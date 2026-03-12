@@ -404,7 +404,7 @@ async function handleReadyCheck() {
 
 async function serveAsset(request: FastifyRequest, reply: FastifyReply) {
   const params = request.params as { "*": string };
-  const storageRoot = path.resolve(getEnv("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+  const storageRoot = path.resolve(getEnv("STORAGE_ROOT", "/var/www/auctorio/storage"));
   const rawPath = String(params["*"] || "").replace(/^\/+/, "");
   const absolutePath = path.resolve(storageRoot, rawPath);
 

@@ -52,7 +52,7 @@ export async function scrapeSource(input: ScrapeInput): Promise<ScrapeItem[]> {
 
 async function fetchUrl(url: URL, options: { accept: string }) {
   const timeoutMs = getNumberEnv("SCRAPE_TIMEOUT_MS", 10000);
-  const userAgent = getEnv("SCRAPE_USER_AGENT", "content-ai-platform-bot");
+  const userAgent = getEnv("SCRAPE_USER_AGENT", "auctorio-bot");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

@@ -99,7 +99,7 @@ Provider registry:
 - Facilidad para swap sin cambios en casos de uso.
 
 ## 12. Almacenamiento local de imagenes
-- Storage local en /var/www/content-ai-platform/storage.
+- Storage local en /var/www/auctorio/storage.
 - Estructura por tenant y fecha: storage/{tenant_id}/YYYY/MM/{content_image_id}.png
 - metadata en content_image.storage_path.
 - Interface IAssetStorage para permitir migracion futura (S3, etc).

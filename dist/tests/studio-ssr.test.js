@@ -119,8 +119,8 @@ async function waitForServer(url) {
 }
 async function startStudioServer(backendUrl) {
     const port = await getFreePort();
-    const child = (0, node_child_process_1.spawn)("node", ["/var/www/content-ai-platform/apps/studio-web/dist/studio-web/server/server.mjs"], {
-        cwd: "/var/www/content-ai-platform/apps/studio-web",
+    const child = (0, node_child_process_1.spawn)("node", ["/var/www/auctorio/apps/studio-web/dist/studio-web/server/server.mjs"], {
+        cwd: "/var/www/auctorio/apps/studio-web",
         env: {
             ...process.env,
             PORT: String(port),

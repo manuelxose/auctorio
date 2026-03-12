@@ -32,7 +32,7 @@ async function scrapeSource(input) {
 }
 async function fetchUrl(url, options) {
     const timeoutMs = (0, env_1.getNumberEnv)("SCRAPE_TIMEOUT_MS", 10000);
-    const userAgent = (0, env_1.getEnv)("SCRAPE_USER_AGENT", "content-ai-platform-bot");
+    const userAgent = (0, env_1.getEnv)("SCRAPE_USER_AGENT", "auctorio-bot");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
