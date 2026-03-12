@@ -1,0 +1,40 @@
+<svg width="1600" height="900" viewBox="0 0 1600 900" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="92" y1="80" x2="1490" y2="814" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#182638"/>
+      <stop offset="0.58" stop-color="#22384F"/>
+      <stop offset="1" stop-color="#304966"/>
+    </linearGradient>
+  </defs>
+  <rect width="1600" height="900" rx="48" fill="url(#bg)"/>
+  <circle cx="1368" cy="186" r="204" fill="#F5A15B" fill-opacity="0.18"/>
+  <circle cx="226" cy="738" r="234" fill="#EF6B4A" fill-opacity="0.12"/>
+
+  <rect x="92" y="114" width="620" height="672" rx="40" fill="white" fill-opacity="0.08" stroke="white" stroke-opacity="0.12"/>
+  <rect x="758" y="114" width="750" height="672" rx="40" fill="#FFF8F1" fill-opacity="0.08" stroke="white" stroke-opacity="0.12"/>
+
+  <text x="148" y="194" fill="#F1E7DA" font-size="22" font-family="Arial, sans-serif" letter-spacing="6">BRAND CONTENT PROGRAM</text>
+  <text x="148" y="286" fill="#FFFFFF" font-size="74" font-weight="700" font-family="Arial, sans-serif">Governed</text>
+  <text x="148" y="366" fill="#FFFFFF" font-size="74" font-weight="700" font-family="Arial, sans-serif">content delivery</text>
+  <text x="148" y="450" fill="#D6DCE5" font-size="28" font-family="Arial, sans-serif">Useful for agency and brand teams that need</text>
+  <text x="148" y="492" fill="#D6DCE5" font-size="28" font-family="Arial, sans-serif">repeatable workflows across several programs.</text>
+
+  <rect x="148" y="574" width="508" height="130" rx="30" fill="#0E1621" fill-opacity="0.36" stroke="white" stroke-opacity="0.12"/>
+  <text x="190" y="640" fill="#FFFFFF" font-size="34" font-weight="700" font-family="Arial, sans-serif">Brand-safe approvals, examples and assets</text>
+  <text x="190" y="682" fill="#D6DCE5" font-size="24" font-family="Arial, sans-serif">without rebuilding the workflow every time</text>
+
+  <rect x="814" y="178" width="642" height="182" rx="34" fill="#FFFFFF" fill-opacity="0.84"/>
+  <text x="860" y="252" fill="#162638" font-size="22" font-family="Arial, sans-serif" letter-spacing="5">PROGRAM VIEW</text>
+  <text x="860" y="320" fill="#162638" font-size="42" font-weight="700" font-family="Arial, sans-serif">One operating model across brands and campaigns</text>
+
+  <rect x="814" y="416" width="292" height="280" rx="30" fill="#F5A15B" fill-opacity="0.18"/>
+  <text x="854" y="476" fill="#162638" font-size="22" font-family="Arial, sans-serif" letter-spacing="4">WORKFLOW</text>
+  <rect x="854" y="520" width="192" height="18" rx="9" fill="#162638" fill-opacity="0.22"/>
+  <rect x="854" y="558" width="160" height="18" rx="9" fill="#162638" fill-opacity="0.16"/>
+  <rect x="854" y="596" width="198" height="18" rx="9" fill="#162638" fill-opacity="0.12"/>
+
+  <rect x="1164" y="416" width="292" height="280" rx="30" fill="#4AB7B2" fill-opacity="0.16"/>
+  <text x="1204" y="476" fill="#162638" font-size="22" font-family="Arial, sans-serif" letter-spacing="4">DELIVERY</text>
+  <rect x="1204" y="522" width="206" height="64" rx="18" fill="#FFFFFF"/>
+  <text x="1242" y="564" fill="#162638" font-size="24" font-weight="700" font-family="Arial, sans-serif">Campaign-ready</text>
+</svg>

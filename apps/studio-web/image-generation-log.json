@@ -1,0 +1,86 @@
+[
+  {
+    "slug": "publisher-command-center",
+    "size": "1600x900",
+    "file": "publisher-command-center-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "publisher-command-center",
+    "size": "960x540",
+    "file": "publisher-command-center-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "search-led-newsroom",
+    "size": "1600x900",
+    "file": "search-led-newsroom-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "search-led-newsroom",
+    "size": "960x540",
+    "file": "search-led-newsroom-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "multi-site-publishing-grid",
+    "size": "1600x900",
+    "file": "multi-site-publishing-grid-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "multi-site-publishing-grid",
+    "size": "960x540",
+    "file": "multi-site-publishing-grid-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "editorial-qa-review",
+    "size": "1600x900",
+    "file": "editorial-qa-review-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "editorial-qa-review",
+    "size": "960x540",
+    "file": "editorial-qa-review-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "brand-content-program",
+    "size": "1600x900",
+    "file": "brand-content-program-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "brand-content-program",
+    "size": "960x540",
+    "file": "brand-content-program-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "content-operations-showcase",
+    "size": "1600x900",
+    "file": "content-operations-showcase-1600.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  },
+  {
+    "slug": "content-operations-showcase",
+    "size": "960x540",
+    "file": "content-operations-showcase-960.webp",
+    "status": "failed",
+    "error": "API 401: \"Api key is invalid\""
+  }
+]

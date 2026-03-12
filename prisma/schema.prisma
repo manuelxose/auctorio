@@ -1,0 +1,717 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  active
+  suspended
+}
+
+enum TopicStatus {
+  active
+  archived
+}
+
+enum FactSourceType {
+  manual
+  rss
+  html
+  api
+}
+
+enum ContentTextType {
+  seo
+  instagram
+}
+
+enum ContentStatus {
+  queued
+  processing
+  done
+  failed
+  canceled
+}
+
+enum JobType {
+  scraping
+  text
+  image
+}
+
+enum JobStatus {
+  queued
+  processing
+  done
+  failed
+  canceled
+}
+
+enum LanguageCode {
+  es
+  en
+}
+
+enum SiteType {
+  guiatv
+  tecnoria
+  talkaris
+  webhook
+}
+
+enum ProjectGoal {
+  article
+  landing
+  comparison
+  faq
+  newsletter
+  social_pack
+}
+
+enum ProjectStatus {
+  draft
+  ai_generated
+  qa_failed
+  qa_passed
+  in_review
+  approved
+  publish_queued
+  published
+  publish_failed
+}
+
+enum VersionStatus {
+  draft
+  ai_generated
+  qa_failed
+  qa_passed
+  approved
+  published
+  archived
+}
+
+enum DerivativeType {
+  newsletter_subject
+  newsletter_intro
+  social_post
+  social_caption
+  social_thread
+}
+
+enum PublicationStatus {
+  queued
+  processing
+  draft_synced
+  published
+  failed
+  canceled
+}
+
+enum PublicationAction {
+  publish
+  update
+  unpublish
+}
+
+enum AssetKind {
+  original
+  hero
+  thumbnail
+  social_square
+  social_story
+}
+
+enum StudioIdentityProviderType {
+  oidc
+}
+
+enum StudioProvisioningMode {
+  invite_only
+}
+
+enum StudioUserStatus {
+  invited
+  active
+  suspended
+}
+
+enum StudioInvitationStatus {
+  pending
+  accepted
+  revoked
+}
+
+enum StudioPromptSurface {
+  text_seo
+  text_instagram
+  image_contextual
+  image_independent
+}
+
+enum StudioPromptScope {
+  global
+  site
+}
+
+enum StudioPromptVersionStatus {
+  draft
+  approved
+  deprecated
+}
+
+model Tenant {
+  id         String       @id @default(uuid()) @db.Uuid
+  name       String       @unique
+  slug       String?      @unique
+  apiKeyHash String       @unique @map("api_key_hash")
+  status     TenantStatus @default(active)
+  plan       String?
+  createdAt  DateTime     @default(now()) @map("created_at")
+  updatedAt  DateTime     @updatedAt @map("updated_at")
+
+  topics       Topic[]
+  facts        Fact[]
+  contentText  ContentText[]
+  contentImage ContentImage[]
+  jobs         Job[]
+  aiAudit      AiAudit[]
+  sites        Site[]
+  contentProjects    ContentProject[]
+  contentVersions    ContentVersion[]
+  contentDerivatives ContentDerivative[]
+  publicationJobs    PublicationJob[]
+  assetVariants      AssetVariant[]
+  studioIdentityProvider StudioIdentityProvider?
+  studioUsers        StudioUser[]
+  studioRoles        StudioRole[]
+  studioInvitations  StudioInvitation[]
+  studioUserSessions StudioUserSession[]
+  studioPromptPresets StudioPromptPreset[]
+  studioPromptAssignments StudioPromptAssignment[]
+
+  @@map("tenants")
+}
+
+model Topic {
+  id          String      @id @default(uuid()) @db.Uuid
+  tenantId    String      @db.Uuid @map("tenant_id")
+  title       String
+  description String?
+  status      TopicStatus @default(active)
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  facts  Fact[]
+  texts  ContentText[]
+  images ContentImage[]
+  projects ContentProject[]
+
+  @@index([tenantId, status])
+  @@unique([tenantId, title])
+  @@map("topics")
+}
+
+model Fact {
+  id          String         @id @default(uuid()) @db.Uuid
+  tenantId    String         @db.Uuid @map("tenant_id")
+  topicId     String         @db.Uuid @map("topic_id")
+  sourceType  FactSourceType @map("source_type")
+  sourceRef   String?        @map("source_ref")
+  content     String         @db.Text
+  contentHash String         @map("content_hash")
+  metadata    Json?
+  createdAt   DateTime       @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  topic  Topic  @relation(fields: [topicId], references: [id])
+
+  @@index([tenantId, topicId])
+  @@unique([tenantId, topicId, contentHash])
+  @@map("facts")
+}
+
+model ContentText {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @db.Uuid @map("tenant_id")
+  topicId      String           @db.Uuid @map("topic_id")
+  type         ContentTextType
+  language     LanguageCode
+  status       ContentStatus    @default(queued)
+  provider     String?
+  model        String?
+  prompt       String?          @db.Text
+  output       String?          @db.Text
+  promptVersion String?         @map("prompt_version")
+  tokensInput  Int?             @map("tokens_input")
+  tokensOutput Int?             @map("tokens_output")
+  costUsd      Decimal?         @map("cost_usd") @db.Decimal(12, 6)
+  error        String?          @db.Text
+  dedupeHash   String?          @map("dedupe_hash")
+  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  topic  Topic  @relation(fields: [topicId], references: [id])
+  images ContentImage[]
+  versions ContentVersion[]
+  promptPresetVersion StudioPromptVersion? @relation("ContentTextPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, topicId, status])
+  @@index([tenantId, promptPresetVersionId])
+  @@unique([tenantId, dedupeHash])
+  @@map("content_text")
+}
+
+model ContentImage {
+  id          String        @id @default(uuid()) @db.Uuid
+  tenantId    String        @db.Uuid @map("tenant_id")
+  topicId     String        @db.Uuid @map("topic_id")
+  textId      String?       @db.Uuid @map("text_id")
+  status      ContentStatus @default(queued)
+  provider    String?
+  model       String?
+  prompt      String?       @db.Text
+  storagePath String?       @map("storage_path")
+  width       Int?
+  height      Int?
+  costUsd     Decimal?      @map("cost_usd") @db.Decimal(12, 6)
+  error       String?       @db.Text
+  dedupeHash  String?       @map("dedupe_hash")
+  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id])
+  topic  Topic        @relation(fields: [topicId], references: [id])
+  text   ContentText? @relation(fields: [textId], references: [id], onDelete: SetNull)
+  versions ContentVersion[]
+  assetVariants AssetVariant[]
+  promptPresetVersion StudioPromptVersion? @relation("ContentImagePromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, topicId, status])
+  @@index([tenantId, textId])
+  @@index([tenantId, promptPresetVersionId])
+  @@unique([tenantId, dedupeHash])
+  @@map("content_image")
+}
+
+model Job {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @db.Uuid @map("tenant_id")
+  type           JobType
+  status         JobStatus @default(queued)
+  idempotencyKey String?   @map("idempotency_key")
+  attempts       Int       @default(0)
+  lastError      String?   @db.Text @map("last_error")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  startedAt      DateTime? @map("started_at")
+  finishedAt     DateTime? @map("finished_at")
+
+  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  aiAudit AiAudit[]
+
+  @@index([tenantId, status, type])
+  @@unique([tenantId, idempotencyKey])
+  @@map("jobs")
+}
+
+model AiAudit {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @db.Uuid @map("tenant_id")
+  jobId     String   @db.Uuid @map("job_id")
+  provider  String
+  model     String
+  prompt    String   @db.Text
+  response  String?  @db.Text
+  usageJson Json?    @map("usage_json")
+  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  job    Job    @relation(fields: [jobId], references: [id])
+  promptPresetVersion StudioPromptVersion? @relation("AiAuditPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, jobId])
+  @@index([tenantId, promptPresetVersionId])
+  @@map("ai_audit")
+}
+
+model Site {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @db.Uuid @map("tenant_id")
+  key                    String
+  name                   String
+  type                   SiteType
+  locale                 String   @default("es-ES")
+  baseUrl                String?  @map("base_url")
+  brandVoice             Json?    @map("brand_voice")
+  seoRules               Json?    @map("seo_rules")
+  taxonomyMap            Json?    @map("taxonomy_map")
+  publishingCredentialsRef String? @map("publishing_credentials_ref")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  projects        ContentProject[]
+  publicationJobs PublicationJob[]
+  assetVariants   AssetVariant[]
+  promptPresets   StudioPromptPreset[]
+  promptAssignments StudioPromptAssignment[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, type])
+  @@map("sites")
+}
+
+model ContentProject {
+  id              String        @id @default(uuid()) @db.Uuid
+  tenantId        String        @db.Uuid @map("tenant_id")
+  siteId          String        @db.Uuid @map("site_id")
+  topicId         String?       @db.Uuid @map("topic_id")
+  title           String
+  brief           String        @db.Text
+  goal            ProjectGoal   @default(article)
+  status          ProjectStatus @default(draft)
+  primaryLanguage String        @default("es") @map("primary_language")
+  metadata        Json?
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+
+  tenant          Tenant            @relation(fields: [tenantId], references: [id])
+  site            Site              @relation(fields: [siteId], references: [id])
+  topic           Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  versions        ContentVersion[]
+  derivatives     ContentDerivative[]
+  publicationJobs PublicationJob[]
+
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, topicId])
+  @@map("content_projects")
+}
+
+model ContentVersion {
+  id             String        @id @default(uuid()) @db.Uuid
+  tenantId       String        @db.Uuid @map("tenant_id")
+  projectId      String        @db.Uuid @map("project_id")
+  contentTextId  String?       @db.Uuid @map("content_text_id")
+  contentImageId String?       @db.Uuid @map("content_image_id")
+  versionNumber  Int           @map("version_number")
+  status         VersionStatus @default(draft)
+  title          String?
+  excerpt        String?       @db.Text
+  bodyHtml       String?       @db.Text @map("body_html")
+  seoTitle       String?       @map("seo_title")
+  seoDescription String?       @db.Text @map("seo_description")
+  qaReport       Json?         @map("qa_report")
+  feedback       String?       @db.Text
+  approvedAt     DateTime?     @map("approved_at")
+  approvedBy     String?       @map("approved_by")
+  approvedByStudioUserId String? @db.Uuid @map("approved_by_studio_user_id")
+  publishedAt    DateTime?     @map("published_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  tenant         Tenant             @relation(fields: [tenantId], references: [id])
+  project        ContentProject     @relation(fields: [projectId], references: [id])
+  contentText    ContentText?       @relation(fields: [contentTextId], references: [id], onDelete: SetNull)
+  contentImage   ContentImage?      @relation(fields: [contentImageId], references: [id], onDelete: SetNull)
+  derivatives    ContentDerivative[]
+  publicationJobs PublicationJob[]
+  approvedByStudioUser StudioUser? @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
+
+  @@unique([projectId, versionNumber])
+  @@index([tenantId, projectId, status])
+  @@index([tenantId, contentTextId])
+  @@index([tenantId, contentImageId])
+  @@index([tenantId, approvedByStudioUserId])
+  @@map("content_versions")
+}
+
+model ContentDerivative {
+  id         String         @id @default(uuid()) @db.Uuid
+  tenantId   String         @db.Uuid @map("tenant_id")
+  projectId  String         @db.Uuid @map("project_id")
+  versionId  String         @db.Uuid @map("version_id")
+  type       DerivativeType
+  title      String?
+  body       String         @db.Text
+  status     String         @default("done")
+  createdAt  DateTime       @default(now()) @map("created_at")
+  updatedAt  DateTime       @updatedAt @map("updated_at")
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id])
+  project    ContentProject @relation(fields: [projectId], references: [id])
+  version    ContentVersion @relation(fields: [versionId], references: [id])
+
+  @@index([tenantId, projectId, versionId])
+  @@map("content_derivatives")
+}
+
+model PublicationJob {
+  id             String            @id @default(uuid()) @db.Uuid
+  tenantId       String            @db.Uuid @map("tenant_id")
+  siteId         String            @db.Uuid @map("site_id")
+  projectId      String            @db.Uuid @map("project_id")
+  versionId      String            @db.Uuid @map("version_id")
+  status         PublicationStatus @default(queued)
+  action         PublicationAction @default(publish)
+  externalId     String?           @map("external_id")
+  externalUrl    String?           @map("external_url")
+  requestPayload Json?             @map("request_payload")
+  responsePayload Json?            @map("response_payload")
+  error          String?           @db.Text
+  requestedByStudioUserId String?  @db.Uuid @map("requested_by_studio_user_id")
+  publishedAt    DateTime?         @map("published_at")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  site           Site              @relation(fields: [siteId], references: [id])
+  project        ContentProject    @relation(fields: [projectId], references: [id])
+  version        ContentVersion    @relation(fields: [versionId], references: [id])
+  requestedByStudioUser StudioUser? @relation("StudioUserRequestedPublications", fields: [requestedByStudioUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, projectId, versionId])
+  @@index([tenantId, requestedByStudioUserId])
+  @@map("publication_jobs")
+}
+
+model AssetVariant {
+  id             String      @id @default(uuid()) @db.Uuid
+  tenantId       String      @db.Uuid @map("tenant_id")
+  siteId         String?     @db.Uuid @map("site_id")
+  contentImageId String      @db.Uuid @map("content_image_id")
+  kind           AssetKind   @default(original)
+  storagePath    String      @map("storage_path")
+  mimeType       String      @map("mime_type")
+  width          Int?
+  height         Int?
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+  site           Site?       @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  contentImage   ContentImage @relation(fields: [contentImageId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, contentImageId, kind])
+  @@map("asset_variants")
+}
+
+model StudioIdentityProvider {
+  id                    String                   @id @default(uuid()) @db.Uuid
+  tenantId              String                   @unique @db.Uuid @map("tenant_id")
+  type                  StudioIdentityProviderType @default(oidc)
+  enabled               Boolean                  @default(false)
+  issuer                String
+  clientId              String                   @map("client_id")
+  clientSecretCiphertext String?                 @map("client_secret_ciphertext")
+  scopes                String                   @default("openid profile email")
+  claimMappings         Json?                    @map("claim_mappings")
+  provisioningMode      StudioProvisioningMode   @default(invite_only) @map("provisioning_mode")
+  createdAt             DateTime                 @default(now()) @map("created_at")
+  updatedAt             DateTime                 @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("studio_identity_providers")
+}
+
+model StudioUser {
+  id           String           @id @default(uuid()) @db.Uuid
+  tenantId     String           @db.Uuid @map("tenant_id")
+  email        String
+  displayName  String           @map("display_name")
+  avatarUrl    String?          @map("avatar_url")
+  status       StudioUserStatus @default(invited)
+  oidcSubject  String?          @map("oidc_subject")
+  oidcIssuer   String?          @map("oidc_issuer")
+  lastLoginAt  DateTime?        @map("last_login_at")
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  roles StudioUserRole[]
+  sessions StudioUserSession[]
+  invitations StudioInvitation[] @relation("StudioInvitationUser")
+  createdInvitations StudioInvitation[] @relation("StudioInvitationCreator")
+  approvedVersions ContentVersion[] @relation("StudioUserApprovedVersions")
+  requestedPublications PublicationJob[] @relation("StudioUserRequestedPublications")
+  createdPromptPresets StudioPromptPreset[] @relation("StudioPromptPresetCreatedBy")
+  updatedPromptPresets StudioPromptPreset[] @relation("StudioPromptPresetUpdatedBy")
+  createdPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionCreatedBy")
+  approvedPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionApprovedBy")
+  createdPromptAssignments StudioPromptAssignment[] @relation("StudioPromptAssignmentCreatedBy")
+
+  @@unique([tenantId, email])
+  @@index([tenantId, status])
+  @@index([tenantId, oidcIssuer, oidcSubject])
+  @@map("studio_users")
+}
+
+model StudioRole {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid @map("tenant_id")
+  key         String
+  name        String
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions StudioRolePermission[]
+  users StudioUserRole[]
+
+  @@unique([tenantId, key])
+  @@map("studio_roles")
+}
+
+model StudioRolePermission {
+  id         String   @id @default(uuid()) @db.Uuid
+  roleId     String   @db.Uuid @map("role_id")
+  permission String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  role StudioRole @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+  @@map("studio_role_permissions")
+}
+
+model StudioUserRole {
+  id           String   @id @default(uuid()) @db.Uuid
+  studioUserId String   @db.Uuid @map("studio_user_id")
+  studioRoleId String   @db.Uuid @map("studio_role_id")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
+  role StudioRole @relation(fields: [studioRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([studioUserId, studioRoleId])
+  @@index([studioRoleId])
+  @@map("studio_user_roles")
+}
+
+model StudioInvitation {
+  id              String                 @id @default(uuid()) @db.Uuid
+  tenantId        String                 @db.Uuid @map("tenant_id")
+  studioUserId    String?                @db.Uuid @map("studio_user_id")
+  email           String
+  displayName     String?                @map("display_name")
+  status          StudioInvitationStatus @default(pending)
+  tokenHash       String?                @unique @map("token_hash")
+  createdByUserId String?                @db.Uuid @map("created_by_user_id")
+  acceptedAt      DateTime?              @map("accepted_at")
+  createdAt       DateTime               @default(now()) @map("created_at")
+  updatedAt       DateTime               @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user StudioUser? @relation("StudioInvitationUser", fields: [studioUserId], references: [id], onDelete: SetNull)
+  createdByUser StudioUser? @relation("StudioInvitationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, email, status])
+  @@map("studio_invitations")
+}
+
+model StudioUserSession {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid @map("tenant_id")
+  studioUserId String   @db.Uuid @map("studio_user_id")
+  tokenHash    String   @unique @map("token_hash")
+  expiresAt    DateTime @map("expires_at")
+  lastSeenAt   DateTime? @map("last_seen_at")
+  revokedAt    DateTime? @map("revoked_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, studioUserId, revokedAt])
+  @@map("studio_user_sessions")
+}
+
+model StudioPromptPreset {
+  id              String            @id @default(uuid()) @db.Uuid
+  tenantId        String            @db.Uuid @map("tenant_id")
+  siteId          String?           @db.Uuid @map("site_id")
+  key             String
+  name            String
+  surface         StudioPromptSurface
+  scope           StudioPromptScope @default(global)
+  description     String?
+  createdByUserId String?           @db.Uuid @map("created_by_user_id")
+  updatedByUserId String?           @db.Uuid @map("updated_by_user_id")
+  createdAt       DateTime          @default(now()) @map("created_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdByUser StudioUser? @relation("StudioPromptPresetCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser StudioUser? @relation("StudioPromptPresetUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  versions StudioPromptVersion[]
+  assignments StudioPromptAssignment[]
+
+  @@unique([tenantId, key])
+  @@index([tenantId, surface, scope, siteId])
+  @@map("studio_prompt_presets")
+}
+
+model StudioPromptVersion {
+  id               String                   @id @default(uuid()) @db.Uuid
+  presetId         String                   @db.Uuid @map("preset_id")
+  versionNumber    Int                      @map("version_number")
+  status           StudioPromptVersionStatus @default(draft)
+  systemTemplate   String?                  @db.Text @map("system_template")
+  userTemplate     String                   @db.Text @map("user_template")
+  variablesJson    Json?                    @map("variables_json")
+  notes            String?                  @db.Text
+  createdByUserId  String?                  @db.Uuid @map("created_by_user_id")
+  approvedByUserId String?                  @db.Uuid @map("approved_by_user_id")
+  approvedAt       DateTime?                @map("approved_at")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+
+  preset StudioPromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  createdByUser StudioUser? @relation("StudioPromptVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser StudioUser? @relation("StudioPromptVersionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  assignments StudioPromptAssignment[]
+  contentTexts ContentText[] @relation("ContentTextPromptVersion")
+  contentImages ContentImage[] @relation("ContentImagePromptVersion")
+  aiAudits AiAudit[] @relation("AiAuditPromptVersion")
+
+  @@unique([presetId, versionNumber])
+  @@index([status])
+  @@map("studio_prompt_versions")
+}
+
+model StudioPromptAssignment {
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @db.Uuid @map("tenant_id")
+  siteId          String?             @db.Uuid @map("site_id")
+  surface         StudioPromptSurface
+  assignmentKey   String              @map("assignment_key")
+  presetId        String              @db.Uuid @map("preset_id")
+  versionId       String              @db.Uuid @map("version_id")
+  createdByUserId String?             @db.Uuid @map("created_by_user_id")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  preset StudioPromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  version StudioPromptVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  createdByUser StudioUser? @relation("StudioPromptAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, surface, assignmentKey])
+  @@index([tenantId, siteId, surface])
+  @@map("studio_prompt_assignments")
+}

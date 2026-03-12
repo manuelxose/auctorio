@@ -1,0 +1,32 @@
+{
+  "name": "content-ai-platform",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:studio": "npm --prefix apps/studio-web run build",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npx prisma migrate deploy && npm run build && npm run build:studio && node --test dist/tests/**/*.test.js",
+    "dev:studio": "npm --prefix apps/studio-web run dev:ssr",
+    "serve:studio": "npm --prefix apps/studio-web run serve:ssr",
+    "bootstrap:studio-access": "ts-node scripts/bootstrap-studio-access.ts",
+    "start:api": "ts-node scripts/start-api.ts",
+    "start:worker:text": "ts-node scripts/start-worker-text.ts",
+    "start:worker:image": "ts-node scripts/start-worker-image.ts",
+    "start:worker:scraping": "ts-node scripts/start-worker-scraping.ts",
+    "start:worker:publishing": "ts-node scripts/start-worker-publishing.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.10.2",
+    "bullmq": "^4.12.1",
+    "cheerio": "^1.0.0-rc.12",
+    "fast-xml-parser": "^4.3.5",
+    "fastify": "^4.26.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "prisma": "^5.10.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  }
+}

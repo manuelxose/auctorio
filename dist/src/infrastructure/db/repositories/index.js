@@ -1,0 +1,15 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.tenantRepository = exports.jobRepository = exports.contentImageRepository = exports.contentTextRepository = exports.factRepository = exports.topicRepository = void 0;
+var topic_repository_1 = require("./topic-repository");
+Object.defineProperty(exports, "topicRepository", { enumerable: true, get: function () { return topic_repository_1.topicRepository; } });
+var fact_repository_1 = require("./fact-repository");
+Object.defineProperty(exports, "factRepository", { enumerable: true, get: function () { return fact_repository_1.factRepository; } });
+var content_text_repository_1 = require("./content-text-repository");
+Object.defineProperty(exports, "contentTextRepository", { enumerable: true, get: function () { return content_text_repository_1.contentTextRepository; } });
+var content_image_repository_1 = require("./content-image-repository");
+Object.defineProperty(exports, "contentImageRepository", { enumerable: true, get: function () { return content_image_repository_1.contentImageRepository; } });
+var job_repository_1 = require("./job-repository");
+Object.defineProperty(exports, "jobRepository", { enumerable: true, get: function () { return job_repository_1.jobRepository; } });
+var tenant_repository_1 = require("./tenant-repository");
+Object.defineProperty(exports, "tenantRepository", { enumerable: true, get: function () { return tenant_repository_1.tenantRepository; } });

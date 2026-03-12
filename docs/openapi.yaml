@@ -1,0 +1,1285 @@
+openapi: 3.0.3
+info:
+  title: Content AI Platform API
+  version: 1.0.0
+  description: Public API for multi-tenant content generation (SEO and Instagram).
+servers:
+  - url: http://localhost:3000
+security:
+  - BearerAuth: []
+
+paths:
+  /v1/topics:
+    post:
+      tags: [topics]
+      summary: Create a topic
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopicCreateInput'
+            examples:
+              default:
+                value:
+                  title: "Turismo en Chipiona"
+                  description: "Ideas para contenido SEO y social"
+      responses:
+        '201':
+          description: Topic created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Topic'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/topics/{id}/facts:
+    post:
+      tags: [facts]
+      summary: Add facts to a topic (manual or scraping source)
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TopicId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FactCreateInput'
+            examples:
+              manual:
+                value:
+                  source_type: manual
+                  content: "Chipiona es conocida por su faro y playas"
+              rss:
+                value:
+                  source_type: rss
+                  source_ref: "https://example.com/feed"
+      responses:
+        '201':
+          description: Fact stored (manual)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Fact'
+        '202':
+          description: Fact accepted or scrape job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/topics/{id}/generate-text:
+    post:
+      tags: [content-text]
+      summary: Generate text for a topic
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TopicId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateTextInput'
+            examples:
+              seo_es:
+                value:
+                  type: seo
+                  language: es
+                  options:
+                    tone: "informativo"
+                    length: "long"
+              ig_en:
+                value:
+                  type: instagram
+                  language: en
+                  options:
+                    tone: "casual"
+                    hashtags: true
+      responses:
+        '200':
+          description: Content already exists (deduplicated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '202':
+          description: Text job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/topics/{id}/generate-image:
+    post:
+      tags: [content-image]
+      summary: Generate an independent image for a topic
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TopicId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateImageInput'
+            examples:
+              independent:
+                value:
+                  mode: independent
+                  options:
+                    style: "photorealistic"
+                    size: "1024x1024"
+      responses:
+        '200':
+          description: Content already exists (deduplicated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '202':
+          description: Image job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/text/{id}/generate-image:
+    post:
+      tags: [content-image]
+      summary: Generate a contextual image from a text content
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TextId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateImageInput'
+            examples:
+              contextual:
+                value:
+                  mode: contextual
+                  options:
+                    style: "illustration"
+                    size: "1024x1024"
+      responses:
+        '200':
+          description: Content already exists (deduplicated)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '202':
+          description: Image job enqueued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentAccepted'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/topics/{id}/results:
+    get:
+      tags: [topics]
+      summary: Get all content for a topic
+      parameters:
+        - $ref: '#/components/parameters/TopicId'
+      responses:
+        '200':
+          description: Topic results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopicResults'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/text/{id}:
+    get:
+      tags: [content-text]
+      summary: Get generated text by id
+      parameters:
+        - $ref: '#/components/parameters/TextId'
+      responses:
+        '200':
+          description: Content text
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentText'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/images/{id}:
+    get:
+      tags: [content-image]
+      summary: Get generated image by id
+      parameters:
+        - $ref: '#/components/parameters/ImageId'
+      responses:
+        '200':
+          description: Content image metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContentImage'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/session/me:
+    get:
+      tags: [studio]
+      summary: Get tenant session summary for Studio clients
+      responses:
+        '200':
+          description: Session summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/sites:
+    get:
+      tags: [studio]
+      summary: List sites for the authenticated tenant
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: Paginated site summaries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedSites'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [studio]
+      summary: Create a site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteInput'
+      responses:
+        '201':
+          description: Site created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSiteDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/sites/{id}:
+    get:
+      tags: [studio]
+      summary: Get site detail
+      parameters:
+        - $ref: '#/components/parameters/SiteId'
+      responses:
+        '200':
+          description: Site detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSiteDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [studio]
+      summary: Update a site
+      parameters:
+        - $ref: '#/components/parameters/SiteId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateSiteInput'
+      responses:
+        '200':
+          description: Site updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSiteDetail'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v2/projects:
+    get:
+      tags: [studio]
+      summary: List projects
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: siteId
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, ai_generated, qa_failed, qa_passed, in_review, approved, publish_queued, published, publish_failed]
+        - name: goal
+          in: query
+          schema:
+            type: string
+            enum: [article, landing, comparison, faq, newsletter, social_pack]
+      responses:
+        '200':
+          description: Paginated projects
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedProjects'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    post:
+      tags: [studio]
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateProjectInput'
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioProjectSummary'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/projects/{id}:
+    get:
+      tags: [studio]
+      summary: Get enriched project detail
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Project detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioProjectDetail'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /v2/projects/{id}/generate:
+    post:
+      tags: [studio]
+      summary: Generate a new AI version for the project
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                feedback:
+                  type: string
+      responses:
+        '202':
+          description: Generation queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedGeneration'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/projects/{id}/revise:
+    post:
+      tags: [studio]
+      summary: Generate a revised version from manual feedback
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [feedback]
+              properties:
+                feedback:
+                  type: string
+      responses:
+        '202':
+          description: Revision queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedGeneration'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/projects/{id}/approve:
+    post:
+      tags: [studio]
+      summary: Approve the latest QA-passed version
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      responses:
+        '200':
+          description: Version approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApprovalResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/projects/{id}/publish:
+    post:
+      tags: [studio]
+      summary: Queue publication, draft sync or unpublish for the latest version
+      parameters:
+        - $ref: '#/components/parameters/ProjectId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PublicationPayload'
+      responses:
+        '202':
+          description: Publication queued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueuedPublication'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v2/publications:
+    get:
+      tags: [studio]
+      summary: List publication jobs
+      parameters:
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [queued, processing, draft_synced, published, failed, canceled]
+      responses:
+        '200':
+          description: Paginated publication jobs
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedPublications'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /studio/api/session/login:
+    post:
+      tags: [studio-bff]
+      summary: Start a Studio SSR session from a tenant API key
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [apiKey]
+              properties:
+                apiKey:
+                  type: string
+      responses:
+        '200':
+          description: Session started and cookie set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /studio/api/session/logout:
+    post:
+      tags: [studio-bff]
+      summary: Clear the Studio SSR session cookie
+      security: []
+      responses:
+        '200':
+          description: Session cleared
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    enum: [true]
+
+  /studio/api/session/me:
+    get:
+      tags: [studio-bff]
+      summary: Read the current Studio SSR session
+      security: []
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StudioSession'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: APIKey
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema:
+        type: string
+    TopicId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    TextId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ImageId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    SiteId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProjectId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+    PageSize:
+      name: pageSize
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+
+  responses:
+    Unauthorized:
+      description: Unauthorized
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+
+  schemas:
+    TopicCreateInput:
+      type: object
+      required: [title]
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+
+    FactCreateInput:
+      type: object
+      required: [source_type]
+      properties:
+        source_type:
+          type: string
+          enum: [manual, rss, html, api]
+        source_ref:
+          type: string
+        content:
+          type: string
+        metadata:
+          type: object
+      oneOf:
+        - required: [content]
+        - required: [source_ref]
+
+    GenerateTextInput:
+      type: object
+      required: [type, language]
+      properties:
+        type:
+          type: string
+          enum: [seo, instagram]
+        language:
+          type: string
+          enum: [es, en]
+        options:
+          type: object
+          properties:
+            tone:
+              type: string
+            length:
+              type: string
+              enum: [short, medium, long]
+            hashtags:
+              type: boolean
+
+    GenerateImageInput:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [contextual, independent]
+        options:
+          type: object
+          properties:
+            style:
+              type: string
+            size:
+              type: string
+            seed:
+              type: integer
+
+    Topic:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, archived]
+        created_at:
+          type: string
+          format: date-time
+
+    Fact:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        topic_id:
+          type: string
+          format: uuid
+        source_type:
+          type: string
+          enum: [manual, rss, html, api]
+        source_ref:
+          type: string
+        content:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ContentText:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        topic_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [seo, instagram]
+        language:
+          type: string
+          enum: [es, en]
+        status:
+          type: string
+          enum: [queued, processing, done, failed, canceled]
+        output:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    ContentImage:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        topic_id:
+          type: string
+          format: uuid
+        text_id:
+          type: string
+          format: uuid
+          nullable: true
+        status:
+          type: string
+          enum: [queued, processing, done, failed, canceled]
+        storage_path:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    JobAccepted:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, done, failed, canceled]
+
+    ContentAccepted:
+      type: object
+      properties:
+        job_id:
+          type: string
+          format: uuid
+          nullable: true
+        content_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, done, failed, canceled]
+
+    TopicResults:
+      type: object
+      properties:
+        topic_id:
+          type: string
+          format: uuid
+        texts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentText'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ContentImage'
+
+    StudioSession:
+      type: object
+      properties:
+        tenant:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            name:
+              type: string
+            status:
+              type: string
+        siteCount:
+          type: integer
+        projectCount:
+          type: integer
+
+    JsonRecord:
+      type: object
+      additionalProperties: true
+      nullable: true
+
+    CreateSiteInput:
+      type: object
+      required: [key, name, type]
+      properties:
+        key:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [guiatv, tecnoria, webhook]
+        locale:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        brandVoice:
+          $ref: '#/components/schemas/JsonRecord'
+        seoRules:
+          $ref: '#/components/schemas/JsonRecord'
+        taxonomyMap:
+          $ref: '#/components/schemas/JsonRecord'
+        publishingCredentialsRef:
+          type: string
+          nullable: true
+
+    UpdateSiteInput:
+      allOf:
+        - $ref: '#/components/schemas/CreateSiteInput'
+
+    StudioSiteDetail:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        key:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [guiatv, tecnoria, webhook]
+        locale:
+          type: string
+        baseUrl:
+          type: string
+          nullable: true
+        brandVoice:
+          $ref: '#/components/schemas/JsonRecord'
+        seoRules:
+          $ref: '#/components/schemas/JsonRecord'
+        taxonomyMap:
+          $ref: '#/components/schemas/JsonRecord'
+        publishingCredentialsRef:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    PublicationExecutionState:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, processing, draft_synced, published, failed, canceled]
+        action:
+          type: string
+          enum: [publish, update, unpublish]
+        targetStatus:
+          type: string
+          nullable: true
+          enum: [draft, publish]
+        externalId:
+          type: string
+          nullable: true
+        externalUrl:
+          type: string
+          nullable: true
+        error:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        publishedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    VersionSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        versionNumber:
+          type: integer
+        status:
+          type: string
+        title:
+          type: string
+          nullable: true
+        excerpt:
+          type: string
+          nullable: true
+        seoTitle:
+          type: string
+          nullable: true
+        seoDescription:
+          type: string
+          nullable: true
+        feedback:
+          type: string
+          nullable: true
+        qaState:
+          type: string
+          enum: [not_ready, failed, passed, approved, published]
+        hasAsset:
+          type: boolean
+        assetUrl:
+          type: string
+          nullable: true
+        derivativeCount:
+          type: integer
+        latestPublicationJob:
+          $ref: '#/components/schemas/PublicationExecutionState'
+        qaReport:
+          $ref: '#/components/schemas/JsonRecord'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    StudioSiteSummary:
+      allOf:
+        - $ref: '#/components/schemas/StudioSiteDetail'
+        - type: object
+          properties:
+            projectCount:
+              type: integer
+            publishedProjectCount:
+              type: integer
+            latestPublicationJob:
+              $ref: '#/components/schemas/PublicationExecutionState'
+
+    CreateProjectInput:
+      type: object
+      required: [siteId, title, brief]
+      properties:
+        siteId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        brief:
+          type: string
+        goal:
+          type: string
+          enum: [article, landing, comparison, faq, newsletter, social_pack]
+        primaryLanguage:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/JsonRecord'
+
+    StudioProjectSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        siteId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        brief:
+          type: string
+        goal:
+          type: string
+          enum: [article, landing, comparison, faq, newsletter, social_pack]
+        status:
+          type: string
+          enum: [draft, ai_generated, qa_failed, qa_passed, in_review, approved, publish_queued, published, publish_failed]
+        primaryLanguage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        site:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            key:
+              type: string
+            name:
+              type: string
+            type:
+              type: string
+              enum: [guiatv, tecnoria, webhook]
+            locale:
+              type: string
+            baseUrl:
+              type: string
+              nullable: true
+        latestVersion:
+          $ref: '#/components/schemas/VersionSummary'
+        latestPublicationJob:
+          $ref: '#/components/schemas/PublicationExecutionState'
+
+    StudioProjectDetail:
+      allOf:
+        - $ref: '#/components/schemas/StudioProjectSummary'
+        - type: object
+          properties:
+            metadata:
+              $ref: '#/components/schemas/JsonRecord'
+            latestAssetUrl:
+              type: string
+              nullable: true
+            site:
+              $ref: '#/components/schemas/StudioSiteDetail'
+            topic:
+              type: object
+              nullable: true
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+                  nullable: true
+            latestVersion:
+              $ref: '#/components/schemas/VersionSummary'
+            versions:
+              type: array
+              items:
+                $ref: '#/components/schemas/VersionSummary'
+            publicationJobs:
+              type: array
+              items:
+                $ref: '#/components/schemas/PublicationExecutionState'
+
+    PublicationPayload:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [publish, update, unpublish]
+        targetStatus:
+          type: string
+          enum: [draft, publish]
+
+    QueuedGeneration:
+      type: object
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        content_text_id:
+          type: string
+          format: uuid
+          nullable: true
+        job_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued]
+
+    ApprovalResponse:
+      type: object
+      properties:
+        project_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [approved]
+
+    QueuedPublication:
+      type: object
+      properties:
+        publication_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          format: uuid
+        version_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued]
+
+    PublicationListItem:
+      allOf:
+        - $ref: '#/components/schemas/PublicationExecutionState'
+        - type: object
+          properties:
+            site:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                key:
+                  type: string
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: [guiatv, tecnoria, webhook]
+            project:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                title:
+                  type: string
+                status:
+                  type: string
+            version:
+              type: object
+              properties:
+                id:
+                  type: string
+                  format: uuid
+                versionNumber:
+                  type: integer
+                status:
+                  type: string
+            assetUrl:
+              type: string
+              nullable: true
+
+    PaginatedSites:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudioSiteSummary'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+
+    PaginatedProjects:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/StudioProjectSummary'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+
+    PaginatedPublications:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PublicationListItem'
+        page:
+          type: integer
+        pageSize:
+          type: integer
+        total:
+          type: integer
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+        request_id:
+          type: string
