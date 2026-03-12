@@ -11,7 +11,7 @@
 **API key expired** at time of execution. The generation script is ready and tested. Re-run:
 
 ```bash
-cd /var/www/content-ai-platform
+cd /var/www/auctorio
 SILICONFLOW_API_KEY=sk-YOUR_KEY node scripts/generate-marketing-images.mjs
 ```
 

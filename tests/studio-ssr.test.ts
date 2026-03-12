@@ -147,9 +147,9 @@ async function startStudioServer(backendUrl: string): Promise<{
   const port = await getFreePort();
   const child = spawn(
     "node",
-    ["/var/www/content-ai-platform/apps/studio-web/dist/studio-web/server/server.mjs"],
+    ["/var/www/auctorio/apps/studio-web/dist/studio-web/server/server.mjs"],
     {
-      cwd: "/var/www/content-ai-platform/apps/studio-web",
+      cwd: "/var/www/auctorio/apps/studio-web",
       env: {
         ...process.env,
         PORT: String(port),

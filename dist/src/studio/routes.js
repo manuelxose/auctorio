@@ -273,7 +273,7 @@ async function handleReadyCheck() {
 }
 async function serveAsset(request, reply) {
     const params = request.params;
-    const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+    const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/auctorio/storage"));
     const rawPath = String(params["*"] || "").replace(/^\/+/, "");
     const absolutePath = node_path_1.default.resolve(storageRoot, rawPath);
     if (!absolutePath.startsWith(storageRoot)) {

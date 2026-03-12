@@ -1,6 +1,6 @@
 # Studio Web
 
-Angular 20 SSR + BFF seguro para operar `content-ai-platform` desde `/studio`.
+Angular 20 SSR + BFF seguro para operar `auctorio` desde `/studio`.
 
 ## Que hace
 
