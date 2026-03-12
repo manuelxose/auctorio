@@ -1,0 +1,2 @@
+import './polyfills.server.mjs';
+import{sc as s}from"./chunk-N47GUGZO.mjs";function o(e){return e instanceof s?(typeof e.error=="object"&&e.error&&"message"in e.error?String(e.error.message):e.message)||`HTTP ${e.status}`:e instanceof Error?e.message:"Ha ocurrido un error inesperado."}export{o as a};

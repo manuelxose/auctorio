@@ -1,0 +1,17 @@
+[Unit]
+Description=Content AI Platform Studio SSR
+After=network.target content-ai-api.service
+Wants=content-ai-api.service
+
+[Service]
+Type=simple
+User=contentai
+Group=contentai
+WorkingDirectory=/var/www/content-ai-platform/apps/studio-web
+EnvironmentFile=/etc/content-ai-platform/studio.env
+ExecStart=/var/www/bin/run-release-entry.sh /var/www/content-ai-platform/apps/studio-web/releases/current/server/server.mjs
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
