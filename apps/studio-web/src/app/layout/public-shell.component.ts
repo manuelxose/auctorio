@@ -12,7 +12,7 @@ import {
   getMarketingLocaleFromPath,
   getMarketingNavigation,
   getMarketingPath,
-  STUDIO_BASE_PATH,
+  getStudioLoginPath,
   TECNORIA_LINKS,
   translateMarketingPath,
 } from '../content/marketing-content';
@@ -53,6 +53,9 @@ import {
             >
               {{ currentLocale === 'en' ? 'ES' : 'EN' }}
             </a>
+            <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
+              {{ currentLocale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
+            </a>
             <a class="marketing-button marketing-button--primary" [routerLink]="contactPath">
               {{ currentLocale === 'es' ? 'Solicitar demo' : 'Request a demo' }}
             </a>
@@ -89,6 +92,7 @@ import {
               <a [routerLink]="homePath">{{ currentLocale === 'es' ? 'Plataforma' : 'Platform' }}</a>
               <a [routerLink]="useCasesPath">{{ currentLocale === 'es' ? 'Casos de uso' : 'Use cases' }}</a>
               <a [routerLink]="examplesPath">{{ currentLocale === 'es' ? 'Ejemplos' : 'Examples' }}</a>
+              <a [href]="studioLoginPath">{{ currentLocale === 'es' ? 'Entrar al Studio' : 'Enter Studio' }}</a>
               <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Contacto' : 'Contact' }}</a>
             </div>
           </section>
@@ -138,7 +142,7 @@ export class PublicShellComponent implements OnInit, OnDestroy {
   readonly signature = BRAND_SIGNATURE;
   readonly brandTagline = BRAND_TAGLINE;
   readonly tecnoriaLinks = TECNORIA_LINKS;
-  readonly studioPath = STUDIO_BASE_PATH;
+  readonly studioLoginPath = getStudioLoginPath();
 
   menuOpen = false;
   currentLocale: MarketingLocale = 'en';

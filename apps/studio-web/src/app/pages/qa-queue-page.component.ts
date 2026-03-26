@@ -4,13 +4,16 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import type {
-  ProjectStatus,
   PublicationListItem,
+  ReviewGateStage,
   StudioProjectSummary,
   StudioSiteSummary,
 } from '../models/studio.models';
+import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
+import { StudioStatStripComponent, type StudioStatItem } from '../components/studio-stat-strip.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import { buildQaScore, qaScoreLabel, reviewStageLabel, reviewStageTone } from '../utils/review-gate';
 
 type QaFocus = 'all' | 'fixes' | 'review' | 'ready';
 type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
@@ -22,6 +25,7 @@ type QueueRow = {
   status: string;
   tone: TagTone;
   summary: string;
+  score: number;
   updatedAt: string;
   link: string[];
 };
@@ -33,74 +37,100 @@ type CheckSignal = {
   latestMessage: string;
 };
 
-const REVIEW_STATUSES = new Set<ProjectStatus>(['in_review', 'qa_passed', 'approved']);
-const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
-  'qa_failed',
-  'qa_passed',
-  'approved',
-  'in_review',
-  'publish_failed',
-]);
-
 @Component({
   selector: 'app-qa-queue-page',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe, StudioPageHeaderComponent, StudioStatStripComponent],
   template: `
     <section class="console-page">
-      <header class="console-page__header">
-        <div class="console-page__copy">
-          <p class="console-kicker">Review</p>
-          <h1 class="console-page__title">QA Queue</h1>
-          <p class="console-page__intro">
-            Triage operativo para bloqueos de calidad, decisiones editoriales y fallos de release antes de publicar.
-          </p>
+      <app-studio-page-header
+        kicker="Review"
+        title="QA Queue"
+        intro="Triage operativo para blockers de QA, decisiones humanas y fallos de release antes de publicar."
+      >
+        <div page-meta *ngIf="!loading">
+          <span class="console-tag console-tag--warning">{{ fixesCount }} fixes</span>
+          <span class="console-tag console-tag--accent">{{ humanDecisionCount }} human decisions</span>
+          <span class="console-tag console-tag--success">{{ readyCount }} ready now</span>
         </div>
 
-        <div class="console-page__actions">
+        <div page-actions>
           <a class="console-button console-button--secondary" routerLink="/studio/editorial/pipeline">
             Open pipeline
           </a>
+          <a class="console-button console-button--secondary" routerLink="/studio/review/editor">
+            Editor review
+          </a>
           <button type="button" class="console-button" (click)="loadData()">Refresh queue</button>
         </div>
-      </header>
+      </app-studio-page-header>
 
       <div class="console-banner console-banner--error" *ngIf="error">{{ error }}</div>
 
-      <div class="console-stat-grid" *ngIf="!loading">
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Needs fixes</p>
-          <strong class="console-stat-card__value">{{ fixesCount }}</strong>
-          <span class="console-stat-card__detail">Piezas bloqueadas por QA o por un publish fallido.</span>
-        </article>
+      <app-studio-stat-strip *ngIf="!loading" [items]="queueStats"></app-studio-stat-strip>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Human decisions</p>
-          <strong class="console-stat-card__value">{{ humanDecisionCount }}</strong>
-          <span class="console-stat-card__detail">Contenido esperando lectura, aprobacion o cierre editorial.</span>
-        </article>
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">QA posture</p>
+            <h2 class="console-surface__title">Gate triage before sign-off and release</h2>
+            <p class="console-hero-copy__body">{{ queueNarrative }}</p>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Ready to release</p>
-          <strong class="console-stat-card__value">{{ readyCount }}</strong>
-          <span class="console-stat-card__detail">Piezas ya validadas y listas para schedule o publish.</span>
-        </article>
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Needs fixes</span>
+                <strong>{{ fixesCount }}</strong>
+                <small>Projects blocked by QA failures, release blockers or recent publish incidents.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Human decisions</span>
+                <strong>{{ humanDecisionCount }}</strong>
+                <small>Pieces that already passed the automatic layer and still need editorial judgment.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Runtime incidents</span>
+                <strong>{{ runtimeIncidentCount }}</strong>
+                <small>Failed publication jobs still visible inside the current triage window.</small>
+              </article>
+            </div>
+          </div>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Runtime incidents</p>
-          <strong class="console-stat-card__value">{{ runtimeIncidentCount }}</strong>
-          <span class="console-stat-card__detail">Ejecuciones de publicacion fallidas en la ventana observada.</span>
-        </article>
-      </div>
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Highest priority queue items</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list" *ngIf="priorityProjects.length; else emptyPriorityProjects">
+              <a
+                class="console-focus-card"
+                *ngFor="let project of priorityProjects.slice(0, 3)"
+                [routerLink]="priorityProjectLink(project)"
+              >
+                <div>
+                  <strong>{{ project.title }}</strong>
+                  <p>{{ project.site.name }} · {{ priorityProjectNarrative(project) }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="reviewTagClass(project.reviewGate.stage)">
+                  {{ reviewStageLabel(project.reviewGate.stage) }}
+                </span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div class="console-workspace" *ngIf="!loading; else loadingState">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Queue</p>
                 <h2 class="console-surface__title">Priority triage</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ queueRows.length }} queued items</span>
             </div>
 
             <form class="console-toolbar console-toolbar--stretch" [formGroup]="filterForm">
@@ -109,7 +139,7 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, destination or QA message"
+                  placeholder="Project, blocker, destination or QA note"
                   (input)="applyFilters()"
                 />
               </label>
@@ -135,21 +165,19 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
 
             <div class="console-list-grid" *ngIf="queueRows.length; else emptyQueue">
               <a class="console-list-card console-list-card--interactive" *ngFor="let row of queueRows" [routerLink]="row.link">
-                <div>
-                  <strong>{{ row.title }}</strong>
-                  <p>{{ row.siteName }} · {{ row.summary }}</p>
-                  <small>{{ row.updatedAt | date: 'MMM d, HH:mm' }}</small>
+                <div class="console-version-card__head">
+                  <div>
+                    <strong>{{ row.title }}</strong>
+                    <p>{{ row.siteName }} · {{ row.summary }}</p>
+                  </div>
+                  <div class="console-version-card__tags">
+                    <span class="console-tag" [ngClass]="tagToneClass(row.tone)">
+                      {{ row.status }}
+                    </span>
+                    <span class="console-tag console-tag--muted">{{ row.score }}/100</span>
+                  </div>
                 </div>
-                <span
-                  class="console-tag"
-                  [class.console-tag--accent]="row.tone === 'accent'"
-                  [class.console-tag--warning]="row.tone === 'warning'"
-                  [class.console-tag--success]="row.tone === 'success'"
-                  [class.console-tag--danger]="row.tone === 'danger'"
-                  [class.console-tag--muted]="row.tone === 'muted'"
-                >
-                  {{ row.status }}
-                </span>
+                <small>{{ row.updatedAt | date: 'MMM d, HH:mm' }}</small>
               </a>
             </div>
           </section>
@@ -158,7 +186,7 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Signals</p>
-                <h2 class="console-surface__title">Most repeated QA checks</h2>
+                <h2 class="console-surface__title">Most repeated gate signals</h2>
               </div>
             </div>
 
@@ -168,11 +196,7 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
                   <strong>{{ signal.key }}</strong>
                   <p>{{ signal.latestMessage }}</p>
                 </div>
-                <span
-                  class="console-tag"
-                  [class.console-tag--warning]="signal.severity === 'warning'"
-                  [class.console-tag--danger]="signal.severity === 'error'"
-                >
+                <span class="console-tag" [ngClass]="severityTagClass(signal.severity)">
                   {{ signal.count }}
                 </span>
               </article>
@@ -181,7 +205,7 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
         </div>
 
         <aside class="console-workspace__aside">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Incidents</p>
@@ -192,7 +216,7 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
             <div class="console-feed" *ngIf="failedPublications.length; else emptyIncidents">
               <article class="console-feed__item" *ngFor="let incident of failedPublications">
                 <div>
-                  <a [routerLink]="['/studio/projects', incident.project.id]">{{ incident.project.title }}</a>
+                  <a [routerLink]="['/studio/editorial/articles', incident.project.id]">{{ incident.project.title }}</a>
                   <p>{{ incident.site.name }} · {{ incident.action }} · {{ incident.error || 'Unknown error' }}</p>
                 </div>
                 <span>{{ incident.updatedAt | date: 'short' }}</span>
@@ -203,22 +227,25 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
           <section class="console-surface">
             <div class="console-surface__head">
               <div>
-                <p class="console-surface__eyebrow">Guidance</p>
-                <h2 class="console-surface__title">Operator checklist</h2>
+                <p class="console-surface__eyebrow">Control surfaces</p>
+                <h2 class="console-surface__title">Operator handoff</h2>
               </div>
             </div>
 
-            <ul class="console-note-list">
-              <li class="console-note-list__item">
-                Empieza por fixes: todo lo que combine QA failed o publish failed es deuda operativa inmediata.
-              </li>
-              <li class="console-note-list__item">
-                Después resuelve Human decisions para que el pipeline no acumule piezas sin propietario claro.
-              </li>
-              <li class="console-note-list__item">
-                Ready to release indica capacidad de salida; Publishing History confirma si esa capacidad se convierte en contenido live.
-              </li>
-            </ul>
+            <div class="console-action-stack">
+              <a class="console-action-card" routerLink="/studio/review/editor">
+                <strong>Editor review</strong>
+                <span>Envia ahi las piezas que ya no necesitan fixes sino criterio editorial humano.</span>
+              </a>
+              <a class="console-action-card" routerLink="/studio/publishing/history">
+                <strong>Publishing history</strong>
+                <span>Usalo cuando el incidente ya salio del editor y vive en el runtime de release.</span>
+              </a>
+              <a class="console-action-card" routerLink="/studio/publishing/scheduled">
+                <strong>Scheduled release</strong>
+                <span>Las piezas realmente listas pasan de QA al carril de release management.</span>
+              </a>
+            </div>
           </section>
         </aside>
       </div>
@@ -228,9 +255,15 @@ const BASE_QUEUE_STATUSES = new Set<ProjectStatus>([
           <div>
             <p class="console-kicker">Loading</p>
             <h2>Assembling the QA queue</h2>
-            <p>Estamos cruzando estados editoriales, checks y publication jobs para construir la cola de triage.</p>
+            <p>Estamos cruzando review gate, QA checks y publication jobs para construir la cola de triage.</p>
           </div>
         </section>
+      </ng-template>
+
+      <ng-template #emptyPriorityProjects>
+        <div class="console-empty-compact">
+          <p>No priority queue items right now.</p>
+        </div>
       </ng-template>
 
       <ng-template #emptyQueue>
@@ -265,6 +298,7 @@ export class QaQueuePageComponent implements OnInit {
   sites: StudioSiteSummary[] = [];
   projects: StudioProjectSummary[] = [];
   publications: PublicationListItem[] = [];
+  filteredProjects: StudioProjectSummary[] = [];
   queueRows: QueueRow[] = [];
   checkSignals: CheckSignal[] = [];
   failedPublications: PublicationListItem[] = [];
@@ -275,6 +309,63 @@ export class QaQueuePageComponent implements OnInit {
   humanDecisionCount = 0;
   readyCount = 0;
   runtimeIncidentCount = 0;
+
+  get queueStats(): StudioStatItem[] {
+    return [
+      {
+        label: 'Needs fixes',
+        value: this.fixesCount,
+        detail: 'Piezas bloqueadas por gate editorial o por un release fallido.',
+        tone: this.fixesCount > 0 ? 'warning' : 'muted',
+      },
+      {
+        label: 'Human decisions',
+        value: this.humanDecisionCount,
+        detail: 'Contenido esperando lectura, aprobacion o compare humano.',
+        tone: this.humanDecisionCount > 0 ? 'accent' : 'muted',
+      },
+      {
+        label: 'Ready to release',
+        value: this.readyCount,
+        detail: 'Piezas listas para draft sync o publish sin blockers abiertos.',
+        tone: this.readyCount > 0 ? 'success' : 'muted',
+      },
+      {
+        label: 'Runtime incidents',
+        value: this.runtimeIncidentCount,
+        detail: 'Publication jobs fallidos dentro de la ventana observada.',
+        tone: this.runtimeIncidentCount > 0 ? 'danger' : 'muted',
+      },
+    ];
+  }
+
+  get queueNarrative(): string {
+    if (!this.projects.length) {
+      return 'No hay proyectos todavia en la cola de QA. La superficie queda lista para triage cuando el workspace empiece a generar y revisar piezas reales.';
+    }
+
+    if (this.fixesCount > 0) {
+      return `${this.fixesCount} pieza${this.fixesCount > 1 ? 's siguen' : ' sigue'} bloqueada${this.fixesCount > 1 ? 's' : ''}. QA Queue ya no es una lista de checks: es el carril donde se prioriza la deuda editorial y runtime antes del release.`;
+    }
+
+    if (this.humanDecisionCount > 0) {
+      return `${this.humanDecisionCount} pieza${this.humanDecisionCount > 1 ? 's esperan' : ' espera'} criterio humano tras superar la capa automatica. El cuello de botella ya no es QA bruto sino decision editorial.`;
+    }
+
+    if (this.readyCount > 0) {
+      return `${this.readyCount} pieza${this.readyCount > 1 ? 's ya pueden' : ' ya puede'} salir de QA hacia scheduled o publish sin blockers visibles.`;
+    }
+
+    return 'La cola esta estable y sin deuda operativa relevante. El siguiente throughput depende de generar nuevo volumen o abrir nuevas iteraciones.';
+  }
+
+  get priorityProjects(): StudioProjectSummary[] {
+    const source = this.filteredProjects.length
+      ? this.filteredProjects
+      : this.projects.filter((project) => this.isQueueProject(project));
+
+    return [...source].sort((left, right) => this.rankProject(right) - this.rankProject(left));
+  }
 
   ngOnInit(): void {
     this.loadData();
@@ -325,9 +416,12 @@ export class QaQueuePageComponent implements OnInit {
         return [
           project.title,
           project.site.name,
-          project.status,
           project.brief,
           project.latestVersion?.title ?? '',
+          project.reviewGate.primaryConcern,
+          project.reviewGate.nextAction,
+          ...(project.reviewGate.blockers || []),
+          ...(project.reviewGate.warnings || []),
           qaMessages,
         ]
           .join(' ')
@@ -338,27 +432,29 @@ export class QaQueuePageComponent implements OnInit {
 
     const filteredProjects = scopedProjects.filter((project) => {
       if (focus === 'fixes') {
-        return ['qa_failed', 'publish_failed'].includes(project.status);
+        return this.needsFixes(project);
       }
 
       if (focus === 'review') {
-        return REVIEW_STATUSES.has(project.status);
+        return this.needsHumanDecision(project);
       }
 
       if (focus === 'ready') {
-        return ['qa_passed', 'approved'].includes(project.status);
+        return this.readyForRelease(project);
       }
 
-      return BASE_QUEUE_STATUSES.has(project.status);
+      return this.isQueueProject(project);
     });
 
+    this.filteredProjects = filteredProjects;
     this.queueRows = filteredProjects.map((project) => ({
       id: project.id,
       title: project.title,
       siteName: project.site.name,
-      status: this.formatStatus(project.status),
-      tone: this.rowTone(project.status),
+      status: reviewStageLabel(project.reviewGate.stage),
+      tone: this.rowTone(project.reviewGate.stage),
       summary: this.projectSummary(project),
+      score: buildQaScore(project.latestVersion),
       updatedAt: project.updatedAt,
       link: ['/studio/editorial/articles', project.id],
     }));
@@ -386,40 +482,94 @@ export class QaQueuePageComponent implements OnInit {
       .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
       .slice(0, 8);
 
-    this.fixesCount = scopedProjects.filter((project) =>
-      ['qa_failed', 'publish_failed'].includes(project.status),
-    ).length;
-    this.humanDecisionCount = scopedProjects.filter((project) =>
-      REVIEW_STATUSES.has(project.status),
-    ).length;
-    this.readyCount = scopedProjects.filter((project) =>
-      ['qa_passed', 'approved'].includes(project.status),
-    ).length;
+    this.fixesCount = scopedProjects.filter((project) => this.needsFixes(project)).length;
+    this.humanDecisionCount = scopedProjects.filter((project) => this.needsHumanDecision(project)).length;
+    this.readyCount = scopedProjects.filter((project) => this.readyForRelease(project)).length;
     this.runtimeIncidentCount = this.failedPublications.length;
+  }
+
+  priorityProjectLink(project: StudioProjectSummary): string[] {
+    return project.reviewGate.compareReady
+      ? ['/studio/editorial/versions', project.id]
+      : ['/studio/editorial/articles', project.id];
+  }
+
+  priorityProjectNarrative(project: StudioProjectSummary): string {
+    if (this.needsFixes(project)) {
+      return `${project.reviewGate.blockerCount} blockers · ${project.reviewGate.primaryConcern}`;
+    }
+
+    if (this.needsHumanDecision(project)) {
+      return `${qaScoreLabel(buildQaScore(project.latestVersion))} · ${project.reviewGate.nextAction}`;
+    }
+
+    if (this.readyForRelease(project)) {
+      return `${buildQaScore(project.latestVersion)}/100 QA score · ready for scheduled release`;
+    }
+
+    return project.reviewGate.nextAction;
+  }
+
+  tagToneClass(tone: TagTone): string {
+    switch (tone) {
+      case 'accent':
+        return 'console-tag--accent';
+      case 'warning':
+        return 'console-tag--warning';
+      case 'success':
+        return 'console-tag--success';
+      case 'danger':
+        return 'console-tag--danger';
+      case 'muted':
+      default:
+        return 'console-tag--muted';
+    }
+  }
+
+  reviewTagClass(stage: ReviewGateStage): string {
+    return this.tagToneClass(reviewStageTone(stage));
+  }
+
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return reviewStageLabel(stage);
+  }
+
+  severityTagClass(severity: CheckSignal['severity']): string {
+    return severity === 'error' ? 'console-tag--danger' : 'console-tag--warning';
   }
 
   private buildCheckSignals(projects: StudioProjectSummary[]): CheckSignal[] {
     const registry = new Map<string, CheckSignal>();
 
+    const register = (key: string, severity: 'error' | 'warning', message: string) => {
+      const existing = registry.get(key);
+      if (existing) {
+        existing.count += 1;
+        existing.latestMessage = message;
+        return;
+      }
+
+      registry.set(key, {
+        key,
+        count: 1,
+        severity,
+        latestMessage: message,
+      });
+    };
+
     projects.forEach((project) => {
       project.latestVersion?.qaReport?.checks.forEach((check) => {
-        if (check.passed) {
-          return;
+        if (!check.passed) {
+          register(check.key, check.severity, check.message);
         }
+      });
 
-        const existing = registry.get(check.key);
-        if (existing) {
-          existing.count += 1;
-          existing.latestMessage = check.message;
-          return;
-        }
+      project.reviewGate.blockers.forEach((message) => {
+        register(this.signalKey(message), 'error', message);
+      });
 
-        registry.set(check.key, {
-          key: check.key,
-          count: 1,
-          severity: check.severity,
-          latestMessage: check.message,
-        });
+      project.reviewGate.warnings.forEach((message) => {
+        register(this.signalKey(message), 'warning', message);
       });
     });
 
@@ -429,76 +579,63 @@ export class QaQueuePageComponent implements OnInit {
   }
 
   private rankProject(project: StudioProjectSummary): number {
-    const weights: Partial<Record<ProjectStatus, number>> = {
+    const weights: Partial<Record<ReviewGateStage, number>> = {
       publish_failed: 100,
-      qa_failed: 90,
-      in_review: 70,
-      approved: 60,
-      qa_passed: 50,
-      ai_generated: 30,
-      draft: 20,
+      qa_blocked: 90,
+      needs_review: 75,
+      ready_to_approve: 65,
+      approved: 55,
+      publish_queued: 45,
       published: 10,
+      awaiting_generation: 5,
     };
 
-    return (weights[project.status] ?? 0) * 10000000000000 + Date.parse(project.updatedAt);
+    return (
+      ((weights[project.reviewGate.stage] ?? 0) + project.reviewGate.blockerCount * 2) * 10000000000000 +
+      Date.parse(project.updatedAt)
+    );
   }
 
   private projectSummary(project: StudioProjectSummary): string {
-    if (project.status === 'publish_failed') {
-      return 'El contenido esta listo en texto, pero el push a destino fallo.';
+    if (project.reviewGate.stage === 'publish_failed') {
+      return project.latestPublicationJob?.error || 'Latest release attempt failed and needs operator review.';
     }
 
-    if (project.status === 'qa_failed') {
-      const failedChecks = project.latestVersion?.qaReport?.checks.filter((check) => !check.passed) ?? [];
-      return failedChecks.length
-        ? failedChecks.slice(0, 2).map((check) => check.key).join(' · ')
-        : 'QA detecto problemas que deben resolverse antes de publicar.';
+    if (project.reviewGate.blockerCount > 0) {
+      return `${project.reviewGate.blockerCount} blockers · ${project.reviewGate.primaryConcern}`;
     }
 
-    if (project.status === 'in_review') {
-      return 'Esperando decision humana sobre calidad, tono y enfoque editorial.';
-    }
-
-    if (project.status === 'approved') {
-      return 'Aprobado por editorial, listo para schedule o release directo.';
-    }
-
-    if (project.status === 'qa_passed') {
-      return 'Checks completados, pendiente de aprobacion final.';
-    }
-
-    return project.latestVersion?.excerpt || 'Pieza viva dentro del circuito editorial.';
+    return `${qaScoreLabel(buildQaScore(project.latestVersion))} · ${project.reviewGate.nextAction}`;
   }
 
-  private rowTone(status: ProjectStatus): TagTone {
-    if (status === 'publish_failed' || status === 'qa_failed') {
-      return 'danger';
-    }
-    if (status === 'in_review') {
-      return 'warning';
-    }
-    if (status === 'approved') {
-      return 'success';
-    }
-    if (status === 'qa_passed') {
-      return 'accent';
-    }
-    return 'muted';
+  private rowTone(stage: ReviewGateStage): TagTone {
+    return reviewStageTone(stage);
   }
 
-  private formatStatus(status: ProjectStatus): string {
-    const labels: Record<ProjectStatus, string> = {
-      draft: 'Draft',
-      ai_generated: 'AI generated',
-      qa_failed: 'QA failed',
-      qa_passed: 'QA passed',
-      in_review: 'In review',
-      approved: 'Approved',
-      publish_queued: 'Publish queued',
-      published: 'Published',
-      publish_failed: 'Publish failed',
-    };
+  private isQueueProject(project: StudioProjectSummary): boolean {
+    return this.needsFixes(project) || this.needsHumanDecision(project) || this.readyForRelease(project) || project.reviewGate.stage === 'publish_queued';
+  }
 
-    return labels[status];
+  private needsFixes(project: StudioProjectSummary): boolean {
+    return project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed';
+  }
+
+  private needsHumanDecision(project: StudioProjectSummary): boolean {
+    return ['needs_review', 'qa_blocked', 'ready_to_approve'].includes(project.reviewGate.stage);
+  }
+
+  private readyForRelease(project: StudioProjectSummary): boolean {
+    return (
+      project.reviewGate.publishReady &&
+      ['approved', 'publish_failed'].includes(project.reviewGate.stage)
+    );
+  }
+
+  private signalKey(message: string): string {
+    return message
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 32);
   }
 }

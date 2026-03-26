@@ -52,6 +52,8 @@ export type StudioPermission =
   | 'integrations.manage'
   | 'analytics.read';
 
+export type StudioAuthMode = 'api_key' | 'oidc' | 'password' | 'google' | 'launch';
+
 export type StudioSession = {
   tenant: {
     id: string;
@@ -59,7 +61,7 @@ export type StudioSession = {
     slug: string | null;
     status: string;
   };
-  authMode: 'api_key' | 'oidc';
+  authMode: StudioAuthMode;
   user: {
     id: string;
     email: string;
@@ -77,6 +79,40 @@ export type StudioSession = {
   } | null;
   siteCount: number;
   projectCount: number;
+};
+
+export type StudioLoginWorkspace = {
+  workspace: {
+    id: string;
+    name: string;
+    slug: string | null;
+    status: string;
+  };
+  membershipStatus: 'invited' | 'active' | 'suspended';
+  requiresSso: boolean;
+  preferred: boolean;
+};
+
+export type StudioLoginOptions = {
+  email: string;
+  account: {
+    id: string;
+    email: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    status: 'invited' | 'active' | 'suspended';
+    lastWorkspaceId: string | null;
+    emailVerifiedAt: string | null;
+  } | null;
+  accountState: 'invited' | 'active' | 'suspended' | 'no_access';
+  canUsePassword: boolean;
+  canUseGoogle: boolean;
+  googleClientId: string | null;
+  needsActivation: boolean;
+  localWorkspaces: StudioLoginWorkspace[];
+  ssoWorkspaces: StudioLoginWorkspace[];
+  recommendedWorkspaceId: string | null;
+  requestAccessUrl: string;
 };
 
 export type StudioWorkspaceAccess = {
@@ -109,6 +145,29 @@ export type PublicationExecutionState = {
   publishedAt: string | null;
 };
 
+export type ReviewGateStage =
+  | 'awaiting_generation'
+  | 'needs_review'
+  | 'qa_blocked'
+  | 'ready_to_approve'
+  | 'approved'
+  | 'publish_queued'
+  | 'publish_failed'
+  | 'published';
+
+export type ReviewGateSummary = {
+  stage: ReviewGateStage;
+  compareReady: boolean;
+  approvalReady: boolean;
+  publishReady: boolean;
+  blockerCount: number;
+  warningCount: number;
+  blockers: string[];
+  warnings: string[];
+  nextAction: string;
+  primaryConcern: string;
+};
+
 export type VersionSummary = {
   id: string;
   versionNumber: number;
@@ -130,6 +189,9 @@ export type VersionSummary = {
   promptVersionLabel: string | null;
   promptPresetName: string | null;
   promptPresetKey: string | null;
+  wordCount: number;
+  qaFailureCount: number;
+  qaWarningCount: number;
   derivativeCount: number;
   latestPublicationJob: PublicationExecutionState | null;
   qaReport: {
@@ -194,6 +256,8 @@ export type StudioProjectSummary = {
     locale: string;
     baseUrl: string | null;
   };
+  versionCount: number;
+  reviewGate: ReviewGateSummary;
   latestVersion: VersionSummary | null;
   latestPublicationJob: PublicationExecutionState | null;
 };
@@ -283,6 +347,15 @@ export type CreateProjectPayload = {
   siteId: string;
   title: string;
   brief: string;
+  goal?: ProjectGoal;
+  primaryLanguage?: string;
+  metadata?: JsonRecord;
+};
+
+export type UpdateProjectPayload = {
+  siteId?: string;
+  title?: string;
+  brief?: string;
   goal?: ProjectGoal;
   primaryLanguage?: string;
   metadata?: JsonRecord;

@@ -10,11 +10,18 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import type {
   ProjectGoal,
   ProjectStatus,
+  ReviewGateStage,
   StudioProjectSummary,
   StudioSiteSummary,
 } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
+import {
+  buildProjectPayloadFromBriefEditor,
+  createEmptyProjectBriefEditorValue,
+} from '../utils/project-brief';
+import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
 import { formatApiError } from '../utils/api-error';
+import { buildQaScore, qaScoreLabel, reviewStageLabel, reviewStageTone } from '../utils/review-gate';
 
 type ProjectCollectionView =
   | 'projects'
@@ -22,6 +29,16 @@ type ProjectCollectionView =
   | 'pipeline'
   | 'briefs'
   | 'articles';
+
+type ProjectFocus =
+  | 'all'
+  | 'intake'
+  | 'review'
+  | 'release'
+  | 'blocked'
+  | 'live';
+
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
 
 type ViewConfig = {
   kicker: string;
@@ -96,25 +113,24 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
 @Component({
   selector: 'app-projects-page',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, StudioPageHeaderComponent],
   template: `
     <section class="console-page">
-      <header class="console-page__header">
-        <div class="console-page__copy">
-          <p class="console-kicker">{{ viewConfig.kicker }}</p>
-          <h1 class="console-page__title">{{ viewConfig.title }}</h1>
-          <p class="console-page__intro">
-            {{ viewConfig.intro }}
-          </p>
-        </div>
-
-        <div class="console-page__actions">
+      <app-studio-page-header
+        [kicker]="viewConfig.kicker"
+        [title]="viewConfig.title"
+        [intro]="viewConfig.intro"
+      >
+        <div page-actions>
           <span class="console-tag console-tag--accent">Live backend</span>
+          <a class="console-button console-button--secondary" routerLink="/studio/editorial/pipeline">
+            Open pipeline
+          </a>
           <button type="button" class="console-button console-button--secondary" (click)="loadProjects()">
             Refresh
           </button>
         </div>
-      </header>
+      </app-studio-page-header>
 
       <div class="console-banner console-banner--error" *ngIf="createError">{{ createError }}</div>
       <div class="console-banner console-banner--error" *ngIf="listError">{{ listError }}</div>
@@ -127,31 +143,110 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Review ready</p>
-          <strong class="console-stat-card__value">{{ countByStatuses(['qa_passed', 'approved']) }}</strong>
-          <span class="console-stat-card__detail">Piezas preparadas para decision humana o release.</span>
+          <p class="console-stat-card__label">Human decisions</p>
+          <strong class="console-stat-card__value">{{ countByFocus('review') }}</strong>
+          <span class="console-stat-card__detail">Piezas esperando lectura humana, QA final o aprobacion editorial.</span>
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Published</p>
-          <strong class="console-stat-card__value">{{ countByStatuses(['published']) }}</strong>
-          <span class="console-stat-card__detail">Contenido ya sincronizado con un destino final.</span>
+          <p class="console-stat-card__label">Release ready</p>
+          <strong class="console-stat-card__value">{{ countByFocus('release') }}</strong>
+          <span class="console-stat-card__detail">Contenido ya publicable o sincronizable sin blockers editoriales abiertos.</span>
         </article>
 
         <article class="console-stat-card">
           <p class="console-stat-card__label">Blocked</p>
-          <strong class="console-stat-card__value">{{ countByStatuses(['qa_failed', 'publish_failed']) }}</strong>
-          <span class="console-stat-card__detail">Bloqueos de QA o publishing que exigen intervencion.</span>
+          <strong class="console-stat-card__value">{{ countByFocus('blocked') }}</strong>
+          <span class="console-stat-card__detail">Bloqueos de QA, metadata, asset o publishing que exigen intervencion.</span>
         </article>
       </div>
 
+      <section class="console-surface console-surface--hero">
+        <div class="console-hero-grid console-hero-grid--compact">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Intake control</p>
+            <h2 class="console-surface__title">Structured briefs, live gate, cleaner registry</h2>
+            <p class="console-hero-copy__body">
+              La entrada editorial ya es operativa. Esta superficie combina composer, filtros y gate real para mover briefs
+              hacia generación, revisión y release sin volver a caer en pantallas sueltas.
+            </p>
+
+            <div class="console-chip-row">
+              <span class="console-chip">Intake {{ countByFocus('intake') }}</span>
+              <span class="console-chip">Review {{ countByFocus('review') }}</span>
+              <span class="console-chip">Release {{ countByFocus('release') }}</span>
+              <span class="console-chip">Blocked {{ countByFocus('blocked') }}</span>
+            </div>
+          </div>
+
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Priority lane</p>
+                <h2 class="console-surface__title">Projects to move next</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list" *ngIf="priorityProjects.length; else emptyPriorityProjects">
+              <a
+                class="console-focus-card"
+                *ngFor="let project of priorityProjects"
+                [routerLink]="[viewConfig.detailBasePath, project.id]"
+              >
+                <div>
+                  <strong>{{ project.title }}</strong>
+                  <p>{{ project.site.name }} · {{ projectNarrative(project) }}</p>
+                </div>
+                <span
+                  class="console-tag"
+                  [class.console-tag--accent]="reviewStageTone(project.reviewGate.stage) === 'accent'"
+                  [class.console-tag--warning]="reviewStageTone(project.reviewGate.stage) === 'warning'"
+                  [class.console-tag--success]="reviewStageTone(project.reviewGate.stage) === 'success'"
+                  [class.console-tag--danger]="reviewStageTone(project.reviewGate.stage) === 'danger'"
+                  [class.console-tag--muted]="reviewStageTone(project.reviewGate.stage) === 'muted'"
+                >
+                  {{ reviewStageLabel(project.reviewGate.stage) }}
+                </span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div class="console-workspace">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">{{ viewConfig.createEyebrow }}</p>
                 <h2 class="console-surface__title">{{ viewConfig.createTitle }}</h2>
+              </div>
+            </div>
+
+            <div class="console-project-composer__intro">
+              <div>
+                <strong>Structured editorial composer</strong>
+                <p>
+                  Define destination, search intent, editorial angle, sections y metadata antes de lanzar la primera versión.
+                </p>
+              </div>
+
+              <div class="console-header-strip">
+                <article class="console-header-strip__card">
+                  <span>Destination</span>
+                  <strong>{{ createForm.controls.siteId.value ? 'Ready' : 'Missing' }}</strong>
+                  <small>Necesario para alinear destino, locale y adapter.</small>
+                </article>
+                <article class="console-header-strip__card">
+                  <span>Search intent</span>
+                  <strong>{{ hasSearchIntent ? 'Ready' : 'Thin' }}</strong>
+                  <small>Query, audience y angle definen la oportunidad editorial.</small>
+                </article>
+                <article class="console-header-strip__card">
+                  <span>Context pack</span>
+                  <strong>{{ hasOperationalContext ? 'Ready' : 'Thin' }}</strong>
+                  <small>Sections, notes y keywords alimentan generación y QA.</small>
+                </article>
               </div>
             </div>
 
@@ -164,17 +259,12 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
                 </select>
               </label>
 
-              <label class="console-field">
-                <span>Working title</span>
-                <input type="text" formControlName="title" />
-              </label>
-
-              <label class="console-field">
-                <span>Brief</span>
-                <textarea rows="5" formControlName="brief"></textarea>
-              </label>
-
               <div class="console-form__grid">
+                <label class="console-field">
+                  <span>Working title</span>
+                  <input type="text" formControlName="title" />
+                </label>
+
                 <label class="console-field">
                   <span>Goal</span>
                   <select formControlName="goal">
@@ -189,8 +279,85 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
               </div>
 
               <label class="console-field">
-                <span>Metadata JSON</span>
-                <textarea rows="4" formControlName="metadata"></textarea>
+                <span>Editorial brief summary</span>
+                <textarea rows="5" formControlName="briefSummary"></textarea>
+              </label>
+
+              <div class="console-form__grid">
+                <label class="console-field">
+                  <span>Target query</span>
+                  <input type="text" formControlName="targetQuery" />
+                </label>
+
+                <label class="console-field">
+                  <span>Audience</span>
+                  <input type="text" formControlName="audience" />
+                </label>
+              </div>
+
+              <div class="console-form__grid">
+                <label class="console-field">
+                  <span>Angle</span>
+                  <input type="text" formControlName="angle" />
+                </label>
+
+                <label class="console-field">
+                  <span>Tone</span>
+                  <input type="text" formControlName="tone" />
+                </label>
+              </div>
+
+              <div class="console-form__grid">
+                <label class="console-field">
+                  <span>CTA</span>
+                  <input type="text" formControlName="cta" />
+                </label>
+
+                <label class="console-field">
+                  <span>Author</span>
+                  <input type="text" formControlName="author" />
+                </label>
+              </div>
+
+              <div class="console-form__grid">
+                <label class="console-field">
+                  <span>Keywords</span>
+                  <input type="text" formControlName="keywords" />
+                </label>
+
+                <label class="console-field">
+                  <span>Categories</span>
+                  <input type="text" formControlName="categories" />
+                </label>
+              </div>
+
+              <div class="console-form__grid">
+                <label class="console-field">
+                  <span>Preferred slug</span>
+                  <input type="text" formControlName="slug" />
+                </label>
+
+                <label class="console-field">
+                  <span>Canonical URL</span>
+                  <input type="url" formControlName="canonicalUrl" />
+                </label>
+              </div>
+
+              <label class="console-field">
+                <span>Required sections</span>
+                <textarea rows="4" formControlName="requiredSections"></textarea>
+              </label>
+
+              <label class="console-field">
+                <span>Facts and source notes</span>
+                <textarea rows="4" formControlName="sourceNotes"></textarea>
+              </label>
+
+              <label class="console-field">
+                <span class="console-inline-actions">
+                  <input type="checkbox" formControlName="featured" />
+                  Featured placement
+                </span>
               </label>
 
               <div class="console-form__actions">
@@ -217,9 +384,21 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Title, brief, goal or destination"
+                  placeholder="Title, gate, blocker, brief or destination"
                   (input)="applySearch()"
                 />
+              </label>
+
+              <label class="console-field">
+                <span>Focus</span>
+                <select formControlName="focus" (change)="applySearch()">
+                  <option value="all">All projects</option>
+                  <option value="intake">Needs generation</option>
+                  <option value="review">Needs decision</option>
+                  <option value="release">Release ready</option>
+                  <option value="blocked">Blocked</option>
+                  <option value="live">Live</option>
+                </select>
               </label>
 
               <label class="console-field">
@@ -232,9 +411,9 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
 
               <div class="console-form__grid">
                 <label class="console-field">
-                  <span>Status</span>
+                  <span>Tech status</span>
                   <select formControlName="status" (change)="loadProjects()">
-                    <option value="">All statuses</option>
+                    <option value="">All technical statuses</option>
                     <option *ngFor="let status of statuses" [value]="status">{{ status }}</option>
                   </select>
                 </label>
@@ -260,13 +439,54 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
 
             <ul class="console-note-list">
               <li class="console-note-list__item">
-                La entidad viva del backend sigue siendo ContentProject, pero ahora se presenta con lenguaje editorial.
+                Este composer genera un brief legible para IA y metadata estructurada sobre el mismo ContentProject.
               </li>
               <li class="console-note-list__item">
-                El mismo dato soporta registro de proyectos, pipeline, briefs y articulos segun la vista activa.
+                Keywords, sections, CTA y notas de fuente dejan de vivir en un textarea JSON sin contexto.
               </li>
               <li class="console-note-list__item">
-                El siguiente salto de producto es reemplazar el brief plano por un editor estructurado y un board real.
+                El siguiente salto sigue siendo un board real y social publishing, pero la entrada editorial ya deja de ser ciega.
+              </li>
+            </ul>
+          </section>
+
+          <section class="console-surface">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Preview</p>
+                <h2 class="console-surface__title">Generated payload</h2>
+              </div>
+            </div>
+
+            <div class="console-code-block">
+              <pre>{{ briefPreview }}</pre>
+            </div>
+
+            <div class="console-code-block">
+              <pre>{{ metadataPreview }}</pre>
+            </div>
+          </section>
+
+          <section class="console-surface">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Readiness</p>
+                <h2 class="console-surface__title">Pre-flight checks</h2>
+              </div>
+            </div>
+
+            <ul class="console-note-list">
+              <li class="console-note-list__item">
+                Destination: {{ createForm.controls.siteId.value ? 'ready' : 'missing' }}
+              </li>
+              <li class="console-note-list__item">
+                Editorial summary: {{ createForm.controls.briefSummary.value.trim() ? 'ready' : 'missing' }}
+              </li>
+              <li class="console-note-list__item">
+                Search intent: {{ hasSearchIntent ? 'ready' : 'thin' }}
+              </li>
+              <li class="console-note-list__item">
+                Context and sections: {{ hasOperationalContext ? 'ready' : 'thin' }}
               </li>
             </ul>
           </section>
@@ -279,6 +499,10 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
             <p class="console-surface__eyebrow">List</p>
             <h2 class="console-surface__title">{{ viewConfig.listTitle }}</h2>
           </div>
+          <div class="console-chip-row">
+            <span class="console-chip">{{ filteredProjects.length }} visible</span>
+            <span class="console-chip">Focus {{ filterForm.controls.focus.value }}</span>
+          </div>
         </div>
 
         <div class="console-list-grid" *ngIf="filteredProjects.length; else emptyProjects">
@@ -287,14 +511,26 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
             *ngFor="let project of filteredProjects"
             [routerLink]="[viewConfig.detailBasePath, project.id]"
           >
-            <div>
-              <strong>{{ project.title }}</strong>
-              <p>{{ project.site.name }} · {{ project.goal }} · {{ project.status }}</p>
-              <small *ngIf="project.latestVersion">
-                V{{ project.latestVersion.versionNumber }} · QA {{ project.latestVersion.qaState }}
-              </small>
+            <div class="console-version-card__head">
+              <div>
+                <strong>{{ project.title }}</strong>
+                <p>{{ project.site.name }} · {{ project.goal }} · {{ projectNarrative(project) }}</p>
+                <small>{{ projectMeta(project) }}</small>
+              </div>
+              <div class="console-version-card__tags">
+                <span
+                  class="console-tag"
+                  [class.console-tag--accent]="reviewStageTone(project.reviewGate.stage) === 'accent'"
+                  [class.console-tag--warning]="reviewStageTone(project.reviewGate.stage) === 'warning'"
+                  [class.console-tag--success]="reviewStageTone(project.reviewGate.stage) === 'success'"
+                  [class.console-tag--danger]="reviewStageTone(project.reviewGate.stage) === 'danger'"
+                  [class.console-tag--muted]="reviewStageTone(project.reviewGate.stage) === 'muted'"
+                >
+                  {{ reviewStageLabel(project.reviewGate.stage) }}
+                </span>
+                <span class="console-tag console-tag--muted">{{ project.primaryLanguage }}</span>
+              </div>
             </div>
-            <span class="console-tag">{{ project.primaryLanguage }}</span>
           </a>
         </div>
       </section>
@@ -310,6 +546,12 @@ const VIEW_CONFIGS: Record<ProjectCollectionView, ViewConfig> = {
             Reset filters
           </button>
         </section>
+      </ng-template>
+
+      <ng-template #emptyPriorityProjects>
+        <div class="console-empty-compact">
+          <p>No priority projects in the current workspace view.</p>
+        </div>
       </ng-template>
     </section>
   `,
@@ -340,25 +582,68 @@ export class ProjectsPageComponent implements OnInit {
   ];
 
   readonly createForm = new FormGroup({
-    siteId: new FormControl('', {
+    siteId: new FormControl(createEmptyProjectBriefEditorValue().siteId, {
       nonNullable: true,
       validators: [Validators.required],
     }),
-    title: new FormControl('', {
+    title: new FormControl(createEmptyProjectBriefEditorValue().title, {
       nonNullable: true,
       validators: [Validators.required],
     }),
-    brief: new FormControl('', {
+    goal: new FormControl<ProjectGoal>(createEmptyProjectBriefEditorValue().goal, {
       nonNullable: true,
-      validators: [Validators.required],
     }),
-    goal: new FormControl<ProjectGoal>('article', { nonNullable: true }),
-    primaryLanguage: new FormControl('es', { nonNullable: true }),
-    metadata: new FormControl('{}', { nonNullable: true }),
+    primaryLanguage: new FormControl(createEmptyProjectBriefEditorValue().primaryLanguage, {
+      nonNullable: true,
+    }),
+    briefSummary: new FormControl(createEmptyProjectBriefEditorValue().briefSummary, {
+      nonNullable: true,
+      validators: [Validators.required, Validators.minLength(24)],
+    }),
+    targetQuery: new FormControl(createEmptyProjectBriefEditorValue().targetQuery, {
+      nonNullable: true,
+    }),
+    audience: new FormControl(createEmptyProjectBriefEditorValue().audience, {
+      nonNullable: true,
+    }),
+    angle: new FormControl(createEmptyProjectBriefEditorValue().angle, {
+      nonNullable: true,
+    }),
+    tone: new FormControl(createEmptyProjectBriefEditorValue().tone, {
+      nonNullable: true,
+    }),
+    cta: new FormControl(createEmptyProjectBriefEditorValue().cta, {
+      nonNullable: true,
+    }),
+    sourceNotes: new FormControl(createEmptyProjectBriefEditorValue().sourceNotes, {
+      nonNullable: true,
+    }),
+    requiredSections: new FormControl(createEmptyProjectBriefEditorValue().requiredSections, {
+      nonNullable: true,
+    }),
+    keywords: new FormControl(createEmptyProjectBriefEditorValue().keywords, {
+      nonNullable: true,
+    }),
+    categories: new FormControl(createEmptyProjectBriefEditorValue().categories, {
+      nonNullable: true,
+    }),
+    author: new FormControl(createEmptyProjectBriefEditorValue().author, {
+      nonNullable: true,
+    }),
+    slug: new FormControl(createEmptyProjectBriefEditorValue().slug, {
+      nonNullable: true,
+    }),
+    canonicalUrl: new FormControl(createEmptyProjectBriefEditorValue().canonicalUrl, {
+      nonNullable: true,
+    }),
+    featured: new FormControl(createEmptyProjectBriefEditorValue().featured, {
+      nonNullable: true,
+    }),
   });
 
   readonly filterForm = new FormGroup({
     query: new FormControl('', { nonNullable: true }),
+    focus: new FormControl<ProjectFocus>('all', { nonNullable: true }),
     siteId: new FormControl('', { nonNullable: true }),
     status: new FormControl('', { nonNullable: true }),
     goal: new FormControl('', { nonNullable: true }),
@@ -374,6 +659,34 @@ export class ProjectsPageComponent implements OnInit {
 
   get viewConfig(): ViewConfig {
     return VIEW_CONFIGS[this.view];
+  }
+
+  get briefPreview(): string {
+    return this.structuredPayload.brief || 'The editorial brief preview will appear here.';
+  }
+
+  get metadataPreview(): string {
+    return JSON.stringify(this.structuredPayload.metadata || {}, null, 2);
+  }
+
+  get hasSearchIntent(): boolean {
+    return Boolean(
+      this.createForm.controls.targetQuery.value.trim() ||
+        this.createForm.controls.audience.value.trim() ||
+        this.createForm.controls.angle.value.trim(),
+    );
+  }
+
+  get hasOperationalContext(): boolean {
+    return Boolean(
+      this.createForm.controls.requiredSections.value.trim() ||
+        this.createForm.controls.sourceNotes.value.trim() ||
+        this.createForm.controls.keywords.value.trim(),
+    );
+  }
+
+  get priorityProjects(): StudioProjectSummary[] {
+    return [...this.filteredProjects].slice(0, 3);
   }
 
   ngOnInit(): void {
@@ -416,8 +729,11 @@ export class ProjectsPageComponent implements OnInit {
 
   applySearch(): void {
     const query = this.filterForm.controls.query.value.trim().toLowerCase();
+    const focus = this.filterForm.controls.focus.value;
 
-    this.filteredProjects = this.projects.filter((project) => {
+    this.filteredProjects = this.projects
+      .filter((project) => this.matchesFocus(project, focus))
+      .filter((project) => {
       if (!query) {
         return true;
       }
@@ -427,17 +743,32 @@ export class ProjectsPageComponent implements OnInit {
         project.brief,
         project.site.name,
         project.goal,
-        project.status,
+        project.reviewGate.stage,
+        project.reviewGate.nextAction,
+        project.reviewGate.primaryConcern,
+        project.latestVersion?.title ?? '',
+        project.latestVersion?.excerpt ?? '',
+        ...(project.reviewGate.blockers ?? []),
+        ...(project.reviewGate.warnings ?? []),
       ]
         .join(' ')
         .toLowerCase()
         .includes(query);
-    });
+      })
+      .sort((left, right) => {
+        const rankDelta = this.projectPriority(right) - this.projectPriority(left);
+        if (rankDelta !== 0) {
+          return rankDelta;
+        }
+
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      });
   }
 
   resetFilters(): void {
     this.filterForm.reset({
       query: '',
+      focus: 'all',
       siteId: '',
       status: '',
       goal: '',
@@ -454,25 +785,8 @@ export class ProjectsPageComponent implements OnInit {
     this.createLoading = true;
     this.createError = '';
 
-    let metadata: Record<string, unknown> | null = null;
-    try {
-      const trimmed = this.createForm.controls.metadata.value.trim();
-      metadata = trimmed ? (JSON.parse(trimmed) as Record<string, unknown>) : null;
-    } catch (error) {
-      this.createLoading = false;
-      this.createError = formatApiError(error);
-      return;
-    }
-
     this.api
-      .createProject({
-        siteId: this.createForm.controls.siteId.value,
-        title: this.createForm.controls.title.value.trim(),
-        brief: this.createForm.controls.brief.value.trim(),
-        goal: this.createForm.controls.goal.value,
-        primaryLanguage: this.createForm.controls.primaryLanguage.value.trim(),
-        metadata,
-      })
+      .createProject(this.structuredPayload)
       .subscribe({
         next: (project) => {
           this.createLoading = false;
@@ -486,7 +800,121 @@ export class ProjectsPageComponent implements OnInit {
       });
   }
 
-  countByStatuses(statuses: ProjectStatus[]): number {
-    return this.projects.filter((project) => statuses.includes(project.status)).length;
+  countByFocus(focus: Exclude<ProjectFocus, 'all'>): number {
+    return this.projects.filter((project) => this.matchesFocus(project, focus)).length;
+  }
+
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return reviewStageLabel(stage);
+  }
+
+  reviewStageTone(stage: ReviewGateStage): TagTone {
+    return reviewStageTone(stage);
+  }
+
+  projectNarrative(project: StudioProjectSummary): string {
+    if (this.isBlocked(project)) {
+      return project.reviewGate.primaryConcern;
+    }
+
+    if (this.isReleaseReady(project)) {
+      return `Release ready · ${project.reviewGate.nextAction}`;
+    }
+
+    return project.reviewGate.nextAction;
+  }
+
+  projectMeta(project: StudioProjectSummary): string {
+    const parts: string[] = [];
+    if (project.latestVersion) {
+      parts.push(`V${project.latestVersion.versionNumber}`);
+      const qaScore = buildQaScore(project.latestVersion);
+      parts.push(qaScore > 0 ? `${qaScoreLabel(qaScore)} · ${qaScore}/100` : 'QA pending');
+    } else {
+      parts.push('No generated version yet');
+    }
+
+    parts.push(`Gate ${this.reviewStageLabel(project.reviewGate.stage)}`);
+    return parts.join(' · ');
+  }
+
+  private get structuredPayload() {
+    return buildProjectPayloadFromBriefEditor({
+      siteId: this.createForm.controls.siteId.value,
+      title: this.createForm.controls.title.value,
+      goal: this.createForm.controls.goal.value,
+      primaryLanguage: this.createForm.controls.primaryLanguage.value,
+      briefSummary: this.createForm.controls.briefSummary.value,
+      targetQuery: this.createForm.controls.targetQuery.value,
+      audience: this.createForm.controls.audience.value,
+      angle: this.createForm.controls.angle.value,
+      tone: this.createForm.controls.tone.value,
+      cta: this.createForm.controls.cta.value,
+      sourceNotes: this.createForm.controls.sourceNotes.value,
+      requiredSections: this.createForm.controls.requiredSections.value,
+      keywords: this.createForm.controls.keywords.value,
+      categories: this.createForm.controls.categories.value,
+      author: this.createForm.controls.author.value,
+      slug: this.createForm.controls.slug.value,
+      canonicalUrl: this.createForm.controls.canonicalUrl.value,
+      featured: this.createForm.controls.featured.value,
+    });
+  }
+
+  private matchesFocus(project: StudioProjectSummary, focus: ProjectFocus): boolean {
+    switch (focus) {
+      case 'intake':
+        return project.reviewGate.stage === 'awaiting_generation';
+      case 'review':
+        return this.needsHumanDecision(project);
+      case 'release':
+        return this.isReleaseReady(project);
+      case 'blocked':
+        return this.isBlocked(project);
+      case 'live':
+        return project.reviewGate.stage === 'published';
+      case 'all':
+      default:
+        return true;
+    }
+  }
+
+  private needsHumanDecision(project: StudioProjectSummary): boolean {
+    return ['needs_review', 'ready_to_approve'].includes(project.reviewGate.stage);
+  }
+
+  private isReleaseReady(project: StudioProjectSummary): boolean {
+    return (
+      project.reviewGate.publishReady &&
+      ['approved', 'publish_queued', 'publish_failed'].includes(project.reviewGate.stage)
+    );
+  }
+
+  private isBlocked(project: StudioProjectSummary): boolean {
+    return project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed';
+  }
+
+  private projectPriority(project: StudioProjectSummary): number {
+    if (this.isBlocked(project)) {
+      return 5;
+    }
+
+    if (this.isReleaseReady(project)) {
+      return 4;
+    }
+
+    if (project.reviewGate.stage === 'ready_to_approve') {
+      return 3;
+    }
+
+    if (project.reviewGate.stage === 'needs_review') {
+      return 2;
+    }
+
+    if (project.reviewGate.stage === 'awaiting_generation') {
+      return 1;
+    }
+
+    return 0;
   }
 }

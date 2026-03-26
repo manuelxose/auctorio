@@ -1,3 +1,19 @@
 .env
 node_modules/
 storage/
+
+dist/
+build/
+public/build/
+
+apps/releases/
+apps/studio-web/releases/
+
+# AI tooling
+.agents/
+.claude-flow/
+.claude/
+.swarm/
+tmp-storage/
+current
+releases/

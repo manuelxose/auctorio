@@ -11,8 +11,10 @@ import type {
   PublicationListItem,
   StudioIdentityProviderConfig,
   StudioProjectSummary,
+  StudioRoleSummary,
   StudioSession,
   StudioSiteSummary,
+  StudioUserSummary,
 } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
@@ -36,8 +38,19 @@ import { formatApiError } from '../utils/api-error';
         title="Workspace"
         intro="Identidad del tenant, provider OIDC, provisioning invite-only y señales operativas base del cockpit."
       >
+        <div page-meta *ngIf="!loading">
+          <span class="console-tag console-tag--muted">{{ session?.tenant?.status || 'unknown' }}</span>
+          <span class="console-tag console-tag--muted">{{ session?.authMode || 'unknown' }}</span>
+          <span class="console-tag" [ngClass]="provider?.enabled ? 'console-tag--success' : 'console-tag--warning'">
+            {{ provider?.enabled ? 'SSO enabled' : 'SSO disabled' }}
+          </span>
+        </div>
+
         <a page-actions class="console-button console-button--secondary" routerLink="/studio/publishing/destinations">
           Open destinations
+        </a>
+        <a page-actions class="console-button console-button--secondary" routerLink="/studio/settings/users">
+          Open users
         </a>
         <button page-actions type="button" class="console-button" (click)="loadData()">Refresh workspace</button>
       </app-studio-page-header>
@@ -47,14 +60,80 @@ import { formatApiError } from '../utils/api-error';
 
       <app-studio-stat-strip *ngIf="!loading" [items]="stats"></app-studio-stat-strip>
 
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Workspace posture</p>
+            <h2 class="console-surface__title">Tenant governance across identity, access and release</h2>
+            <p class="console-hero-copy__body">{{ workspaceNarrative }}</p>
+
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Members</span>
+                <strong>{{ users.length }}</strong>
+                <small>{{ activeUsersCount }} active · {{ invitedUsersCount }} invited · {{ suspendedUsersCount }} suspended.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Roles</span>
+                <strong>{{ roles.length }}</strong>
+                <small>{{ customRolesCount }} custom roles on top of the seeded system defaults.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Publishing coverage</span>
+                <strong>{{ credentialsCoverageLabel }}</strong>
+                <small>{{ runtimeIncidentCount }} runtime incident{{ runtimeIncidentCount === 1 ? '' : 's' }} still visible in recent publishing signals.</small>
+              </article>
+            </div>
+          </div>
+
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Governance shortcuts</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list">
+              <a class="console-focus-card" routerLink="/studio/settings/users">
+                <div>
+                  <strong>User access</strong>
+                  <p>{{ invitedUsersCount }} invited accounts and {{ suspendedUsersCount }} suspended seats need governance visibility.</p>
+                </div>
+                <span class="console-tag console-tag--accent">Users</span>
+              </a>
+
+              <a class="console-focus-card" routerLink="/studio/settings/roles">
+                <div>
+                  <strong>Role matrix</strong>
+                  <p>{{ customRolesCount }} custom roles and {{ roles.length }} total RBAC shapes define the cockpit perimeter.</p>
+                </div>
+                <span class="console-tag console-tag--muted">Roles</span>
+              </a>
+
+              <a class="console-focus-card" routerLink="/studio/ai/prompts">
+                <div>
+                  <strong>Prompt governance</strong>
+                  <p>{{ session?.projectCount || 0 }} projects depend on prompt defaults, assignments and provider health remaining coherent.</p>
+                </div>
+                <span class="console-tag" [ngClass]="provider?.enabled ? 'console-tag--success' : 'console-tag--warning'">
+                  {{ provider?.enabled ? 'Tenant ready' : 'Check setup' }}
+                </span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div class="console-workspace" *ngIf="!loading; else loadingState">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Tenant profile</p>
                 <h2 class="console-surface__title">Workspace identity</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ session?.tenant?.slug || 'no-slug' }}</span>
             </div>
 
             <div class="console-meta-grid">
@@ -74,6 +153,14 @@ import { formatApiError } from '../utils/api-error';
                 <span>Auth mode</span>
                 <strong>{{ session?.authMode || 'unknown' }}</strong>
               </article>
+              <article class="console-meta-card">
+                <span>Members</span>
+                <strong>{{ activeUsersCount }} active · {{ invitedUsersCount }} invited</strong>
+              </article>
+              <article class="console-meta-card">
+                <span>Workspace load</span>
+                <strong>{{ session?.projectCount || 0 }} projects · {{ sites.length }} destinations</strong>
+              </article>
             </div>
           </section>
 
@@ -83,6 +170,9 @@ import { formatApiError } from '../utils/api-error';
                 <p class="console-surface__eyebrow">OIDC configuration</p>
                 <h2 class="console-surface__title">Identity provider</h2>
               </div>
+              <span class="console-tag" [ngClass]="provider?.enabled ? 'console-tag--success' : 'console-tag--warning'">
+                {{ provider?.enabled ? 'enabled' : 'disabled' }}
+              </span>
             </div>
 
             <form class="console-form" [formGroup]="providerForm" (ngSubmit)="saveProvider()">
@@ -154,12 +244,8 @@ import { formatApiError } from '../utils/api-error';
                   <p>{{ site.type }} · {{ site.locale }} · {{ site.projectCount }} projects</p>
                   <small>{{ site.baseUrl || 'No base URL configured' }}</small>
                 </div>
-                <span
-                  class="console-tag"
-                  [class.console-tag--success]="!!site.publishingCredentialsRef"
-                  [class.console-tag--warning]="!site.publishingCredentialsRef"
-                >
-                  {{ site.publishingCredentialsRef ? 'Credentials mapped' : 'Credentials missing' }}
+                <span class="console-tag" [ngClass]="destinationTagClass(site)">
+                  {{ destinationTagLabel(site) }}
                 </span>
               </article>
             </div>
@@ -172,7 +258,7 @@ import { formatApiError } from '../utils/api-error';
                   <strong>{{ item.project.title }}</strong>
                   <p>{{ item.site.name }} · {{ item.action }} · {{ item.status }}</p>
                 </div>
-                <span class="console-tag" [class.console-tag--danger]="item.status === 'failed'">
+                <span class="console-tag" [ngClass]="publicationTagClass(item.status)">
                   {{ item.status }}
                 </span>
               </article>
@@ -220,6 +306,8 @@ export class WorkspaceSettingsPageComponent implements OnInit {
   provider: StudioIdentityProviderConfig | null = null;
   sites: StudioSiteSummary[] = [];
   projects: StudioProjectSummary[] = [];
+  users: StudioUserSummary[] = [];
+  roles: StudioRoleSummary[] = [];
   publications: PublicationListItem[] = [];
   stats: StudioStatItem[] = [];
   loading = true;
@@ -227,6 +315,54 @@ export class WorkspaceSettingsPageComponent implements OnInit {
   testing = false;
   error = '';
   notice = '';
+
+  get activeUsersCount(): number {
+    return this.users.filter((user) => user.status === 'active').length;
+  }
+
+  get invitedUsersCount(): number {
+    return this.users.filter((user) => user.status === 'invited').length;
+  }
+
+  get suspendedUsersCount(): number {
+    return this.users.filter((user) => user.status === 'suspended').length;
+  }
+
+  get customRolesCount(): number {
+    return this.roles.filter((role) => !role.isSystem).length;
+  }
+
+  get credentialsMappedCount(): number {
+    return this.sites.filter((site) => Boolean(site.publishingCredentialsRef)).length;
+  }
+
+  get runtimeIncidentCount(): number {
+    return this.publications.filter((item) => item.status === 'failed').length;
+  }
+
+  get credentialsCoverageLabel(): string {
+    return `${this.credentialsMappedCount}/${this.sites.length || 0}`;
+  }
+
+  get workspaceNarrative(): string {
+    if (!this.session) {
+      return 'Estamos reuniendo la postura real del tenant antes de exponer decisiones de gobierno.';
+    }
+
+    if (!this.provider?.enabled) {
+      return 'El tenant sigue operando sin SSO activo. Antes de escalar invitaciones y colaboración enterprise conviene cerrar la postura del identity provider.';
+    }
+
+    if (this.runtimeIncidentCount > 0) {
+      return `${this.runtimeIncidentCount} incidente${this.runtimeIncidentCount === 1 ? '' : 's'} runtime siguen visibles en publishing. Workspace settings deja de ser solo configuración y pasa a resumir el estado operativo del tenant.`;
+    }
+
+    if (this.credentialsMappedCount < this.sites.length) {
+      return `${this.sites.length - this.credentialsMappedCount} destino${this.sites.length - this.credentialsMappedCount === 1 ? '' : 's'} siguen sin credenciales mapeadas. El tenant está topológicamente montado, pero todavía no totalmente listo para publish real.`;
+    }
+
+    return `${this.activeUsersCount} usuarios activos, ${this.roles.length} roles y ${this.sites.length} destinos conectados. La postura base del tenant ya se parece a un control plane serio y no a un panel aislado de configuración.`;
+  }
 
   ngOnInit(): void {
     this.loadData();
@@ -241,34 +377,42 @@ export class WorkspaceSettingsPageComponent implements OnInit {
       provider: this.api.getIdentityProvider(),
       sites: this.api.listSites(1, 100),
       projects: this.api.listProjects({ page: 1, pageSize: 100 }),
+      users: this.api.listUsers(),
+      roles: this.api.listRoles(),
       publications: this.api.listPublications(1, 100),
     }).subscribe({
-      next: ({ session, provider, sites, projects, publications }) => {
+      next: ({ session, provider, sites, projects, users, roles, publications }) => {
         this.session = session;
         this.provider = provider;
         this.sites = sites.items;
         this.projects = projects.items;
+        this.users = users;
+        this.roles = roles;
         this.publications = publications.items;
         this.stats = [
           {
             label: 'Destinations',
             value: sites.items.length,
             detail: 'Superficies conectadas al tenant para operar contenido.',
+            tone: sites.items.length > 0 ? 'accent' : 'muted',
           },
           {
-            label: 'Projects',
-            value: session.projectCount,
-            detail: 'Volumen editorial actual gestionado por el workspace.',
+            label: 'Members',
+            value: users.length,
+            detail: 'Cuentas con invitación o acceso activo dentro del workspace.',
+            tone: users.length > 0 ? 'accent' : 'muted',
           },
           {
-            label: 'Credentials coverage',
-            value: sites.items.filter((site) => Boolean(site.publishingCredentialsRef)).length,
-            detail: 'Destinos con referencia de credenciales mapeada en el control plane.',
+            label: 'Roles',
+            value: roles.length,
+            detail: 'Capas RBAC que gobiernan acceso y operación del cockpit.',
+            tone: roles.length > 0 ? 'muted' : 'warning',
           },
           {
             label: 'SSO',
             value: provider?.enabled ? 'Enabled' : 'Disabled',
             detail: 'Estado operativo del identity provider enterprise.',
+            tone: provider?.enabled ? 'success' : 'warning',
           },
         ];
         this.providerForm.reset({
@@ -288,7 +432,48 @@ export class WorkspaceSettingsPageComponent implements OnInit {
         this.error = formatApiError(error);
         this.loading = false;
       },
-    });
+      });
+  }
+
+  destinationTagLabel(site: StudioSiteSummary): string {
+    if (site.latestPublicationJob?.status === 'failed') {
+      return 'Runtime incident';
+    }
+
+    if (site.publishingCredentialsRef) {
+      return 'Credentials mapped';
+    }
+
+    return 'Credentials missing';
+  }
+
+  destinationTagClass(site: StudioSiteSummary): string {
+    if (site.latestPublicationJob?.status === 'failed') {
+      return 'console-tag--danger';
+    }
+
+    if (site.publishingCredentialsRef) {
+      return 'console-tag--success';
+    }
+
+    return 'console-tag--warning';
+  }
+
+  publicationTagClass(status: PublicationListItem['status']): string {
+    switch (status) {
+      case 'published':
+        return 'console-tag--success';
+      case 'failed':
+        return 'console-tag--danger';
+      case 'processing':
+        return 'console-tag--warning';
+      case 'queued':
+      case 'draft_synced':
+        return 'console-tag--accent';
+      case 'canceled':
+      default:
+        return 'console-tag--muted';
+    }
   }
 
   saveProvider(): void {

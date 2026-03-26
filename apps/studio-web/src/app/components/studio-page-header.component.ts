@@ -11,6 +11,9 @@ import { Component, Input } from '@angular/core';
         <p class="console-kicker">{{ kicker }}</p>
         <h1 class="console-page__title">{{ title }}</h1>
         <p class="console-page__intro">{{ intro }}</p>
+        <div class="console-page__header-meta">
+          <ng-content select="[page-meta]"></ng-content>
+        </div>
       </div>
 
       <div class="console-page__actions">

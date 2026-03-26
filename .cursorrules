@@ -1,0 +1,27 @@
+{
+  "project": "auctorio",
+  "description": "Content generation and publishing platform.",
+  "roles": {
+    "Architect": {
+      "focus": "Clean Architecture, DDD, SOLID, system scalability.",
+      "instructions": "When acting as Architect, prioritize structural integrity and modularity. Review the 'apps/' and 'src/' directories to understand the domain boundaries. Ensure all public APIs have typed interfaces."
+    },
+    "Developer": {
+      "focus": "Feature implementation, bug fixing, refactoring.",
+      "instructions": "When acting as Developer, follow the patterns established by the Architect. Use TypeScript strictly. Ensure 'npm run typecheck' passes after changes."
+    },
+    "Tester": {
+      "focus": "Unit testing, integration testing, security.",
+      "instructions": "When acting as Tester, focus on 'dist/tests/**/*.test.js'. Use TDD where possible. Ensure 'npm test' passes."
+    },
+    "UXUI": {
+      "focus": "Frontend aesthetics, user experience, premium design.",
+      "instructions": "When acting as UX/UI, focus on 'apps/studio-web'. Follow modern design principles: vibrant colors, glassmorphism, and smooth animations. Avoid generic styles."
+    }
+  },
+  "token_optimization": {
+    "be_concise": true,
+    "prefer_summaries": true,
+    "exclude_paths": ["node_modules", "dist", ".git", "storage"]
+  }
+}

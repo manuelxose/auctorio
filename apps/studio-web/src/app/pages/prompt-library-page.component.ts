@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import { StudioEmptyStateComponent } from '../components/studio-empty-state.component';
 import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
@@ -25,6 +26,7 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
   imports: [
     CommonModule,
     ReactiveFormsModule,
+    RouterLink,
     StudioEmptyStateComponent,
     StudioPageHeaderComponent,
     StudioSidePanelComponent,
@@ -37,6 +39,15 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
         title="Prompt Library"
         intro="Presets versionados, approvals, asignaciones por site y preview sobre contexto editorial real."
       >
+        <div page-meta *ngIf="!loading">
+          <span class="console-tag console-tag--accent">{{ presets.length }} presets</span>
+          <span class="console-tag console-tag--success">{{ approvedPresetCount }} approved</span>
+          <span class="console-tag console-tag--muted">{{ assignedPresetCount }} assigned</span>
+        </div>
+
+        <a page-actions class="console-button console-button--secondary" routerLink="/studio/ai/text-generation">
+          Open text generation
+        </a>
         <button page-actions type="button" class="console-button" (click)="loadData()">
           Refresh prompts
         </button>
@@ -47,14 +58,99 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
 
       <app-studio-stat-strip *ngIf="!loading" [items]="stats"></app-studio-stat-strip>
 
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Prompt posture</p>
+            <h2 class="console-surface__title">Governance of the AI runtime</h2>
+            <p class="console-hero-copy__body">{{ libraryNarrative }}</p>
+
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Approved presets</span>
+                <strong>{{ approvedPresetCount }}</strong>
+                <small>Presets whose latest saved version is already approved for production usage.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Assignments</span>
+                <strong>{{ assignedPresetCount }}</strong>
+                <small>Defaults currently resolved by tenant or by site for downstream generation flows.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Site scoped</span>
+                <strong>{{ siteScopedPresetCount }}</strong>
+                <small>Overrides that already diverge from the tenant global baseline.</small>
+              </article>
+            </div>
+          </div>
+
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Prompt governance watchlist</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list">
+              <button
+                type="button"
+                class="console-focus-card console-focus-card--button"
+                [disabled]="!approvalLead"
+                (click)="focusPrompt(approvalLead)"
+              >
+                <div>
+                  <strong>{{ approvalLead?.name || 'Approval backlog clear' }}</strong>
+                  <p>{{ approvalLead ? approvalLeadNarrative : 'No draft preset is currently waiting for approval.' }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="approvalLead ? 'console-tag--warning' : 'console-tag--success'">
+                  {{ approvalLead ? 'Needs approval' : 'Healthy' }}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                class="console-focus-card console-focus-card--button"
+                [disabled]="!assignmentLead"
+                (click)="focusPrompt(assignmentLead)"
+              >
+                <div>
+                  <strong>{{ assignmentLead?.name || 'Assignment gap' }}</strong>
+                  <p>{{ assignmentLead ? assignmentLeadNarrative : 'No active default is currently assigned to a preset.' }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="assignmentLead ? 'console-tag--accent' : 'console-tag--warning'">
+                  {{ assignmentLead ? 'Assigned' : 'Needs assignment' }}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                class="console-focus-card console-focus-card--button"
+                [disabled]="!siteScopedLead"
+                (click)="focusPrompt(siteScopedLead)"
+              >
+                <div>
+                  <strong>{{ siteScopedLead?.name || 'Global baseline only' }}</strong>
+                  <p>{{ siteScopedLead ? siteScopedLeadNarrative : 'No site-specific override exists yet in the current library.' }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="siteScopedLead ? 'console-tag--muted' : 'console-tag--accent'">
+                  {{ siteScopedLead ? 'Site scoped' : 'Tenant default' }}
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <div class="console-workspace" *ngIf="!loading; else loadingState">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Library</p>
                 <h2 class="console-surface__title">Prompt presets</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ filteredPresets.length }} visible presets</span>
             </div>
 
             <div class="console-toolbar console-toolbar--stretch">
@@ -87,12 +183,7 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
                   </div>
                   <div class="console-version-card__tags">
                     <span class="console-tag console-tag--muted">{{ preset.scope }}</span>
-                    <span
-                      *ngIf="preset.latestVersion"
-                      class="console-tag"
-                      [class.console-tag--success]="preset.latestVersion.status === 'approved'"
-                      [class.console-tag--warning]="preset.latestVersion.status === 'draft'"
-                    >
+                    <span *ngIf="preset.latestVersion" class="console-tag" [ngClass]="versionStatusTagClass(preset.latestVersion.status)">
                       v{{ preset.latestVersion.versionNumber }} · {{ preset.latestVersion.status }}
                     </span>
                   </div>
@@ -116,12 +207,13 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
             </div>
           </section>
 
-          <section class="console-surface" *ngIf="selectedPromptDetail as prompt">
+          <section class="console-surface console-surface--editorial" *ngIf="selectedPromptDetail as prompt">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Detail</p>
                 <h2 class="console-surface__title">{{ prompt.name }}</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ prompt.versions.length }} versions</span>
             </div>
 
             <div class="console-toolbar console-toolbar--stretch">
@@ -142,25 +234,38 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
               </label>
             </div>
 
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Assignments</span>
+                <strong>{{ prompt.assignments.length }}</strong>
+                <small>Active tenant or site-level defaults currently tied to this preset.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Preview source</span>
+                <strong>{{ prompt.preview?.source || 'manual' }}</strong>
+                <small>Origin of the resolved context used to render the current prompt preview.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Latest version</span>
+                <strong>{{ prompt.latestVersion ? 'v' + prompt.latestVersion.versionNumber : 'none' }}</strong>
+                <small>{{ prompt.latestVersion?.status || 'No version has been saved yet.' }}</small>
+              </article>
+            </div>
+
             <div class="console-prompt-layout">
               <div class="console-prompt-timeline">
                 <article class="console-prompt-version" *ngFor="let version of prompt.versions">
                   <div class="console-version-card__head">
                     <div>
-                      <strong>v{{ version.versionNumber }}</strong>
-                      <p>{{ version.createdBy?.displayName || 'System seed' }}</p>
-                    </div>
-                    <div class="console-version-card__tags">
-                      <span
-                        class="console-tag"
-                        [class.console-tag--success]="version.status === 'approved'"
-                        [class.console-tag--warning]="version.status === 'draft'"
-                        [class.console-tag--danger]="version.status === 'deprecated'"
-                      >
-                        {{ version.status }}
-                      </span>
-                    </div>
+                    <strong>v{{ version.versionNumber }}</strong>
+                    <p>{{ version.createdBy?.displayName || 'System seed' }}</p>
                   </div>
+                  <div class="console-version-card__tags">
+                    <span class="console-tag" [ngClass]="versionStatusTagClass(version.status)">
+                      {{ version.status }}
+                    </span>
+                  </div>
+                </div>
 
                   <p class="console-version-card__body">{{ version.notes || 'No notes for this version.' }}</p>
 
@@ -217,6 +322,27 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
                   <div class="console-code-block">
                     <strong>User</strong>
                     <pre>{{ prompt.preview?.userPrompt || 'Prompt preview requires a selected project.' }}</pre>
+                  </div>
+                </section>
+
+                <section class="console-surface console-surface--nested">
+                  <div class="console-surface__head">
+                    <div>
+                      <p class="console-surface__eyebrow">Assignments</p>
+                      <h2 class="console-surface__title">Resolved defaults</h2>
+                    </div>
+                  </div>
+
+                  <div class="console-feed" *ngIf="prompt.assignments.length; else emptyAssignments">
+                    <article class="console-feed__item" *ngFor="let assignment of prompt.assignments">
+                      <div>
+                        <strong>{{ assignment.assignmentKey }}</strong>
+                        <p>{{ assignment.site?.name || 'Tenant default' }} · v{{ assignment.version.versionNumber }} · {{ assignment.version.status }}</p>
+                      </div>
+                      <span class="console-tag" [ngClass]="versionStatusTagClass(assignment.version.status)">
+                        {{ assignment.site ? 'Site' : 'Global' }}
+                      </span>
+                    </article>
                   </div>
                 </section>
               </div>
@@ -333,6 +459,12 @@ type PromptSurface = 'text_seo' | 'text_instagram' | 'image_contextual' | 'image
           body="Crea el primer preset editable para empezar a gobernar el runtime de IA desde el cockpit."
         ></app-studio-empty-state>
       </ng-template>
+
+      <ng-template #emptyAssignments>
+        <div class="console-empty-compact">
+          <p>No active assignments for this preset yet.</p>
+        </div>
+      </ng-template>
     </section>
   `,
 })
@@ -374,6 +506,66 @@ export class PromptLibraryPageComponent implements OnInit {
   error = '';
   notice = '';
 
+  get approvedPresetCount(): number {
+    return this.presets.filter((preset) => preset.latestVersion?.status === 'approved').length;
+  }
+
+  get assignedPresetCount(): number {
+    return this.presets.filter((preset) => Boolean(preset.activeAssignment)).length;
+  }
+
+  get siteScopedPresetCount(): number {
+    return this.presets.filter((preset) => preset.scope === 'site').length;
+  }
+
+  get approvalLead(): StudioPromptPresetSummary | null {
+    return this.filteredPresets.find((preset) => preset.latestVersion?.status === 'draft') ?? null;
+  }
+
+  get assignmentLead(): StudioPromptPresetSummary | null {
+    return this.filteredPresets.find((preset) => preset.latestVersion?.status === 'approved' && !preset.activeAssignment) ?? null;
+  }
+
+  get siteScopedLead(): StudioPromptPresetSummary | null {
+    return this.filteredPresets.find((preset) => preset.scope === 'site') ?? null;
+  }
+
+  get libraryNarrative(): string {
+    if (!this.presets.length) {
+      return 'Todavia no existe una libreria de prompts gobernable. Antes de escalar generacion y canales hace falta fijar presets versionados y asignables.';
+    }
+
+    const draftCount = this.presets.filter((preset) => preset.latestVersion?.status === 'draft').length;
+
+    if (draftCount > 0) {
+      return `${draftCount} preset${draftCount === 1 ? '' : 's'} siguen con una draft version en cabeza. La libreria ya no es solo almacenamiento: es la cola de gobierno del runtime de IA antes de mover defaults a producción.`;
+    }
+
+    if (this.assignedPresetCount < this.approvedPresetCount) {
+      return `${this.approvedPresetCount - this.assignedPresetCount} preset${this.approvedPresetCount - this.assignedPresetCount === 1 ? '' : 's'} aprobados siguen sin asignacion activa. El riesgo ya no está en escribir prompts, sino en gobernar su resolución real.`;
+    }
+
+    return `${this.approvedPresetCount} presets aprobados y ${this.assignedPresetCount} asignaciones activas ya gobiernan el runtime de IA. Prompt library empieza a funcionar como control plane, no como repositorio pasivo.`;
+  }
+
+  get approvalLeadNarrative(): string {
+    return this.approvalLead
+      ? `${this.surfaceLabel(this.approvalLead.surface)} · latest version still waits for approval before becoming a safe default.`
+      : '';
+  }
+
+  get assignmentLeadNarrative(): string {
+    return this.assignmentLead
+      ? `${this.surfaceLabel(this.assignmentLead.surface)} · approved but still missing an active assignment.`
+      : '';
+  }
+
+  get siteScopedLeadNarrative(): string {
+    return this.siteScopedLead
+      ? `${this.siteScopedLead.site?.name || 'Site scope'} override already diverges from the tenant default.`
+      : '';
+  }
+
   ngOnInit(): void {
     this.queryControl.valueChanges.subscribe(() => this.applyFilters());
     this.surfaceControl.valueChanges.subscribe(() => this.applyFilters());
@@ -398,21 +590,25 @@ export class PromptLibraryPageComponent implements OnInit {
             label: 'Presets',
             value: presets.length,
             detail: 'Objetos gobernables del runtime de prompts.',
+            tone: presets.length > 0 ? 'accent' : 'muted',
           },
           {
             label: 'Approved versions',
             value: presets.filter((preset) => preset.latestVersion?.status === 'approved').length,
             detail: 'Presets cuya versión más reciente ya está aprobada.',
+            tone: presets.some((preset) => preset.latestVersion?.status === 'approved') ? 'success' : 'muted',
           },
           {
             label: 'Assignments',
             value: presets.filter((preset) => Boolean(preset.activeAssignment)).length,
             detail: 'Defaults activos resueltos por tenant o por site.',
+            tone: presets.some((preset) => Boolean(preset.activeAssignment)) ? 'accent' : 'warning',
           },
           {
             label: 'Surfaces',
             value: 4,
             detail: 'Text SEO, Instagram y generación de imagen contextual/independiente.',
+            tone: 'muted',
           },
         ];
         this.applyFilters();
@@ -489,6 +685,14 @@ export class PromptLibraryPageComponent implements OnInit {
           this.error = formatApiError(error);
         },
       });
+  }
+
+  focusPrompt(preset: StudioPromptPresetSummary | null): void {
+    if (!preset) {
+      return;
+    }
+
+    this.selectPreset(preset);
   }
 
   reloadSelectedPrompt(): void {
@@ -621,7 +825,19 @@ export class PromptLibraryPageComponent implements OnInit {
       error: (error) => {
         this.error = formatApiError(error);
       },
-    });
+      });
+  }
+
+  versionStatusTagClass(status: StudioPromptVersionSummary['status']): string {
+    switch (status) {
+      case 'approved':
+        return 'console-tag--success';
+      case 'draft':
+        return 'console-tag--warning';
+      case 'deprecated':
+      default:
+        return 'console-tag--danger';
+    }
   }
 
   surfaceLabel(surface: PromptSurface): string {

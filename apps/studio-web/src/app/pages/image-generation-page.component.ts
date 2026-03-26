@@ -2,12 +2,19 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import type { StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import type { ReviewGateStage, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  buildQaScore,
+  qaScoreLabel,
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone as getReviewStageTone,
+} from '../utils/review-gate';
 
 type ImageWorkspaceView = 'assets' | 'generation';
-type AssetFocus = 'all' | 'missing' | 'ready' | 'published';
+type AssetFocus = 'all' | 'releaseRisk' | 'missing' | 'ready' | 'live';
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
 
 type ViewConfig = {
   kicker: string;
@@ -69,15 +76,15 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Published with image</p>
-          <strong class="console-stat-card__value">{{ publishedWithImageCount }}</strong>
-          <span class="console-stat-card__detail">Contenido live cuya version activa mantiene soporte visual.</span>
+          <p class="console-stat-card__label">Blocks release</p>
+          <strong class="console-stat-card__value">{{ releaseRiskCount }}</strong>
+          <span class="console-stat-card__detail">Piezas cuyo hero ausente sigue impidiendo QA final, approval o publish.</span>
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Generation queue</p>
-          <strong class="console-stat-card__value">{{ generationCandidates.length }}</strong>
-          <span class="console-stat-card__detail">Candidatos inmediatos para lanzar o relanzar generación de assets.</span>
+          <p class="console-stat-card__label">Live with hero</p>
+          <strong class="console-stat-card__value">{{ liveCount }}</strong>
+          <span class="console-stat-card__detail">Contenido publicado cuya version activa mantiene un hero disponible.</span>
         </article>
       </div>
 
@@ -97,7 +104,7 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, version title or destination"
+                  placeholder="Project, blocker, gate, version title or destination"
                   (input)="applyFilters()"
                 />
               </label>
@@ -114,9 +121,10 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                 <span>Focus</span>
                 <select formControlName="focus" (change)="applyFilters()">
                   <option value="all">All assets</option>
+                  <option value="releaseRisk">Blocks release</option>
                   <option value="missing">Missing</option>
                   <option value="ready">Ready</option>
-                  <option value="published">Published</option>
+                  <option value="live">Live</option>
                 </select>
               </label>
             </form>
@@ -137,17 +145,29 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                 <div class="console-version-card__head">
                   <div>
                     <strong>{{ project.title }}</strong>
-                    <p>{{ project.site.name }} · {{ project.goal }} · V{{ project.latestVersion?.versionNumber || 0 }}</p>
+                    <p>{{ project.site.name }} · {{ project.goal }} · {{ assetNarrative(project) }}</p>
                   </div>
                   <div class="console-version-card__tags">
                     <span
                       class="console-tag"
-                      [class.console-tag--success]="project.latestVersion?.hasAsset"
-                      [class.console-tag--warning]="!project.latestVersion?.hasAsset"
+                      [class.console-tag--success]="assetTone(project) === 'success'"
+                      [class.console-tag--accent]="assetTone(project) === 'accent'"
+                      [class.console-tag--warning]="assetTone(project) === 'warning'"
+                      [class.console-tag--danger]="assetTone(project) === 'danger'"
+                      [class.console-tag--muted]="assetTone(project) === 'muted'"
                     >
-                      {{ project.latestVersion?.hasAsset ? 'Ready' : 'Missing' }}
+                      {{ assetLabel(project) }}
                     </span>
-                    <span class="console-tag console-tag--muted">{{ project.status }}</span>
+                    <span
+                      class="console-tag"
+                      [class.console-tag--success]="reviewStageTone(project.reviewGate.stage) === 'success'"
+                      [class.console-tag--accent]="reviewStageTone(project.reviewGate.stage) === 'accent'"
+                      [class.console-tag--warning]="reviewStageTone(project.reviewGate.stage) === 'warning'"
+                      [class.console-tag--danger]="reviewStageTone(project.reviewGate.stage) === 'danger'"
+                      [class.console-tag--muted]="reviewStageTone(project.reviewGate.stage) === 'muted'"
+                    >
+                      {{ reviewStageLabel(project.reviewGate.stage) }}
+                    </span>
                   </div>
                 </div>
 
@@ -161,8 +181,12 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                     <strong>{{ project.latestVersion?.promptPresetName || project.latestVersion?.promptVersionLabel || 'Seed fallback' }}</strong>
                   </article>
                   <article class="console-meta-card">
-                    <span>Assignment</span>
-                    <strong>{{ project.site.name }}</strong>
+                    <span>Gate / QA</span>
+                    <strong>{{ qaSummary(project) }}</strong>
+                  </article>
+                  <article class="console-meta-card">
+                    <span>Version</span>
+                    <strong>V{{ project.latestVersion?.versionNumber || 0 }}</strong>
                   </article>
                 </div>
 
@@ -183,8 +207,8 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                   >
                     Prompt
                   </a>
-                  <a class="console-button console-button--secondary" [routerLink]="['/studio/editorial/articles', project.id]">
-                    Open article
+                  <a class="console-button console-button--secondary" [routerLink]="detailLink(project)">
+                    {{ project.latestVersion ? 'Open article' : 'Open brief' }}
                   </a>
                 </div>
               </article>
@@ -202,12 +226,18 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
             </div>
 
             <div class="console-action-stack" *ngIf="generationCandidates.length; else emptyQueue">
-              <a class="console-action-card" *ngFor="let project of generationCandidates" [routerLink]="['/studio/editorial/articles', project.id]">
+              <a class="console-action-card" *ngFor="let project of generationCandidates" [routerLink]="detailLink(project)">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <span>{{ project.site.name }} · {{ project.status }}</span>
+                  <span>{{ project.site.name }} · {{ project.reviewGate.primaryConcern }}</span>
                 </div>
-                <span class="console-tag console-tag--warning">Needs image</span>
+                <span
+                  class="console-tag"
+                  [class.console-tag--danger]="needsHeroForRelease(project)"
+                  [class.console-tag--warning]="!needsHeroForRelease(project)"
+                >
+                  {{ needsHeroForRelease(project) ? 'Blocks release' : 'Needs image' }}
+                </span>
               </a>
             </div>
           </section>
@@ -225,10 +255,10 @@ const VIEW_CONFIGS: Record<ImageWorkspaceView, ViewConfig> = {
                 La generación se ejecuta sobre la version activa del proyecto, no sobre briefs huérfanos.
               </li>
               <li class="console-note-list__item">
-                Missing coverage marca contenido con texto listo pero sin soporte visual para release.
+                El hero deja de ser un adorno: cuando falta, el mismo review gate lo trata como blocker real antes de publish.
               </li>
               <li class="console-note-list__item">
-                El siguiente salto será exponer variantes, prompts y selección manual desde la misma superficie.
+                Esta superficie prioriza primero las piezas cuyo hueco visual ya pone en riesgo approval o release, no solo las que no tienen imagen.
               </li>
             </ul>
           </section>
@@ -276,7 +306,8 @@ export class ImageGenerationPageComponent implements OnInit {
   generationCandidates: StudioProjectSummary[] = [];
   readyCount = 0;
   missingCount = 0;
-  publishedWithImageCount = 0;
+  releaseRiskCount = 0;
+  liveCount = 0;
   generatingProjectId = '';
   loading = true;
   error = '';
@@ -325,47 +356,65 @@ export class ImageGenerationPageComponent implements OnInit {
     const siteId = this.filterForm.controls.siteId.value;
     const focus = this.filterForm.controls.focus.value;
 
-    this.readyCount = this.projects.filter((project) => project.latestVersion?.hasAsset).length;
-    this.missingCount = this.projects.filter((project) => !project.latestVersion?.hasAsset).length;
-    this.publishedWithImageCount = this.projects.filter(
-      (project) => project.status === 'published' && project.latestVersion?.hasAsset,
-    ).length;
+    this.readyCount = this.projects.filter((project) => this.hasHero(project)).length;
+    this.missingCount = this.projects.filter((project) => this.isCoverageGap(project)).length;
+    this.releaseRiskCount = this.projects.filter((project) => this.needsHeroForRelease(project)).length;
+    this.liveCount = this.projects.filter((project) => this.isLiveWithHero(project)).length;
 
-    this.filteredProjects = this.projects.filter((project) => {
-      if (siteId && project.siteId !== siteId) {
-        return false;
-      }
+    this.filteredProjects = this.projects
+      .filter((project) => {
+        if (siteId && project.siteId !== siteId) {
+          return false;
+        }
 
-      if (focus === 'missing' && project.latestVersion?.hasAsset) {
-        return false;
-      }
+        if (focus === 'releaseRisk' && !this.needsHeroForRelease(project)) {
+          return false;
+        }
 
-      if (focus === 'ready' && !project.latestVersion?.hasAsset) {
-        return false;
-      }
+        if (focus === 'missing' && !this.isCoverageGap(project)) {
+          return false;
+        }
 
-      if (focus === 'published' && project.status !== 'published') {
-        return false;
-      }
+        if (focus === 'ready' && !this.hasHero(project)) {
+          return false;
+        }
 
-      if (!query) {
-        return true;
-      }
+        if (focus === 'live' && !this.isLiveWithHero(project)) {
+          return false;
+        }
 
-      return [
-        project.title,
-        project.site.name,
-        project.status,
-        project.latestVersion?.title || '',
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(query);
-    });
+        if (!query) {
+          return true;
+        }
+
+        return [
+          project.title,
+          project.site.name,
+          project.goal,
+          project.reviewGate.stage,
+          project.reviewGate.nextAction,
+          project.reviewGate.primaryConcern,
+          project.latestVersion?.title || '',
+          ...(project.reviewGate.blockers ?? []),
+          ...(project.reviewGate.warnings ?? []),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => {
+        const priorityDelta = this.assetPriority(right) - this.assetPriority(left);
+        if (priorityDelta !== 0) {
+          return priorityDelta;
+        }
+
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      });
 
     this.generationCandidates = this.projects
-      .filter((project) => !project.latestVersion?.hasAsset)
+      .filter((project) => this.isCoverageGap(project))
       .filter((project) => !siteId || project.siteId === siteId)
+      .sort((left, right) => this.assetPriority(right) - this.assetPriority(left))
       .slice(0, 6);
   }
 
@@ -389,5 +438,115 @@ export class ImageGenerationPageComponent implements OnInit {
         this.error = formatApiError(error);
       },
     });
+  }
+
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return formatReviewStageLabel(stage);
+  }
+
+  reviewStageTone(stage: ReviewGateStage): TagTone {
+    return getReviewStageTone(stage);
+  }
+
+  assetLabel(project: StudioProjectSummary): string {
+    if (this.needsHeroForRelease(project)) {
+      return 'Blocks release';
+    }
+
+    if (this.isLiveWithHero(project)) {
+      return 'Live hero';
+    }
+
+    if (this.hasHero(project)) {
+      return 'Hero ready';
+    }
+
+    return 'Missing hero';
+  }
+
+  assetTone(project: StudioProjectSummary): TagTone {
+    if (this.needsHeroForRelease(project)) {
+      return 'danger';
+    }
+
+    if (this.isLiveWithHero(project)) {
+      return 'success';
+    }
+
+    if (this.hasHero(project)) {
+      return 'accent';
+    }
+
+    return 'warning';
+  }
+
+  assetNarrative(project: StudioProjectSummary): string {
+    if (this.needsHeroForRelease(project)) {
+      return 'Hero missing and now blocking QA, approval or publish.';
+    }
+
+    if (this.isLiveWithHero(project)) {
+      return 'Hero is live with the published article.';
+    }
+
+    if (this.hasHero(project)) {
+      return `Hero available. ${project.reviewGate.nextAction}`;
+    }
+
+    return 'Hero missing on the active version.';
+  }
+
+  qaSummary(project: StudioProjectSummary): string {
+    const qaScore = buildQaScore(project.latestVersion);
+    return qaScore > 0
+      ? `${qaScoreLabel(qaScore)} · ${qaScore}/100`
+      : formatReviewStageLabel(project.reviewGate.stage);
+  }
+
+  detailLink(project: StudioProjectSummary): string[] {
+    return project.latestVersion
+      ? ['/studio/editorial/articles', project.id]
+      : ['/studio/editorial/briefs', project.id];
+  }
+
+  needsHeroForRelease(project: StudioProjectSummary): boolean {
+    return (
+      this.isCoverageGap(project) &&
+      ['needs_review', 'qa_blocked', 'ready_to_approve', 'approved', 'publish_queued', 'publish_failed'].includes(
+        project.reviewGate.stage,
+      )
+    );
+  }
+
+  private hasHero(project: StudioProjectSummary): boolean {
+    return Boolean(project.latestVersion?.hasAsset);
+  }
+
+  private isCoverageGap(project: StudioProjectSummary): boolean {
+    return Boolean(project.latestVersion) && !this.hasHero(project);
+  }
+
+  private isLiveWithHero(project: StudioProjectSummary): boolean {
+    return this.hasHero(project) && project.reviewGate.stage === 'published';
+  }
+
+  private assetPriority(project: StudioProjectSummary): number {
+    if (this.needsHeroForRelease(project)) {
+      return 4;
+    }
+
+    if (this.isCoverageGap(project)) {
+      return 3;
+    }
+
+    if (project.reviewGate.publishReady && this.hasHero(project)) {
+      return 2;
+    }
+
+    if (this.isLiveWithHero(project)) {
+      return 1;
+    }
+
+    return 0;
   }
 }

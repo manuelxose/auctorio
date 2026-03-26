@@ -145,6 +145,24 @@ enum StudioInvitationStatus {
   revoked
 }
 
+enum StudioAccountStatus {
+  invited
+  active
+  suspended
+}
+
+enum StudioAccountTokenKind {
+  activation
+  password_reset
+}
+
+enum StudioSessionAuthMode {
+  oidc
+  password
+  google
+  launch
+}
+
 enum StudioPromptSurface {
   text_seo
   text_instagram
@@ -186,10 +204,12 @@ model Tenant {
   publicationJobs    PublicationJob[]
   assetVariants      AssetVariant[]
   studioIdentityProvider StudioIdentityProvider?
+  studioAccountsLastWorkspace StudioAccount[] @relation("StudioAccountLastWorkspace")
   studioUsers        StudioUser[]
   studioRoles        StudioRole[]
   studioInvitations  StudioInvitation[]
   studioUserSessions StudioUserSession[]
+  studioLaunchTickets StudioLaunchTicket[]
   studioPromptPresets StudioPromptPreset[]
   studioPromptAssignments StudioPromptAssignment[]
 
@@ -524,9 +544,48 @@ model StudioIdentityProvider {
   @@map("studio_identity_providers")
 }
 
+model StudioAccount {
+  id              String             @id @default(uuid()) @db.Uuid
+  email           String             @unique
+  passwordHash    String?            @map("password_hash")
+  googleSubject   String?            @unique @map("google_subject")
+  emailVerifiedAt DateTime?          @map("email_verified_at")
+  lastWorkspaceId String?            @db.Uuid @map("last_workspace_id")
+  displayName     String?            @map("display_name")
+  avatarUrl       String?            @map("avatar_url")
+  status          StudioAccountStatus @default(invited)
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  lastWorkspace Tenant?              @relation("StudioAccountLastWorkspace", fields: [lastWorkspaceId], references: [id], onDelete: SetNull)
+  users         StudioUser[]
+  tokens        StudioAccountToken[]
+
+  @@index([status])
+  @@map("studio_accounts")
+}
+
+model StudioAccountToken {
+  id         String                @id @default(uuid()) @db.Uuid
+  accountId  String                @db.Uuid @map("account_id")
+  kind       StudioAccountTokenKind
+  tokenHash  String                @unique @map("token_hash")
+  expiresAt  DateTime              @map("expires_at")
+  consumedAt DateTime?             @map("consumed_at")
+  createdAt  DateTime              @default(now()) @map("created_at")
+  updatedAt  DateTime              @updatedAt @map("updated_at")
+
+  account StudioAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, kind, consumedAt])
+  @@index([expiresAt])
+  @@map("studio_account_tokens")
+}
+
 model StudioUser {
   id           String           @id @default(uuid()) @db.Uuid
   tenantId     String           @db.Uuid @map("tenant_id")
+  accountId    String           @db.Uuid @map("account_id")
   email        String
   displayName  String           @map("display_name")
   avatarUrl    String?          @map("avatar_url")
@@ -538,10 +597,12 @@ model StudioUser {
   updatedAt    DateTime         @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account StudioAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
   roles StudioUserRole[]
   sessions StudioUserSession[]
   invitations StudioInvitation[] @relation("StudioInvitationUser")
   createdInvitations StudioInvitation[] @relation("StudioInvitationCreator")
+  launchTickets StudioLaunchTicket[]
   approvedVersions ContentVersion[] @relation("StudioUserApprovedVersions")
   requestedPublications PublicationJob[] @relation("StudioUserRequestedPublications")
   createdPromptPresets StudioPromptPreset[] @relation("StudioPromptPresetCreatedBy")
@@ -551,6 +612,7 @@ model StudioUser {
   createdPromptAssignments StudioPromptAssignment[] @relation("StudioPromptAssignmentCreatedBy")
 
   @@unique([tenantId, email])
+  @@index([accountId])
   @@index([tenantId, status])
   @@index([tenantId, oidcIssuer, oidcSubject])
   @@map("studio_users")
@@ -625,6 +687,7 @@ model StudioUserSession {
   id           String   @id @default(uuid()) @db.Uuid
   tenantId     String   @db.Uuid @map("tenant_id")
   studioUserId String   @db.Uuid @map("studio_user_id")
+  authMode     StudioSessionAuthMode @default(oidc) @map("auth_mode")
   tokenHash    String   @unique @map("token_hash")
   expiresAt    DateTime @map("expires_at")
   lastSeenAt   DateTime? @map("last_seen_at")
@@ -637,6 +700,29 @@ model StudioUserSession {
 
   @@index([tenantId, studioUserId, revokedAt])
   @@map("studio_user_sessions")
+}
+
+model StudioLaunchTicket {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid @map("tenant_id")
+  studioUserId         String   @db.Uuid @map("studio_user_id")
+  tokenHash            String   @unique @map("token_hash")
+  jti                  String   @unique
+  requestedEmail       String   @map("requested_email")
+  requestedDisplayName String?  @map("requested_display_name")
+  sourceApp            String   @map("source_app")
+  returnTo             String   @map("return_to")
+  expiresAt            DateTime @map("expires_at")
+  consumedAt           DateTime? @map("consumed_at")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, studioUserId, consumedAt])
+  @@index([expiresAt])
+  @@map("studio_launch_tickets")
 }
 
 model StudioPromptPreset {

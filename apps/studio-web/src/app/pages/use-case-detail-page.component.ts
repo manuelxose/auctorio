@@ -8,6 +8,7 @@ import {
   getAssetBySlug,
   getLocalizedAssets,
   getMarketingPath,
+  getStudioLoginPath,
   getUseCaseAlternatePaths,
   getUseCaseBySlug,
   getUseCaseSeo,
@@ -112,7 +113,7 @@ import { SeoService } from '../services/seo.service';
         </div>
 
         <div class="wrap-actions">
-          <a class="marketing-button marketing-button--primary" routerLink="/studio/login">
+          <a class="marketing-button marketing-button--primary" [href]="studioLoginPath">
             {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
           </a>
           <a
@@ -146,7 +147,7 @@ import { SeoService } from '../services/seo.service';
           <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'use_cases')">
             {{ locale === 'en' ? 'Back to use cases' : 'Volver a casos de uso' }}
           </a>
-          <a class="marketing-button marketing-button--ghost" routerLink="/studio/login">
+          <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
             {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
           </a>
         </div>
@@ -159,6 +160,7 @@ export class UseCaseDetailPageComponent {
   private readonly seo = inject(SeoService);
 
   readonly locale = (this.route.snapshot.data['locale'] as MarketingLocale | undefined) ?? 'en';
+  readonly studioLoginPath = getStudioLoginPath();
   readonly useCase = getUseCaseBySlug(this.locale, this.route.snapshot.paramMap.get('slug'));
   readonly assets = this.useCase ? getLocalizedAssets(this.locale, this.useCase.assetSlugs) : [];
   readonly leadAsset = this.assets[0] ?? null;

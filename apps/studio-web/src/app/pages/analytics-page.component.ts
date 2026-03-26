@@ -4,13 +4,43 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import type {
   PublicationListItem,
+  ReviewGateStage,
   StudioProjectSummary,
   StudioSiteSummary,
 } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  buildQaScore,
+  reviewStageLabel,
+  reviewStageTone,
+} from '../utils/review-gate';
 
 type AnalyticsView = 'contentPerformance' | 'seoMetrics';
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
+type AnalyticsRow = {
+  label: string;
+  detail: string;
+  count: number;
+  tone: TagTone;
+};
+type DestinationAnalyticsRow = {
+  id: string;
+  name: string;
+  type: string;
+  projectCount: number;
+  liveCount: number;
+  releaseReadyCount: number;
+  blockedCount: number;
+  tone: TagTone;
+};
+type PublicationSignal = {
+  title: string;
+  detail: string;
+  badge: string;
+  tone: TagTone;
+  updatedAt: string;
+};
 
 @Component({
   selector: 'app-analytics-page',
@@ -54,13 +84,13 @@ type AnalyticsView = 'contentPerformance' | 'seoMetrics';
         <article class="console-stat-card">
           <p class="console-stat-card__label">Publish success rate</p>
           <strong class="console-stat-card__value">{{ successRate | percent: '1.0-0' }}</strong>
-          <span class="console-stat-card__detail">Ratio de jobs publicados sobre el total observado.</span>
+          <span class="console-stat-card__detail">Ratio de publicaciones completadas sobre jobs ya resueltos en runtime.</span>
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Review ready</p>
+          <p class="console-stat-card__label">Editorial ready</p>
           <strong class="console-stat-card__value">{{ reviewReadyCount }}</strong>
-          <span class="console-stat-card__detail">Piezas en qa_passed o approved listas para release.</span>
+          <span class="console-stat-card__detail">Piezas ya listas para aprobacion o release sin blockers editoriales abiertos.</span>
         </article>
       </div>
 
@@ -80,7 +110,16 @@ type AnalyticsView = 'contentPerformance' | 'seoMetrics';
                   <strong>{{ row.label }}</strong>
                   <p>{{ row.detail }}</p>
                 </div>
-                <span class="console-tag">{{ row.count }}</span>
+                <span
+                  class="console-tag"
+                  [class.console-tag--accent]="row.tone === 'accent'"
+                  [class.console-tag--warning]="row.tone === 'warning'"
+                  [class.console-tag--success]="row.tone === 'success'"
+                  [class.console-tag--danger]="row.tone === 'danger'"
+                  [class.console-tag--muted]="row.tone === 'muted'"
+                >
+                  {{ row.count }}
+                </span>
               </article>
             </div>
           </section>
@@ -97,9 +136,18 @@ type AnalyticsView = 'contentPerformance' | 'seoMetrics';
               <article class="console-list-card" *ngFor="let site of destinationRows">
                 <div>
                   <strong>{{ site.name }}</strong>
-                  <p>{{ site.type }} · {{ site.projectCount }} projects</p>
+                  <p>{{ site.type }} · {{ site.releaseReadyCount }} release-ready · {{ site.blockedCount }} blocked</p>
                 </div>
-                <span class="console-tag">{{ site.publishedProjectCount }} live</span>
+                <span
+                  class="console-tag"
+                  [class.console-tag--accent]="site.tone === 'accent'"
+                  [class.console-tag--warning]="site.tone === 'warning'"
+                  [class.console-tag--success]="site.tone === 'success'"
+                  [class.console-tag--danger]="site.tone === 'danger'"
+                  [class.console-tag--muted]="site.tone === 'muted'"
+                >
+                  {{ site.liveCount }} live
+                </span>
               </article>
             </div>
           </section>
@@ -114,13 +162,25 @@ type AnalyticsView = 'contentPerformance' | 'seoMetrics';
               </div>
             </div>
 
-            <div class="console-feed" *ngIf="recentPublications.length; else noActivity">
-              <article class="console-feed__item" *ngFor="let item of recentPublications">
+            <div class="console-feed" *ngIf="recentSignals.length; else noActivity">
+              <article class="console-feed__item" *ngFor="let item of recentSignals">
                 <div>
-                  <strong>{{ item.project.title }}</strong>
-                  <p>{{ item.site.name }} · {{ item.status }}</p>
+                  <strong>{{ item.title }}</strong>
+                  <p>{{ item.detail }}</p>
                 </div>
-                <span>{{ item.updatedAt | date: 'short' }}</span>
+                <div class="console-calendar-day__meta">
+                  <span
+                    class="console-tag"
+                    [class.console-tag--accent]="item.tone === 'accent'"
+                    [class.console-tag--warning]="item.tone === 'warning'"
+                    [class.console-tag--success]="item.tone === 'success'"
+                    [class.console-tag--danger]="item.tone === 'danger'"
+                    [class.console-tag--muted]="item.tone === 'muted'"
+                  >
+                    {{ item.badge }}
+                  </span>
+                  <span>{{ item.updatedAt | date: 'short' }}</span>
+                </div>
               </article>
             </div>
           </section>
@@ -163,9 +223,9 @@ export class AnalyticsPageComponent implements OnInit {
   sites: StudioSiteSummary[] = [];
   projects: StudioProjectSummary[] = [];
   publications: PublicationListItem[] = [];
-  destinationRows: StudioSiteSummary[] = [];
-  recentPublications: PublicationListItem[] = [];
-  statusRows: Array<{ label: string; detail: string; count: number }> = [];
+  destinationRows: DestinationAnalyticsRow[] = [];
+  recentSignals: PublicationSignal[] = [];
+  statusRows: AnalyticsRow[] = [];
   notes: string[] = [];
   loading = true;
   error = '';
@@ -185,11 +245,11 @@ export class AnalyticsPageComponent implements OnInit {
   }
 
   get primaryBlockEyebrow(): string {
-    return this.view === 'seoMetrics' ? 'SEO readiness' : 'Editorial throughput';
+    return this.view === 'seoMetrics' ? 'SEO package' : 'Operational gate';
   }
 
   get primaryBlockTitle(): string {
-    return this.view === 'seoMetrics' ? 'Optimization and quality signals' : 'Status distribution';
+    return this.view === 'seoMetrics' ? 'Optimization and release signals' : 'Gate distribution';
   }
 
   ngOnInit(): void {
@@ -211,94 +271,22 @@ export class AnalyticsPageComponent implements OnInit {
       next: ({ sites, projects, publications }) => {
         this.sites = sites.items;
         this.projects = projects.items;
-        this.publications = publications.items;
-        this.destinationRows = [...this.sites]
-          .sort((a, b) => b.projectCount - a.projectCount)
-          .slice(0, 6);
-        this.recentPublications = this.publications.slice(0, 6);
+        this.publications = [...publications.items].sort(
+          (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+        );
+        this.destinationRows = this.buildDestinationRows();
+        this.recentSignals = this.buildRecentSignals();
 
-        const publicationTotal = this.publications.length;
-        this.successRate = publicationTotal
-          ? this.publications.filter((item) => item.status === 'published').length / publicationTotal
+        const resolvedPublications = this.publications.filter((item) =>
+          ['published', 'failed', 'canceled'].includes(item.status),
+        );
+        this.successRate = resolvedPublications.length
+          ? resolvedPublications.filter((item) => item.status === 'published').length / resolvedPublications.length
           : 0;
-        this.reviewReadyCount = this.projects.filter((item) =>
-          ['qa_passed', 'approved'].includes(item.status),
+        this.reviewReadyCount = this.projects.filter((project) =>
+          project.reviewGate.approvalReady || project.reviewGate.publishReady,
         ).length;
-
-        const statusConfig: Array<{
-          key: StudioProjectSummary['status'];
-          label: string;
-          detail: string;
-        }> = this.view === 'seoMetrics'
-          ? [
-              {
-                key: 'draft',
-                label: 'Brief stage',
-                detail: 'Piezas que todavia necesitan estructura y objetivo editorial claros.',
-              },
-              {
-                key: 'ai_generated',
-                label: 'Needs optimization',
-                detail: 'Contenido generado que aun no ha pasado por QA y ajuste editorial.',
-              },
-              {
-                key: 'qa_failed',
-                label: 'SEO risk',
-                detail: 'Piezas bloqueadas por checks de estructura, metadata o imagen.',
-              },
-              {
-                key: 'qa_passed',
-                label: 'Ready for approval',
-                detail: 'Contenido optimizado y listo para decision editorial final.',
-              },
-              {
-                key: 'approved',
-                label: 'Ready to publish',
-                detail: 'Piezas ya listas para pasar a release sin friccion SEO adicional.',
-              },
-              {
-                key: 'published',
-                label: 'Live content',
-                detail: 'Contenido ya visible en destino final.',
-              },
-            ]
-          : [
-              {
-                key: 'draft',
-                label: 'Draft',
-                detail: 'Briefs y proyectos todavia sin una primera salida AI.',
-              },
-              {
-                key: 'ai_generated',
-                label: 'AI generated',
-                detail: 'Piezas con contenido generado que todavia no cerraron QA.',
-              },
-              {
-                key: 'qa_failed',
-                label: 'QA failed',
-                detail: 'Bloqueos que frenan el paso a revision y publish.',
-              },
-              {
-                key: 'qa_passed',
-                label: 'QA passed',
-                detail: 'Piezas listas para aprobacion y release.',
-              },
-              {
-                key: 'approved',
-                label: 'Approved',
-                detail: 'Contenido aprobado, pendiente de publicar o sincronizar.',
-              },
-              {
-                key: 'published',
-                label: 'Published',
-                detail: 'Contenido ya visible y distribuido en destino final.',
-              },
-            ];
-
-        this.statusRows = statusConfig.map((item) => ({
-          ...item,
-          count: this.projects.filter((project) => project.status === item.key).length,
-        }));
+        this.statusRows = this.buildStatusRows();
 
         this.notes = this.buildNotes();
         this.loading = false;
@@ -310,19 +298,261 @@ export class AnalyticsPageComponent implements OnInit {
     });
   }
 
+  private buildStatusRows(): AnalyticsRow[] {
+    if (this.view === 'seoMetrics') {
+      return [
+        {
+          label: 'SEO package complete',
+          detail: 'Latest versions that already carry metadata, hero asset and a strong QA baseline.',
+          count: this.projects.filter((project) => this.hasCompleteSeoPackage(project)).length,
+          tone: 'success',
+        },
+        {
+          label: 'Metadata missing',
+          detail: 'Generated pieces whose latest version still lacks SEO title or description.',
+          count: this.projects.filter((project) => this.hasOutput(project) && !this.hasSeoMetadata(project)).length,
+          tone: 'warning',
+        },
+        {
+          label: 'Hero missing',
+          detail: 'Pieces with output but without a featured asset yet attached to the release package.',
+          count: this.projects.filter((project) => this.hasOutput(project) && !project.latestVersion?.hasAsset).length,
+          tone: 'danger',
+        },
+        {
+          label: 'QA blocked',
+          detail: 'Pieces whose review gate is still blocked by structure, metadata, image or publish failures.',
+          count: this.projects.filter((project) => this.isBlocked(project)).length,
+          tone: 'danger',
+        },
+        {
+          label: 'Warning watchlist',
+          detail: 'Pieces with warnings but no blockers, where the SEO package still deserves human attention.',
+          count: this.projects.filter((project) => this.hasWarningPressure(project)).length,
+          tone: 'warning',
+        },
+        {
+          label: 'Approval ready',
+          detail: 'Pieces already safe enough to move into final editorial decision.',
+          count: this.projects.filter((project) => project.reviewGate.approvalReady).length,
+          tone: 'accent',
+        },
+        {
+          label: 'Live baseline',
+          detail: 'Published pieces whose current package still meets the latest SEO minimums.',
+          count: this.projects.filter((project) =>
+            project.reviewGate.stage === 'published' && this.hasCompleteSeoPackage(project),
+          ).length,
+          tone: 'success',
+        },
+      ];
+    }
+
+    const throughputStages: Array<{ stage: ReviewGateStage; detail: string }> = [
+      {
+        stage: 'awaiting_generation',
+        detail: 'Briefs still waiting for a first usable draft or structured editorial output.',
+      },
+      {
+        stage: 'needs_review',
+        detail: 'AI output exists, but the editorial loop still needs a human pass.',
+      },
+      {
+        stage: 'qa_blocked',
+        detail: 'Blockers in QA, metadata or hero package still stop release.',
+      },
+      {
+        stage: 'ready_to_approve',
+        detail: 'Pieces with QA cleared and enough package quality to enter final decision.',
+      },
+      {
+        stage: 'approved',
+        detail: 'Approved pieces that can move into release orchestration.',
+      },
+      {
+        stage: 'publish_queued',
+        detail: 'Pieces already flowing through runtime publishing or draft sync.',
+      },
+      {
+        stage: 'published',
+        detail: 'Content already visible in its destination.',
+      },
+    ];
+
+    const rows = throughputStages.map((item) => ({
+      label: reviewStageLabel(item.stage),
+      detail: item.detail,
+      count: this.projects.filter((project) => project.reviewGate.stage === item.stage).length,
+      tone: reviewStageTone(item.stage),
+    }));
+
+    return [
+      ...rows,
+      {
+        label: 'Retry publish',
+        detail: 'Release incidents that need supervised retry instead of pretending they are healthy queued items.',
+        count: this.projects.filter((project) => project.reviewGate.stage === 'publish_failed').length,
+        tone: 'danger',
+      },
+    ];
+  }
+
+  private buildDestinationRows(): DestinationAnalyticsRow[] {
+    return this.sites
+      .map((site) => {
+        const siteProjects = this.projects.filter((project) => project.siteId === site.id);
+        const liveCount = siteProjects.filter((project) => project.reviewGate.stage === 'published').length;
+        const releaseReadyCount = siteProjects.filter((project) =>
+          project.reviewGate.publishReady &&
+          ['approved', 'publish_queued'].includes(project.reviewGate.stage),
+        ).length;
+        const blockedCount = siteProjects.filter((project) => this.isBlocked(project)).length;
+
+        const tone: TagTone =
+          blockedCount > 0 ? 'danger' : releaseReadyCount > 0 ? 'accent' : liveCount > 0 ? 'success' : 'muted';
+
+        return {
+          id: site.id,
+          name: site.name,
+          type: site.type,
+          projectCount: siteProjects.length,
+          liveCount,
+          releaseReadyCount,
+          blockedCount,
+          tone,
+        };
+      })
+      .sort((left, right) => {
+        const priorityDelta =
+          right.releaseReadyCount + right.liveCount * 2 - right.blockedCount -
+          (left.releaseReadyCount + left.liveCount * 2 - left.blockedCount);
+        if (priorityDelta !== 0) {
+          return priorityDelta;
+        }
+
+        return right.projectCount - left.projectCount;
+      })
+      .slice(0, 6);
+  }
+
+  private buildRecentSignals(): PublicationSignal[] {
+    return this.publications.slice(0, 6).map((item) => ({
+      title: item.project.title,
+      detail: `${item.site.name} · ${item.action} · ${item.error || this.publicationNarrative(item)}`,
+      badge: this.publicationBadge(item),
+      tone: this.publicationTone(item.status),
+      updatedAt: item.updatedAt,
+    }));
+  }
+
   private buildNotes(): string[] {
     if (this.view === 'seoMetrics') {
       return [
-        'Esta vista usa estados editoriales y QA como proxy de readiness SEO hasta que exista una capa analitica dedicada.',
-        'Los siguientes pasos naturales son topic planning, clustering y scorecards por pieza.',
-        'Destinations y publishing history completan la lectura de impacto operacional.',
+        'Esta vista usa el mismo review gate y la misma version viva que ya gobiernan QA, review y publish; no es una taxonomia separada.',
+        'Todavia faltan scorecards SEO por pieza, topic planning y clustering editorial para hablar de performance organica real.',
+        'Publishing history y destinations siguen completando la lectura runtime del riesgo de release.',
       ];
     }
 
     return [
-      'La distribucion de estados revela donde se atasca hoy el workflow editorial antes de publicar.',
-      'Publishing history y jobs completan esta vista para diagnosticar runtime e integraciones.',
-      'El siguiente salto es incorporar performance real por contenido y no solo trazas operativas.',
+      'La distribucion ya no usa project.status como verdad principal; agrupa por el mismo review gate que usa el cockpit operativo.',
+      'Release lane y runtime failures siguen leyendo publication jobs reales, no una simulacion analitica separada.',
+      'El siguiente salto es incorporar performance real por contenido y no solo trazas operativas del workflow.',
     ];
+  }
+
+  private hasOutput(project: StudioProjectSummary): boolean {
+    return Boolean(project.latestVersion);
+  }
+
+  private hasSeoMetadata(project: StudioProjectSummary): boolean {
+    return Boolean(project.latestVersion?.seoTitle && project.latestVersion?.seoDescription);
+  }
+
+  private hasCompleteSeoPackage(project: StudioProjectSummary): boolean {
+    const latestVersion = project.latestVersion;
+    if (!latestVersion) {
+      return false;
+    }
+
+    return Boolean(
+      latestVersion.hasAsset &&
+      latestVersion.seoTitle &&
+      latestVersion.seoDescription &&
+      buildQaScore(latestVersion) >= 90,
+    );
+  }
+
+  private hasWarningPressure(project: StudioProjectSummary): boolean {
+    return project.reviewGate.warningCount > 0 && project.reviewGate.blockerCount === 0;
+  }
+
+  private isBlocked(project: StudioProjectSummary): boolean {
+    return project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed';
+  }
+
+  private publicationBadge(item: PublicationListItem): string {
+    if (item.status === 'failed') {
+      return 'Runtime failure';
+    }
+
+    if (item.status === 'published') {
+      return 'Published';
+    }
+
+    if (item.status === 'draft_synced') {
+      return 'Draft synced';
+    }
+
+    if (item.status === 'processing') {
+      return 'Processing';
+    }
+
+    if (item.status === 'queued') {
+      return 'Queued';
+    }
+
+    return 'Canceled';
+  }
+
+  private publicationNarrative(item: PublicationListItem): string {
+    if (item.status === 'published') {
+      return 'Live signal confirmed';
+    }
+
+    if (item.status === 'draft_synced') {
+      return 'Draft is already synced downstream';
+    }
+
+    if (item.status === 'processing') {
+      return 'Runtime is executing the current release step';
+    }
+
+    if (item.status === 'queued') {
+      return 'Waiting for runtime execution';
+    }
+
+    if (item.status === 'failed') {
+      return 'Runtime reported a publishing failure';
+    }
+
+    return 'Execution was canceled before completion';
+  }
+
+  private publicationTone(status: PublicationListItem['status']): TagTone {
+    switch (status) {
+      case 'published':
+        return 'success';
+      case 'queued':
+      case 'processing':
+      case 'draft_synced':
+        return 'accent';
+      case 'failed':
+        return 'danger';
+      case 'canceled':
+        return 'warning';
+      default:
+        return 'muted';
+    }
   }
 }

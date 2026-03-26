@@ -11,6 +11,7 @@ import type {
   PublicationListItem,
   ProjectStatus,
   StudioIdentityProviderConfig,
+  StudioLoginOptions,
   StudioInvitationSummary,
   StudioPromptAssignmentSummary,
   StudioPromptPresetDetail,
@@ -25,6 +26,7 @@ import type {
   StudioUserSummary,
   StudioWorkspaceAccess,
   UpdateStudioIdentityProviderPayload,
+  UpdateProjectPayload,
   UpdateSitePayload,
 } from '../models/studio.models';
 
@@ -33,6 +35,44 @@ export class StudioApiService {
   private readonly http = inject(HttpClient);
   private readonly origin = inject(STUDIO_ORIGIN);
   private readonly apiBase = `${this.origin}/studio/api`;
+
+  getLoginOptions(email: string): Observable<StudioLoginOptions> {
+    return this.http.post<StudioLoginOptions>(`${this.apiBase}/auth/login/options`, {
+      email,
+    });
+  }
+
+  loginWithPassword(payload: {
+    email: string;
+    password: string;
+    workspaceId?: string | null;
+  }): Observable<StudioSession> {
+    return this.http.post<StudioSession>(`${this.apiBase}/auth/login/password`, payload);
+  }
+
+  loginWithGoogle(payload: {
+    credential: string;
+    emailHint?: string | null;
+    workspaceId?: string | null;
+  }): Observable<StudioSession> {
+    return this.http.post<StudioSession>(`${this.apiBase}/auth/login/google`, payload);
+  }
+
+  sendPasswordReset(email: string): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.apiBase}/auth/password/forgot`, { email });
+  }
+
+  resetPassword(payload: { token: string; password: string }): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.apiBase}/auth/password/reset`, payload);
+  }
+
+  acceptInvitation(payload: {
+    token: string;
+    password: string;
+    workspaceId?: string | null;
+  }): Observable<StudioSession> {
+    return this.http.post<StudioSession>(`${this.apiBase}/auth/invitations/accept`, payload);
+  }
 
   login(apiKey: string, workspace?: string): Observable<StudioSession> {
     return this.http.post<StudioSession>(`${this.apiBase}/session/login`, {
@@ -141,6 +181,16 @@ export class StudioApiService {
 
   createProject(payload: CreateProjectPayload): Observable<{ id: string }> {
     return this.http.post<{ id: string }>(`${this.apiBase}/backend/v2/projects`, payload);
+  }
+
+  updateProject(
+    projectId: string,
+    payload: UpdateProjectPayload,
+  ): Observable<StudioProjectDetailView> {
+    return this.http.put<StudioProjectDetailView>(
+      `${this.apiBase}/backend/v2/projects/${projectId}`,
+      payload,
+    );
   }
 
   getProject(projectId: string): Observable<StudioProjectDetailView> {

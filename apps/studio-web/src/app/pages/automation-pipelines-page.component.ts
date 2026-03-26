@@ -3,16 +3,22 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import type { PublicationListItem, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import type { PublicationListItem, ReviewGateStage, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone as getReviewStageTone,
+} from '../utils/review-gate';
 
 type AutomationFocus = 'all' | 'approval' | 'release' | 'runtime';
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
 
 type LaneCard = {
   title: string;
   detail: string;
   badge: string;
+  tone: TagTone;
   link: string[];
 };
 
@@ -51,7 +57,7 @@ type LaneCard = {
         <article class="console-stat-card">
           <p class="console-stat-card__label">Ready to autopush</p>
           <strong class="console-stat-card__value">{{ releaseCandidates.length }}</strong>
-          <span class="console-stat-card__detail">Contenido aprobado o en cola donde una policy futura podría intervenir.</span>
+          <span class="console-stat-card__detail">Contenido sin blockers editoriales que ya puede entrar en autopublish o draft sync supervisado.</span>
         </article>
 
         <article class="console-stat-card">
@@ -62,8 +68,8 @@ type LaneCard = {
 
         <article class="console-stat-card">
           <p class="console-stat-card__label">Failures</p>
-          <strong class="console-stat-card__value">{{ failedJobs.length }}</strong>
-          <span class="console-stat-card__detail">Incidentes que hoy bloquean cualquier automatización de release.</span>
+          <strong class="console-stat-card__value">{{ blockingCards.length }}</strong>
+          <span class="console-stat-card__detail">Incidentes editoriales o runtime que hoy bloquean cualquier automatización de release.</span>
         </article>
       </div>
 
@@ -83,7 +89,7 @@ type LaneCard = {
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, destination or automation stage"
+                  placeholder="Project, destination, gate, blocker or automation stage"
                   (input)="applyFilters()"
                 />
               </label>
@@ -120,7 +126,16 @@ type LaneCard = {
                 <div class="console-pipeline-stack" *ngIf="approvalCandidates.length; else emptyApproval">
                   <a class="console-pipeline-card" *ngFor="let card of approvalCandidates" [routerLink]="card.link">
                     <div class="console-pipeline-card__meta">
-                      <span class="console-tag console-tag--warning">{{ card.badge }}</span>
+                      <span
+                        class="console-tag"
+                        [class.console-tag--accent]="card.tone === 'accent'"
+                        [class.console-tag--warning]="card.tone === 'warning'"
+                        [class.console-tag--success]="card.tone === 'success'"
+                        [class.console-tag--danger]="card.tone === 'danger'"
+                        [class.console-tag--muted]="card.tone === 'muted'"
+                      >
+                        {{ card.badge }}
+                      </span>
                     </div>
                     <div>
                       <strong>{{ card.title }}</strong>
@@ -142,7 +157,16 @@ type LaneCard = {
                 <div class="console-pipeline-stack" *ngIf="releaseCandidates.length; else emptyRelease">
                   <a class="console-pipeline-card" *ngFor="let card of releaseCandidates" [routerLink]="card.link">
                     <div class="console-pipeline-card__meta">
-                      <span class="console-tag console-tag--accent">{{ card.badge }}</span>
+                      <span
+                        class="console-tag"
+                        [class.console-tag--accent]="card.tone === 'accent'"
+                        [class.console-tag--warning]="card.tone === 'warning'"
+                        [class.console-tag--success]="card.tone === 'success'"
+                        [class.console-tag--danger]="card.tone === 'danger'"
+                        [class.console-tag--muted]="card.tone === 'muted'"
+                      >
+                        {{ card.badge }}
+                      </span>
                     </div>
                     <div>
                       <strong>{{ card.title }}</strong>
@@ -164,7 +188,16 @@ type LaneCard = {
                 <div class="console-pipeline-stack" *ngIf="runtimeQueue.length; else emptyRuntime">
                   <a class="console-pipeline-card" *ngFor="let card of runtimeQueue" [routerLink]="card.link">
                     <div class="console-pipeline-card__meta">
-                      <span class="console-tag console-tag--success">{{ card.badge }}</span>
+                      <span
+                        class="console-tag"
+                        [class.console-tag--accent]="card.tone === 'accent'"
+                        [class.console-tag--warning]="card.tone === 'warning'"
+                        [class.console-tag--success]="card.tone === 'success'"
+                        [class.console-tag--danger]="card.tone === 'danger'"
+                        [class.console-tag--muted]="card.tone === 'muted'"
+                      >
+                        {{ card.badge }}
+                      </span>
                     </div>
                     <div>
                       <strong>{{ card.title }}</strong>
@@ -186,13 +219,13 @@ type LaneCard = {
               </div>
             </div>
 
-            <div class="console-feed" *ngIf="failedJobs.length; else emptyFailures">
-              <article class="console-feed__item" *ngFor="let job of failedJobs">
+            <div class="console-feed" *ngIf="blockingCards.length; else emptyFailures">
+              <article class="console-feed__item" *ngFor="let card of blockingCards">
                 <div>
-                  <strong>{{ job.project.title }}</strong>
-                  <p>{{ job.site.name }} · {{ job.action }}</p>
+                  <strong>{{ card.title }}</strong>
+                  <p>{{ card.detail }}</p>
                 </div>
-                <p class="console-feed__error">{{ job.error || 'Unknown runtime failure' }}</p>
+                <a class="console-link" [routerLink]="card.link">{{ card.badge }}</a>
               </article>
             </div>
           </section>
@@ -210,10 +243,10 @@ type LaneCard = {
                 No existe todavía un motor declarativo de policies; esta vista hace visible dónde tendría sentido introducirlo.
               </li>
               <li class="console-note-list__item">
-                Approval y release automation dependen hoy de estados reales, no de una simulación inventada.
+                Approval y release automation dependen hoy del mismo review gate que ya gobierna QA, review y publish, no de una simulación inventada.
               </li>
               <li class="console-note-list__item">
-                El siguiente paso de producto es modelar reglas por destino, goal y ventana de publicación.
+                El siguiente paso de producto es modelar reglas por destino, goal y ventana de publicación sin romper esta lectura operacional base.
               </li>
             </ul>
           </section>
@@ -272,6 +305,7 @@ export class AutomationPipelinesPageComponent implements OnInit {
   releaseCandidates: LaneCard[] = [];
   runtimeQueue: LaneCard[] = [];
   failedJobs: PublicationListItem[] = [];
+  blockingCards: LaneCard[] = [];
   candidateCount = 0;
   loading = true;
   error = '';
@@ -331,9 +365,13 @@ export class AutomationPipelinesPageComponent implements OnInit {
         return [
           project.title,
           project.site.name,
-          project.status,
+          project.reviewGate.stage,
+          project.reviewGate.nextAction,
+          project.reviewGate.primaryConcern,
           project.goal,
           project.latestVersion?.title || '',
+          ...(project.reviewGate.blockers || []),
+          ...(project.reviewGate.warnings || []),
         ]
           .join(' ')
           .toLowerCase()
@@ -359,22 +397,29 @@ export class AutomationPipelinesPageComponent implements OnInit {
       });
 
     this.approvalCandidates = scopedProjects
-      .filter((project) => ['qa_passed', 'in_review'].includes(project.status))
+      .filter((project) => ['needs_review', 'ready_to_approve'].includes(project.reviewGate.stage))
+      .sort((left, right) => this.approvalPriority(right) - this.approvalPriority(left))
       .slice(0, 8)
       .map((project) => ({
         title: project.title,
-        detail: `${project.site.name} · ${project.status} · ${project.latestVersion?.title || 'Untitled version'}`,
-        badge: project.status === 'qa_passed' ? 'Ready to approve' : 'Human review',
+        detail: `${project.site.name} · ${project.reviewGate.nextAction}`,
+        badge: formatReviewStageLabel(project.reviewGate.stage),
+        tone: this.reviewStageTone(project.reviewGate.stage),
         link: ['/studio/review/editor'],
       }));
 
     this.releaseCandidates = scopedProjects
-      .filter((project) => ['approved', 'publish_queued'].includes(project.status))
+      .filter((project) =>
+        project.reviewGate.publishReady &&
+        ['approved', 'publish_queued'].includes(project.reviewGate.stage),
+      )
+      .sort((left, right) => this.releasePriority(right) - this.releasePriority(left))
       .slice(0, 8)
       .map((project) => ({
         title: project.title,
-        detail: `${project.site.name} · ${project.status} · ${project.latestVersion?.title || 'Untitled version'}`,
-        badge: project.status === 'approved' ? 'Can autopublish' : 'Queued',
+        detail: `${project.site.name} · ${project.reviewGate.nextAction}`,
+        badge: project.reviewGate.stage === 'publish_queued' ? 'Queued' : 'Can autopublish',
+        tone: project.reviewGate.stage === 'publish_queued' ? 'warning' : 'accent',
         link: ['/studio/publishing/scheduled'],
       }));
 
@@ -385,6 +430,7 @@ export class AutomationPipelinesPageComponent implements OnInit {
         title: item.project.title,
         detail: `${item.site.name} · ${item.action} · ${item.status}`,
         badge: item.status,
+        tone: this.publicationTone(item.status),
         link: ['/studio/automation/jobs'],
       }));
 
@@ -392,6 +438,72 @@ export class AutomationPipelinesPageComponent implements OnInit {
       .filter((item) => item.status === 'failed')
       .slice(0, 8);
 
+    const editorialBlockers = scopedProjects
+      .filter((project) => project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed')
+      .slice(0, 8)
+      .map((project) => ({
+        title: project.title,
+        detail: `${project.site.name} · ${project.reviewGate.primaryConcern}`,
+        badge: project.reviewGate.stage === 'publish_failed' ? 'Retry publish' : formatReviewStageLabel(project.reviewGate.stage),
+        tone: project.reviewGate.stage === 'publish_failed' ? 'danger' : this.reviewStageTone(project.reviewGate.stage),
+        link: project.reviewGate.stage === 'publish_failed'
+          ? ['/studio/publishing/scheduled']
+          : ['/studio/editorial/articles', project.id],
+      }));
+
+    const runtimeBlockers = this.failedJobs.map((job) => ({
+      title: job.project.title,
+      detail: `${job.site.name} · ${job.action} · ${job.error || 'Unknown runtime failure'}`,
+      badge: 'Runtime failure',
+      tone: 'danger' as const,
+      link: ['/studio/publishing/history'],
+    }));
+
+    this.blockingCards = [...editorialBlockers, ...runtimeBlockers].slice(0, 8);
+
     this.candidateCount = this.approvalCandidates.length + this.releaseCandidates.length;
+  }
+
+  reviewStageTone(stage: ReviewGateStage): TagTone {
+    return getReviewStageTone(stage);
+  }
+
+  private approvalPriority(project: StudioProjectSummary): number {
+    if (project.reviewGate.stage === 'ready_to_approve') {
+      return 2;
+    }
+
+    if (project.reviewGate.stage === 'needs_review') {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private releasePriority(project: StudioProjectSummary): number {
+    if (project.reviewGate.stage === 'publish_queued') {
+      return 2;
+    }
+
+    if (project.reviewGate.stage === 'approved') {
+      return 1;
+    }
+
+    return 0;
+  }
+
+  private publicationTone(status: PublicationListItem['status']): TagTone {
+    switch (status) {
+      case 'published':
+        return 'success';
+      case 'queued':
+      case 'processing':
+      case 'draft_synced':
+        return 'accent';
+      case 'failed':
+        return 'danger';
+      default:
+        return 'muted';
+    }
   }
 }

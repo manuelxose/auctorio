@@ -131,6 +131,7 @@ async function startStudioServer(backendUrl) {
             STUDIO_COOKIE_NAME: "studio_session",
             STUDIO_COOKIE_SECURE: "false",
             STUDIO_ALLOWED_HOSTS: "127.0.0.1,localhost",
+            STUDIO_ENABLE_OPS_LOGIN: "true",
         },
         stdio: ["ignore", "pipe", "pipe"],
     });
@@ -218,7 +219,7 @@ node_test_1.default.after(async () => {
         redirect: "manual",
     });
     strict_1.default.equal(response.status, 302);
-    strict_1.default.equal(response.headers.get("location"), "/studio/login");
+    strict_1.default.equal(response.headers.get("location"), "/studio/login?returnTo=%2Fstudio%2F");
 });
 (0, node_test_1.default)("studio login route remains public", async () => {
     const response = await fetch(`${studio.baseUrl}/studio/login`, {
@@ -226,8 +227,8 @@ node_test_1.default.after(async () => {
     });
     strict_1.default.equal(response.status, 200);
     const html = await response.text();
-    strict_1.default.match(html, /cockpit editorial para operar múltiples webs con IA/i);
-    strict_1.default.match(html, /Continue with SSO/);
+    strict_1.default.match(html, /Auctorio/);
+    strict_1.default.match(html, /<app-root><\/app-root>/i);
 });
 (0, node_test_1.default)("studio login stores an encrypted HttpOnly cookie and session/me returns the tenant summary", async () => {
     const loginResponse = await fetch(`${studio.baseUrl}/studio/api/session/login`, {

@@ -4,6 +4,7 @@ import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import type {
   PublicationListItem,
+  ReviewGateStage,
   StudioPermission,
   StudioProjectSummary,
   StudioSiteSummary,
@@ -13,6 +14,10 @@ import { StudioSessionService } from '../services/studio-session.service';
 import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
 import { StudioStatStripComponent, type StudioStatItem } from '../components/studio-stat-strip.component';
 import { formatApiError } from '../utils/api-error';
+import {
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone,
+} from '../utils/review-gate';
 
 @Component({
   selector: 'app-dashboard-page',
@@ -42,6 +47,61 @@ import { formatApiError } from '../utils/api-error';
       <div class="console-banner console-banner--error" *ngIf="error">{{ error }}</div>
 
       <app-studio-stat-strip *ngIf="!loading" [items]="stats"></app-studio-stat-strip>
+
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Mission control</p>
+            <h2 class="console-surface__title">Workspace release posture</h2>
+            <p class="console-hero-copy__body">
+              {{ dashboardNarrative }}
+            </p>
+
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Approval ready</span>
+                <strong>{{ approvalReadyCount }}</strong>
+                <small>Pieces safe enough for final editorial decision.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Release ready</span>
+                <strong>{{ releaseReadyCount }}</strong>
+                <small>Pieces that can move into publish or draft sync without blockers.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Incidents</span>
+                <strong>{{ attentionProjects.length }}</strong>
+                <small>Projects that still need direct human intervention.</small>
+              </article>
+            </div>
+          </div>
+
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Attention queue</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list" *ngIf="heroProjects.length; else emptyHeroProjects">
+              <a
+                class="console-focus-card"
+                *ngFor="let project of heroProjects.slice(0, 3)"
+                [routerLink]="['/studio/projects', project.id]"
+              >
+                <div>
+                  <strong>{{ project.title }}</strong>
+                  <p>{{ project.site.name }} · {{ activeProjectSummary(project) }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="projectTagClass(project.reviewGate.stage)">
+                  {{ reviewStageLabel(project.reviewGate.stage) }}
+                </span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div class="console-workspace" *ngIf="!loading">
         <div class="console-workspace__main">
@@ -200,14 +260,22 @@ import { formatApiError } from '../utils/api-error';
                   <a [routerLink]="['/studio/projects', project.id]">
                     <strong>{{ project.title }}</strong>
                   </a>
-                  <p>{{ project.site.name }} · {{ project.goal }}</p>
+                  <p>{{ project.site.name }} · {{ activeProjectSummary(project) }}</p>
                 </div>
-                <span class="console-tag" [ngClass]="projectTagClass(project.status)">{{ project.status.replace('_', ' ') }}</span>
+                <span class="console-tag" [ngClass]="projectTagClass(project.reviewGate.stage)">
+                  {{ reviewStageLabel(project.reviewGate.stage) }}
+                </span>
               </article>
             </div>
           </section>
         </aside>
       </div>
+
+      <ng-template #emptyHeroProjects>
+        <div class="console-empty-compact">
+          <p>No priority projects need attention right now.</p>
+        </div>
+      </ng-template>
 
       <ng-template #emptyRuntime>
         <div class="console-empty-compact">
@@ -235,9 +303,35 @@ export class DashboardPageComponent implements OnInit {
   error = '';
 
   activeProjects: StudioProjectSummary[] = [];
+  attentionProjects: StudioProjectSummary[] = [];
+  releaseReadyProjects: StudioProjectSummary[] = [];
   pipelineRows: Array<{ label: string; description: string; count: number; tagClass: string }> = [];
   pipelineSegments: Array<{ key: string; label: string; count: number }> = [];
   readinessChecks: Array<{ label: string; detail: string; ok: boolean }> = [];
+
+  get approvalReadyCount(): number {
+    return this.projects.filter((project) => project.reviewGate.approvalReady).length;
+  }
+
+  get releaseReadyCount(): number {
+    return this.releaseReadyProjects.length;
+  }
+
+  get heroProjects(): StudioProjectSummary[] {
+    return this.attentionProjects.length ? this.attentionProjects : this.releaseReadyProjects;
+  }
+
+  get dashboardNarrative(): string {
+    if (this.attentionProjects.length > 0) {
+      return `${this.attentionProjects.length} project${this.attentionProjects.length > 1 ? 's' : ''} still block the ideal release path. The cockpit is now prioritizing direct editorial intervention before pushing more volume downstream.`;
+    }
+
+    if (this.releaseReadyProjects.length > 0) {
+      return `${this.releaseReadyProjects.length} project${this.releaseReadyProjects.length > 1 ? 's are' : ' is'} ready to move through release. The workspace is operating with a healthy editorial gate and a clear publish lane.`;
+    }
+
+    return 'The workspace is stable, but the next throughput gain still depends on creating new briefs or running another AI generation cycle.';
+  }
 
   ngOnInit(): void {
     forkJoin({
@@ -251,13 +345,34 @@ export class DashboardPageComponent implements OnInit {
         this.publications = publications.items;
 
         this.activeProjects = this.projects
-          .filter((p) => !['published', 'publish_failed'].includes(p.status))
-          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+          .filter((project) => project.reviewGate.stage !== 'published')
+          .sort((left, right) => {
+            const priorityDelta = this.projectAttentionRank(right) - this.projectAttentionRank(left);
+            if (priorityDelta !== 0) {
+              return priorityDelta;
+            }
+
+            return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+          });
+        this.attentionProjects = this.activeProjects.filter((project) => this.projectNeedsAttention(project));
+        this.releaseReadyProjects = this.projects
+          .filter((project) =>
+            project.reviewGate.publishReady &&
+            ['approved', 'publish_queued'].includes(project.reviewGate.stage),
+          )
+          .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
 
         const publishedJobs = this.publications.filter((p) => p.status === 'published').length;
         const failedJobs = this.publications.filter((p) => p.status === 'failed').length;
-        const failedProjects = this.projects.filter((p) => p.status === 'publish_failed').length;
-        const incidentCount = failedJobs + failedProjects;
+        const incidentProjects = new Set([
+          ...this.projects
+            .filter((project) => this.projectNeedsAttention(project))
+            .map((project) => project.id),
+          ...this.publications
+            .filter((publication) => publication.status === 'failed')
+            .map((publication) => publication.project.id),
+        ]);
+        const incidentCount = incidentProjects.size + failedJobs;
 
         this.stats = [
           {
@@ -309,47 +424,59 @@ export class DashboardPageComponent implements OnInit {
     }
   }
 
-  projectTagClass(status: string): string {
-    switch (status) {
-      case 'published': return 'console-tag--success';
-      case 'publish_failed': return 'console-tag--danger';
-      case 'approved':
-      case 'qa_passed': return 'console-tag--accent';
+  projectTagClass(stage: ReviewGateStage): string {
+    switch (reviewStageTone(stage)) {
+      case 'danger': return 'console-tag--danger';
+      case 'warning': return 'console-tag--warning';
+      case 'accent': return 'console-tag--accent';
+      case 'success': return 'console-tag--success';
       default: return 'console-tag--muted';
     }
   }
 
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return formatReviewStageLabel(stage);
+  }
+
+  activeProjectSummary(project: StudioProjectSummary): string {
+    if (project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed') {
+      return project.reviewGate.primaryConcern;
+    }
+
+    return project.reviewGate.nextAction;
+  }
+
   private buildPipeline(): void {
-    const draft = this.countProjects('draft');
-    const aiGen = this.countProjects('ai_generated');
-    const review = this.countProjects('qa_passed') + this.countProjects('approved');
-    const published = this.countProjects('published');
-    const failed = this.countProjects('publish_failed');
+    const draft = this.projects.filter((project) => this.pipelineBucket(project) === 'draft').length;
+    const aiGen = this.projects.filter((project) => this.pipelineBucket(project) === 'ai').length;
+    const review = this.projects.filter((project) => this.pipelineBucket(project) === 'review').length;
+    const published = this.projects.filter((project) => this.pipelineBucket(project) === 'published').length;
+    const failed = this.projects.filter((project) => this.pipelineBucket(project) === 'failed').length;
 
     this.pipelineSegments = [
-      { key: 'draft', label: 'Draft', count: draft },
-      { key: 'ai', label: 'AI generation', count: aiGen },
-      { key: 'review', label: 'Review', count: review },
+      { key: 'draft', label: 'Brief / Draft', count: draft },
+      { key: 'ai', label: 'AI / Review', count: aiGen },
+      { key: 'review', label: 'Approval / Release', count: review },
       { key: 'published', label: 'Published', count: published },
-      { key: 'failed', label: 'Failed', count: failed },
+      { key: 'failed', label: 'Blocked', count: failed },
     ].filter((s) => s.count > 0);
 
     this.pipelineRows = [
       {
-        label: 'Draft',
-        description: 'Briefs recien creados o todavia sin una primera salida de IA.',
+        label: 'Brief / Draft',
+        description: 'Intake pendiente de primera generacion o de completar la estructura inicial.',
         count: draft,
         tagClass: 'console-tag--muted',
       },
       {
-        label: 'AI generation',
-        description: 'Contenido generado que todavia no completo QA ni aprobacion.',
+        label: 'AI / Review',
+        description: 'Contenido con version viva que aun requiere lectura, calibracion o QA inicial.',
         count: aiGen,
         tagClass: 'console-tag--warning',
       },
       {
-        label: 'Review and QA',
-        description: 'Piezas listas para decision humana o ya aprobadas.',
+        label: 'Approval / Release',
+        description: 'Piezas sin blockers que ya pueden aprobarse o entrar en release.',
         count: review,
         tagClass: 'console-tag--accent',
       },
@@ -360,8 +487,8 @@ export class DashboardPageComponent implements OnInit {
         tagClass: 'console-tag--success',
       },
       {
-        label: 'Failed',
-        description: 'Publicaciones fallidas que requieren intervencion.',
+        label: 'Blocked',
+        description: 'Blockers editoriales o fallos de publish que requieren intervencion.',
         count: failed,
         tagClass: 'console-tag--danger',
       },
@@ -388,8 +515,8 @@ export class DashboardPageComponent implements OnInit {
       {
         label: 'Publishing healthy',
         detail: incidents === 0
-          ? 'No failed jobs or blocked projects.'
-          : `${incidents} incident${incidents > 1 ? 's' : ''} need attention.`,
+          ? 'No blocked projects or failed jobs.'
+          : `${incidents} operational incident${incidents > 1 ? 's' : ''} need attention.`,
         ok: incidents === 0,
       },
       {
@@ -402,7 +529,44 @@ export class DashboardPageComponent implements OnInit {
     ];
   }
 
-  private countProjects(status: StudioProjectSummary['status']): number {
-    return this.projects.filter((project) => project.status === status).length;
+  private pipelineBucket(project: StudioProjectSummary): 'draft' | 'ai' | 'review' | 'published' | 'failed' {
+    switch (project.reviewGate.stage) {
+      case 'published':
+        return 'published';
+      case 'qa_blocked':
+      case 'publish_failed':
+        return 'failed';
+      case 'ready_to_approve':
+      case 'approved':
+      case 'publish_queued':
+        return 'review';
+      case 'awaiting_generation':
+        return 'draft';
+      case 'needs_review':
+      default:
+        return project.latestVersion?.status === 'draft' ? 'draft' : 'ai';
+    }
+  }
+
+  private projectNeedsAttention(project: StudioProjectSummary): boolean {
+    return project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed';
+  }
+
+  private projectAttentionRank(project: StudioProjectSummary): number {
+    switch (project.reviewGate.stage) {
+      case 'publish_failed':
+        return 5;
+      case 'qa_blocked':
+        return 4;
+      case 'ready_to_approve':
+        return 3;
+      case 'approved':
+      case 'publish_queued':
+        return 2;
+      case 'needs_review':
+        return 1;
+      default:
+        return 0;
+    }
   }
 }

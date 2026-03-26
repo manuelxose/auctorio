@@ -7,6 +7,10 @@ export const BRAND_DESCRIPTION =
 export const BRAND_DOMAIN_OBJECTIVE = 'https://auctorio.com';
 export const STUDIO_BASE_PATH = '/studio';
 
+export function getStudioLoginPath(): string {
+  return `/login?entry=public`;
+}
+
 export const CHAT_WIDGET_API_BASE_URL = 'https://tecnoriasl.com/chat-api';
 export const CHAT_WIDGET_BASE_URL = 'https://tecnoriasl.com/chat-widget/';
 export const CHAT_WIDGET_BRAND_LABEL = 'Auctorio by Tecnoria';
