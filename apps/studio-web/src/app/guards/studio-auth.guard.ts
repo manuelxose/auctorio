@@ -4,6 +4,13 @@ import { Router } from '@angular/router';
 import type { StudioPermission } from '../models/studio.models';
 import { StudioSessionService } from '../services/studio-session.service';
 
+const DEFAULT_STUDIO_RETURN_TO = '/studio/dashboard';
+
+function resolveStudioReturnTo(value: string | null | undefined): string {
+  const normalized = String(value || '').trim();
+  return normalized.startsWith('/studio/') ? normalized : DEFAULT_STUDIO_RETURN_TO;
+}
+
 export const studioAuthGuard: CanActivateFn = async (
   _route: ActivatedRouteSnapshot,
   state: RouterStateSnapshot,
@@ -15,24 +22,12 @@ export const studioAuthGuard: CanActivateFn = async (
     await session.ensureSession();
     return true;
   } catch {
-    return router.createUrlTree(['/studio/login'], {
+    return router.createUrlTree(['/login'], {
       queryParams: {
         reason: 'session_expired',
         returnTo: state.url,
       },
     });
-  }
-};
-
-export const studioLoginGuard: CanActivateFn = async () => {
-  const router = inject(Router);
-  const session = inject(StudioSessionService);
-
-  try {
-    const current = await session.ensureSession();
-    return current ? router.createUrlTree(['/studio/dashboard']) : true;
-  } catch {
-    return true;
   }
 };
 
@@ -47,7 +42,7 @@ export const studioPermissionGuard: CanActivateFn = async (
   try {
     await session.ensureSession();
   } catch {
-    return router.createUrlTree(['/studio/login'], {
+    return router.createUrlTree(['/login'], {
       queryParams: {
         reason: 'session_expired',
         returnTo: state.url,

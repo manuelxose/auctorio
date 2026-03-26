@@ -14,6 +14,7 @@ import {
   getLocalizedUseCases,
   getMarketingHomeContent,
   getMarketingPath,
+  getStudioLoginPath,
 } from '../content/marketing-content';
 import { SeoService } from '../services/seo.service';
 
@@ -246,6 +247,9 @@ import { SeoService } from '../services/seo.service';
           <a class="marketing-button marketing-button--primary" [routerLink]="getPagePath('contact')">
             {{ locale === 'en' ? 'Request a demo' : 'Solicitar demo' }}
           </a>
+          <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
+            {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
+          </a>
           <a
             class="marketing-button marketing-button--ghost"
             [routerLink]="getPagePath('use_cases')"
@@ -265,6 +269,7 @@ export class HomePageComponent {
   readonly content = getMarketingHomeContent(this.locale);
   readonly brandName = BRAND_NAME;
   readonly tecnoriaLinks = TECNORIA_LINKS;
+  readonly studioLoginPath = getStudioLoginPath();
   readonly faqs = getLocalizedFaqEntries(this.locale);
   readonly examples = getHomeExamples(this.locale);
   readonly galleryAssets = getHomeAssets(this.locale);

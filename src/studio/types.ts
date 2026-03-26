@@ -11,6 +11,7 @@ import type {
   SiteType,
   StudioIdentityProvider,
   StudioInvitation,
+  StudioAccount,
   StudioPromptAssignment,
   StudioPromptPreset,
   StudioPromptScope,
@@ -19,7 +20,9 @@ import type {
   StudioPromptVersionStatus,
   StudioProvisioningMode,
   StudioRole,
+  StudioSessionAuthMode,
   StudioUser,
+  StudioAccountStatus,
   StudioUserStatus,
   Tenant,
   VersionStatus,
@@ -42,6 +45,15 @@ export type CreateProjectInput = {
   siteId: string;
   title: string;
   brief: string;
+  goal?: ProjectGoal;
+  primaryLanguage?: string;
+  metadata?: Record<string, unknown> | null;
+};
+
+export type UpdateProjectInput = {
+  siteId?: string;
+  title?: string;
+  brief?: string;
   goal?: ProjectGoal;
   primaryLanguage?: string;
   metadata?: Record<string, unknown> | null;
@@ -135,7 +147,7 @@ export type PaginatedResult<T> = {
 
 export type StudioSession = {
   tenant: Pick<Tenant, "id" | "name" | "slug" | "status">;
-  authMode: "api_key" | "oidc";
+  authMode: StudioSessionAuthMode | "api_key";
   user: {
     id: string;
     email: string;
@@ -153,6 +165,53 @@ export type StudioSession = {
   } | null;
   siteCount: number;
   projectCount: number;
+};
+
+export type StudioAccountWorkspaceSummary = {
+  workspace: Pick<Tenant, "id" | "name" | "slug" | "status">;
+  membershipStatus: StudioUserStatus;
+  requiresSso: boolean;
+  preferred: boolean;
+};
+
+export type StudioLoginOptions = {
+  email: string;
+  account: Pick<
+    StudioAccount,
+    "id" | "email" | "displayName" | "avatarUrl" | "status" | "lastWorkspaceId" | "emailVerifiedAt"
+  > | null;
+  accountState: StudioAccountStatus | "no_access";
+  canUsePassword: boolean;
+  canUseGoogle: boolean;
+  googleClientId: string | null;
+  needsActivation: boolean;
+  localWorkspaces: StudioAccountWorkspaceSummary[];
+  ssoWorkspaces: StudioAccountWorkspaceSummary[];
+  recommendedWorkspaceId: string | null;
+  requestAccessUrl: string;
+};
+
+export type StudioPasswordLoginInput = {
+  email: string;
+  password: string;
+  workspaceId?: string | null;
+};
+
+export type StudioGoogleLoginInput = {
+  credential: string;
+  emailHint?: string | null;
+  workspaceId?: string | null;
+};
+
+export type StudioActivationInput = {
+  token: string;
+  password: string;
+  workspaceId?: string | null;
+};
+
+export type StudioPasswordResetInput = {
+  token: string;
+  password: string;
 };
 
 export type StudioIdentityProviderConfig = Pick<
@@ -341,6 +400,29 @@ export type PublicationExecutionState = Pick<
   targetStatus: PublicationTargetStatus | null;
 };
 
+export type ReviewGateStage =
+  | "awaiting_generation"
+  | "needs_review"
+  | "qa_blocked"
+  | "ready_to_approve"
+  | "approved"
+  | "publish_queued"
+  | "publish_failed"
+  | "published";
+
+export type ReviewGateSummary = {
+  stage: ReviewGateStage;
+  compareReady: boolean;
+  approvalReady: boolean;
+  publishReady: boolean;
+  blockerCount: number;
+  warningCount: number;
+  blockers: string[];
+  warnings: string[];
+  nextAction: string;
+  primaryConcern: string;
+};
+
 export type VersionSummary = Pick<
   ContentVersion,
   | "id"
@@ -364,6 +446,9 @@ export type VersionSummary = Pick<
   promptVersionLabel: string | null;
   promptPresetName: string | null;
   promptPresetKey: string | null;
+  wordCount: number;
+  qaFailureCount: number;
+  qaWarningCount: number;
   derivativeCount: number;
   latestPublicationJob: PublicationExecutionState | null;
   qaReport: ContentVersion["qaReport"];
@@ -382,6 +467,8 @@ export type StudioProjectSummary = Pick<
   | "updatedAt"
 > & {
   site: Pick<Site, "id" | "key" | "name" | "type" | "locale" | "baseUrl">;
+  versionCount: number;
+  reviewGate: ReviewGateSummary;
   latestVersion: VersionSummary | null;
   latestPublicationJob: PublicationExecutionState | null;
 };

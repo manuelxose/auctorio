@@ -3,11 +3,21 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import type { PublicationListItem, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import type {
+  PublicationListItem,
+  ReviewGateStage,
+  StudioProjectSummary,
+  StudioSiteSummary,
+} from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone as getReviewStageTone,
+} from '../utils/review-gate';
 
 type CalendarFocus = 'all' | 'updated' | 'releaseReady' | 'published';
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
 
 type CalendarEvent = {
   id: string;
@@ -17,6 +27,7 @@ type CalendarEvent = {
   label: string;
   detail: string;
   status: string;
+  tone: TagTone;
   occurredAt: string;
   link: string[];
 };
@@ -68,7 +79,7 @@ type CalendarGroup = {
         <article class="console-stat-card">
           <p class="console-stat-card__label">Ready for release</p>
           <strong class="console-stat-card__value">{{ releaseReadyCount }}</strong>
-          <span class="console-stat-card__detail">Aprobadas o en cola, listas para pasar por el tramo final de publish.</span>
+          <span class="console-stat-card__detail">Piezas que realmente pueden entrar en scheduled release sin blockers editoriales abiertos.</span>
         </article>
 
         <article class="console-stat-card">
@@ -94,7 +105,7 @@ type CalendarGroup = {
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, destination or event type"
+                  placeholder="Project, destination, gate, runtime or event type"
                   (input)="applyFilters()"
                 />
               </label>
@@ -132,7 +143,14 @@ type CalendarGroup = {
                       <p>{{ event.detail }}</p>
                     </div>
                     <div class="console-calendar-day__meta">
-                      <span class="console-tag" [class.console-tag--accent]="event.kind === 'project'">
+                      <span
+                        class="console-tag"
+                        [class.console-tag--accent]="event.tone === 'accent'"
+                        [class.console-tag--warning]="event.tone === 'warning'"
+                        [class.console-tag--success]="event.tone === 'success'"
+                        [class.console-tag--danger]="event.tone === 'danger'"
+                        [class.console-tag--muted]="event.tone === 'muted'"
+                      >
                         {{ event.label }}
                       </span>
                       <a class="console-link" [routerLink]="event.link">{{ event.status }}</a>
@@ -154,12 +172,21 @@ type CalendarGroup = {
             </div>
 
             <div class="console-action-stack" *ngIf="releaseProjects.length; else emptyReleaseLane">
-              <a class="console-action-card" *ngFor="let project of releaseProjects" [routerLink]="['/studio/publishing/scheduled']">
+              <a class="console-action-card" *ngFor="let project of releaseProjects" [routerLink]="releaseLink(project)">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <span>{{ project.site.name }} · {{ project.status }}</span>
+                  <span>{{ project.site.name }} · {{ releaseNarrative(project) }}</span>
                 </div>
-                <span class="console-tag console-tag--accent">Release</span>
+                <span
+                  class="console-tag"
+                  [class.console-tag--accent]="releaseTone(project) === 'accent'"
+                  [class.console-tag--warning]="releaseTone(project) === 'warning'"
+                  [class.console-tag--success]="releaseTone(project) === 'success'"
+                  [class.console-tag--danger]="releaseTone(project) === 'danger'"
+                  [class.console-tag--muted]="releaseTone(project) === 'muted'"
+                >
+                  {{ releaseBadge(project) }}
+                </span>
               </a>
             </div>
           </section>
@@ -177,10 +204,10 @@ type CalendarGroup = {
                 Esta vista no promete programación futura exacta: ordena la cadencia editorial observable hoy.
               </li>
               <li class="console-note-list__item">
-                Combina cambios de proyectos con publication jobs para dar una lectura continua del workflow.
+                Combina review gate y publication jobs para dar una lectura continua del workflow, no un simple historial de enums técnicos.
               </li>
               <li class="console-note-list__item">
-                Cuando exista scheduling real, esta pantalla podrá pasar de agenda operativa a calendario editorial completo.
+                Cuando exista scheduling real con ventanas temporales, esta agenda ya tendrá la semántica editorial correcta para crecer sin rehacerse.
               </li>
             </ul>
           </section>
@@ -272,10 +299,10 @@ export class EditorialCalendarPageComponent implements OnInit {
       .filter((project) => !siteId || project.siteId === siteId)
       .filter((project) => {
         if (focus === 'releaseReady') {
-          return ['approved', 'publish_queued'].includes(project.status);
+          return this.isReleaseReady(project);
         }
         if (focus === 'published') {
-          return project.status === 'published';
+          return project.reviewGate.stage === 'published';
         }
         return true;
       })
@@ -284,11 +311,12 @@ export class EditorialCalendarPageComponent implements OnInit {
         dayKey: this.dayKey(project.updatedAt),
         title: project.title,
         kind: 'project',
-        label: 'Project update',
-        detail: `${project.site.name} · ${project.goal} · ${project.status}`,
-        status: 'Open article',
+        label: this.projectEventLabel(project),
+        detail: `${project.site.name} · ${project.goal} · ${this.projectEventDetail(project)}`,
+        status: this.projectEventActionLabel(project),
+        tone: this.projectEventTone(project.reviewGate.stage),
         occurredAt: project.updatedAt,
-        link: ['/studio/editorial/articles', project.id],
+        link: this.projectEventLink(project),
       }));
 
     const publicationEvents = this.publications
@@ -313,6 +341,7 @@ export class EditorialCalendarPageComponent implements OnInit {
         label: 'Publishing',
         detail: `${item.site.name} · ${item.action} · ${item.status}`,
         status: 'Open history',
+        tone: this.publicationTone(item.status),
         occurredAt: item.updatedAt,
         link: ['/studio/publishing/history'],
       }));
@@ -349,7 +378,7 @@ export class EditorialCalendarPageComponent implements OnInit {
       return item.status === 'published' && updated >= weekStart.getTime();
     }).length;
     this.releaseReadyCount = this.projects.filter((project) =>
-      ['approved', 'publish_queued'].includes(project.status),
+      this.isReleaseReady(project),
     ).length;
     this.activeDestinationCount = new Set(
       [
@@ -359,9 +388,53 @@ export class EditorialCalendarPageComponent implements OnInit {
     ).size;
 
     this.releaseProjects = this.projects
-      .filter((project) => ['approved', 'publish_queued'].includes(project.status))
+      .filter((project) =>
+        ['approved', 'publish_queued', 'publish_failed'].includes(project.reviewGate.stage) &&
+        (project.reviewGate.publishReady || project.reviewGate.stage === 'publish_queued'),
+      )
       .filter((project) => !siteId || project.siteId === siteId)
+      .sort((left, right) => this.releasePriority(right) - this.releasePriority(left))
       .slice(0, 6);
+  }
+
+  releaseBadge(project: StudioProjectSummary): string {
+    if (project.reviewGate.stage === 'publish_queued') {
+      return 'Queued';
+    }
+
+    if (project.reviewGate.stage === 'publish_failed') {
+      return 'Retry publish';
+    }
+
+    return 'Release ready';
+  }
+
+  releaseTone(project: StudioProjectSummary): TagTone {
+    if (project.reviewGate.stage === 'publish_failed') {
+      return 'danger';
+    }
+
+    if (project.reviewGate.stage === 'publish_queued') {
+      return 'warning';
+    }
+
+    return 'accent';
+  }
+
+  releaseNarrative(project: StudioProjectSummary): string {
+    if (project.reviewGate.stage === 'publish_failed') {
+      return project.reviewGate.primaryConcern;
+    }
+
+    return project.reviewGate.nextAction;
+  }
+
+  releaseLink(project: StudioProjectSummary): string[] {
+    if (project.reviewGate.stage === 'publish_queued') {
+      return ['/studio/publishing/history'];
+    }
+
+    return ['/studio/publishing/scheduled'];
   }
 
   private dayKey(value: string): string {
@@ -388,5 +461,87 @@ export class EditorialCalendarPageComponent implements OnInit {
       day: 'numeric',
       year: 'numeric',
     });
+  }
+
+  private isReleaseReady(project: StudioProjectSummary): boolean {
+    return (
+      project.reviewGate.publishReady &&
+      ['approved', 'publish_queued', 'publish_failed'].includes(project.reviewGate.stage)
+    );
+  }
+
+  private projectEventLabel(project: StudioProjectSummary): string {
+    if (project.reviewGate.stage === 'published') {
+      return 'Live content';
+    }
+
+    if (project.reviewGate.stage === 'publish_queued') {
+      return 'Queued for publish';
+    }
+
+    return formatReviewStageLabel(project.reviewGate.stage);
+  }
+
+  private projectEventDetail(project: StudioProjectSummary): string {
+    if (project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed') {
+      return project.reviewGate.primaryConcern;
+    }
+
+    return project.reviewGate.nextAction;
+  }
+
+  private projectEventActionLabel(project: StudioProjectSummary): string {
+    if (['approved', 'publish_queued', 'publish_failed'].includes(project.reviewGate.stage)) {
+      return 'Open scheduled';
+    }
+
+    if (project.reviewGate.stage === 'published') {
+      return 'Open article';
+    }
+
+    return 'Open article';
+  }
+
+  private projectEventLink(project: StudioProjectSummary): string[] {
+    if (['approved', 'publish_queued', 'publish_failed'].includes(project.reviewGate.stage)) {
+      return ['/studio/publishing/scheduled'];
+    }
+
+    return ['/studio/editorial/articles', project.id];
+  }
+
+  private projectEventTone(stage: ReviewGateStage): TagTone {
+    return getReviewStageTone(stage);
+  }
+
+  private publicationTone(status: PublicationListItem['status']): TagTone {
+    switch (status) {
+      case 'published':
+        return 'success';
+      case 'failed':
+        return 'danger';
+      case 'queued':
+      case 'processing':
+      case 'draft_synced':
+        return 'accent';
+      default:
+        return 'muted';
+    }
+  }
+
+  private releasePriority(project: StudioProjectSummary): number {
+    if (project.reviewGate.stage === 'publish_failed') {
+      return 3;
+    }
+
+    if (project.reviewGate.stage === 'publish_queued') {
+      return 2;
+    }
+
+    if (project.reviewGate.stage === 'approved') {
+      return 1;
+    }
+
+    return 0;
   }
 }

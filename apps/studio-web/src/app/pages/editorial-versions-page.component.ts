@@ -1,72 +1,111 @@
-import { CommonModule, DatePipe } from '@angular/common';
+import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import type { ProjectStatus, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import { forkJoin } from 'rxjs';
+import type { ReviewGateStage, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
+import { StudioStatStripComponent, type StudioStatItem } from '../components/studio-stat-strip.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  buildQaScore,
+  qaScoreLabel as formatQaScoreLabel,
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone,
+} from '../utils/review-gate';
 
 type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareReady';
 
 @Component({
   selector: 'app-editorial-versions-page',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, RouterLink, DatePipe],
+  imports: [CommonModule, ReactiveFormsModule, RouterLink, StudioPageHeaderComponent, StudioStatStripComponent],
   template: `
     <section class="console-page">
-      <header class="console-page__header">
-        <div class="console-page__copy">
-          <p class="console-kicker">Editorial</p>
-          <h1 class="console-page__title">Versions</h1>
-          <p class="console-page__intro">
-            Inventario de snapshots editoriales, readiness QA y capacidad de comparación antes de aprobar o publicar.
-          </p>
+      <app-studio-page-header
+        kicker="Editorial"
+        title="Versions"
+        intro="Inventario vivo de snapshots editoriales, compare readiness y bloqueo operativo antes de aprobar o publicar."
+      >
+        <div page-meta *ngIf="!loading">
+          <span class="console-tag console-tag--accent">{{ compareReadyCount }} compare ready</span>
+          <span class="console-tag console-tag--warning">{{ gateBlockedCount }} gate blocked</span>
+          <span class="console-tag console-tag--muted">{{ unversionedProjects.length }} missing first version</span>
         </div>
 
-        <div class="console-page__actions">
+        <div page-actions>
           <a class="console-button console-button--secondary" routerLink="/studio/editorial/articles">
             Open articles
           </a>
           <button type="button" class="console-button" (click)="loadData()">Refresh versions</button>
         </div>
-      </header>
+      </app-studio-page-header>
 
       <div class="console-banner console-banner--error" *ngIf="error">{{ error }}</div>
 
-      <div class="console-stat-grid" *ngIf="!loading">
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Latest snapshots</p>
-          <strong class="console-stat-card__value">{{ versionedProjects.length }}</strong>
-          <span class="console-stat-card__detail">Proyectos que ya cuentan con al menos una version registrada.</span>
-        </article>
+      <app-studio-stat-strip *ngIf="!loading" [items]="versionStats"></app-studio-stat-strip>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Compare ready</p>
-          <strong class="console-stat-card__value">{{ compareReadyCount }}</strong>
-          <span class="console-stat-card__detail">Piezas con suficiente memoria de revisiones para abrir compare mode.</span>
-        </article>
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid console-hero-grid--compact">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Version posture</p>
+            <h2 class="console-surface__title">Revision memory and compare readiness</h2>
+            <p class="console-hero-copy__body">{{ versionNarrative }}</p>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Approved snapshots</p>
-          <strong class="console-stat-card__value">{{ approvedCount }}</strong>
-          <span class="console-stat-card__detail">Versiones activas ya aprobadas y listas para release.</span>
-        </article>
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Saved snapshots</span>
+                <strong>{{ versionedProjects.length }}</strong>
+                <small>Projects that already keep a traceable editorial output.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Compare ready</span>
+                <strong>{{ compareReadyCount }}</strong>
+                <small>Pieces with enough saved memory to make iteration diffs useful.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Missing first pass</span>
+                <strong>{{ unversionedProjects.length }}</strong>
+                <small>Briefs that still need a first generated output before review can even start.</small>
+              </article>
+            </div>
+          </div>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Without version</p>
-          <strong class="console-stat-card__value">{{ unversionedProjects.length }}</strong>
-          <span class="console-stat-card__detail">Briefs o proyectos que aun no han generado una primera salida versionada.</span>
-        </article>
-      </div>
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Version memory lanes</h2>
+              </div>
+            </div>
+
+            <div class="console-focus-list">
+              <a
+                class="console-focus-card"
+                *ngFor="let card of focusCards"
+                [routerLink]="card.link"
+              >
+                <div>
+                  <strong>{{ card.title }}</strong>
+                  <p>{{ card.detail }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="card.tagClass">{{ card.tag }}</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div class="console-workspace" *ngIf="!loading; else loadingState">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Explorer</p>
                 <h2 class="console-surface__title">Version memory</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ filteredProjects.length }} indexed versions</span>
             </div>
 
             <form class="console-toolbar console-toolbar--stretch" [formGroup]="filterForm">
@@ -75,7 +114,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, version title, excerpt or destination"
+                  placeholder="Project, version title, blocker or destination"
                   (input)="applyFilters()"
                 />
               </label>
@@ -109,16 +148,10 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
                   </div>
                   <div class="console-version-card__tags">
                     <span class="console-tag console-tag--accent">V{{ project.latestVersion?.versionNumber }}</span>
-                    <span
-                      class="console-tag"
-                      [class.console-tag--success]="project.latestVersion?.qaState === 'published'"
-                      [class.console-tag--accent]="project.latestVersion?.qaState === 'approved' || project.latestVersion?.qaState === 'passed'"
-                      [class.console-tag--warning]="project.latestVersion?.qaState === 'not_ready'"
-                      [class.console-tag--danger]="project.latestVersion?.qaState === 'failed'"
-                    >
-                      {{ project.latestVersion?.qaState }}
+                    <span class="console-tag" [ngClass]="reviewTagClass(project.reviewGate.stage)">
+                      {{ reviewStageLabel(project.reviewGate.stage) }}
                     </span>
-                    <span class="console-tag console-tag--muted">{{ project.latestVersion?.status }}</span>
+                    <span class="console-tag console-tag--muted">{{ project.latestVersion?.qaState }}</span>
                   </div>
                 </div>
 
@@ -131,14 +164,30 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
 
                 <div class="console-meta-grid">
                   <article class="console-meta-card">
-                    <span>Updated</span>
-                    <strong>{{ project.latestVersion?.updatedAt | date: 'short' }}</strong>
+                    <span>Revision memory</span>
+                    <strong>{{ project.versionCount }} snapshots</strong>
                   </article>
                   <article class="console-meta-card">
-                    <span>Publication</span>
-                    <strong>{{ project.latestVersion?.latestPublicationJob?.status || 'not shipped' }}</strong>
+                    <span>QA posture</span>
+                    <strong>{{ qaScore(project) }}/100 · {{ qaScoreLabel(project) }}</strong>
+                  </article>
+                  <article class="console-meta-card">
+                    <span>Next action</span>
+                    <strong>{{ project.reviewGate.nextAction }}</strong>
                   </article>
                 </div>
+
+                <ul
+                  class="console-note-list"
+                  *ngIf="project.reviewGate.blockers.length || project.reviewGate.warnings.length"
+                >
+                  <li class="console-note-list__item" *ngFor="let blocker of project.reviewGate.blockers.slice(0, 2)">
+                    {{ blocker }}
+                  </li>
+                  <li class="console-note-list__item" *ngFor="let warning of project.reviewGate.warnings.slice(0, 1)">
+                    {{ warning }}
+                  </li>
+                </ul>
 
                 <div class="console-inline-actions">
                   <a class="console-button console-button--secondary" [routerLink]="['/studio/editorial/articles', project.id]">
@@ -148,7 +197,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
                     class="console-button"
                     [routerLink]="['/studio/editorial/versions', project.id]"
                   >
-                    {{ isCompareReady(project) ? 'Compare versions' : 'Open version detail' }}
+                    {{ project.reviewGate.compareReady ? 'Compare versions' : 'Open version detail' }}
                   </a>
                 </div>
               </article>
@@ -167,7 +216,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
               <article class="console-feed__item" *ngFor="let project of unversionedProjects.slice(0, 6)">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <p>{{ project.site.name }} · {{ project.status }} · {{ truncate(project.brief, 120) }}</p>
+                  <p>{{ project.site.name }} · {{ reviewStageLabel(project.reviewGate.stage) }} · {{ truncate(project.brief, 120) }}</p>
                 </div>
                 <a class="console-link" [routerLink]="['/studio/editorial/briefs', project.id]">Open brief</a>
               </article>
@@ -176,7 +225,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
         </div>
 
         <aside class="console-workspace__aside">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Ready for compare</p>
@@ -188,7 +237,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
               <a class="console-action-card" *ngFor="let project of compareReadyProjects" [routerLink]="['/studio/editorial/versions', project.id]">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <span>{{ project.site.name }} · V{{ project.latestVersion?.versionNumber }}</span>
+                  <span>{{ project.site.name }} · {{ project.versionCount }} snapshots</span>
                 </div>
                 <span class="console-tag console-tag--accent">Compare</span>
               </a>
@@ -205,13 +254,13 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
 
             <ul class="console-note-list">
               <li class="console-note-list__item">
-                La version activa sigue siendo la referencia operativa, pero esta vista separa memoria editorial de article editing.
+                Compare readiness ya no usa un proxy visual: depende de la memoria real de versiones guardadas.
               </li>
               <li class="console-note-list__item">
-                Compare ready usa el numero de version como proxy de historial suficiente para comparar iteraciones.
+                El review gate resume blockers, warnings y siguiente accion operativa sin abrir el detalle del articulo.
               </li>
               <li class="console-note-list__item">
-                El siguiente salto sera añadir restore o promote version cuando el backend exponga esa accion.
+                Esta vista sigue siendo catalogo editorial; la decision humana y el publish viven en review y release management.
               </li>
             </ul>
           </section>
@@ -223,7 +272,7 @@ type VersionFocus = 'all' | 'needsReview' | 'approved' | 'published' | 'compareR
           <div>
             <p class="console-kicker">Loading</p>
             <h2>Indexing version memory</h2>
-            <p>Estamos reuniendo snapshots, estados QA y readiness de comparación.</p>
+            <p>Estamos reuniendo snapshots, review gates y readiness de comparacion.</p>
           </div>
         </section>
       </ng-template>
@@ -258,9 +307,94 @@ export class EditorialVersionsPageComponent implements OnInit {
   compareReadyProjects: StudioProjectSummary[] = [];
   unversionedProjects: StudioProjectSummary[] = [];
   compareReadyCount = 0;
-  approvedCount = 0;
+  gateBlockedCount = 0;
   loading = true;
   error = '';
+
+  get versionStats(): StudioStatItem[] {
+    return [
+      {
+        label: 'Latest snapshots',
+        value: this.versionedProjects.length,
+        detail: 'Proyectos que ya cuentan con una salida versionada y trazable.',
+        tone: this.versionedProjects.length > 0 ? 'accent' : 'muted',
+      },
+      {
+        label: 'Compare ready',
+        value: this.compareReadyCount,
+        detail: 'Piezas con memoria suficiente para revisar diffs entre iteraciones.',
+        tone: this.compareReadyCount > 0 ? 'accent' : 'muted',
+      },
+      {
+        label: 'Blocked by gate',
+        value: this.gateBlockedCount,
+        detail: 'Versiones cuya aprobacion o publish siguen frenados por QA o inputs faltantes.',
+        tone: this.gateBlockedCount > 0 ? 'warning' : 'muted',
+      },
+      {
+        label: 'Without version',
+        value: this.unversionedProjects.length,
+        detail: 'Briefs o proyectos que aun no han generado una primera salida versionada.',
+        tone: this.unversionedProjects.length > 0 ? 'danger' : 'muted',
+      },
+    ];
+  }
+
+  get versionNarrative(): string {
+    if (!this.projects.length) {
+      return 'No hay proyectos cargados en el indice editorial. Cuando entren briefs y primeras salidas, este modulo mostrara la memoria de iteracion real.';
+    }
+
+    if (this.unversionedProjects.length > 0) {
+      return `${this.unversionedProjects.length} piezas siguen sin una primera version guardada. El cuello de botella no esta en compare, sino en producir y persistir el primer output util.`;
+    }
+
+    if (this.gateBlockedCount > 0) {
+      return `${this.gateBlockedCount} versiones tienen memoria suficiente, pero siguen frenadas por blockers de gate. Compare ya no es el problema; el problema es readiness editorial real.`;
+    }
+
+    if (this.compareReadyCount > 0) {
+      return `${this.compareReadyCount} piezas ya tienen suficiente historial para comparar iteraciones con criterio. Version memory deja de ser catalogo y pasa a ser soporte operativo para review.`;
+    }
+
+    return 'Las versiones estan vivas, pero con poca profundidad de iteracion. El siguiente paso es seguir guardando memoria util para que compare y review ganen contexto.';
+  }
+
+  get focusCards(): Array<{ title: string; detail: string; link: string | any[]; tag: string; tagClass: string }> {
+    const compareLead = this.compareReadyProjects[0];
+    const blockedLead = this.versionedProjects.find((project) => project.reviewGate.blockerCount > 0);
+    const missingLead = this.unversionedProjects[0];
+
+    return [
+      {
+        title: compareLead ? compareLead.title : 'Compare lane',
+        detail: compareLead
+          ? `${compareLead.site.name} · ${compareLead.versionCount} snapshots ready for diff review.`
+          : 'No project has enough saved history yet. Keep persisting iterations before relying on compare.',
+        link: compareLead ? ['/studio/editorial/versions', compareLead.id] : '/studio/editorial/versions',
+        tag: compareLead ? 'Compare ready' : 'Shallow memory',
+        tagClass: compareLead ? 'console-tag--accent' : 'console-tag--muted',
+      },
+      {
+        title: blockedLead ? blockedLead.title : 'Gate blockers',
+        detail: blockedLead
+          ? `${blockedLead.reviewGate.blockerCount} blockers · ${blockedLead.reviewGate.nextAction}`
+          : 'No saved version is currently blocked by QA or release prerequisites.',
+        link: blockedLead ? ['/studio/editorial/versions', blockedLead.id] : '/studio/review/qa',
+        tag: blockedLead ? 'Blocked' : 'Healthy',
+        tagClass: blockedLead ? 'console-tag--warning' : 'console-tag--success',
+      },
+      {
+        title: missingLead ? missingLead.title : 'First version queue',
+        detail: missingLead
+          ? `${missingLead.site.name} · brief ready but still missing the first persisted output.`
+          : 'Every visible project already has at least one saved version.',
+        link: missingLead ? ['/studio/editorial/briefs', missingLead.id] : '/studio/editorial/articles',
+        tag: missingLead ? 'Needs first pass' : 'Covered',
+        tagClass: missingLead ? 'console-tag--danger' : 'console-tag--success',
+      },
+    ];
+  }
 
   ngOnInit(): void {
     this.loadData();
@@ -270,22 +404,17 @@ export class EditorialVersionsPageComponent implements OnInit {
     this.loading = true;
     this.error = '';
 
-    this.api.listSites(1, 100).subscribe({
-      next: (sites) => {
+    forkJoin({
+      sites: this.api.listSites(1, 100),
+      projects: this.api.listProjects({ page: 1, pageSize: 100 }),
+    }).subscribe({
+      next: ({ sites, projects }) => {
         this.sites = sites.items;
-        this.api.listProjects({ page: 1, pageSize: 100 }).subscribe({
-          next: (projects) => {
-            this.projects = projects.items.sort(
-              (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
-            );
-            this.applyFilters();
-            this.loading = false;
-          },
-          error: (error) => {
-            this.error = formatApiError(error);
-            this.loading = false;
-          },
-        });
+        this.projects = projects.items.sort(
+          (left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt),
+        );
+        this.applyFilters();
+        this.loading = false;
       },
       error: (error) => {
         this.error = formatApiError(error);
@@ -301,58 +430,88 @@ export class EditorialVersionsPageComponent implements OnInit {
 
     this.versionedProjects = this.projects.filter((project) => Boolean(project.latestVersion));
     this.unversionedProjects = this.projects.filter((project) => !project.latestVersion);
-    this.compareReadyCount = this.versionedProjects.filter((project) => this.isCompareReady(project)).length;
-    this.approvedCount = this.versionedProjects.filter((project) =>
-      ['approved', 'published'].includes(project.latestVersion?.status || ''),
-    ).length;
+    this.compareReadyCount = this.versionedProjects.filter((project) => project.reviewGate.compareReady).length;
+    this.gateBlockedCount = this.versionedProjects.filter((project) => project.reviewGate.blockerCount > 0).length;
 
-    this.filteredProjects = this.versionedProjects
-      .filter((project) => {
-        if (siteId && project.siteId !== siteId) {
-          return false;
-        }
+    this.filteredProjects = this.versionedProjects.filter((project) => {
+      if (siteId && project.siteId !== siteId) {
+        return false;
+      }
 
-        if (focus === 'needsReview' && !this.needsReview(project.status)) {
-          return false;
-        }
+      if (focus === 'needsReview' && !this.needsReview(project.reviewGate.stage)) {
+        return false;
+      }
 
-        if (focus === 'approved' && !['approved'].includes(project.latestVersion?.status || '')) {
-          return false;
-        }
+      if (focus === 'approved' && project.reviewGate.stage !== 'approved') {
+        return false;
+      }
 
-        if (focus === 'published' && !['published'].includes(project.latestVersion?.status || '')) {
-          return false;
-        }
+      if (focus === 'published' && project.reviewGate.stage !== 'published') {
+        return false;
+      }
 
-        if (focus === 'compareReady' && !this.isCompareReady(project)) {
-          return false;
-        }
+      if (focus === 'compareReady' && !project.reviewGate.compareReady) {
+        return false;
+      }
 
-        if (!query) {
-          return true;
-        }
+      if (!query) {
+        return true;
+      }
 
-        return [
-          project.title,
-          project.site.name,
-          project.latestVersion?.title || '',
-          project.latestVersion?.excerpt || '',
-          project.latestVersion?.status || '',
-          project.latestVersion?.qaState || '',
-        ]
-          .join(' ')
-          .toLowerCase()
-          .includes(query);
-      });
+      return [
+        project.title,
+        project.site.name,
+        project.latestVersion?.title || '',
+        project.latestVersion?.excerpt || '',
+        project.reviewGate.primaryConcern,
+        project.reviewGate.nextAction,
+        ...(project.reviewGate.blockers || []),
+        ...(project.reviewGate.warnings || []),
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
 
     this.compareReadyProjects = this.versionedProjects
-      .filter((project) => this.isCompareReady(project))
+      .filter((project) => project.reviewGate.compareReady)
       .filter((project) => !siteId || project.siteId === siteId)
+      .sort((left, right) => {
+        if (right.versionCount !== left.versionCount) {
+          return right.versionCount - left.versionCount;
+        }
+
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      })
       .slice(0, 6);
   }
 
-  isCompareReady(project: StudioProjectSummary): boolean {
-    return (project.latestVersion?.versionNumber ?? 0) > 1;
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return formatReviewStageLabel(stage);
+  }
+
+  reviewTagClass(stage: ReviewGateStage): string {
+    switch (reviewStageTone(stage)) {
+      case 'danger':
+        return 'console-tag--danger';
+      case 'warning':
+        return 'console-tag--warning';
+      case 'accent':
+        return 'console-tag--accent';
+      case 'success':
+        return 'console-tag--success';
+      case 'muted':
+      default:
+        return 'console-tag--muted';
+    }
+  }
+
+  qaScore(project: StudioProjectSummary): number {
+    return buildQaScore(project.latestVersion);
+  }
+
+  qaScoreLabel(project: StudioProjectSummary): string {
+    return formatQaScoreLabel(this.qaScore(project));
   }
 
   truncate(text: string | null | undefined, limit: number): string {
@@ -366,7 +525,7 @@ export class EditorialVersionsPageComponent implements OnInit {
       : normalized;
   }
 
-  private needsReview(status: ProjectStatus): boolean {
-    return ['ai_generated', 'qa_failed', 'qa_passed', 'in_review'].includes(status);
+  private needsReview(stage: ReviewGateStage): boolean {
+    return ['needs_review', 'qa_blocked', 'ready_to_approve'].includes(stage);
   }
 }

@@ -15,6 +15,11 @@ export const STUDIO_ORIGIN = new InjectionToken<string>('STUDIO_ORIGIN', {
       return normalizeOrigin(window.location.origin);
     }
 
+    const internalOrigin = request?.headers.get('x-studio-internal-origin');
+    if (internalOrigin) {
+      return normalizeOrigin(internalOrigin);
+    }
+
     const protocol =
       request?.headers.get('x-forwarded-proto') ||
       (request?.url.startsWith('https://') ? 'https' : 'http');

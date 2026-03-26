@@ -1,0 +1,224 @@
+:host {
+  display: block;
+  min-height: 100%;
+}
+
+.console-auth--saas {
+  align-items: stretch;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(91, 149, 255, 0.14), transparent 26%),
+    radial-gradient(circle at 88% 18%, rgba(29, 78, 216, 0.12), transparent 24%),
+    linear-gradient(180deg, #06101f 0%, #0a1423 48%, #09101b 100%);
+}
+
+.studio-login-hero {
+  align-content: center;
+  padding: 1rem 0;
+}
+
+.studio-login-hero > p {
+  max-width: 58ch;
+}
+
+.studio-login-hero__signals {
+  margin-top: 1rem;
+}
+
+.studio-login-panel {
+  display: grid;
+  gap: 1rem;
+  align-content: start;
+}
+
+.studio-login-panel__head {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.studio-login-panel__head p {
+  margin: 0;
+}
+
+.studio-login-account,
+.studio-login-state,
+.studio-login-workspaces,
+.studio-login-method {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1.1rem;
+  border-radius: 22px;
+  border: 1px solid var(--console-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.studio-login-account--active {
+  background: linear-gradient(180deg, rgba(22, 33, 57, 0.88), rgba(10, 18, 31, 0.92));
+  border-color: rgba(87, 135, 255, 0.22);
+  box-shadow: 0 28px 54px rgba(4, 12, 27, 0.34);
+}
+
+.studio-login-account__copy,
+.studio-login-account__actions,
+.studio-login-method__head,
+.studio-login-method__actions,
+.studio-login-state__actions,
+.studio-login-email,
+.studio-login-identity {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.studio-login-account__actions,
+.studio-login-method__actions,
+.studio-login-state__actions {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  align-items: stretch;
+}
+
+.studio-login-panel .console-button:not(.console-button--secondary) {
+  background: linear-gradient(135deg, #245eff 0%, #4c83ff 100%);
+  color: #ffffff;
+  box-shadow: 0 18px 36px rgba(36, 94, 255, 0.24);
+}
+
+.studio-login-panel .console-button:not(.console-button--secondary):hover {
+  box-shadow: 0 22px 42px rgba(36, 94, 255, 0.3);
+}
+
+.studio-login-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  color: var(--console-subtle);
+  font-size: 0.9rem;
+}
+
+.studio-login-divider::before,
+.studio-login-divider::after {
+  content: '';
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.studio-login-account__copy h3,
+.studio-login-state h3,
+.studio-login-workspaces__head h3,
+.studio-login-method__head h3 {
+  margin: 0;
+  color: var(--console-text);
+}
+
+.studio-login-account__copy p,
+.studio-login-state p,
+.studio-login-workspaces__head p,
+.studio-login-method__head p {
+  margin: 0;
+}
+
+.studio-login-email__actions {
+  display: grid;
+}
+
+.studio-login-identity {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--console-stroke);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.studio-login-identity strong,
+.studio-login-workspace-pill strong,
+.studio-login-sso-card strong {
+  color: var(--console-text);
+}
+
+.studio-login-identity p,
+.studio-login-workspace-pill span,
+.studio-login-sso-card p {
+  margin: 0;
+  color: var(--console-subtle);
+}
+
+.studio-login-workspace-pills,
+.studio-login-sso-grid {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.studio-login-workspace-pills {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.studio-login-workspace-pill,
+.studio-login-sso-card {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.95rem 1rem;
+  border-radius: 18px;
+  border: 1px solid var(--console-stroke);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.studio-login-workspace-pill.is-selected {
+  border-color: rgba(116, 176, 255, 0.42);
+  background: rgba(29, 78, 216, 0.12);
+}
+
+.studio-login-sso-grid {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.studio-login-sso-card {
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--transition),
+    border-color var(--transition),
+    background var(--transition),
+    box-shadow var(--transition);
+}
+
+.studio-login-sso-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(116, 176, 255, 0.42);
+  background: rgba(29, 78, 216, 0.12);
+  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.2);
+}
+
+.studio-login-google {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.studio-login-google__button {
+  min-height: 48px;
+}
+
+.studio-login-footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.85rem;
+  align-items: center;
+  padding-top: 0.35rem;
+}
+
+@media (max-width: 820px) {
+  .studio-login-identity {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-login-account__actions,
+  .studio-login-method__actions,
+  .studio-login-state__actions {
+    grid-template-columns: 1fr;
+  }
+
+  .studio-login-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

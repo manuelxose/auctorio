@@ -23,16 +23,22 @@ import {
   listProjects,
   listPublicationJobs,
   listSites,
+  updateProject,
   updateProjectStatus,
   updateSite,
 } from "./repository";
 import {
+  acceptStudioInvitation,
   assignStudioRoleToUser,
   buildApiKeyStudioSession,
   completeStudioSsoLogin,
+  createStudioLaunchTicket,
+  getStudioLoginOptions,
   getInternalStudioIdentityProviderBySlug,
   getInternalStudioWorkspaceAccessBySlug,
   getStudioIdentityProviderConfig,
+  loginStudioAccountWithGoogle,
+  loginStudioAccountWithPassword,
   getStudioSessionBySessionId,
   getStudioSessionByToken,
   inviteStudioUser,
@@ -40,6 +46,9 @@ import {
   listStudioUsers,
   removeStudioRoleFromUser,
   revokeStudioSessionByToken,
+  redeemStudioLaunchTicket,
+  resetStudioPassword,
+  sendStudioPasswordReset,
   upsertStudioIdentityProvider,
   updateStudioRole,
   updateStudioUser,
@@ -61,6 +70,7 @@ import {
   listStudioPromptPresets,
   updateStudioPromptVersion,
 } from "./prompts";
+import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml } from "./review";
 import {
   buildStudioProxySignature,
   hasStudioPermission,
@@ -81,6 +91,7 @@ import type {
   PublicationTargetStatus,
   StudioProjectDetailView,
   UpdateStudioIdentityProviderInput,
+  UpdateProjectInput,
   UpdateStudioPromptVersionInput,
   UpdateStudioRoleInput,
   UpdateStudioUserInput,
@@ -154,6 +165,44 @@ function badRequest(reply: FastifyReply, message: string) {
 
 function notFound(reply: FastifyReply, message: string) {
   return reply.code(404).send({ error: "not_found", message });
+}
+
+function getAuthErrorStatus(message: string): number {
+  if (
+    [
+      "email_required",
+      "password_required",
+      "workspace_selection_required",
+      "workspace_not_authorized",
+      "google_login_not_configured",
+      "google_identity_invalid",
+      "google_email_not_verified",
+      "invite_invalid",
+      "invite_expired",
+      "invite_consumed",
+      "reset_invalid",
+      "reset_expired",
+      "reset_consumed",
+      "password_too_short",
+    ].includes(message)
+  ) {
+    return 400;
+  }
+
+  if (
+    [
+      "invalid_credentials",
+      "activation_required",
+      "password_login_not_available",
+      "user_not_authorized",
+      "user_suspended",
+      "google_subject_mismatch",
+    ].includes(message)
+  ) {
+    return 403;
+  }
+
+  return 500;
 }
 
 function parseBody<T>(request: FastifyRequest): T {
@@ -506,12 +555,37 @@ async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionS
     hasAsset: Boolean(version.contentImage?.storagePath),
     assetUrl: await buildAssetPublicUrl(version.contentImage?.storagePath),
     ...readPromptFields(version),
+    wordCount: countWordsFromHtml(version.bodyHtml),
+    qaFailureCount: countQaFailures(version.qaReport),
+    qaWarningCount: countQaWarnings(version.qaReport),
     derivativeCount: version.derivatives.length,
     latestPublicationJob: version.publicationJobs[0]
       ? mapPublicationState(version.publicationJobs[0] as PublicationRecord)
       : null,
     qaReport: version.qaReport,
   };
+}
+
+function buildProjectReviewGate(project: ProjectRecord) {
+  const latestVersionRecord = project.versions[0] ?? null;
+
+  return buildReviewGate({
+    projectStatus: project.status,
+    versionCount: project.versions.length,
+    latestVersion: latestVersionRecord
+      ? {
+          status: latestVersionRecord.status,
+          title: latestVersionRecord.title,
+          excerpt: latestVersionRecord.excerpt,
+          seoTitle: latestVersionRecord.seoTitle,
+          seoDescription: latestVersionRecord.seoDescription,
+          feedback: latestVersionRecord.feedback,
+          bodyHtml: latestVersionRecord.bodyHtml,
+          qaReport: latestVersionRecord.qaReport,
+          hasAsset: Boolean(latestVersionRecord.contentImage?.storagePath),
+        }
+      : null,
+  });
 }
 
 async function toProjectDetail(project: ProjectRecord): Promise<StudioProjectDetailView> {
@@ -535,6 +609,8 @@ async function toProjectDetail(project: ProjectRecord): Promise<StudioProjectDet
     primaryLanguage: project.primaryLanguage,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
+    versionCount: project.versions.length,
+    reviewGate: buildProjectReviewGate(project),
     metadata: project.metadata,
     site: {
       id: project.site.id,
@@ -636,6 +712,254 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     return reply.send(access);
+  });
+
+  fastify.post("/internal/login/options", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ email?: string }>(request);
+    const email = body.email?.trim() || "";
+    if (!email) {
+      return badRequest(reply, "email_required");
+    }
+
+    try {
+      const options = await getStudioLoginOptions(email);
+      return reply.send(options);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/login/password", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{
+      email?: string;
+      password?: string;
+      workspaceId?: string | null;
+    }>(request);
+
+    try {
+      const result = await loginStudioAccountWithPassword({
+        email: body.email?.trim() || "",
+        password: body.password || "",
+        workspaceId: body.workspaceId?.trim() || null,
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/login/google", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{
+      credential?: string;
+      emailHint?: string | null;
+      workspaceId?: string | null;
+    }>(request);
+
+    try {
+      const result = await loginStudioAccountWithGoogle({
+        credential: body.credential?.trim() || "",
+        emailHint: body.emailHint?.trim() || null,
+        workspaceId: body.workspaceId?.trim() || null,
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/password/forgot", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ email?: string }>(request);
+    try {
+      const result = await sendStudioPasswordReset(body.email?.trim() || "");
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/password/reset", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ token?: string; password?: string }>(request);
+    try {
+      const result = await resetStudioPassword({
+        token: body.token?.trim() || "",
+        password: body.password || "",
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/invitations/accept", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ token?: string; password?: string; workspaceId?: string | null }>(request);
+    try {
+      const result = await acceptStudioInvitation({
+        token: body.token?.trim() || "",
+        password: body.password || "",
+        workspaceId: body.workspaceId?.trim() || null,
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/launch-tickets", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{
+      workspace?: string;
+      email?: string;
+      displayName?: string | null;
+      returnTo?: string | null;
+      sourceApp?: string;
+    }>(request);
+
+    if (!body.workspace?.trim() || !body.email?.trim() || !body.sourceApp?.trim()) {
+      return badRequest(reply, "workspace, email and sourceApp are required");
+    }
+
+    try {
+      const ticket = await createStudioLaunchTicket({
+        slug: body.workspace.trim(),
+        email: body.email.trim(),
+        displayName: body.displayName ?? null,
+        returnTo: body.returnTo ?? null,
+        sourceApp: body.sourceApp.trim(),
+      });
+
+      request.log.info(
+        {
+          workspace: ticket.tenantSlug,
+          email: body.email.trim().toLowerCase(),
+          returnTo: ticket.returnTo,
+          sourceApp: body.sourceApp.trim(),
+        },
+        "studio_launch_ticket_created",
+      );
+
+      return reply.send(ticket);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      request.log.warn(
+        {
+          workspace: body.workspace?.trim(),
+          email: body.email?.trim().toLowerCase(),
+          returnTo: body.returnTo ?? null,
+          sourceApp: body.sourceApp?.trim(),
+          reason: message,
+        },
+        "studio_launch_ticket_failed",
+      );
+
+      if (message === "workspace_not_found") {
+        return notFound(reply, message);
+      }
+
+      if (
+        message === "workspace_launch_not_allowed" ||
+        message === "interactive_login_required" ||
+        message === "user_not_authorized" ||
+        message === "user_suspended"
+      ) {
+        return reply.code(403).send({ error: "forbidden", message });
+      }
+
+      return reply.code(500).send({ error: "internal_error", message });
+    }
+  });
+
+  fastify.post("/internal/launch-tickets/redeem", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ launchId?: string }>(request);
+    const launchId = body.launchId?.trim();
+    if (!launchId) {
+      return badRequest(reply, "launchId is required");
+    }
+
+    try {
+      const redeemed = await redeemStudioLaunchTicket(launchId);
+      request.log.info(
+        {
+          workspace: redeemed.tenantSlug,
+          returnTo: redeemed.returnTo,
+          userId: redeemed.session.user.id,
+          email: redeemed.session.user.email,
+        },
+        "studio_launch_ticket_redeemed",
+      );
+      return reply.send(redeemed);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      request.log.warn({ launchId, reason: message }, "studio_launch_ticket_redeem_failed");
+
+      if (
+        message === "launch_invalid" ||
+        message === "launch_consumed" ||
+        message === "launch_expired"
+      ) {
+        return reply.code(400).send({ error: "bad_request", message });
+      }
+
+      if (message === "user_suspended" || message === "user_not_found") {
+        return reply.code(403).send({ error: "forbidden", message });
+      }
+
+      return reply.code(500).send({ error: "internal_error", message });
+    }
   });
 
   fastify.post("/internal/session/oidc", async (request, reply) => {
@@ -914,6 +1238,83 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.put("/v2/projects/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+
+    const body = parseBody<UpdateProjectInput>(request);
+    if (
+      body.siteId === undefined &&
+      body.title === undefined &&
+      body.brief === undefined &&
+      body.goal === undefined &&
+      body.primaryLanguage === undefined &&
+      body.metadata === undefined
+    ) {
+      return badRequest(reply, "at least one project field must be provided");
+    }
+    if (body.siteId !== undefined && !body.siteId.trim()) {
+      return badRequest(reply, "siteId cannot be empty");
+    }
+    if (body.siteId && !isUuid(body.siteId)) {
+      return badRequest(reply, "invalid siteId");
+    }
+    if (body.title !== undefined && !body.title.trim()) {
+      return badRequest(reply, "title cannot be empty");
+    }
+    if (body.brief !== undefined && !body.brief.trim()) {
+      return badRequest(reply, "brief cannot be empty");
+    }
+    if (body.primaryLanguage !== undefined && !body.primaryLanguage.trim()) {
+      return badRequest(reply, "primaryLanguage cannot be empty");
+    }
+    if (body.goal && !isOneOf(body.goal, PROJECT_GOALS)) {
+      return badRequest(reply, `goal must be one of: ${PROJECT_GOALS.join(", ")}`);
+    }
+
+    const existingProject = await getProjectById(context.tenantId, projectId);
+    if (!existingProject) {
+      return notFound(reply, "project not found");
+    }
+
+    const nextSiteId = body.siteId?.trim();
+    if (nextSiteId && nextSiteId !== existingProject.siteId) {
+      const site = await getSiteById(context.tenantId, nextSiteId);
+      if (!site) {
+        return notFound(reply, "site not found");
+      }
+    }
+
+    try {
+      const parsedMetadata = parseJsonObjectField(body.metadata, "metadata");
+
+      await updateProject(context.tenantId, projectId, {
+        siteId: nextSiteId,
+        title: body.title?.trim(),
+        brief: body.brief?.trim(),
+        goal: body.goal,
+        primaryLanguage: body.primaryLanguage?.trim(),
+        metadata: parsedMetadata,
+      });
+
+      const updatedProject = await getProjectById(context.tenantId, projectId);
+      if (!updatedProject) {
+        return notFound(reply, "project not found");
+      }
+
+      return reply.send(await toProjectDetail(updatedProject));
+    } catch (error) {
+      return badRequest(reply, String(error));
+    }
+  });
+
   fastify.get("/v2/projects/:id", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
@@ -1019,8 +1420,9 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (!latestVersion) {
       return badRequest(reply, "project has no versions");
     }
-    if (latestVersion.status !== "qa_passed") {
-      return badRequest(reply, "latest version must pass QA before approval");
+    const reviewGate = buildProjectReviewGate(project);
+    if (!reviewGate.approvalReady) {
+      return badRequest(reply, reviewGate.primaryConcern || "latest version is not ready for approval");
     }
 
     await approveVersion(
@@ -1066,12 +1468,13 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (!latestVersion) {
       return badRequest(reply, "project has no versions");
     }
+    const reviewGate = buildProjectReviewGate(project);
 
     if (
       action !== "unpublish" &&
-      !["approved", "published"].includes(latestVersion.status)
+      !reviewGate.publishReady
     ) {
-      return badRequest(reply, "latest version must be approved before publishing");
+      return badRequest(reply, reviewGate.primaryConcern || "latest version is not ready for publishing");
     }
 
     const latestExternalId = await getLatestPublishedExternalId(

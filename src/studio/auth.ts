@@ -1,12 +1,26 @@
-import { Prisma, type PrismaClient, type StudioProvisioningMode, type StudioUserStatus, type TenantStatus } from "@prisma/client";
+import {
+  Prisma,
+  type PrismaClient,
+  type StudioProvisioningMode,
+  type StudioSessionAuthMode,
+  type StudioUserStatus,
+  type TenantStatus,
+} from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { getEnv } from "../shared/utils/env";
 import type {
   CreateStudioInvitationInput,
   CreateStudioRoleInput,
+  StudioActivationInput,
   StudioIdentityProviderConfig,
   StudioInvitationSummary,
+  StudioLoginOptions,
+  StudioPasswordLoginInput,
+  StudioPasswordResetInput,
+  StudioGoogleLoginInput,
   StudioRoleSummary,
   StudioSession,
+  StudioAccountWorkspaceSummary,
   StudioUserSummary,
   UpdateStudioIdentityProviderInput,
   UpdateStudioRoleInput,
@@ -24,16 +38,118 @@ import {
   type StudioPermission,
 } from "./security";
 import { ensureTenantPromptLibrarySeeded } from "./prompts";
+import { buildStudioLoginUrl, isStudioEmailConfigured, sendStudioEmail } from "./email";
+import { getStudioGoogleClientId, verifyStudioGoogleCredential } from "./google";
+import { hashStudioPassword, verifyStudioPassword } from "./passwords";
 
 const prisma = getPrismaClient();
+const DEFAULT_STUDIO_RETURN_TO = "/studio/dashboard";
+const STUDIO_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
+const STUDIO_ACCOUNT_TOKEN_TTL_MS = 1000 * 60 * 60;
+
+function resolveStudioReturnTo(value: string | null | undefined): string {
+  const normalized = String(value || "").trim();
+  return normalized.startsWith("/studio/") ? normalized : DEFAULT_STUDIO_RETURN_TO;
+}
+
+function normalizeStudioEmail(value: string | null | undefined): string {
+  return String(value || "").trim().toLowerCase();
+}
+
+function getStudioRequestAccessUrl(): string {
+  return getEnv("STUDIO_REQUEST_ACCESS_URL", "https://tecnoriasl.com/contacto").trim();
+}
+
+function hasEnabledProvider(
+  provider: { enabled: boolean } | null | undefined,
+): boolean {
+  return Boolean(provider?.enabled);
+}
+
+function isLocalMembership(
+  membership: AccountWithMemberships["users"][number],
+): boolean {
+  return !hasEnabledProvider(membership.tenant.studioIdentityProvider);
+}
+
+function isSelectableMembershipStatus(status: StudioUserStatus): boolean {
+  return status === "active" || status === "invited";
+}
+
+function toWorkspaceSummary(
+  account: AccountWithMemberships,
+  membership: AccountWithMemberships["users"][number],
+): StudioAccountWorkspaceSummary {
+  return {
+    workspace: {
+      id: membership.tenant.id,
+      name: membership.tenant.name,
+      slug: membership.tenant.slug,
+      status: membership.tenant.status,
+    },
+    membershipStatus: membership.status,
+    requiresSso: hasEnabledProvider(membership.tenant.studioIdentityProvider),
+    preferred: membership.tenant.id === account.lastWorkspaceId,
+  };
+}
+
+function resolveRecommendedWorkspaceId(
+  account: AccountWithMemberships,
+  memberships: AccountWithMemberships["users"],
+): string | null {
+  if (
+    account.lastWorkspaceId &&
+    memberships.some((item: AccountWithMemberships["users"][number]) => item.tenantId === account.lastWorkspaceId)
+  ) {
+    return account.lastWorkspaceId;
+  }
+  if (memberships.length === 1) {
+    return memberships[0]?.tenantId || null;
+  }
+  return null;
+}
+
+function getFirstPartyLaunchWorkspaceSet(): Set<string> {
+  return new Set(
+    getEnv("STUDIO_FIRST_PARTY_LAUNCH_WORKSPACES", "tecnoria")
+      .split(",")
+      .map((item: string) => slugifyTenantName(item))
+      .filter(Boolean),
+  );
+}
 
 type UserWithRoles = Prisma.StudioUserGetPayload<{
   include: {
+    account: true;
     roles: {
       include: {
         role: {
           include: {
             permissions: true;
+          };
+        };
+      };
+    };
+  };
+}>;
+
+type AccountWithMemberships = Prisma.StudioAccountGetPayload<{
+  include: {
+    users: {
+      include: {
+        tenant: {
+          select: {
+            id: true;
+            name: true;
+            slug: true;
+            status: true;
+            studioIdentityProvider: {
+              select: {
+                enabled: true;
+                issuer: true;
+                provisioningMode: true;
+              };
+            };
           };
         };
       };
@@ -146,6 +262,313 @@ function mapRoleSummary(
   };
 }
 
+async function ensureStudioAccountByEmail(params: {
+  email: string;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  status?: "invited" | "active" | "suspended";
+  emailVerifiedAt?: Date | null;
+}): Promise<{ id: string; email: string }> {
+  const email = normalizeStudioEmail(params.email);
+  if (!email) {
+    throw new Error("email_required");
+  }
+
+  const existing = await prisma.studioAccount.findUnique({
+    where: { email },
+    select: {
+      id: true,
+      email: true,
+      displayName: true,
+      avatarUrl: true,
+      status: true,
+      emailVerifiedAt: true,
+    },
+  });
+
+  if (existing) {
+    const nextStatus =
+      existing.status === "suspended"
+        ? "suspended"
+        : existing.status === "active"
+          ? "active"
+          : (params.status ?? existing.status);
+
+    await prisma.studioAccount.update({
+      where: { id: existing.id },
+      data: {
+        displayName: params.displayName?.trim() || existing.displayName || undefined,
+        avatarUrl: params.avatarUrl?.trim() || existing.avatarUrl || undefined,
+        status: nextStatus,
+        emailVerifiedAt:
+          params.emailVerifiedAt === undefined ? existing.emailVerifiedAt : params.emailVerifiedAt,
+      },
+    });
+
+    return {
+      id: existing.id,
+      email: existing.email,
+    };
+  }
+
+  const account = await prisma.studioAccount.create({
+    data: {
+      email,
+      displayName: params.displayName?.trim() || email,
+      avatarUrl: params.avatarUrl?.trim() || null,
+      status: params.status ?? "invited",
+      emailVerifiedAt: params.emailVerifiedAt ?? null,
+    },
+    select: {
+      id: true,
+      email: true,
+    },
+  });
+
+  return account;
+}
+
+async function getStudioAccountByEmail(email: string): Promise<AccountWithMemberships | null> {
+  const normalized = normalizeStudioEmail(email);
+  if (!normalized) {
+    return null;
+  }
+
+  return prisma.studioAccount.findUnique({
+    where: { email: normalized },
+    include: {
+      users: {
+        where: {
+          status: {
+            in: ["active", "invited", "suspended"],
+          },
+        },
+        include: {
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              status: true,
+              studioIdentityProvider: {
+                select: {
+                  enabled: true,
+                  issuer: true,
+                  provisioningMode: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ lastLoginAt: "desc" }, { updatedAt: "desc" }],
+      },
+    },
+  });
+}
+
+async function getStudioAccountByGoogleSubject(subject: string): Promise<AccountWithMemberships | null> {
+  const normalized = String(subject || "").trim();
+  if (!normalized) {
+    return null;
+  }
+
+  return prisma.studioAccount.findFirst({
+    where: { googleSubject: normalized },
+    include: {
+      users: {
+        where: {
+          status: {
+            in: ["active", "invited", "suspended"],
+          },
+        },
+        include: {
+          tenant: {
+            select: {
+              id: true,
+              name: true,
+              slug: true,
+              status: true,
+              studioIdentityProvider: {
+                select: {
+                  enabled: true,
+                  issuer: true,
+                  provisioningMode: true,
+                },
+              },
+            },
+          },
+        },
+        orderBy: [{ lastLoginAt: "desc" }, { updatedAt: "desc" }],
+      },
+    },
+  });
+}
+
+function splitMembershipsByAccess(account: AccountWithMemberships) {
+  const selectable = account.users.filter((membership: AccountWithMemberships["users"][number]) =>
+    isSelectableMembershipStatus(membership.status),
+  );
+  return {
+    local: selectable.filter((membership: AccountWithMemberships["users"][number]) => isLocalMembership(membership)),
+    sso: selectable.filter((membership: AccountWithMemberships["users"][number]) => !isLocalMembership(membership)),
+  };
+}
+
+function resolveTargetMembership(
+  account: AccountWithMemberships,
+  memberships: AccountWithMemberships["users"],
+  workspaceId?: string | null,
+): AccountWithMemberships["users"][number] {
+  if (memberships.length === 0) {
+    throw new Error("user_not_authorized");
+  }
+
+  const requestedWorkspaceId = String(workspaceId || "").trim();
+  if (requestedWorkspaceId) {
+    const match = memberships.find(
+      (membership: AccountWithMemberships["users"][number]) => membership.tenantId === requestedWorkspaceId,
+    );
+    if (!match) {
+      throw new Error("workspace_not_authorized");
+    }
+    return match;
+  }
+
+  const preferredId = resolveRecommendedWorkspaceId(account, memberships);
+  if (preferredId) {
+    const preferred = memberships.find(
+      (membership: AccountWithMemberships["users"][number]) => membership.tenantId === preferredId,
+    );
+    if (preferred) {
+      return preferred;
+    }
+  }
+
+  if (memberships.length === 1) {
+    return memberships[0];
+  }
+
+  throw new Error("workspace_selection_required");
+}
+
+async function issueStudioAccountToken(params: {
+  accountId: string;
+  kind: "activation" | "password_reset";
+  ttlMs?: number;
+}): Promise<string> {
+  const token = generateStudioToken();
+  await prisma.studioAccountToken.updateMany({
+    where: {
+      accountId: params.accountId,
+      kind: params.kind,
+      consumedAt: null,
+    },
+    data: {
+      consumedAt: new Date(),
+    },
+  });
+
+  await prisma.studioAccountToken.create({
+    data: {
+      accountId: params.accountId,
+      kind: params.kind,
+      tokenHash: hashStudioToken(token),
+      expiresAt: new Date(Date.now() + (params.ttlMs ?? STUDIO_ACCOUNT_TOKEN_TTL_MS)),
+    },
+  });
+
+  return token;
+}
+
+async function activateStudioAccountMemberships(accountId: string): Promise<void> {
+  const account = await prisma.studioAccount.findUnique({
+    where: { id: accountId },
+    include: {
+      users: true,
+    },
+  });
+  if (!account) {
+    throw new Error("account_not_found");
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.studioAccount.update({
+      where: { id: account.id },
+      data: {
+        status: "active",
+        emailVerifiedAt: account.emailVerifiedAt ?? new Date(),
+      },
+    });
+
+    await tx.studioUser.updateMany({
+      where: {
+        accountId: account.id,
+        status: "invited",
+      },
+      data: {
+        status: "active",
+        lastLoginAt: new Date(),
+      },
+    });
+
+    await tx.studioInvitation.updateMany({
+      where: {
+        email: account.email,
+        status: "pending",
+      },
+      data: {
+        status: "accepted",
+        acceptedAt: new Date(),
+      },
+    });
+  });
+}
+
+async function sendStudioAccountActionEmail(params: {
+  email: string;
+  displayName?: string | null;
+  kind: "activation" | "password_reset";
+  token: string;
+}): Promise<void> {
+  if (!isStudioEmailConfigured()) {
+    throw new Error("smtp_not_configured");
+  }
+
+  const loginUrl = buildStudioLoginUrl({
+    [params.kind === "activation" ? "invite" : "reset"]: params.token,
+    email: params.email,
+    entry: "public",
+  });
+  const subject =
+    params.kind === "activation"
+      ? "Activa tu acceso a Auctorio Studio"
+      : "Restablece tu acceso a Auctorio Studio";
+  const intro =
+    params.kind === "activation"
+      ? "Tu acceso a Auctorio ya esta listo para activarse."
+      : "Hemos recibido una solicitud para restablecer tu acceso a Auctorio.";
+  const actionLabel = params.kind === "activation" ? "Activar acceso" : "Restablecer password";
+
+  await sendStudioEmail({
+    to: params.email,
+    subject,
+    text: `${intro}\n\n${actionLabel}: ${loginUrl}\n\nSi no esperabas este correo, ignóralo.`,
+    html: `
+      <div style="font-family:Inter,system-ui,sans-serif;color:#0f172a;line-height:1.6">
+        <p>Hola${params.displayName ? ` ${params.displayName}` : ""},</p>
+        <p>${intro}</p>
+        <p>
+          <a href="${loginUrl}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:600">
+            ${actionLabel}
+          </a>
+        </p>
+        <p style="font-size:14px;color:#475569">Si el boton no funciona, copia este enlace:</p>
+        <p style="font-size:14px;word-break:break-all"><a href="${loginUrl}">${loginUrl}</a></p>
+      </div>
+    `,
+  });
+}
+
 async function ensureUniqueTenantSlug(tenantId: string, name: string): Promise<string> {
   const base = slugifyTenantName(name);
   let candidate = base;
@@ -210,6 +633,70 @@ async function ensureTenantBootstrap(tenantId: string): Promise<{
   };
 }
 
+function resolveTenantSlugForSession(tenant: {
+  name: string;
+  slug: string | null;
+}): string {
+  return tenant.slug?.trim() || slugifyTenantName(tenant.name);
+}
+
+async function readTenantSessionContext(tenantId: string): Promise<{
+  id: string;
+  name: string;
+  slug: string;
+  status: TenantStatus;
+  siteCount: number;
+  projectCount: number;
+  identityProvider: {
+    enabled: boolean;
+    issuer: string | null;
+    provisioningMode: StudioProvisioningMode;
+  } | null;
+}> {
+  const tenant = await prisma.tenant.findUnique({
+    where: { id: tenantId },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      status: true,
+      _count: {
+        select: {
+          sites: true,
+          contentProjects: true,
+        },
+      },
+      studioIdentityProvider: {
+        select: {
+          enabled: true,
+          issuer: true,
+          provisioningMode: true,
+        },
+      },
+    },
+  });
+
+  if (!tenant) {
+    throw new Error("tenant_not_found");
+  }
+
+  return {
+    id: tenant.id,
+    name: tenant.name,
+    slug: resolveTenantSlugForSession(tenant),
+    status: tenant.status,
+    siteCount: tenant._count.sites,
+    projectCount: tenant._count.contentProjects,
+    identityProvider: tenant.studioIdentityProvider
+      ? {
+          enabled: tenant.studioIdentityProvider.enabled,
+          issuer: tenant.studioIdentityProvider.issuer,
+          provisioningMode: tenant.studioIdentityProvider.provisioningMode,
+        }
+      : null,
+  };
+}
+
 async function ensureStudioRoles(tenantId: string): Promise<void> {
   for (const [key, definition] of Object.entries(STUDIO_SYSTEM_ROLES)) {
     const role = await prisma.studioRole.upsert({
@@ -266,27 +753,11 @@ async function ensureStudioRoles(tenantId: string): Promise<void> {
   }
 }
 
-async function buildHumanSession(user: UserWithRoles): Promise<StudioSession> {
-  const tenant = await ensureTenantBootstrap(user.tenantId);
-  const provider = await prisma.studioIdentityProvider.findUnique({
-    where: { tenantId: user.tenantId },
-    select: {
-      enabled: true,
-      issuer: true,
-      provisioningMode: true,
-    },
-  });
-  const counts = await prisma.tenant.findUnique({
-    where: { id: user.tenantId },
-    select: {
-      _count: {
-        select: {
-          sites: true,
-          contentProjects: true,
-        },
-      },
-    },
-  });
+async function buildHumanSession(
+  user: UserWithRoles,
+  authMode: StudioSessionAuthMode,
+): Promise<StudioSession> {
+  const tenant = await readTenantSessionContext(user.tenantId);
 
   return {
     tenant: {
@@ -295,7 +766,7 @@ async function buildHumanSession(user: UserWithRoles): Promise<StudioSession> {
       slug: tenant.slug,
       status: tenant.status,
     },
-    authMode: "oidc",
+    authMode,
     user: {
       id: user.id,
       email: user.email,
@@ -306,52 +777,45 @@ async function buildHumanSession(user: UserWithRoles): Promise<StudioSession> {
     },
     roles: buildRoleKeyList(user),
     permissions: buildPermissionList(user),
-    identityProvider: provider
-      ? {
-          enabled: provider.enabled,
-          issuer: provider.issuer,
-          provisioningMode: provider.provisioningMode,
-        }
-      : null,
-    siteCount: counts?._count.sites ?? 0,
-    projectCount: counts?._count.contentProjects ?? 0,
+    identityProvider: tenant.identityProvider,
+    siteCount: tenant.siteCount,
+    projectCount: tenant.projectCount,
   };
 }
 
-export async function buildApiKeyStudioSession(tenantId: string): Promise<StudioSession | null> {
-  const tenant = await prisma.tenant.findUnique({
-    where: { id: tenantId },
+async function createStudioUserSession(
+  tenantId: string,
+  studioUserId: string,
+  authMode: StudioSessionAuthMode,
+): Promise<string> {
+  const sessionToken = generateStudioToken();
+  await prisma.studioUserSession.create({
+    data: {
+      tenantId,
+      studioUserId,
+      authMode,
+      tokenHash: hashStudioToken(sessionToken),
+      expiresAt: new Date(Date.now() + STUDIO_SESSION_TTL_MS),
+      lastSeenAt: new Date(),
+    },
   });
-  if (!tenant) {
+  return sessionToken;
+}
+
+export async function buildApiKeyStudioSession(tenantId: string): Promise<StudioSession | null> {
+  let tenant: Awaited<ReturnType<typeof readTenantSessionContext>>;
+  try {
+    tenant = await readTenantSessionContext(tenantId);
+  } catch {
     return null;
   }
 
-  const bootstrappedTenant = await ensureTenantBootstrap(tenantId);
-  const counts = await prisma.tenant.findUnique({
-    where: { id: tenantId },
-    select: {
-      _count: {
-        select: {
-          sites: true,
-          contentProjects: true,
-        },
-      },
-      studioIdentityProvider: {
-        select: {
-          enabled: true,
-          issuer: true,
-          provisioningMode: true,
-        },
-      },
-    },
-  });
-
   return {
     tenant: {
-      id: bootstrappedTenant.id,
-      name: bootstrappedTenant.name,
-      slug: bootstrappedTenant.slug,
-      status: bootstrappedTenant.status,
+      id: tenant.id,
+      name: tenant.name,
+      slug: tenant.slug,
+      status: tenant.status,
     },
     authMode: "api_key",
     user: {
@@ -364,15 +828,9 @@ export async function buildApiKeyStudioSession(tenantId: string): Promise<Studio
     },
     roles: ["owner", "admin"],
     permissions: [...STUDIO_PERMISSIONS],
-    identityProvider: counts?.studioIdentityProvider
-      ? {
-          enabled: counts.studioIdentityProvider.enabled,
-          issuer: counts.studioIdentityProvider.issuer,
-          provisioningMode: counts.studioIdentityProvider.provisioningMode,
-        }
-      : null,
-    siteCount: counts?._count.sites ?? 0,
-    projectCount: counts?._count.contentProjects ?? 0,
+    identityProvider: tenant.identityProvider,
+    siteCount: tenant.siteCount,
+    projectCount: tenant.projectCount,
   };
 }
 
@@ -597,6 +1055,7 @@ export async function listStudioUsers(tenantId: string): Promise<StudioUserSumma
     where: { tenantId },
     orderBy: [{ status: "asc" }, { displayName: "asc" }],
     include: {
+      account: true,
       roles: {
         include: {
           role: true,
@@ -608,7 +1067,7 @@ export async function listStudioUsers(tenantId: string): Promise<StudioUserSumma
   return users.map((user) =>
     mapUserSummary({
       ...user,
-      roles: user.roles.map((membership) => ({
+      roles: user.roles.map((membership: (typeof user.roles)[number]) => ({
         ...membership,
         role: {
           ...membership.role,
@@ -685,6 +1144,11 @@ export async function inviteStudioUser(
 
   const roleKeys = input.roleKeys?.length ? input.roleKeys : ["editor"];
   const roles = await ensureRolesByKeys(tenantId, roleKeys);
+  const account = await ensureStudioAccountByEmail({
+    email,
+    displayName: input.displayName?.trim() || email,
+    status: "invited",
+  });
 
   const user = await prisma.studioUser.upsert({
     where: {
@@ -694,11 +1158,13 @@ export async function inviteStudioUser(
       },
     },
     update: {
+      accountId: account.id,
       displayName: input.displayName?.trim() || email,
       status: "invited",
     },
     create: {
       tenantId,
+      accountId: account.id,
       email,
       displayName: input.displayName?.trim() || email,
       status: "invited",
@@ -729,6 +1195,23 @@ export async function inviteStudioUser(
       createdByUserId: actorUserId ?? undefined,
     },
   });
+
+  if (isStudioEmailConfigured()) {
+    try {
+      const activationToken = await issueStudioAccountToken({
+        accountId: account.id,
+        kind: "activation",
+      });
+      await sendStudioAccountActionEmail({
+        email,
+        displayName: input.displayName?.trim() || null,
+        kind: "activation",
+        token: activationToken,
+      });
+    } catch {
+      // Best effort: access can still be activated later from the login screen.
+    }
+  }
 
   return {
     id: invitation.id,
@@ -769,6 +1252,7 @@ export async function updateStudioUser(
   const user = await prisma.studioUser.findFirst({
     where: { tenantId, id: userId },
     include: {
+      account: true,
       roles: {
         include: {
           role: true,
@@ -783,7 +1267,7 @@ export async function updateStudioUser(
 
   return mapUserSummary({
     ...user,
-    roles: user.roles.map((membership) => ({
+    roles: user.roles.map((membership: (typeof user.roles)[number]) => ({
       ...membership,
       role: {
         ...membership.role,
@@ -1011,6 +1495,7 @@ async function loadFullUser(tenantId: string, userId: string): Promise<UserWithR
       id: userId,
     },
     include: {
+      account: true,
       roles: {
         include: {
           role: {
@@ -1037,6 +1522,378 @@ async function applyMappedRoles(tenantId: string, userId: string, roleKeys: stri
     },
   });
   await setUserRoles(userId, roles);
+}
+
+async function completeLocalAccountLogin(params: {
+  account: AccountWithMemberships;
+  membership: AccountWithMemberships["users"][number];
+  authMode: "password" | "google";
+}): Promise<{ sessionToken: string; session: StudioSession }> {
+  const lastLoginAt = new Date();
+
+  await prisma.$transaction(async (tx) => {
+    await tx.studioAccount.update({
+      where: { id: params.account.id },
+      data: {
+        status: "active",
+        lastWorkspaceId: params.membership.tenantId,
+        emailVerifiedAt: params.account.emailVerifiedAt ?? lastLoginAt,
+        displayName: params.account.displayName || params.membership.displayName,
+        avatarUrl: params.account.avatarUrl || params.membership.avatarUrl,
+      },
+    });
+
+    await tx.studioUser.updateMany({
+      where: {
+        accountId: params.account.id,
+        status: "invited",
+      },
+      data: {
+        status: "active",
+      },
+    });
+
+    await tx.studioUser.update({
+      where: { id: params.membership.id },
+      data: {
+        lastLoginAt,
+        status: "active",
+      },
+    });
+
+    await tx.studioInvitation.updateMany({
+      where: {
+        email: params.account.email,
+        status: "pending",
+      },
+      data: {
+        status: "accepted",
+        acceptedAt: lastLoginAt,
+      },
+    });
+  });
+
+  const hydratedUser = await loadFullUser(params.membership.tenantId, params.membership.id);
+  if (!hydratedUser) {
+    throw new Error("user_not_found");
+  }
+
+  await ensureTenantBootstrap(params.membership.tenantId);
+  const sessionToken = await createStudioUserSession(
+    params.membership.tenantId,
+    params.membership.id,
+    params.authMode,
+  );
+
+  return {
+    sessionToken,
+    session: await buildHumanSession(hydratedUser, params.authMode),
+  };
+}
+
+function mapLoginOptions(account: AccountWithMemberships | null, email: string): StudioLoginOptions {
+  if (!account) {
+    return {
+      email,
+      account: null,
+      accountState: "no_access",
+      canUsePassword: false,
+      canUseGoogle: false,
+      googleClientId: null,
+      needsActivation: false,
+      localWorkspaces: [],
+      ssoWorkspaces: [],
+      recommendedWorkspaceId: null,
+      requestAccessUrl: getStudioRequestAccessUrl(),
+    };
+  }
+
+  const memberships = splitMembershipsByAccess(account);
+  const localWorkspaces = memberships.local.map((membership: AccountWithMemberships["users"][number]) =>
+    toWorkspaceSummary(account, membership),
+  );
+  const ssoWorkspaces = memberships.sso.map((membership: AccountWithMemberships["users"][number]) =>
+    toWorkspaceSummary(account, membership),
+  );
+  const recommendedWorkspaceId = resolveRecommendedWorkspaceId(account, memberships.local);
+  const googleClientId = getStudioGoogleClientId();
+  const hasLocalAccess = memberships.local.length > 0;
+  const accountState =
+    account.status === "suspended"
+      ? "suspended"
+      : memberships.local.length + memberships.sso.length === 0
+        ? "no_access"
+        : account.status;
+
+  return {
+    email,
+    account: {
+      id: account.id,
+      email: account.email,
+      displayName: account.displayName,
+      avatarUrl: account.avatarUrl,
+      status: account.status,
+      lastWorkspaceId: account.lastWorkspaceId,
+      emailVerifiedAt: account.emailVerifiedAt,
+    },
+    accountState,
+    canUsePassword: accountState === "active" && Boolean(account.passwordHash) && hasLocalAccess,
+    canUseGoogle: accountState !== "suspended" && accountState !== "no_access" && Boolean(googleClientId) && hasLocalAccess,
+    googleClientId,
+    needsActivation: accountState === "invited" && hasLocalAccess,
+    localWorkspaces,
+    ssoWorkspaces,
+    recommendedWorkspaceId,
+    requestAccessUrl: getStudioRequestAccessUrl(),
+  };
+}
+
+export async function getStudioLoginOptions(email: string): Promise<StudioLoginOptions> {
+  const normalizedEmail = normalizeStudioEmail(email);
+  if (!normalizedEmail) {
+    throw new Error("email_required");
+  }
+
+  const account = await getStudioAccountByEmail(normalizedEmail);
+  return mapLoginOptions(account, normalizedEmail);
+}
+
+export async function loginStudioAccountWithPassword(
+  input: StudioPasswordLoginInput,
+): Promise<{ sessionToken: string; session: StudioSession }> {
+  const email = normalizeStudioEmail(input.email);
+  if (!email) {
+    throw new Error("email_required");
+  }
+  if (!input.password?.trim()) {
+    throw new Error("password_required");
+  }
+
+  const account = await getStudioAccountByEmail(email);
+  if (!account) {
+    throw new Error("user_not_authorized");
+  }
+  if (account.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+  if (!account.passwordHash) {
+    throw new Error(account.status === "invited" ? "activation_required" : "password_login_not_available");
+  }
+
+  const validPassword = await verifyStudioPassword(input.password, account.passwordHash);
+  if (!validPassword) {
+    throw new Error("invalid_credentials");
+  }
+
+  const memberships = splitMembershipsByAccess(account);
+  const membership = resolveTargetMembership(account, memberships.local, input.workspaceId);
+
+  return completeLocalAccountLogin({
+    account,
+    membership,
+    authMode: "password",
+  });
+}
+
+export async function loginStudioAccountWithGoogle(
+  input: StudioGoogleLoginInput,
+): Promise<{ sessionToken: string; session: StudioSession }> {
+  const identity = await verifyStudioGoogleCredential(input.credential);
+  const account =
+    (await getStudioAccountByGoogleSubject(identity.sub)) ??
+    (await getStudioAccountByEmail(identity.email));
+
+  if (!account) {
+    throw new Error("user_not_authorized");
+  }
+  if (account.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+  if (!identity.emailVerified) {
+    throw new Error("google_email_not_verified");
+  }
+
+  if (account.googleSubject && account.googleSubject !== identity.sub) {
+    throw new Error("google_subject_mismatch");
+  }
+
+  await prisma.studioAccount.update({
+    where: { id: account.id },
+    data: {
+      googleSubject: identity.sub,
+      displayName: identity.name || account.displayName || undefined,
+      avatarUrl: identity.picture || account.avatarUrl || undefined,
+      emailVerifiedAt: account.emailVerifiedAt ?? new Date(),
+      status: "active",
+    },
+  });
+
+  const refreshedAccount = await getStudioAccountByEmail(account.email);
+  if (!refreshedAccount) {
+    throw new Error("account_not_found");
+  }
+
+  const memberships = splitMembershipsByAccess(refreshedAccount);
+  const membership = resolveTargetMembership(refreshedAccount, memberships.local, input.workspaceId);
+
+  return completeLocalAccountLogin({
+    account: refreshedAccount,
+    membership,
+    authMode: "google",
+  });
+}
+
+export async function sendStudioPasswordReset(email: string): Promise<{ ok: true }> {
+  const normalizedEmail = normalizeStudioEmail(email);
+  if (!normalizedEmail) {
+    throw new Error("email_required");
+  }
+
+  const account = await getStudioAccountByEmail(normalizedEmail);
+  if (!account || account.status === "suspended") {
+    return { ok: true };
+  }
+
+  const token = await issueStudioAccountToken({
+    accountId: account.id,
+    kind: account.status === "invited" || !account.passwordHash ? "activation" : "password_reset",
+  });
+
+  await sendStudioAccountActionEmail({
+    email: account.email,
+    displayName: account.displayName,
+    kind: account.status === "invited" || !account.passwordHash ? "activation" : "password_reset",
+    token,
+  });
+
+  return { ok: true };
+}
+
+async function consumeStudioAccountToken(params: {
+  token: string;
+  kind: "activation" | "password_reset";
+}): Promise<AccountWithMemberships> {
+  const tokenHash = hashStudioToken(String(params.token || "").trim());
+  const record = await prisma.studioAccountToken.findUnique({
+    where: { tokenHash },
+    include: {
+      account: {
+        include: {
+          users: {
+            where: {
+              status: {
+                in: ["active", "invited", "suspended"],
+              },
+            },
+            include: {
+              tenant: {
+                select: {
+                  id: true,
+                  name: true,
+                  slug: true,
+                  status: true,
+                  studioIdentityProvider: {
+                    select: {
+                      enabled: true,
+                      issuer: true,
+                      provisioningMode: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: [{ lastLoginAt: "desc" }, { updatedAt: "desc" }],
+          },
+        },
+      },
+    },
+  });
+
+  if (!record || record.kind !== params.kind) {
+    throw new Error(params.kind === "activation" ? "invite_invalid" : "reset_invalid");
+  }
+  if (record.consumedAt) {
+    throw new Error(params.kind === "activation" ? "invite_consumed" : "reset_consumed");
+  }
+  if (record.expiresAt.getTime() <= Date.now()) {
+    throw new Error(params.kind === "activation" ? "invite_expired" : "reset_expired");
+  }
+  if (record.account.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+
+  const consumedAt = new Date();
+  const updated = await prisma.studioAccountToken.updateMany({
+    where: {
+      id: record.id,
+      consumedAt: null,
+      expiresAt: { gt: consumedAt },
+    },
+    data: {
+      consumedAt,
+    },
+  });
+
+  if (updated.count !== 1) {
+    throw new Error(params.kind === "activation" ? "invite_consumed" : "reset_consumed");
+  }
+
+  return record.account;
+}
+
+export async function acceptStudioInvitation(
+  input: StudioActivationInput,
+): Promise<{ sessionToken: string; session: StudioSession }> {
+  if (!input.password?.trim()) {
+    throw new Error("password_required");
+  }
+
+  const account = await consumeStudioAccountToken({
+    token: input.token,
+    kind: "activation",
+  });
+  const memberships = splitMembershipsByAccess(account);
+  const membership = resolveTargetMembership(account, memberships.local, input.workspaceId ?? null);
+  const passwordHash = await hashStudioPassword(input.password);
+
+  await prisma.studioAccount.update({
+    where: { id: account.id },
+    data: {
+      passwordHash,
+      status: "active",
+      emailVerifiedAt: new Date(),
+    },
+  });
+
+  return loginStudioAccountWithPassword({
+    email: account.email,
+    password: input.password,
+    workspaceId: membership.tenantId,
+  });
+}
+
+export async function resetStudioPassword(
+  input: StudioPasswordResetInput,
+): Promise<{ ok: true }> {
+  if (!input.password?.trim()) {
+    throw new Error("password_required");
+  }
+
+  const account = await consumeStudioAccountToken({
+    token: input.token,
+    kind: "password_reset",
+  });
+  const passwordHash = await hashStudioPassword(input.password);
+
+  await prisma.studioAccount.update({
+    where: { id: account.id },
+    data: {
+      passwordHash,
+      status: account.status === "suspended" ? "suspended" : "active",
+    },
+  });
+
+  return { ok: true };
 }
 
 export async function completeStudioSsoLogin(params: {
@@ -1084,6 +1941,13 @@ export async function completeStudioSsoLogin(params: {
     "avatar_url",
   ]);
   const avatarUrl = typeof avatarValue === "string" && avatarValue.trim() ? avatarValue.trim() : null;
+  const account = await ensureStudioAccountByEmail({
+    email,
+    displayName,
+    avatarUrl,
+    status: "active",
+    emailVerifiedAt: new Date(),
+  });
 
   const invitation = await prisma.studioInvitation.findFirst({
     where: {
@@ -1120,6 +1984,7 @@ export async function completeStudioSsoLogin(params: {
     user = await prisma.studioUser.create({
       data: {
         tenantId: tenant.id,
+        accountId: account.id,
         email,
         displayName,
         avatarUrl,
@@ -1137,6 +2002,7 @@ export async function completeStudioSsoLogin(params: {
     user = await prisma.studioUser.update({
       where: { id: user.id },
       data: {
+        accountId: account.id,
         email,
         displayName,
         avatarUrl,
@@ -1197,20 +2063,244 @@ export async function completeStudioSsoLogin(params: {
     throw new Error("user_not_found");
   }
 
-  const sessionToken = generateStudioToken();
-  await prisma.studioUserSession.create({
+  const sessionToken = await createStudioUserSession(tenant.id, hydratedUser.id, "oidc");
+  await prisma.studioAccount.update({
+    where: { id: account.id },
     data: {
-      tenantId: tenant.id,
-      studioUserId: hydratedUser.id,
-      tokenHash: hashStudioToken(sessionToken),
-      expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 12),
-      lastSeenAt: new Date(),
+      lastWorkspaceId: tenant.id,
+      status: "active",
+      emailVerifiedAt: new Date(),
+      displayName,
+      avatarUrl,
     },
   });
 
   return {
     sessionToken,
-    session: await buildHumanSession(hydratedUser),
+    session: await buildHumanSession(hydratedUser, "oidc"),
+  };
+}
+
+async function resolveLaunchUser(
+  tenantId: string,
+  email: string,
+): Promise<UserWithRoles> {
+  const normalizedEmail = email.trim().toLowerCase();
+  const user = await prisma.studioUser.findFirst({
+    where: {
+      tenantId,
+      email: normalizedEmail,
+    },
+    include: {
+      account: true,
+      roles: {
+        include: {
+          role: {
+            include: {
+              permissions: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (user) {
+    if (user.status === "suspended") {
+      throw new Error("user_suspended");
+    }
+    return user;
+  }
+
+  const invitation = await prisma.studioInvitation.findFirst({
+    where: {
+      tenantId,
+      email: normalizedEmail,
+      status: "pending",
+    },
+    orderBy: {
+      createdAt: "desc",
+    },
+  });
+
+  if (invitation?.studioUserId) {
+    const invitedUser = await loadFullUser(tenantId, invitation.studioUserId);
+    if (!invitedUser) {
+      throw new Error("interactive_login_required");
+    }
+    if (invitedUser.status === "suspended") {
+      throw new Error("user_suspended");
+    }
+    return invitedUser;
+  }
+
+  if (invitation) {
+    throw new Error("interactive_login_required");
+  }
+
+  throw new Error("user_not_authorized");
+}
+
+export async function createStudioLaunchTicket(params: {
+  slug: string;
+  email: string;
+  displayName?: string | null;
+  returnTo?: string | null;
+  sourceApp: string;
+}): Promise<{ launchId: string; tenantSlug: string; returnTo: string }> {
+  const tenant = await resolveTenantBySlug(params.slug);
+  if (!tenant) {
+    throw new Error("workspace_not_found");
+  }
+
+  const allowedWorkspaces = getFirstPartyLaunchWorkspaceSet();
+  if (!allowedWorkspaces.has(tenant.slug)) {
+    throw new Error("workspace_launch_not_allowed");
+  }
+
+  const user = await resolveLaunchUser(tenant.id, params.email);
+  const launchId = generateStudioToken();
+  const jti = generateStudioToken();
+  const returnTo = resolveStudioReturnTo(params.returnTo);
+
+  await prisma.studioLaunchTicket.create({
+    data: {
+      tenantId: tenant.id,
+      studioUserId: user.id,
+      tokenHash: hashStudioToken(launchId),
+      jti,
+      requestedEmail: params.email.trim().toLowerCase(),
+      requestedDisplayName: params.displayName?.trim() || null,
+      sourceApp: params.sourceApp.trim(),
+      returnTo,
+      expiresAt: new Date(Date.now() + 60 * 1000),
+    },
+  });
+
+  return {
+    launchId,
+    tenantSlug: tenant.slug,
+    returnTo,
+  };
+}
+
+export async function redeemStudioLaunchTicket(launchId: string): Promise<{
+  sessionToken: string;
+  session: StudioSession;
+  tenantSlug: string;
+  returnTo: string;
+}> {
+  const tokenHash = hashStudioToken(launchId.trim());
+  const record = await prisma.studioLaunchTicket.findUnique({
+    where: { tokenHash },
+    include: {
+      tenant: {
+        select: {
+          slug: true,
+        },
+      },
+      user: {
+        include: {
+          account: true,
+          roles: {
+            include: {
+              role: {
+                include: {
+                  permissions: true,
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    throw new Error("launch_invalid");
+  }
+
+  if (record.consumedAt) {
+    throw new Error("launch_consumed");
+  }
+
+  if (record.expiresAt.getTime() <= Date.now()) {
+    throw new Error("launch_expired");
+  }
+
+  if (record.user.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+
+  const consumedAt = new Date();
+  const lastLoginAt = new Date();
+  const sessionToken = generateStudioToken();
+
+  const consumed = await prisma.$transaction(async (tx) => {
+    const updateResult = await tx.studioLaunchTicket.updateMany({
+      where: {
+        id: record.id,
+        consumedAt: null,
+        expiresAt: {
+          gt: consumedAt,
+        },
+      },
+      data: {
+        consumedAt,
+      },
+    });
+
+    if (updateResult.count !== 1) {
+      return false;
+    }
+
+    await tx.studioUser.update({
+      where: { id: record.user.id },
+      data: {
+        lastLoginAt,
+      },
+    });
+
+    if (record.user.accountId) {
+      await tx.studioAccount.update({
+        where: { id: record.user.accountId },
+        data: {
+          lastWorkspaceId: record.tenantId,
+          status: "active",
+          emailVerifiedAt: record.user.account.emailVerifiedAt ?? lastLoginAt,
+        },
+      });
+    }
+
+    await tx.studioUserSession.create({
+      data: {
+        tenantId: record.tenantId,
+        studioUserId: record.user.id,
+        authMode: "launch",
+        tokenHash: hashStudioToken(sessionToken),
+        expiresAt: new Date(Date.now() + STUDIO_SESSION_TTL_MS),
+        lastSeenAt: lastLoginAt,
+      },
+    });
+
+    return true;
+  });
+
+  if (!consumed) {
+    throw new Error("launch_consumed");
+  }
+
+  const hydratedUser = await loadFullUser(record.tenantId, record.user.id);
+  if (!hydratedUser) {
+    throw new Error("user_not_found");
+  }
+
+  await ensureTenantBootstrap(record.tenantId);
+  return {
+    sessionToken,
+    session: await buildHumanSession(hydratedUser, "launch"),
+    tenantSlug: record.tenant.slug || record.tenantId,
+    returnTo: resolveStudioReturnTo(record.returnTo),
   };
 }
 
@@ -1227,6 +2317,7 @@ export async function getStudioSessionByToken(sessionToken: string): Promise<{
     include: {
       user: {
         include: {
+          account: true,
           roles: {
             include: {
               role: {
@@ -1256,7 +2347,7 @@ export async function getStudioSessionByToken(sessionToken: string): Promise<{
     },
   });
 
-  const session = await buildHumanSession(record.user);
+  const session = await buildHumanSession(record.user, record.authMode);
   return {
     sessionId: record.id,
     tenantId: record.tenantId,
@@ -1278,6 +2369,7 @@ export async function getStudioSessionBySessionId(sessionId: string): Promise<St
     include: {
       user: {
         include: {
+          account: true,
           roles: {
             include: {
               role: {
@@ -1296,7 +2388,7 @@ export async function getStudioSessionBySessionId(sessionId: string): Promise<St
     return null;
   }
 
-  return buildHumanSession(record.user);
+  return buildHumanSession(record.user, record.authMode);
 }
 
 export async function revokeStudioSessionByToken(sessionToken: string): Promise<void> {

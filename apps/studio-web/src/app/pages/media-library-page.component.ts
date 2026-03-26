@@ -3,11 +3,23 @@ import { Component, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
-import type { StudioProjectDetailView, StudioProjectSummary, StudioSiteSummary } from '../models/studio.models';
+import type {
+  ReviewGateStage,
+  StudioProjectDetailView,
+  StudioProjectSummary,
+  StudioSiteSummary,
+} from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import {
+  buildQaScore,
+  qaScoreLabel,
+  reviewStageLabel as formatReviewStageLabel,
+  reviewStageTone as getReviewStageTone,
+} from '../utils/review-gate';
 
-type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
+type LibraryFocus = 'all' | 'releaseReady' | 'live' | 'recent' | 'coverageGaps';
+type TagTone = 'muted' | 'accent' | 'warning' | 'success' | 'danger';
 
 @Component({
   selector: 'app-media-library-page',
@@ -43,21 +55,21 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Published assets</p>
-          <strong class="console-stat-card__value">{{ publishedAssetCount }}</strong>
+          <p class="console-stat-card__label">Release-ready heroes</p>
+          <strong class="console-stat-card__value">{{ releaseReadyAssetCount }}</strong>
+          <span class="console-stat-card__detail">Assets que ya sostienen piezas sin blockers editoriales abiertos.</span>
+        </article>
+
+        <article class="console-stat-card">
+          <p class="console-stat-card__label">Live assets</p>
+          <strong class="console-stat-card__value">{{ liveAssetCount }}</strong>
           <span class="console-stat-card__detail">Heroes que ya están sosteniendo contenido publicado.</span>
         </article>
 
         <article class="console-stat-card">
-          <p class="console-stat-card__label">Destinations covered</p>
-          <strong class="console-stat-card__value">{{ coveredDestinationCount }}</strong>
-          <span class="console-stat-card__detail">Destinos que ya disponen de al menos un asset activo en la biblioteca.</span>
-        </article>
-
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Coverage gaps</p>
-          <strong class="console-stat-card__value">{{ missingProjects.length }}</strong>
-          <span class="console-stat-card__detail">Piezas activas sin hero image todavía disponible.</span>
+          <p class="console-stat-card__label">Critical gaps</p>
+          <strong class="console-stat-card__value">{{ criticalGapCount }}</strong>
+          <span class="console-stat-card__detail">Piezas donde la falta de hero sigue poniendo en riesgo QA, approval o publish.</span>
         </article>
       </div>
 
@@ -77,7 +89,7 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
                 <input
                   type="text"
                   formControlName="query"
-                  placeholder="Project, destination or version title"
+                  placeholder="Project, destination, gate, blocker or version title"
                   (input)="applyFilters()"
                 />
               </label>
@@ -94,7 +106,8 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
                 <span>Focus</span>
                 <select formControlName="focus" (change)="applyFilters()">
                   <option value="all">All assets</option>
-                  <option value="published">Published</option>
+                  <option value="releaseReady">Release ready</option>
+                  <option value="live">Live</option>
                   <option value="recent">Recently updated</option>
                   <option value="coverageGaps">Coverage gaps</option>
                 </select>
@@ -116,15 +129,28 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
                 <div class="console-version-card__head">
                   <div>
                     <strong>{{ project.title }}</strong>
-                    <p>{{ project.site.name }} · V{{ project.latestVersion?.versionNumber || 0 }}</p>
+                    <p>{{ project.site.name }} · {{ assetNarrative(project) }}</p>
                   </div>
                   <div class="console-version-card__tags">
                     <span
                       class="console-tag"
-                      [class.console-tag--success]="project.status === 'published'"
-                      [class.console-tag--accent]="project.status !== 'published'"
+                      [class.console-tag--success]="assetTone(project) === 'success'"
+                      [class.console-tag--accent]="assetTone(project) === 'accent'"
+                      [class.console-tag--warning]="assetTone(project) === 'warning'"
+                      [class.console-tag--danger]="assetTone(project) === 'danger'"
+                      [class.console-tag--muted]="assetTone(project) === 'muted'"
                     >
-                      {{ project.status === 'published' ? 'Live' : 'Active' }}
+                      {{ assetLabel(project) }}
+                    </span>
+                    <span
+                      class="console-tag"
+                      [class.console-tag--success]="reviewStageTone(project.reviewGate.stage) === 'success'"
+                      [class.console-tag--accent]="reviewStageTone(project.reviewGate.stage) === 'accent'"
+                      [class.console-tag--warning]="reviewStageTone(project.reviewGate.stage) === 'warning'"
+                      [class.console-tag--danger]="reviewStageTone(project.reviewGate.stage) === 'danger'"
+                      [class.console-tag--muted]="reviewStageTone(project.reviewGate.stage) === 'muted'"
+                    >
+                      {{ reviewStageLabel(project.reviewGate.stage) }}
                     </span>
                   </div>
                 </div>
@@ -139,9 +165,9 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
               <article class="console-feed__item" *ngFor="let project of coverageGapItems">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <p>{{ project.site.name }} · {{ project.status }}</p>
+                  <p>{{ project.site.name }} · {{ project.reviewGate.primaryConcern }}</p>
                 </div>
-                <a class="console-link" [routerLink]="['/studio/assets/images']">Generate image</a>
+                <a class="console-link" [routerLink]="detailLink(project)">Open article</a>
               </article>
             </div>
           </section>
@@ -166,12 +192,12 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
                 <strong>{{ activeProject.site.name }}</strong>
               </article>
               <article class="console-meta-card">
-                <span>Version</span>
-                <strong>V{{ activeProject.latestVersion?.versionNumber || 0 }}</strong>
+                <span>Gate</span>
+                <strong>{{ reviewStageLabel(activeProject.reviewGate.stage) }}</strong>
               </article>
               <article class="console-meta-card">
-                <span>QA state</span>
-                <strong>{{ activeProject.latestVersion?.qaState || 'not_ready' }}</strong>
+                <span>QA / release</span>
+                <strong>{{ qaSummary(activeProject) }}</strong>
               </article>
               <article class="console-meta-card">
                 <span>Derivative count</span>
@@ -188,8 +214,8 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
               >
                 {{ regeneratingProjectId === activeProject.id ? 'Running...' : 'Regenerate hero' }}
               </button>
-              <a class="console-button console-button--secondary" [routerLink]="['/studio/editorial/articles', activeProject.id]">
-                Open article
+              <a class="console-button console-button--secondary" [routerLink]="detailLink(activeProject)">
+                {{ activeProject.latestVersion ? 'Open article' : 'Open brief' }}
               </a>
             </div>
           </section>
@@ -230,12 +256,18 @@ type LibraryFocus = 'all' | 'published' | 'recent' | 'coverageGaps';
             </div>
 
             <div class="console-action-stack" *ngIf="missingProjects.length; else emptyCoverage">
-              <a class="console-action-card" *ngFor="let project of missingProjects.slice(0, 6)" [routerLink]="['/studio/assets/images']">
+              <a class="console-action-card" *ngFor="let project of missingProjects.slice(0, 6)" [routerLink]="detailLink(project)">
                 <div>
                   <strong>{{ project.title }}</strong>
-                  <span>{{ project.site.name }} · {{ project.status }}</span>
+                  <span>{{ project.site.name }} · {{ project.reviewGate.primaryConcern }}</span>
                 </div>
-                <span class="console-tag console-tag--warning">Missing</span>
+                <span
+                  class="console-tag"
+                  [class.console-tag--danger]="needsHeroForRelease(project)"
+                  [class.console-tag--warning]="!needsHeroForRelease(project)"
+                >
+                  {{ needsHeroForRelease(project) ? 'Blocks release' : 'Missing' }}
+                </span>
               </a>
             </div>
           </section>
@@ -291,8 +323,9 @@ export class MediaLibraryPageComponent implements OnInit {
   coverageGapItems: StudioProjectSummary[] = [];
   selectedProjectId = '';
   selectedProject: StudioProjectDetailView | null = null;
-  publishedAssetCount = 0;
-  coveredDestinationCount = 0;
+  releaseReadyAssetCount = 0;
+  liveAssetCount = 0;
+  criticalGapCount = 0;
   regeneratingProjectId = '';
   loading = true;
   detailLoading = false;
@@ -331,45 +364,63 @@ export class MediaLibraryPageComponent implements OnInit {
     const siteId = this.filterForm.controls.siteId.value;
     const focus = this.filterForm.controls.focus.value;
 
-    this.assetProjects = this.projects.filter((project) => project.latestVersion?.hasAsset);
-    this.missingProjects = this.projects.filter((project) => !project.latestVersion?.hasAsset);
-    this.publishedAssetCount = this.assetProjects.filter((project) => project.status === 'published').length;
-    this.coveredDestinationCount = new Set(this.assetProjects.map((project) => project.siteId)).size;
+    this.assetProjects = this.projects.filter((project) => this.hasHero(project));
+    this.missingProjects = this.projects.filter((project) => this.isCoverageGap(project));
+    this.releaseReadyAssetCount = this.assetProjects.filter((project) => this.isReleaseReadyAsset(project)).length;
+    this.liveAssetCount = this.assetProjects.filter((project) => this.isLiveAsset(project)).length;
+    this.criticalGapCount = this.missingProjects.filter((project) => this.needsHeroForRelease(project)).length;
 
-    this.filteredLibraryProjects = this.assetProjects.filter((project) => {
-      if (siteId && project.siteId !== siteId) {
-        return false;
-      }
-
-      if (focus === 'published' && project.status !== 'published') {
-        return false;
-      }
-
-      if (focus === 'recent') {
-        const isRecent = Date.now() - Date.parse(project.updatedAt) <= 1000 * 60 * 60 * 24 * 7;
-        if (!isRecent) {
+    this.filteredLibraryProjects = this.assetProjects
+      .filter((project) => {
+        if (siteId && project.siteId !== siteId) {
           return false;
         }
-      }
 
-      if (focus === 'coverageGaps') {
-        return false;
-      }
+        if (focus === 'releaseReady' && !this.isReleaseReadyAsset(project)) {
+          return false;
+        }
 
-      if (!query) {
-        return true;
-      }
+        if (focus === 'live' && !this.isLiveAsset(project)) {
+          return false;
+        }
 
-      return [
-        project.title,
-        project.site.name,
-        project.latestVersion?.title || '',
-        project.status,
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(query);
-    });
+        if (focus === 'recent') {
+          const isRecent = Date.now() - Date.parse(project.updatedAt) <= 1000 * 60 * 60 * 24 * 7;
+          if (!isRecent) {
+            return false;
+          }
+        }
+
+        if (focus === 'coverageGaps') {
+          return false;
+        }
+
+        if (!query) {
+          return true;
+        }
+
+        return [
+          project.title,
+          project.site.name,
+          project.latestVersion?.title || '',
+          project.reviewGate.stage,
+          project.reviewGate.nextAction,
+          project.reviewGate.primaryConcern,
+          ...(project.reviewGate.blockers ?? []),
+          ...(project.reviewGate.warnings ?? []),
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      })
+      .sort((left, right) => {
+        const priorityDelta = this.assetPriority(right) - this.assetPriority(left);
+        if (priorityDelta !== 0) {
+          return priorityDelta;
+        }
+
+        return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+      });
 
     this.coverageGapItems = this.missingProjects
       .filter((project) => !siteId || project.siteId === siteId)
@@ -383,7 +434,8 @@ export class MediaLibraryPageComponent implements OnInit {
             project.title,
             project.site.name,
             project.brief,
-            project.status,
+            project.reviewGate.primaryConcern,
+            project.reviewGate.stage,
           ]
             .join(' ')
             .toLowerCase()
@@ -398,12 +450,14 @@ export class MediaLibraryPageComponent implements OnInit {
           project.title,
           project.site.name,
           project.brief,
-          project.status,
+          project.reviewGate.primaryConcern,
+          project.reviewGate.stage,
         ]
           .join(' ')
           .toLowerCase()
           .includes(query);
       })
+      .sort((left, right) => this.assetPriority(right) - this.assetPriority(left))
       .slice(0, 8);
 
     const nextSelectedId = this.filteredLibraryProjects[0]?.id ?? '';
@@ -449,6 +503,72 @@ export class MediaLibraryPageComponent implements OnInit {
     });
   }
 
+  reviewStageLabel(stage: ReviewGateStage): string {
+    return formatReviewStageLabel(stage);
+  }
+
+  reviewStageTone(stage: ReviewGateStage): TagTone {
+    return getReviewStageTone(stage);
+  }
+
+  assetLabel(project: StudioProjectSummary | StudioProjectDetailView): string {
+    if (this.isLiveAsset(project)) {
+      return 'Live hero';
+    }
+
+    if (this.isReleaseReadyAsset(project)) {
+      return 'Release ready';
+    }
+
+    return 'Active asset';
+  }
+
+  assetTone(project: StudioProjectSummary | StudioProjectDetailView): TagTone {
+    if (this.isLiveAsset(project)) {
+      return 'success';
+    }
+
+    if (this.isReleaseReadyAsset(project)) {
+      return 'accent';
+    }
+
+    return 'muted';
+  }
+
+  assetNarrative(project: StudioProjectSummary | StudioProjectDetailView): string {
+    if (this.isLiveAsset(project)) {
+      return 'Hero is already supporting a published article.';
+    }
+
+    if (this.isReleaseReadyAsset(project)) {
+      return `Hero available. ${project.reviewGate.nextAction}`;
+    }
+
+    return `Hero available. ${project.reviewGate.primaryConcern}`;
+  }
+
+  qaSummary(project: StudioProjectSummary | StudioProjectDetailView): string {
+    const qaScore = buildQaScore(project.latestVersion);
+    return qaScore > 0
+      ? `${qaScoreLabel(qaScore)} · ${qaScore}/100`
+      : formatReviewStageLabel(project.reviewGate.stage);
+  }
+
+  detailLink(project: StudioProjectSummary | StudioProjectDetailView): string[] {
+    return project.latestVersion
+      ? ['/studio/editorial/articles', project.id]
+      : ['/studio/editorial/briefs', project.id];
+  }
+
+  needsHeroForRelease(project: StudioProjectSummary | StudioProjectDetailView): boolean {
+    return (
+      this.isCoverageGap(project) &&
+      ['needs_review', 'qa_blocked', 'ready_to_approve', 'approved', 'publish_queued', 'publish_failed'].includes(
+        project.reviewGate.stage,
+      )
+    );
+  }
+
   private fetchSelectedProject(): void {
     if (!this.selectedProjectId) {
       this.selectedProject = null;
@@ -466,5 +586,41 @@ export class MediaLibraryPageComponent implements OnInit {
         this.detailLoading = false;
       },
     });
+  }
+
+  private hasHero(project: StudioProjectSummary | StudioProjectDetailView): boolean {
+    return Boolean(project.latestVersion?.hasAsset);
+  }
+
+  private isCoverageGap(project: StudioProjectSummary | StudioProjectDetailView): boolean {
+    return Boolean(project.latestVersion) && !this.hasHero(project);
+  }
+
+  private isReleaseReadyAsset(project: StudioProjectSummary | StudioProjectDetailView): boolean {
+    return this.hasHero(project) && (project.reviewGate.publishReady || project.reviewGate.stage === 'ready_to_approve');
+  }
+
+  private isLiveAsset(project: StudioProjectSummary | StudioProjectDetailView): boolean {
+    return this.hasHero(project) && project.reviewGate.stage === 'published';
+  }
+
+  private assetPriority(project: StudioProjectSummary): number {
+    if (this.needsHeroForRelease(project)) {
+      return 4;
+    }
+
+    if (this.isCoverageGap(project)) {
+      return 3;
+    }
+
+    if (this.isReleaseReadyAsset(project)) {
+      return 2;
+    }
+
+    if (this.isLiveAsset(project)) {
+      return 1;
+    }
+
+    return 0;
   }
 }

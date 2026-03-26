@@ -2,7 +2,12 @@ import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { SeoService } from '../services/seo.service';
-import { getMarketingLocaleFromPath, getMarketingPath, type MarketingLocale } from '../content/marketing-content';
+import {
+  getMarketingLocaleFromPath,
+  getMarketingPath,
+  getStudioLoginPath,
+  type MarketingLocale,
+} from '../content/marketing-content';
 
 @Component({
   selector: 'app-public-not-found-page',
@@ -29,7 +34,7 @@ import { getMarketingLocaleFromPath, getMarketingPath, type MarketingLocale } fr
         <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'home')">
           {{ locale === 'en' ? 'Back to platform' : 'Ir a la plataforma' }}
         </a>
-        <a class="marketing-button marketing-button--ghost" routerLink="/studio/login">
+        <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
           {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
         </a>
       </div>
@@ -41,6 +46,7 @@ export class PublicNotFoundPageComponent {
   private readonly router = inject(Router);
 
   readonly locale: MarketingLocale = getMarketingLocaleFromPath(this.router.url || '/');
+  readonly studioLoginPath = getStudioLoginPath();
 
   constructor() {
     this.seo.update({

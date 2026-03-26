@@ -4,13 +4,14 @@ import { FormControl, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { forkJoin } from 'rxjs';
 import type {
-  ProjectStatus,
   PublicationListItem,
+  ReviewGateStage,
   StudioProjectSummary,
   StudioSiteSummary,
 } from '../models/studio.models';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
+import { buildQaScore, qaScoreLabel, reviewStageLabel, reviewStageTone } from '../utils/review-gate';
 
 type PipelineStageId =
   | 'brief'
@@ -125,12 +126,6 @@ const STAGE_BLUEPRINT: Array<Omit<PipelineStage, 'cards' | 'count'>> = [
     tone: 'success',
   },
 ];
-
-const READY_FOR_RELEASE = new Set<ProjectStatus>([
-  'qa_passed',
-  'approved',
-  'publish_queued',
-]);
 
 @Component({
   selector: 'app-editorial-pipeline-page',
@@ -374,13 +369,13 @@ const READY_FOR_RELEASE = new Set<ProjectStatus>([
 
             <ul class="console-note-list">
               <li class="console-note-list__item">
-                El board no inventa estados: traduce los ProjectStatus existentes a una secuencia editorial legible.
+                El board ya no decide por el status tecnico a solas: ordena el flujo desde el review gate y usa la version solo como contexto secundario.
               </li>
               <li class="console-note-list__item">
-                approved y publish_queued viven juntos en Scheduled para reflejar readiness de release, no detalle tecnico interno.
+                Scheduled agrupa contenido realmente publicable; los retry de publish fallido aparecen ademas como incidencias operativas hasta que alguien actua.
               </li>
               <li class="console-note-list__item">
-                Los fallos de publicacion aparecen como bloqueos operativos aunque la pieza ya tenga contenido valido.
+                Blockers y warnings visibles en cada tarjeta salen del mismo gate que ya gobierna approval y publish en backend.
               </li>
             </ul>
           </section>
@@ -491,10 +486,14 @@ export class EditorialPipelinePageComponent implements OnInit {
           project.title,
           project.brief,
           project.goal,
-          project.status,
+          project.reviewGate.stage,
+          project.reviewGate.nextAction,
+          project.reviewGate.primaryConcern,
           project.site.name,
           project.latestVersion?.title ?? '',
           project.latestVersion?.excerpt ?? '',
+          ...(project.reviewGate.blockers ?? []),
+          ...(project.reviewGate.warnings ?? []),
         ]
           .join(' ')
           .toLowerCase()
@@ -542,36 +541,39 @@ export class EditorialPipelinePageComponent implements OnInit {
     this.inFlowCount = filteredProjects.filter(
       (project) => this.resolveStage(project) !== 'published',
     ).length;
-    this.readyCount = filteredProjects.filter((project) =>
-      READY_FOR_RELEASE.has(project.status),
-    ).length;
+    this.readyCount = filteredProjects.filter((project) => this.isReleaseCandidate(project)).length;
     this.publishedCount = filteredProjects.filter(
-      (project) => project.status === 'published',
+      (project) => project.reviewGate.stage === 'published',
     ).length;
-    this.blockedCount =
-      filteredProjects.filter((project) =>
-        ['qa_failed', 'publish_failed'].includes(project.status),
-      ).length + filteredFailures.length;
+    this.blockedCount = new Set([
+      ...filteredProjects
+        .filter((project) => this.isOperationallyBlocked(project))
+        .map((project) => project.id),
+      ...filteredFailures.map((publication) => publication.project.id),
+    ]).size;
 
     this.releaseQueue = filteredProjects
-      .filter((project) => READY_FOR_RELEASE.has(project.status))
+      .filter((project) => this.isReleaseCandidate(project) || this.isRetryCandidate(project))
+      .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
       .slice(0, 6)
       .map((project) => ({
         title: project.title,
-        detail: `${project.site.name} · ${this.buildCardSummary(project, this.resolveStage(project))}`,
-        badge: this.formatStatus(project.status),
-        tone: project.status === 'publish_queued' ? 'accent' : 'warning',
+        detail: `${project.site.name} · ${this.buildReleaseSummary(project)}`,
+        badge: this.isRetryCandidate(project) ? 'Retry publish' : reviewStageLabel(project.reviewGate.stage),
+        tone: this.isRetryCandidate(project) ? 'danger' : reviewStageTone(project.reviewGate.stage),
         updatedAt: project.updatedAt,
         link: this.projectLink(project, 'article'),
       }));
 
     const projectBlockers = filteredProjects
-      .filter((project) => ['qa_failed', 'publish_failed'].includes(project.status))
+      .filter((project) => this.isOperationallyBlocked(project))
       .map((project) => ({
         title: project.title,
-        detail: `${project.site.name} · ${this.buildCardSummary(project, this.resolveStage(project))}`,
-        badge: this.formatStatus(project.status),
-        tone: 'danger' as const,
+        detail: `${project.site.name} · ${project.reviewGate.primaryConcern}`,
+        badge: reviewStageLabel(project.reviewGate.stage),
+        tone: reviewStageTone(project.reviewGate.stage) === 'muted'
+          ? 'warning' as const
+          : reviewStageTone(project.reviewGate.stage),
         updatedAt: project.updatedAt,
         link: this.projectLink(project, 'article'),
       }));
@@ -599,8 +601,8 @@ export class EditorialPipelinePageComponent implements OnInit {
           type: site.type,
           locale: site.locale,
           projectCount: siteProjects.length,
-          readyCount: siteProjects.filter((project) => READY_FOR_RELEASE.has(project.status)).length,
-          liveCount: siteProjects.filter((project) => project.status === 'published').length,
+          readyCount: siteProjects.filter((project) => this.isReleaseCandidate(project)).length,
+          liveCount: siteProjects.filter((project) => project.reviewGate.stage === 'published').length,
         };
       })
       .filter((site) => site.projectCount > 0)
@@ -610,6 +612,8 @@ export class EditorialPipelinePageComponent implements OnInit {
 
   private buildCard(project: StudioProjectSummary): PipelineCard {
     const stage = this.resolveStage(project);
+    const qaScore = buildQaScore(project.latestVersion);
+    const qaLabel = qaScore > 0 ? `${qaScoreLabel(qaScore)} · ${qaScore}/100` : 'QA pending';
 
     return {
       id: project.id,
@@ -617,72 +621,70 @@ export class EditorialPipelinePageComponent implements OnInit {
       title: project.title,
       siteName: project.site.name,
       goal: project.goal,
-      statusLabel: this.formatStatus(project.status),
-      summary: this.buildCardSummary(project, stage),
+      statusLabel: reviewStageLabel(project.reviewGate.stage),
+      summary: this.buildCardSummary(project, stage, qaLabel),
       updatedAt: project.updatedAt,
       versionLabel: project.latestVersion
         ? `V${project.latestVersion.versionNumber}`
         : null,
-      tone: this.cardTone(project.status),
+      tone: this.reviewTone(project.reviewGate.stage),
     };
   }
 
   private resolveStage(project: StudioProjectSummary): PipelineStageId {
-    switch (project.status) {
+    switch (project.reviewGate.stage) {
       case 'published':
         return 'published';
-      case 'publish_queued':
       case 'approved':
+      case 'publish_queued':
         return 'scheduled';
-      case 'qa_passed':
+      case 'ready_to_approve':
         return 'qa';
-      case 'qa_failed':
+      case 'qa_blocked':
       case 'publish_failed':
         return 'editing';
-      case 'in_review':
-        return 'human_review';
-      case 'ai_generated':
-        return 'ai_generation';
-      case 'draft':
+      case 'awaiting_generation':
         return project.latestVersion ? 'draft' : 'brief';
+      case 'needs_review':
       default:
-        return 'brief';
+        return this.resolvePreApprovalStage(project);
     }
   }
 
   private buildCardSummary(
     project: StudioProjectSummary,
     stage: PipelineStageId,
+    qaLabel: string,
   ): string {
     switch (stage) {
       case 'brief':
         return this.truncate(
           project.brief,
           108,
-          'Brief creado y pendiente de primera estructuracion editorial.',
+          project.reviewGate.nextAction,
         );
       case 'draft':
         return project.latestVersion?.title
-          ? `Version inicial disponible: ${project.latestVersion.title}.`
-          : 'Proyecto listo para una primera generacion de contenido.';
+          ? `Version inicial disponible: ${project.latestVersion.title}. ${project.reviewGate.nextAction}.`
+          : project.reviewGate.nextAction;
       case 'ai_generation':
         return project.latestVersion?.excerpt
           ? this.truncate(project.latestVersion.excerpt, 108)
-          : 'Salida IA preparada y pendiente de lectura editorial.';
+          : `${qaLabel} · ${project.reviewGate.nextAction}.`;
       case 'human_review':
-        return 'La pieza esta esperando decision de editor antes de avanzar.';
+        return `${project.reviewGate.nextAction}. ${project.reviewGate.primaryConcern}`;
       case 'editing':
-        return project.status === 'publish_failed'
-          ? 'El contenido esta listo en texto, pero el publish fallo y requiere intervencion.'
-          : 'QA detecto cambios necesarios en estructura, metadata o consistencia.';
+        return project.reviewGate.primaryConcern;
       case 'qa':
-        return 'Checks completados: la pieza esta lista para aprobacion o release.';
+        return `${qaLabel} · ${project.reviewGate.nextAction}.`;
       case 'scheduled':
-        return project.status === 'publish_queued'
+        return project.reviewGate.stage === 'publish_queued'
           ? 'El job ya esta en cola de publicacion.'
-          : 'Contenido aprobado, listo para schedule o push a destino.';
+          : `${qaLabel} · ${project.reviewGate.nextAction}.`;
       case 'published':
-        return 'Contenido ya visible en destino final y disponible para seguimiento.';
+        return project.latestPublicationJob?.externalUrl
+          ? 'Contenido visible en destino final y listo para seguimiento.'
+          : 'Contenido publicado y disponible para seguimiento.';
     }
   }
 
@@ -701,36 +703,50 @@ export class EditorialPipelinePageComponent implements OnInit {
     return ['/studio/editorial/articles', project.id];
   }
 
-  private cardTone(status: ProjectStatus): TagTone {
-    if (status === 'published') {
-      return 'success';
+  private resolvePreApprovalStage(project: StudioProjectSummary): PipelineStageId {
+    if (!project.latestVersion) {
+      return 'brief';
     }
-    if (status === 'qa_failed' || status === 'publish_failed') {
-      return 'danger';
+
+    if (project.latestVersion.status === 'draft') {
+      return 'draft';
     }
-    if (status === 'qa_passed' || status === 'approved' || status === 'publish_queued') {
-      return 'accent';
+
+    if (project.latestVersion.status === 'ai_generated') {
+      return 'ai_generation';
     }
-    if (status === 'in_review') {
-      return 'warning';
-    }
-    return 'muted';
+
+    return 'human_review';
   }
 
-  private formatStatus(status: ProjectStatus): string {
-    const labels: Record<ProjectStatus, string> = {
-      draft: 'Draft',
-      ai_generated: 'AI generated',
-      qa_failed: 'QA failed',
-      qa_passed: 'QA passed',
-      in_review: 'In review',
-      approved: 'Approved',
-      publish_queued: 'Publish queued',
-      published: 'Published',
-      publish_failed: 'Publish failed',
-    };
+  private isReleaseCandidate(project: StudioProjectSummary): boolean {
+    return (
+      project.reviewGate.publishReady &&
+      ['approved', 'publish_queued'].includes(project.reviewGate.stage)
+    );
+  }
 
-    return labels[status];
+  private isRetryCandidate(project: StudioProjectSummary): boolean {
+    return project.reviewGate.publishReady && project.reviewGate.stage === 'publish_failed';
+  }
+
+  private isOperationallyBlocked(project: StudioProjectSummary): boolean {
+    return project.reviewGate.blockerCount > 0 || project.reviewGate.stage === 'publish_failed';
+  }
+
+  private buildReleaseSummary(project: StudioProjectSummary): string {
+    const qaScore = buildQaScore(project.latestVersion);
+    const qaState = qaScore > 0 ? `${qaScoreLabel(qaScore)} · ${qaScore}/100` : 'QA pending';
+
+    if (this.isRetryCandidate(project)) {
+      return `Retry path available. ${project.reviewGate.primaryConcern}`;
+    }
+
+    return `${qaState} · ${project.reviewGate.nextAction}`;
+  }
+
+  private reviewTone(stage: ReviewGateStage): TagTone {
+    return reviewStageTone(stage);
   }
 
   private truncate(text: string | null | undefined, limit: number, fallback = ''): string {

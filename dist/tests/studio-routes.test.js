@@ -41,7 +41,7 @@ async function createFixture() {
             status: "draft",
         },
     });
-    await prisma.contentVersion.create({
+    const version = await prisma.contentVersion.create({
         data: {
             tenantId: tenant.id,
             projectId: project.id,
@@ -59,6 +59,7 @@ async function createFixture() {
         tenantId: tenant.id,
         siteId: site.id,
         projectId: project.id,
+        versionId: version.id,
     };
 }
 async function cleanupFixture(tenantId) {
@@ -120,7 +121,71 @@ node_test_1.default.after(async () => {
         strict_1.default.equal(payload.items.length, 1);
         strict_1.default.equal(payload.items[0]?.id, fixture.projectId);
         strict_1.default.equal(payload.items[0]?.site.id, fixture.siteId);
+        strict_1.default.equal(payload.items[0]?.versionCount, 1);
+        strict_1.default.equal(payload.items[0]?.reviewGate.stage, "needs_review");
+        strict_1.default.equal(payload.items[0]?.reviewGate.compareReady, false);
+        strict_1.default.equal(payload.items[0]?.reviewGate.blockerCount, 2);
         strict_1.default.equal(payload.items[0]?.latestVersion?.title, "Version inicial");
+        strict_1.default.equal(payload.items[0]?.latestVersion?.wordCount, 8);
+        strict_1.default.equal(payload.items[0]?.latestVersion?.qaFailureCount, 0);
+        strict_1.default.equal(payload.items[0]?.latestVersion?.qaWarningCount, 0);
+    }
+    finally {
+        await server.close();
+        await cleanupFixture(fixture.tenantId);
+    }
+});
+(0, node_test_1.default)("GET /v2/projects/:id returns review gate and version insights", async () => {
+    const fixture = await createFixture();
+    const server = buildStudioTestServer(fixture.tenantId);
+    try {
+        const response = await server.inject({
+            method: "GET",
+            url: `/v2/projects/${fixture.projectId}`,
+        });
+        strict_1.default.equal(response.statusCode, 200);
+        const payload = response.json();
+        strict_1.default.equal(payload.id, fixture.projectId);
+        strict_1.default.equal(payload.versionCount, 1);
+        strict_1.default.equal(payload.reviewGate.stage, "needs_review");
+        strict_1.default.equal(payload.reviewGate.blockers.length, 2);
+        strict_1.default.equal(payload.reviewGate.warnings.length, 1);
+        strict_1.default.equal(payload.versions[0]?.versionNumber, 1);
+        strict_1.default.equal(payload.versions[0]?.wordCount, 8);
+        strict_1.default.equal(payload.versions[0]?.qaFailureCount, 0);
+    }
+    finally {
+        await server.close();
+        await cleanupFixture(fixture.tenantId);
+    }
+});
+(0, node_test_1.default)("PUT /v2/projects/:id updates the editorial brief payload", async () => {
+    const fixture = await createFixture();
+    const server = buildStudioTestServer(fixture.tenantId);
+    try {
+        const response = await server.inject({
+            method: "PUT",
+            url: `/v2/projects/${fixture.projectId}`,
+            payload: {
+                title: "Proyecto reencuadrado",
+                brief: "Brief reescrito con nueva estrategia editorial",
+                primaryLanguage: "en",
+                metadata: {
+                    targetQuery: "enterprise editorial workflow",
+                    keywords: ["editorial cockpit", "content ops"],
+                    featured: true,
+                },
+            },
+        });
+        strict_1.default.equal(response.statusCode, 200);
+        const payload = response.json();
+        strict_1.default.equal(payload.id, fixture.projectId);
+        strict_1.default.equal(payload.title, "Proyecto reencuadrado");
+        strict_1.default.equal(payload.brief, "Brief reescrito con nueva estrategia editorial");
+        strict_1.default.equal(payload.primaryLanguage, "en");
+        strict_1.default.equal(payload.metadata?.targetQuery, "enterprise editorial workflow");
+        strict_1.default.deepEqual(payload.metadata?.keywords, ["editorial cockpit", "content ops"]);
+        strict_1.default.equal(payload.metadata?.featured, true);
     }
     finally {
         await server.close();
@@ -140,6 +205,68 @@ node_test_1.default.after(async () => {
         strict_1.default.equal(payload.tenant.id, fixture.tenantId);
         strict_1.default.equal(payload.siteCount, 1);
         strict_1.default.equal(payload.projectCount, 1);
+    }
+    finally {
+        await server.close();
+        await cleanupFixture(fixture.tenantId);
+    }
+});
+(0, node_test_1.default)("POST /v2/projects/:id/approve rejects versions that look qa_passed but still fail the review gate", async () => {
+    const fixture = await createFixture();
+    const server = buildStudioTestServer(fixture.tenantId);
+    try {
+        await prisma.contentVersion.update({
+            where: { id: fixture.versionId },
+            data: {
+                status: "qa_passed",
+            },
+        });
+        await prisma.contentProject.update({
+            where: { id: fixture.projectId },
+            data: {
+                status: "qa_passed",
+            },
+        });
+        const response = await server.inject({
+            method: "POST",
+            url: `/v2/projects/${fixture.projectId}/approve`,
+        });
+        strict_1.default.equal(response.statusCode, 400);
+        const payload = response.json();
+        strict_1.default.equal(payload.message, "Featured image is still missing.");
+    }
+    finally {
+        await server.close();
+        await cleanupFixture(fixture.tenantId);
+    }
+});
+(0, node_test_1.default)("POST /v2/projects/:id/publish rejects approved versions when gate blockers remain", async () => {
+    const fixture = await createFixture();
+    const server = buildStudioTestServer(fixture.tenantId);
+    try {
+        await prisma.contentVersion.update({
+            where: { id: fixture.versionId },
+            data: {
+                status: "approved",
+            },
+        });
+        await prisma.contentProject.update({
+            where: { id: fixture.projectId },
+            data: {
+                status: "approved",
+            },
+        });
+        const response = await server.inject({
+            method: "POST",
+            url: `/v2/projects/${fixture.projectId}/publish`,
+            payload: {
+                action: "publish",
+                targetStatus: "publish",
+            },
+        });
+        strict_1.default.equal(response.statusCode, 400);
+        const payload = response.json();
+        strict_1.default.equal(payload.message, "Featured image is still missing.");
     }
     finally {
         await server.close();

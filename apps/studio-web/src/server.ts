@@ -18,10 +18,12 @@ import {
 } from './app/content/marketing-content';
 
 type SessionPayload = {
-  authMode: 'api_key' | 'oidc';
+  authMode: 'api_key' | 'human' | 'oidc';
   apiKey?: string;
   sessionToken?: string;
 };
+
+type HumanAuthMode = 'oidc' | 'password' | 'google' | 'launch';
 
 type SessionResponse = {
   tenant: {
@@ -30,7 +32,7 @@ type SessionResponse = {
     slug?: string | null;
     status: string;
   };
-  authMode?: 'api_key' | 'oidc';
+  authMode?: 'api_key' | HumanAuthMode;
   user?: {
     id: string;
     email: string;
@@ -80,6 +82,53 @@ type WorkspaceAccessResponse = {
   };
 };
 
+type LoginWorkspaceSummary = {
+  workspace: {
+    id: string;
+    name: string;
+    slug: string | null;
+    status: string;
+  };
+  membershipStatus: string;
+  requiresSso: boolean;
+  preferred: boolean;
+};
+
+type LoginOptionsResponse = {
+  email: string;
+  account: {
+    id: string;
+    email: string;
+    displayName: string | null;
+    avatarUrl: string | null;
+    status: 'invited' | 'active' | 'suspended';
+    lastWorkspaceId: string | null;
+    emailVerifiedAt: string | null;
+  } | null;
+  accountState: 'invited' | 'active' | 'suspended' | 'no_access';
+  canUsePassword: boolean;
+  canUseGoogle: boolean;
+  googleClientId: string | null;
+  needsActivation: boolean;
+  localWorkspaces: LoginWorkspaceSummary[];
+  ssoWorkspaces: LoginWorkspaceSummary[];
+  recommendedWorkspaceId: string | null;
+  requestAccessUrl: string;
+};
+
+type LaunchTicketResponse = {
+  launchId: string;
+  tenantSlug: string;
+  returnTo: string;
+};
+
+type RedeemedLaunchResponse = {
+  sessionToken: string;
+  session: SessionResponse;
+  tenantSlug: string;
+  returnTo: string;
+};
+
 type InternalValidatedSession = {
   sessionId: string;
   tenantId: string;
@@ -92,6 +141,7 @@ type AuthStatePayload = {
   state: string;
   nonce: string;
   workspaceSlug: string;
+  returnTo: string;
   issuer: string;
   clientId: string;
   clientSecret: string | null;
@@ -114,9 +164,23 @@ const backendBaseUrl = new URL(
 );
 const backendInternalSecret =
   process.env['STUDIO_PROXY_SHARED_SECRET'] || 'studio-proxy-dev-secret-change-me';
+const launchClientId = process.env['STUDIO_LAUNCH_CLIENT_ID'] || 'webtecnoria';
+const launchSharedSecret =
+  process.env['STUDIO_LAUNCH_SHARED_SECRET'] || 'studio-launch-dev-secret-change-me';
+const opsLoginEnabled = ['1', 'true', 'yes', 'on'].includes(
+  String(process.env['STUDIO_ENABLE_OPS_LOGIN'] || 'false').trim().toLowerCase(),
+);
 const angularApp = new AngularNodeAppEngine({
   allowedHosts: getAllowedHosts(),
 });
+const LAUNCH_CLIENT_HEADER = 'x-launch-client';
+const LAUNCH_TIMESTAMP_HEADER = 'x-launch-timestamp';
+const LAUNCH_SIGNATURE_HEADER = 'x-launch-signature';
+
+function resolveStudioReturnTo(value: unknown): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized.startsWith(`${studioBasePath}/`) ? normalized : `${studioBasePath}/dashboard`;
+}
 
 function normalizeBasePath(value: string): string {
   const normalized = value.trim().replace(/\/+$/, '');
@@ -140,6 +204,41 @@ function readHeaderValue(value: string | string[] | undefined): string | undefin
     return value[0];
   }
   return value;
+}
+
+function constantTimeEquals(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+
+  if (leftBuffer.length !== rightBuffer.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function buildLaunchSignature(timestamp: string, rawBody: string): string {
+  return crypto
+    .createHmac('sha256', launchSharedSecret)
+    .update(`${timestamp}.${rawBody}`)
+    .digest('base64url');
+}
+
+function isLaunchTimestampFresh(timestamp: string): boolean {
+  const parsed = Number.parseInt(timestamp, 10);
+  if (Number.isNaN(parsed)) {
+    return false;
+  }
+
+  return Math.abs(Date.now() - parsed) <= 60 * 1000;
+}
+
+function readLaunchHeader(req: express.Request, name: string): string {
+  const value = req.headers[name];
+  if (Array.isArray(value)) {
+    return String(value[0] || '').trim();
+  }
+  return String(value || '').trim();
 }
 
 function splitForwardedValue(value: string | null | undefined): string | undefined {
@@ -329,9 +428,9 @@ function decryptSession(value: string | undefined): SessionPayload | null {
     };
   }
 
-  if (payload.authMode === 'oidc' && payload.sessionToken?.trim()) {
+  if ((payload.authMode === 'oidc' || payload.authMode === 'human') && payload.sessionToken?.trim()) {
     return {
-      authMode: 'oidc',
+      authMode: payload.authMode,
       sessionToken: payload.sessionToken.trim(),
     };
   }
@@ -568,6 +667,131 @@ async function fetchInternalWorkspaceAccess(
   };
 }
 
+async function postInternalAuth<TResponse extends object>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<TResponse> {
+  const response = await fetch(new URL(path, backendBaseUrl), {
+    method: 'POST',
+    headers: {
+      ...getInternalHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  const payload = (await response.json()) as TResponse | { error?: string; message?: string };
+  if (!response.ok) {
+    const error = new Error(
+      ('message' in payload && payload.message) || 'auth_request_failed',
+    ) as Error & { status?: number };
+    error.status = response.status;
+    throw error;
+  }
+
+  return payload as TResponse;
+}
+
+async function requestInternalLoginOptions(email: string): Promise<LoginOptionsResponse> {
+  return postInternalAuth<LoginOptionsResponse>('/internal/login/options', { email });
+}
+
+async function requestInternalPasswordLogin(input: {
+  email: string;
+  password: string;
+  workspaceId?: string | null;
+}): Promise<{ sessionToken: string; session: SessionResponse }> {
+  return postInternalAuth<{ sessionToken: string; session: SessionResponse }>(
+    '/internal/login/password',
+    input,
+  );
+}
+
+async function requestInternalGoogleLogin(input: {
+  credential: string;
+  emailHint?: string | null;
+  workspaceId?: string | null;
+}): Promise<{ sessionToken: string; session: SessionResponse }> {
+  return postInternalAuth<{ sessionToken: string; session: SessionResponse }>(
+    '/internal/login/google',
+    input,
+  );
+}
+
+async function requestInternalPasswordForgot(email: string): Promise<{ ok: true }> {
+  return postInternalAuth<{ ok: true }>('/internal/password/forgot', { email });
+}
+
+async function requestInternalPasswordReset(input: {
+  token: string;
+  password: string;
+}): Promise<{ ok: true }> {
+  return postInternalAuth<{ ok: true }>('/internal/password/reset', input);
+}
+
+async function requestInternalInvitationAccept(input: {
+  token: string;
+  password: string;
+  workspaceId?: string | null;
+}): Promise<{ sessionToken: string; session: SessionResponse }> {
+  return postInternalAuth<{ sessionToken: string; session: SessionResponse }>(
+    '/internal/invitations/accept',
+    input,
+  );
+}
+
+async function createInternalLaunchTicket(input: {
+  workspace: string;
+  email: string;
+  displayName?: string | null;
+  returnTo: string;
+  sourceApp: 'webtecnoria';
+}): Promise<LaunchTicketResponse> {
+  const response = await fetch(new URL('/internal/launch-tickets', backendBaseUrl), {
+    method: 'POST',
+    headers: {
+      ...getInternalHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  const payload = (await response.json()) as
+    | LaunchTicketResponse
+    | { error?: string; message?: string };
+
+  if (!response.ok || !('launchId' in payload)) {
+    throw new Error(
+      ('message' in payload && payload.message) || 'launch_ticket_create_failed',
+    );
+  }
+
+  return payload;
+}
+
+async function redeemInternalLaunchTicket(launchId: string): Promise<RedeemedLaunchResponse> {
+  const response = await fetch(new URL('/internal/launch-tickets/redeem', backendBaseUrl), {
+    method: 'POST',
+    headers: {
+      ...getInternalHeaders(),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ launchId }),
+  });
+
+  const payload = (await response.json()) as
+    | RedeemedLaunchResponse
+    | { error?: string; message?: string };
+
+  if (!response.ok || !('sessionToken' in payload)) {
+    throw new Error(
+      ('message' in payload && payload.message) || 'launch_ticket_redeem_failed',
+    );
+  }
+
+  return payload;
+}
+
 async function validateSessionToken(
   sessionToken: string,
 ): Promise<InternalValidatedSession | null> {
@@ -678,7 +902,7 @@ async function resolveStudioSession(
     return { payload, session };
   }
 
-  if (payload.authMode === 'oidc' && payload.sessionToken) {
+  if ((payload.authMode === 'oidc' || payload.authMode === 'human') && payload.sessionToken) {
     const validatedOidcSession = await validateSessionToken(payload.sessionToken);
     if (!validatedOidcSession) {
       return null;
@@ -850,6 +1074,20 @@ app.get(`${studioBasePath}/health`, (_req, res) => {
   });
 });
 
+app.get('/login', (req, res) => {
+  const params = new URLSearchParams();
+  params.set('entry', 'public');
+
+  for (const key of ['workspace', 'returnTo', 'invite', 'reset', 'launch', 'email', 'reason']) {
+    const value = typeof req.query[key] === 'string' ? req.query[key].trim() : '';
+    if (value) {
+      params.set(key, value);
+    }
+  }
+
+  res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+});
+
 app.get(`${studioBasePath}/api/session/workspace`, (req, res) => {
   void (async () => {
     const workspace = String(req.query['workspace'] || '').trim();
@@ -879,8 +1117,153 @@ app.get(`${studioBasePath}/api/session/workspace`, (req, res) => {
   });
 });
 
+app.post(`${studioBasePath}/api/auth/login/options`, express.json({ limit: '16kb' }), (req, res) => {
+  void (async () => {
+    const email = String((req.body as { email?: string } | undefined)?.email || '').trim();
+    if (!email) {
+      res.status(400).json({
+        error: 'bad_request',
+        message: 'email_required',
+      });
+      return;
+    }
+
+    const options = await requestInternalLoginOptions(email);
+    res.json(options);
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
+app.post(`${studioBasePath}/api/auth/login/password`, express.json({ limit: '32kb' }), (req, res) => {
+  void (async () => {
+    const body = req.body as
+      | {
+          email?: string;
+          password?: string;
+          workspaceId?: string | null;
+        }
+      | undefined;
+
+    const result = await requestInternalPasswordLogin({
+      email: String(body?.email || '').trim(),
+      password: String(body?.password || ''),
+      workspaceId: body?.workspaceId ? String(body.workspaceId).trim() : null,
+    });
+
+    setSessionCookie(res, req, {
+      authMode: 'human',
+      sessionToken: result.sessionToken,
+    });
+    res.json(result.session);
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
+app.post(`${studioBasePath}/api/auth/login/google`, express.json({ limit: '32kb' }), (req, res) => {
+  void (async () => {
+    const body = req.body as
+      | {
+          credential?: string;
+          emailHint?: string | null;
+          workspaceId?: string | null;
+        }
+      | undefined;
+
+    const result = await requestInternalGoogleLogin({
+      credential: String(body?.credential || '').trim(),
+      emailHint: body?.emailHint ? String(body.emailHint).trim() : null,
+      workspaceId: body?.workspaceId ? String(body.workspaceId).trim() : null,
+    });
+
+    setSessionCookie(res, req, {
+      authMode: 'human',
+      sessionToken: result.sessionToken,
+    });
+    res.json(result.session);
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
+app.post(`${studioBasePath}/api/auth/password/forgot`, express.json({ limit: '16kb' }), (req, res) => {
+  void (async () => {
+    const email = String((req.body as { email?: string } | undefined)?.email || '').trim();
+    await requestInternalPasswordForgot(email);
+    res.json({ ok: true });
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
+app.post(`${studioBasePath}/api/auth/password/reset`, express.json({ limit: '32kb' }), (req, res) => {
+  void (async () => {
+    const body = req.body as { token?: string; password?: string } | undefined;
+    const result = await requestInternalPasswordReset({
+      token: String(body?.token || '').trim(),
+      password: String(body?.password || ''),
+    });
+    res.json(result);
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
+app.post(`${studioBasePath}/api/auth/invitations/accept`, express.json({ limit: '32kb' }), (req, res) => {
+  void (async () => {
+    const body = req.body as
+      | {
+          token?: string;
+          password?: string;
+          workspaceId?: string | null;
+        }
+      | undefined;
+
+    const result = await requestInternalInvitationAccept({
+      token: String(body?.token || '').trim(),
+      password: String(body?.password || ''),
+      workspaceId: body?.workspaceId ? String(body.workspaceId).trim() : null,
+    });
+
+    setSessionCookie(res, req, {
+      authMode: 'human',
+      sessionToken: result.sessionToken,
+    });
+    res.json(result.session);
+  })().catch((error: Error & { status?: number }) => {
+    res.status(error.status || 500).json({
+      error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
+      message: error.message || 'Unexpected error',
+    });
+  });
+});
+
 app.post(`${studioBasePath}/api/session/login`, express.json({ limit: '64kb' }), (req, res) => {
   void (async () => {
+    if (!opsLoginEnabled) {
+      res.status(404).json({
+        error: 'not_found',
+        message: 'Ops login is disabled',
+      });
+      return;
+    }
+
     const apiKey = String((req.body as { apiKey?: string } | undefined)?.apiKey || '').trim();
     const workspace = String((req.body as { workspace?: string } | undefined)?.workspace || '').trim();
     if (!apiKey) {
@@ -929,9 +1312,108 @@ app.post(`${studioBasePath}/api/session/login`, express.json({ limit: '64kb' }),
   });
 });
 
+app.post(
+  `${studioBasePath}/api/auth/launch-tickets`,
+  express.json({
+    limit: '16kb',
+    verify: (req, _res, buffer) => {
+      (req as express.Request & { rawBody?: string }).rawBody = buffer.toString('utf8');
+    },
+  }),
+  (req, res) => {
+    void (async () => {
+      const client = readLaunchHeader(req, LAUNCH_CLIENT_HEADER);
+      const timestamp = readLaunchHeader(req, LAUNCH_TIMESTAMP_HEADER);
+      const signature = readLaunchHeader(req, LAUNCH_SIGNATURE_HEADER);
+      const rawBody = (req as express.Request & { rawBody?: string }).rawBody || '';
+
+      if (!client || !timestamp || !signature || !rawBody) {
+        res.status(401).json({
+          error: 'unauthorized',
+          message: 'Missing launch signature headers',
+        });
+        return;
+      }
+
+      if (client !== launchClientId || !isLaunchTimestampFresh(timestamp)) {
+        res.status(401).json({
+          error: 'unauthorized',
+          message: 'Invalid launch signature context',
+        });
+        return;
+      }
+
+      const expectedSignature = buildLaunchSignature(timestamp, rawBody);
+      if (!constantTimeEquals(signature, expectedSignature)) {
+        res.status(401).json({
+          error: 'unauthorized',
+          message: 'Invalid launch signature',
+        });
+        return;
+      }
+
+      const body = req.body as {
+        workspace?: string;
+        email?: string;
+        displayName?: string | null;
+        returnTo?: string;
+        sourceApp?: 'webtecnoria';
+      };
+      const workspace = String(body.workspace || '').trim();
+      const email = String(body.email || '').trim().toLowerCase();
+      const sourceApp = body.sourceApp === 'webtecnoria' ? body.sourceApp : null;
+      const returnTo = resolveStudioReturnTo(body.returnTo);
+
+      if (!workspace || !email || !sourceApp) {
+        res.status(400).json({
+          error: 'bad_request',
+          message: 'workspace, email and sourceApp are required',
+        });
+        return;
+      }
+
+      try {
+        const ticket = await createInternalLaunchTicket({
+          workspace,
+          email,
+          displayName: body.displayName?.trim() || null,
+          returnTo,
+          sourceApp,
+        });
+
+        res.json(ticket);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'launch_ticket_create_failed';
+        const status =
+          message === 'workspace_not_found'
+            ? 404
+            : [
+                  'workspace_launch_not_allowed',
+                  'interactive_login_required',
+                  'user_not_authorized',
+                  'user_suspended',
+                ].includes(message)
+              ? 403
+              : 502;
+
+        res.status(status).json({
+          error: status === 502 ? 'upstream_unavailable' : 'launch_denied',
+          message,
+        });
+      }
+    })().catch((error) => {
+      res.status(500).json({
+        error: 'internal_error',
+        message: error instanceof Error ? error.message : 'Unexpected error',
+      });
+    });
+  },
+);
+
 app.get(`${studioBasePath}/api/auth/sso/start`, (req, res) => {
   void (async () => {
     const workspaceSlug = String(req.query['workspace'] || '').trim();
+    const returnTo = resolveStudioReturnTo(req.query['returnTo']);
     if (!workspaceSlug) {
       res.redirect(302, `${studioBasePath}/login?reason=workspace_not_found`);
       return;
@@ -961,6 +1443,7 @@ app.get(`${studioBasePath}/api/auth/sso/start`, (req, res) => {
       state,
       nonce,
       workspaceSlug,
+      returnTo,
       issuer: provider.issuer,
       clientId: provider.clientId,
       clientSecret: provider.clientSecret,
@@ -1083,10 +1566,10 @@ app.get(`${studioBasePath}/api/auth/sso/callback`, (req, res) => {
 
     clearAuthStateCookie(res, req);
     setSessionCookie(res, req, {
-      authMode: 'oidc',
+      authMode: 'human',
       sessionToken: studioSession.sessionToken,
     });
-    res.redirect(302, `${studioBasePath}/dashboard`);
+    res.redirect(302, authState.returnTo);
   })().catch((error) => {
     clearAuthStateCookie(res, req);
     res.redirect(
@@ -1101,7 +1584,7 @@ app.get(`${studioBasePath}/api/auth/sso/callback`, (req, res) => {
 app.post(`${studioBasePath}/api/session/logout`, (req, res) => {
   void (async () => {
     const session = readSession(req);
-    if (session?.authMode === 'oidc' && session.sessionToken) {
+    if ((session?.authMode === 'oidc' || session?.authMode === 'human') && session.sessionToken) {
       await revokeSessionToken(session.sessionToken);
     }
 
@@ -1148,6 +1631,8 @@ app.use(
 
 app.use((req, res, next) => {
   void (async () => {
+    req.headers['x-studio-internal-origin'] = `http://127.0.0.1:${process.env['PORT'] || '4400'}`;
+
     const pathname = new URL(req.originalUrl, 'http://localhost').pathname;
     if (!shouldHandleWithAngular(pathname)) {
       next();
@@ -1156,25 +1641,81 @@ app.use((req, res, next) => {
 
     if (isStudioPage(pathname)) {
       const isLoginRoute = pathname === `${studioBasePath}/login`;
+      const isOpsLoginRoute = pathname === `${studioBasePath}/ops-login`;
+      const forceLoginView =
+        isLoginRoute && String(req.query['entry'] || '').trim().toLowerCase() === 'public';
       const rawSession = readSession(req);
       const validatedSession = await resolveStudioSession(req);
+      const requestedStudioPath = resolveStudioReturnTo(req.originalUrl);
+      const returnTo = resolveStudioReturnTo(
+        typeof req.query['returnTo'] === 'string' ? req.query['returnTo'] : undefined,
+      );
 
-      if (isLoginRoute && validatedSession) {
-        res.redirect(302, `${studioBasePath}/`);
+      if (isOpsLoginRoute && !opsLoginEnabled) {
+        res.status(404).type('text/plain').send('Not found');
         return;
       }
 
-      if (!isLoginRoute && !validatedSession) {
-        if (rawSession) {
-          clearSessionCookie(res, req);
+      if (isLoginRoute) {
+        const launchId = String(req.query['launch'] || '').trim();
+        if (launchId) {
+          try {
+            const redeemed = await redeemInternalLaunchTicket(launchId);
+            clearAuthStateCookie(res, req);
+            setSessionCookie(res, req, {
+              authMode: 'human',
+              sessionToken: redeemed.sessionToken,
+            });
+            res.redirect(302, redeemed.returnTo);
+            return;
+          } catch (error) {
+            const reason = error instanceof Error ? error.message : 'launch_ticket_redeem_failed';
+            const workspace = String(req.query['workspace'] || '').trim();
+            const params = new URLSearchParams({
+              reason,
+              returnTo,
+            });
+
+            if (workspace) {
+              params.set('workspace', workspace);
+            }
+
+            res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+            return;
+          }
         }
-        const reason = rawSession ? 'session_expired' : '';
-        res.redirect(
-          302,
-          reason ? `${studioBasePath}/login?reason=${reason}` : `${studioBasePath}/login`,
-        );
+      }
+
+      if ((isLoginRoute || isOpsLoginRoute) && validatedSession && !forceLoginView) {
+        res.redirect(302, returnTo);
         return;
       }
+
+      if (rawSession && !validatedSession) {
+        clearSessionCookie(res, req);
+        if (!isLoginRoute && !isOpsLoginRoute) {
+          const params = new URLSearchParams({
+            reason: 'session_expired',
+            returnTo: requestedStudioPath,
+          });
+          res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+          return;
+        }
+      }
+
+      if (!validatedSession && !isLoginRoute && !isOpsLoginRoute) {
+        const params = new URLSearchParams({
+          returnTo: requestedStudioPath,
+        });
+        res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+        return;
+      }
+
+      res.setHeader('Cache-Control', 'no-store');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+      res.sendFile(join(browserDistFolder, 'index.csr.html'));
+      return;
     }
 
     angularApp

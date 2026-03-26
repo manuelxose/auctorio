@@ -1,0 +1,298 @@
+<div class="console-auth console-auth--saas">
+  <section class="console-auth__hero studio-login-hero">
+    <p class="console-kicker">Auctorio Studio</p>
+    <h1>Acceso editorial SaaS para operar contenido, assets y publicacion desde una sola capa.</h1>
+    <p>
+      Entra con email, Google o SSO corporativo segun tu workspace. Sin slugs visibles, sin accesos
+      operativos en cliente y sin rebotes opacos al dashboard.
+    </p>
+
+    <div class="console-auth__signals studio-login-hero__signals">
+      <article class="console-auth__signal">
+        <span>Access model</span>
+        <strong>Email-first + Google + SSO</strong>
+      </article>
+      <article class="console-auth__signal">
+        <span>Scope</span>
+        <strong>Editorial cockpit multi-site</strong>
+      </article>
+      <article class="console-auth__signal">
+        <span>Security</span>
+        <strong>Invite-only + tenant sessions</strong>
+      </article>
+    </div>
+  </section>
+
+  <section class="console-auth__panel studio-login-panel">
+    <div class="studio-login-panel__head">
+      <p class="console-kicker">{{ hasTokenFlow ? 'Account action' : 'Studio login' }}</p>
+      <h2>{{ hasTokenFlow ? tokenFormTitle : 'Entra al Studio como en un SaaS normal' }}</h2>
+      <p *ngIf="!hasTokenFlow">
+        {{
+          showContinuation
+            ? 'Ya tienes una sesion valida. Puedes continuar con ella o identificar otra cuenta justo debajo, sin salir del login.'
+            : 'Identificamos tu cuenta por email y luego te ofrecemos solo las vias validas para tus workspaces: password, Google o SSO.'
+        }}
+      </p>
+      <p *ngIf="hasTokenFlow">
+        Este enlace es temporal y sirve para activar tu acceso o actualizar tu password sin pedir
+        slugs tecnicos.
+      </p>
+    </div>
+
+    <div class="console-banner console-banner--error" *ngIf="error">{{ error }}</div>
+    <div class="console-banner console-banner--success" *ngIf="success">{{ success }}</div>
+
+    <section class="studio-login-account studio-login-account--active" *ngIf="showContinuation">
+      <div class="studio-login-account__copy">
+        <span class="console-kicker">Session activa</span>
+        <h3>Continuar como {{ activeSession?.user?.displayName || activeSession?.user?.email }}</h3>
+        <p>
+          Ya tienes una sesion valida en
+          <strong>{{ activeSession?.tenant?.name || 'Auctorio Studio' }}</strong>.
+          Puedes continuar directamente o cambiar de cuenta.
+        </p>
+      </div>
+
+      <div class="studio-login-account__actions">
+        <a class="console-button" [href]="returnTo">
+          Continuar al Studio
+        </a>
+        <button type="button" class="console-button console-button--secondary" (click)="switchAccount()">
+          Cambiar cuenta
+        </button>
+      </div>
+    </section>
+
+    <div class="studio-login-divider" *ngIf="showContinuation">
+      <span>O entrar con otra cuenta</span>
+    </div>
+
+    <ng-container>
+      <form class="console-form studio-login-email" (ngSubmit)="lookupEmail()">
+        <label class="console-field">
+          <span>Email de acceso</span>
+          <input
+            type="email"
+            name="email"
+            [(ngModel)]="email"
+            autocomplete="email"
+            placeholder="name@company.com"
+            [readonly]="hasResolvedOptions"
+          />
+        </label>
+
+        <div class="studio-login-email__actions" *ngIf="!hasResolvedOptions || hasTokenFlow">
+          <button type="submit" class="console-button console-button--full" [disabled]="loadingOptions">
+            {{ loadingOptions ? 'Comprobando acceso...' : 'Continuar con email' }}
+          </button>
+        </div>
+
+        <div class="studio-login-identity" *ngIf="hasResolvedOptions && !hasTokenFlow">
+          <div>
+            <span class="console-kicker">Cuenta detectada</span>
+            <strong>{{ options?.account?.displayName || email }}</strong>
+            <p>{{ email }}</p>
+          </div>
+          <button type="button" class="console-button console-button--secondary" (click)="changeEmail()">
+            Cambiar email
+          </button>
+        </div>
+      </form>
+
+      <section class="studio-login-state studio-login-state--denied" *ngIf="options?.accountState === 'no_access' || options?.accountState === 'suspended'">
+        <h3>{{ options?.accountState === 'suspended' ? 'Acceso suspendido' : 'No hay acceso para ese email' }}</h3>
+        <p>
+          {{
+            options?.accountState === 'suspended'
+              ? 'Tu cuenta existe, pero el acceso al Studio esta suspendido. Contacta con el equipo responsable del workspace.'
+              : 'Auctorio Studio sigue un modelo cerrado por invitacion. Si necesitas acceso, solicitalo al equipo responsable del workspace o al equipo de Tecnoria.'
+          }}
+        </p>
+        <div class="studio-login-state__actions">
+          <a class="console-button" [href]="requestAccessUrl" target="_blank" rel="noreferrer">
+            {{ options?.accountState === 'suspended' ? 'Contactar con soporte' : 'Solicitar acceso' }}
+          </a>
+          <button type="button" class="console-button console-button--secondary" (click)="changeEmail()">
+            Probar otro email
+          </button>
+        </div>
+      </section>
+
+      <ng-container *ngIf="options && options.accountState !== 'no_access' && options.accountState !== 'suspended'">
+        <section class="studio-login-workspaces" *ngIf="localWorkspaces.length > 0">
+          <div class="studio-login-workspaces__head">
+            <h3>Workspace de entrada</h3>
+            <p>
+              {{ localWorkspaces.length > 1
+                ? 'Selecciona el workspace donde quieres empezar. Recordaremos el ultimo que uses.'
+                : 'Tu acceso local ya esta asociado al workspace correcto.' }}
+            </p>
+          </div>
+
+          <label class="console-field" *ngIf="localWorkspaces.length > 1">
+            <span>Workspace</span>
+            <select name="workspaceId" [(ngModel)]="selectedWorkspaceId">
+              <option value="">Selecciona un workspace</option>
+              <option *ngFor="let workspace of localWorkspaces" [value]="workspace.workspace.id">
+                {{ workspace.workspace.name }}
+              </option>
+            </select>
+          </label>
+
+          <div class="studio-login-workspace-pills">
+            <span
+              class="studio-login-workspace-pill"
+              *ngFor="let workspace of localWorkspaces"
+              [class.is-selected]="selectedWorkspaceId === workspace.workspace.id"
+            >
+              <strong>{{ workspace.workspace.name }}</strong>
+              <span>{{ workspace.preferred ? 'Ultimo usado' : workspace.membershipStatus }}</span>
+            </span>
+          </div>
+        </section>
+
+        <section class="studio-login-method" *ngIf="!hasTokenFlow && (options.canUsePassword || options.needsActivation)">
+          <div class="studio-login-method__head">
+            <h3>{{ options.canUsePassword ? 'Entrar con password' : 'Activar acceso' }}</h3>
+            <p *ngIf="options.canUsePassword">
+              Usa tu password local para entrar en {{ selectedWorkspaceName }}.
+            </p>
+            <p *ngIf="!options.canUsePassword && options.needsActivation">
+              Tu cuenta esta invitada pero todavia no tiene password local. Te enviamos un enlace de
+              activacion al email.
+            </p>
+          </div>
+
+          <form class="console-form" *ngIf="options.canUsePassword" (ngSubmit)="submitPassword()">
+            <label class="console-field">
+              <span>Password</span>
+              <input
+                type="password"
+                name="password"
+                [(ngModel)]="password"
+                autocomplete="current-password"
+                placeholder="Tu password de acceso"
+              />
+            </label>
+
+            <div class="studio-login-method__actions">
+              <button type="submit" class="console-button" [disabled]="loadingPassword">
+                {{ loadingPassword ? 'Entrando...' : 'Entrar al Studio' }}
+              </button>
+              <button type="button" class="console-button console-button--secondary" (click)="sendAccessEmail()">
+                {{ sendingAccessEmail ? 'Enviando...' : 'Olvide el password' }}
+              </button>
+            </div>
+          </form>
+
+          <div class="studio-login-method__actions" *ngIf="!options.canUsePassword && options.needsActivation">
+            <button type="button" class="console-button" (click)="sendAccessEmail()">
+              {{ sendingAccessEmail ? 'Enviando enlace...' : 'Enviar enlace de activacion' }}
+            </button>
+          </div>
+        </section>
+
+        <section class="studio-login-method" *ngIf="!hasTokenFlow && options.canUseGoogle">
+          <div class="studio-login-method__head">
+            <h3>Continuar con Google</h3>
+            <p>Valido solo para cuentas ya invitadas o ya activadas dentro del Studio.</p>
+          </div>
+
+          <div class="studio-login-google">
+            <div #googleButtonHost class="studio-login-google__button"></div>
+            <p class="console-field__hint" *ngIf="!googleReady && !googleUnavailableMessage">
+              Preparando Google Sign-In...
+            </p>
+            <p class="console-field__hint console-feed__error" *ngIf="googleUnavailableMessage">
+              {{ googleUnavailableMessage }}
+            </p>
+            <p class="console-field__hint console-feed__error" *ngIf="googleErrorMessage">
+              {{ googleErrorMessage }}
+            </p>
+            <p class="console-field__hint" *ngIf="loadingGoogle">Validando acceso con Google...</p>
+          </div>
+        </section>
+
+        <section class="studio-login-method" *ngIf="hasTokenFlow">
+          <div class="studio-login-method__head">
+            <h3>{{ tokenFormTitle }}</h3>
+            <p *ngIf="inviteToken">
+              Define un password inicial para entrar al Studio. Si tienes mas de un workspace local,
+              elige tambien donde quieres entrar primero.
+            </p>
+            <p *ngIf="resetToken">
+              Define un password nuevo para tu cuenta. Despues podras entrar normalmente con email y
+              password o con Google si lo tienes activado.
+            </p>
+          </div>
+
+          <form class="console-form" (ngSubmit)="submitPassword()">
+            <label class="console-field">
+              <span>Nuevo password</span>
+              <input
+                type="password"
+                name="newPassword"
+                [(ngModel)]="password"
+                autocomplete="new-password"
+                placeholder="Minimo 10 caracteres"
+              />
+            </label>
+
+            <label class="console-field">
+              <span>Repite el password</span>
+              <input
+                type="password"
+                name="newPasswordConfirm"
+                [(ngModel)]="passwordConfirm"
+                autocomplete="new-password"
+                placeholder="Repite el password"
+              />
+            </label>
+
+            <div class="studio-login-method__actions">
+              <button type="submit" class="console-button" [disabled]="loadingPassword">
+                {{ loadingPassword ? 'Procesando...' : (inviteToken ? 'Activar y entrar' : 'Guardar password') }}
+              </button>
+            </div>
+          </form>
+        </section>
+
+        <section class="studio-login-method" *ngIf="ssoWorkspaces.length > 0">
+          <div class="studio-login-method__head">
+            <h3>Continuar con SSO corporativo</h3>
+            <p>
+              Estos workspaces requieren autenticacion corporativa. No necesitas recordar ningun slug;
+              solo elige el workspace correcto y seguimos el flujo OIDC.
+            </p>
+          </div>
+
+          <div class="studio-login-sso-grid">
+            <button
+              type="button"
+              class="studio-login-sso-card"
+              *ngFor="let workspace of ssoWorkspaces"
+              (click)="goWithSso(workspace)"
+            >
+              <span class="console-kicker">SSO</span>
+              <strong>{{ workspace.workspace.name }}</strong>
+              <p>
+                {{ workspace.workspace.slug || 'workspace' }} ·
+                {{ workspace.preferred ? 'ultimo usado' : 'acceso enterprise' }}
+              </p>
+            </button>
+          </div>
+        </section>
+
+        <div class="studio-login-footer">
+          <a class="console-link" [href]="requestAccessUrl" target="_blank" rel="noreferrer">
+            Solicitar acceso
+          </a>
+          <button type="button" class="console-link-button" (click)="changeEmail()">
+            Cambiar email
+          </button>
+        </div>
+      </ng-container>
+    </ng-container>
+  </section>
+</div>

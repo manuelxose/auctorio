@@ -25,9 +25,11 @@ import type {
   StudioSession,
   StudioSiteSummary,
   StudioVersionDerivation,
+  UpdateProjectInput,
   UpdateSiteInput,
 } from "./types";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml } from "./review";
 import { STUDIO_PERMISSIONS } from "./security";
 
 const prisma = getPrismaClient();
@@ -178,6 +180,37 @@ export async function createProject(tenantId: string, input: CreateProjectInput)
   });
 }
 
+export async function updateProject(
+  tenantId: string,
+  projectId: string,
+  input: UpdateProjectInput,
+): Promise<ContentProject | null> {
+  const project = await prisma.contentProject.findFirst({
+    where: { id: projectId, tenantId },
+    select: { id: true },
+  });
+  if (!project) {
+    return null;
+  }
+
+  return prisma.contentProject.update({
+    where: { id: project.id },
+    data: {
+      siteId: input.siteId ?? undefined,
+      title: input.title?.trim() || undefined,
+      brief: input.brief?.trim() || undefined,
+      goal: input.goal,
+      primaryLanguage: input.primaryLanguage?.trim() || undefined,
+      metadata:
+        input.metadata === undefined
+          ? undefined
+          : input.metadata
+            ? (input.metadata as Prisma.InputJsonObject)
+            : Prisma.JsonNull,
+    },
+  });
+}
+
 export async function getProjectById(tenantId: string, projectId: string) {
   return prisma.contentProject.findFirst({
     where: { id: projectId, tenantId },
@@ -241,6 +274,11 @@ export async function listProjects(
       skip,
       take: pageSize,
       include: {
+        _count: {
+          select: {
+            versions: true,
+          },
+        },
         site: true,
         versions: {
           orderBy: { versionNumber: "desc" },
@@ -280,71 +318,96 @@ export async function listProjects(
   ]);
 
   return {
-    items: projects.map((project) => ({
-      id: project.id,
-      siteId: project.siteId,
-      title: project.title,
-      brief: project.brief,
-      goal: project.goal,
-      status: project.status,
-      primaryLanguage: project.primaryLanguage,
-      createdAt: project.createdAt,
-      updatedAt: project.updatedAt,
-      site: {
-        id: project.site.id,
-        key: project.site.key,
-        name: project.site.name,
-        type: project.site.type,
-        locale: project.site.locale,
-        baseUrl: project.site.baseUrl,
-      },
-      latestVersion: project.versions[0]
-        ? {
-            id: project.versions[0].id,
-            versionNumber: project.versions[0].versionNumber,
-            status: project.versions[0].status,
-            title: project.versions[0].title,
-            excerpt: project.versions[0].excerpt,
-            seoTitle: project.versions[0].seoTitle,
-            seoDescription: project.versions[0].seoDescription,
-            feedback: project.versions[0].feedback,
-            createdAt: project.versions[0].createdAt,
-            updatedAt: project.versions[0].updatedAt,
-            approvedAt: project.versions[0].approvedAt,
-            approvedBy: project.versions[0].approvedBy,
-            publishedAt: project.versions[0].publishedAt,
-            qaState: mapQaState(project.versions[0].status),
-            hasAsset: Boolean(project.versions[0].contentImage?.storagePath),
-            assetUrl: project.versions[0].contentImage?.storagePath ?? null,
+    items: projects.map((project) => {
+      const latestVersion = project.versions[0] ?? null;
+
+      return {
+        id: project.id,
+        siteId: project.siteId,
+        title: project.title,
+        brief: project.brief,
+        goal: project.goal,
+        status: project.status,
+        primaryLanguage: project.primaryLanguage,
+        createdAt: project.createdAt,
+        updatedAt: project.updatedAt,
+        site: {
+          id: project.site.id,
+          key: project.site.key,
+          name: project.site.name,
+          type: project.site.type,
+          locale: project.site.locale,
+          baseUrl: project.site.baseUrl,
+        },
+        versionCount: project._count.versions,
+        reviewGate: buildReviewGate({
+          projectStatus: project.status,
+          versionCount: project._count.versions,
+          latestVersion: latestVersion
+            ? {
+                status: latestVersion.status,
+                title: latestVersion.title,
+                excerpt: latestVersion.excerpt,
+                seoTitle: latestVersion.seoTitle,
+                seoDescription: latestVersion.seoDescription,
+                feedback: latestVersion.feedback,
+                bodyHtml: latestVersion.bodyHtml,
+                qaReport: latestVersion.qaReport,
+                hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+              }
+            : null,
+        }),
+        latestVersion: latestVersion
+          ? {
+            id: latestVersion.id,
+            versionNumber: latestVersion.versionNumber,
+            status: latestVersion.status,
+            title: latestVersion.title,
+            excerpt: latestVersion.excerpt,
+            seoTitle: latestVersion.seoTitle,
+            seoDescription: latestVersion.seoDescription,
+            feedback: latestVersion.feedback,
+            createdAt: latestVersion.createdAt,
+            updatedAt: latestVersion.updatedAt,
+            approvedAt: latestVersion.approvedAt,
+            approvedBy: latestVersion.approvedBy,
+            publishedAt: latestVersion.publishedAt,
+            qaState: mapQaState(latestVersion.status),
+            hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+            assetUrl: latestVersion.contentImage?.storagePath ?? null,
             promptPresetVersionId:
-              project.versions[0].contentText?.promptPresetVersion?.id ??
-              project.versions[0].contentImage?.promptPresetVersion?.id ??
+              latestVersion.contentText?.promptPresetVersion?.id ??
+              latestVersion.contentImage?.promptPresetVersion?.id ??
               null,
             promptVersionLabel:
-              project.versions[0].contentText?.promptPresetVersion
-                ? `v${project.versions[0].contentText.promptPresetVersion.versionNumber}`
-                : project.versions[0].contentImage?.promptPresetVersion
-                  ? `v${project.versions[0].contentImage.promptPresetVersion.versionNumber}`
-                  : project.versions[0].contentText?.promptVersion ?? null,
+              latestVersion.contentText?.promptPresetVersion
+                ? `v${latestVersion.contentText.promptPresetVersion.versionNumber}`
+                : latestVersion.contentImage?.promptPresetVersion
+                  ? `v${latestVersion.contentImage.promptPresetVersion.versionNumber}`
+                  : latestVersion.contentText?.promptVersion ?? null,
             promptPresetName:
-              project.versions[0].contentText?.promptPresetVersion?.preset.name ??
-              project.versions[0].contentImage?.promptPresetVersion?.preset.name ??
+              latestVersion.contentText?.promptPresetVersion?.preset.name ??
+              latestVersion.contentImage?.promptPresetVersion?.preset.name ??
               null,
             promptPresetKey:
-              project.versions[0].contentText?.promptPresetVersion?.preset.key ??
-              project.versions[0].contentImage?.promptPresetVersion?.preset.key ??
+              latestVersion.contentText?.promptPresetVersion?.preset.key ??
+              latestVersion.contentImage?.promptPresetVersion?.preset.key ??
               null,
-            derivativeCount: project.versions[0].derivatives.length,
-            latestPublicationJob: project.versions[0].publicationJobs[0]
-              ? mapPublicationJob(project.versions[0].publicationJobs[0])
+            wordCount: countWordsFromHtml(latestVersion.bodyHtml),
+            qaFailureCount: countQaFailures(latestVersion.qaReport),
+            qaWarningCount: countQaWarnings(latestVersion.qaReport),
+            derivativeCount: latestVersion.derivatives.length,
+            latestPublicationJob: latestVersion.publicationJobs[0]
+              ? mapPublicationJob(latestVersion.publicationJobs[0])
               : null,
-            qaReport: project.versions[0].qaReport,
+            qaReport: latestVersion.qaReport,
           }
         : null,
-      latestPublicationJob: project.publicationJobs[0]
-        ? mapPublicationJob(project.publicationJobs[0])
-        : null,
-    })),
+        latestPublicationJob: project.publicationJobs[0]
+          ? mapPublicationJob(project.publicationJobs[0])
+          : null,
+      };
+    }),
     page,
     pageSize,
     total,

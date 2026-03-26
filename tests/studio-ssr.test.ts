@@ -160,6 +160,7 @@ async function startStudioServer(backendUrl: string): Promise<{
         STUDIO_COOKIE_NAME: "studio_session",
         STUDIO_COOKIE_SECURE: "false",
         STUDIO_ALLOWED_HOSTS: "127.0.0.1,localhost",
+        STUDIO_ENABLE_OPS_LOGIN: "true",
       },
       stdio: ["ignore", "pipe", "pipe"],
     },
@@ -266,7 +267,7 @@ test("studio SSR redirects unauthenticated users to /studio/login", async () => 
   });
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "/studio/login");
+  assert.equal(response.headers.get("location"), "/studio/login?returnTo=%2Fstudio%2F");
 });
 
 test("studio login route remains public", async () => {
@@ -276,8 +277,8 @@ test("studio login route remains public", async () => {
 
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /cockpit editorial para operar múltiples webs con IA/i);
-  assert.match(html, /Continue with SSO/);
+  assert.match(html, /Auctorio/);
+  assert.match(html, /<app-root><\/app-root>/i);
 });
 
 test("studio login stores an encrypted HttpOnly cookie and session/me returns the tenant summary", async () => {

@@ -1,27 +1,29 @@
 import { Routes } from '@angular/router';
 import {
   studioAuthGuard,
-  studioLoginGuard,
   studioPermissionGuard,
 } from './guards/studio-auth.guard';
-import { PublicShellComponent } from './layout/public-shell.component';
-import { StudioShellComponent } from './layout/studio-shell.component';
 
 export const routes: Routes = [
   {
     path: 'login',
-    redirectTo: 'studio/login',
-    pathMatch: 'full',
+    loadComponent: () =>
+      import('./pages/login-page.component').then((m) => m.LoginPageComponent),
   },
   {
     path: 'studio/login',
-    canActivate: [studioLoginGuard],
+    loadComponent: () =>
+      import('./pages/login-page.component').then((m) => m.LoginPageComponent),
+  },
+  {
+    path: 'studio/ops-login',
     loadComponent: () =>
       import('./pages/login-page.component').then((m) => m.LoginPageComponent),
   },
   {
     path: 'studio',
-    component: StudioShellComponent,
+    loadComponent: () =>
+      import('./layout/studio-shell.component').then((m) => m.StudioShellComponent),
     canActivate: [studioAuthGuard],
     children: [
       {
@@ -627,7 +629,8 @@ export const routes: Routes = [
   },
   {
     path: '',
-    component: PublicShellComponent,
+    loadComponent: () =>
+      import('./layout/public-shell.component').then((m) => m.PublicShellComponent),
     children: [
       {
         path: '',

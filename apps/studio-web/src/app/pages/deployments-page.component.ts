@@ -2,6 +2,8 @@ import { CommonModule, DatePipe } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import type { PublicationListItem } from '../models/studio.models';
+import { StudioPageHeaderComponent } from '../components/studio-page-header.component';
+import { StudioStatStripComponent, type StudioStatItem } from '../components/studio-stat-strip.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { formatApiError } from '../utils/api-error';
 
@@ -17,20 +19,24 @@ type PublicationStatusFilter =
 @Component({
   selector: 'app-deployments-page',
   standalone: true,
-  imports: [CommonModule, RouterLink, DatePipe],
+  imports: [CommonModule, RouterLink, DatePipe, StudioPageHeaderComponent, StudioStatStripComponent],
   template: `
     <section class="console-page">
-      <header class="console-page__header">
-        <div class="console-page__copy">
-          <p class="console-kicker">Publishing</p>
-          <h1 class="console-page__title">History</h1>
-          <p class="console-page__intro">
-            Historial de publish, sync draft, errores y trazabilidad operativa por destino.
-          </p>
+      <app-studio-page-header
+        kicker="Publishing"
+        title="History"
+        intro="Historial de publish, sync draft, errores y trazabilidad operativa por destino."
+      >
+        <div page-meta *ngIf="!loading">
+          <span class="console-tag console-tag--success">{{ publishedCount }} published</span>
+          <span class="console-tag console-tag--accent">{{ inFlightCount }} in flight</span>
+          <span class="console-tag console-tag--warning">{{ failedCount }} incidents</span>
         </div>
 
-        <div class="console-page__actions">
-          <span class="console-tag console-tag--accent">Live data</span>
+        <div page-actions>
+          <a class="console-button console-button--secondary" routerLink="/studio/publishing/destinations">
+            Open destinations
+          </a>
           <button type="button" class="console-button console-button--secondary" (click)="resetFilters()">
             Reset filters
           </button>
@@ -38,44 +44,72 @@ type PublicationStatusFilter =
             Refresh history
           </button>
         </div>
-      </header>
+      </app-studio-page-header>
 
       <div class="console-banner console-banner--error" *ngIf="error">{{ error }}</div>
 
-      <div class="console-stat-grid" *ngIf="!loading">
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Published</p>
-          <strong class="console-stat-card__value">{{ publishedCount }}</strong>
-          <span class="console-stat-card__detail">Jobs que terminaron en publicacion efectiva.</span>
-        </article>
+      <app-studio-stat-strip *ngIf="!loading" [items]="historyStats"></app-studio-stat-strip>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">In flight</p>
-          <strong class="console-stat-card__value">{{ queuedCount + processingCount }}</strong>
-          <span class="console-stat-card__detail">Cola y procesamiento activo del runtime editorial.</span>
-        </article>
+      <section class="console-surface console-surface--hero" *ngIf="!loading">
+        <div class="console-hero-grid">
+          <div class="console-hero-copy">
+            <p class="console-surface__eyebrow">Runtime posture</p>
+            <h2 class="console-surface__title">Release trace and incident view</h2>
+            <p class="console-hero-copy__body">{{ runtimeNarrative }}</p>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Draft sync</p>
-          <strong class="console-stat-card__value">{{ draftSyncedCount }}</strong>
-          <span class="console-stat-card__detail">Sincronizaciones a borrador sin publicar aun.</span>
-        </article>
+            <div class="console-header-strip">
+              <article class="console-header-strip__card">
+                <span>Published jobs</span>
+                <strong>{{ publishedCount }}</strong>
+                <small>Successful publish executions already visible on connected destinations.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Runtime active</span>
+                <strong>{{ inFlightCount }}</strong>
+                <small>Queued, processing and draft sync jobs still moving through the release runtime.</small>
+              </article>
+              <article class="console-header-strip__card">
+                <span>Requires action</span>
+                <strong>{{ failedCount }}</strong>
+                <small>Publishing incidents that still require direct operator attention or retry.</small>
+              </article>
+            </div>
+          </div>
 
-        <article class="console-stat-card">
-          <p class="console-stat-card__label">Failures</p>
-          <strong class="console-stat-card__value">{{ failedCount }}</strong>
-          <span class="console-stat-card__detail">Incidentes que requieren revision operativa.</span>
-        </article>
-      </div>
+          <div class="console-focus-stack">
+            <div class="console-surface__head">
+              <div>
+                <p class="console-surface__eyebrow">Focus now</p>
+                <h2 class="console-surface__title">Runtime priority queue</h2>
+              </div>
+            </div>
 
-      <div class="console-workspace">
+            <div class="console-focus-list" *ngIf="priorityPublications.length; else emptyPriorityPublications">
+              <a
+                class="console-focus-card"
+                *ngFor="let item of priorityPublications.slice(0, 3)"
+                [routerLink]="['/studio/projects', item.project.id]"
+              >
+                <div>
+                  <strong>{{ item.project.title }}</strong>
+                  <p>{{ item.site.name }} · {{ priorityPublicationNarrative(item) }}</p>
+                </div>
+                <span class="console-tag" [ngClass]="publicationTagClass(item.status)">{{ item.status }}</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <div class="console-workspace" *ngIf="!loading; else loadingState">
         <div class="console-workspace__main">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Filters</p>
                 <h2 class="console-surface__title">Publication history</h2>
               </div>
+              <span class="console-tag console-tag--muted">{{ filteredPublications.length }} runtime events</span>
             </div>
 
             <div class="console-toolbar console-toolbar--stretch">
@@ -116,7 +150,7 @@ type PublicationStatusFilter =
                 <span>{{ item.site.name }}</span>
                 <span>{{ item.action }} · {{ item.targetStatus || 'n/a' }}</span>
                 <span>
-                  <span class="console-tag" [class.console-tag--danger]="item.status === 'failed'">
+                  <span class="console-tag" [ngClass]="publicationTagClass(item.status)">
                     {{ item.status }}
                   </span>
                 </span>
@@ -127,7 +161,7 @@ type PublicationStatusFilter =
         </div>
 
         <aside class="console-workspace__aside">
-          <section class="console-surface">
+          <section class="console-surface console-surface--editorial">
             <div class="console-surface__head">
               <div>
                 <p class="console-surface__eyebrow">Failures</p>
@@ -149,25 +183,44 @@ type PublicationStatusFilter =
           <section class="console-surface">
             <div class="console-surface__head">
               <div>
-                <p class="console-surface__eyebrow">Signals</p>
-                <h2 class="console-surface__title">Publishing notes</h2>
+                <p class="console-surface__eyebrow">Governance links</p>
+                <h2 class="console-surface__title">Release control surfaces</h2>
               </div>
             </div>
 
-            <ul class="console-note-list">
-              <li class="console-note-list__item">
-                La plataforma ya soporta draft, publish y unpublish con trazabilidad por job.
-              </li>
-              <li class="console-note-list__item">
-                El dry-run seguro sigue siendo parte del modelo operativo cuando faltan credenciales.
-              </li>
-              <li class="console-note-list__item">
-                El detalle completo de cada pieza enlaza a projects, briefs o articles sin perder contexto.
-              </li>
-            </ul>
+            <div class="console-action-stack">
+              <a class="console-action-card" routerLink="/studio/publishing/scheduled">
+                <strong>Scheduled release queue</strong>
+                <span>Gestiona piezas aprobadas, draft syncs y cola previa a publish.</span>
+              </a>
+              <a class="console-action-card" routerLink="/studio/publishing/destinations">
+                <strong>Destination governance</strong>
+                <span>Revisa credenciales, contratos de salida y posture operativa por destino.</span>
+              </a>
+              <a class="console-action-card" routerLink="/studio/editorial/pipeline">
+                <strong>Editorial pipeline</strong>
+                <span>Vuelve al flujo upstream cuando un incidente de publishing nace antes del release.</span>
+              </a>
+            </div>
           </section>
         </aside>
       </div>
+
+      <ng-template #loadingState>
+        <section class="console-empty-state">
+          <div>
+            <p class="console-kicker">Publishing</p>
+            <h2>Loading publishing history</h2>
+            <p>Estamos reuniendo eventos runtime, incidentes y trazabilidad reciente por destino.</p>
+          </div>
+        </section>
+      </ng-template>
+
+      <ng-template #emptyPriorityPublications>
+        <div class="console-empty-compact">
+          <p>No runtime priorities right now.</p>
+        </div>
+      </ng-template>
 
       <ng-template #emptyState>
         <section class="console-empty-state">
@@ -216,6 +269,66 @@ export class DeploymentsPageComponent implements OnInit {
   draftSyncedCount = 0;
   failedCount = 0;
 
+  get inFlightCount(): number {
+    return this.queuedCount + this.processingCount + this.draftSyncedCount;
+  }
+
+  get historyStats(): StudioStatItem[] {
+    return [
+      {
+        label: 'Published',
+        value: this.publishedCount,
+        detail: 'Jobs que terminaron en publicacion efectiva.',
+        tone: this.publishedCount > 0 ? 'success' : 'muted',
+      },
+      {
+        label: 'In flight',
+        value: this.inFlightCount,
+        detail: 'Cola, procesamiento y draft sync activos del runtime editorial.',
+        tone: this.inFlightCount > 0 ? 'accent' : 'muted',
+      },
+      {
+        label: 'Draft sync',
+        value: this.draftSyncedCount,
+        detail: 'Sincronizaciones a borrador completadas sin publicar aun.',
+        tone: this.draftSyncedCount > 0 ? 'accent' : 'muted',
+      },
+      {
+        label: 'Failures',
+        value: this.failedCount,
+        detail: 'Incidentes que requieren revision operativa.',
+        tone: this.failedCount > 0 ? 'warning' : 'muted',
+      },
+    ];
+  }
+
+  get runtimeNarrative(): string {
+    if (!this.publications.length) {
+      return 'Todavia no hay eventos de publishing en el workspace. La superficie queda preparada para leer runtime real cuando el equipo empiece a sincronizar drafts o publicar.';
+    }
+
+    if (this.failedCount > 0) {
+      return `${this.failedCount} incidente${this.failedCount > 1 ? 's siguen' : ' sigue'} abierto${this.failedCount > 1 ? 's' : ''}. History deja de ser una tabla plana y pasa a ser la vista de control para retries, fallos y trazabilidad downstream.`;
+    }
+
+    if (this.inFlightCount > 0) {
+      return `${this.inFlightCount} job${this.inFlightCount > 1 ? 's siguen' : ' sigue'} en movimiento entre cola, procesamiento o draft sync. El runtime esta activo y sin incidentes criticos visibles.`;
+    }
+
+    return `${this.publishedCount} release${this.publishedCount > 1 ? 's ya quedaron' : ' ya quedo'} trazado${this.publishedCount > 1 ? 's' : ''} sin fallos activos. Publishing history esta funcionando como memoria operativa real del release.`;
+  }
+
+  get priorityPublications(): PublicationListItem[] {
+    return [...this.publications].sort((left, right) => {
+      const priorityDelta = this.publicationPriorityRank(left) - this.publicationPriorityRank(right);
+      if (priorityDelta !== 0) {
+        return priorityDelta;
+      }
+
+      return Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+    });
+  }
+
   ngOnInit(): void {
     this.loadPublications();
   }
@@ -261,6 +374,47 @@ export class DeploymentsPageComponent implements OnInit {
     this.applyFilters();
   }
 
+  publicationTagClass(status: PublicationListItem['status']): string {
+    switch (status) {
+      case 'published':
+        return 'console-tag--success';
+      case 'failed':
+        return 'console-tag--danger';
+      case 'queued':
+      case 'draft_synced':
+        return 'console-tag--accent';
+      case 'processing':
+        return 'console-tag--warning';
+      case 'canceled':
+      default:
+        return 'console-tag--muted';
+    }
+  }
+
+  priorityPublicationNarrative(item: PublicationListItem): string {
+    if (item.status === 'failed') {
+      return `${item.action} failed · ${item.error || 'Unknown runtime error'}`;
+    }
+
+    if (item.status === 'processing') {
+      return `${item.action} is currently processing on the destination runtime.`;
+    }
+
+    if (item.status === 'queued') {
+      return `${item.action} is queued and waiting for runtime execution.`;
+    }
+
+    if (item.status === 'draft_synced') {
+      return `${item.action} finished as draft sync${item.externalId ? ` · ${item.externalId}` : ''}.`;
+    }
+
+    if (item.status === 'published') {
+      return `${item.action} reached destination successfully${item.externalUrl ? ' and has a live URL.' : '.'}`;
+    }
+
+    return `${item.action} was canceled before completion.`;
+  }
+
   private applyFilters(): void {
     const search = this.query.trim().toLowerCase();
 
@@ -282,5 +436,23 @@ export class DeploymentsPageComponent implements OnInit {
 
   private countByStatus(status: PublicationListItem['status']): number {
     return this.publications.filter((item) => item.status === status).length;
+  }
+
+  private publicationPriorityRank(item: PublicationListItem): number {
+    switch (item.status) {
+      case 'failed':
+        return 0;
+      case 'processing':
+        return 1;
+      case 'queued':
+        return 2;
+      case 'draft_synced':
+        return 3;
+      case 'published':
+        return 4;
+      case 'canceled':
+      default:
+        return 5;
+    }
   }
 }
