@@ -1,14 +1,13 @@
 import { inject } from '@angular/core';
 import type { ActivatedRouteSnapshot, CanActivateFn, RouterStateSnapshot } from '@angular/router';
 import { Router } from '@angular/router';
-import type { StudioPermission } from '../models/studio.models';
-import { StudioSessionService } from '../services/studio-session.service';
+import { AppContextService } from '../services/app-context.service';
 
-const DEFAULT_STUDIO_RETURN_TO = '/studio/dashboard';
+const DEFAULT_RETURN_TO = '/studio/overview';
 
-function resolveStudioReturnTo(value: string | null | undefined): string {
+function resolveReturnTo(value: string | null | undefined): string {
   const normalized = String(value || '').trim();
-  return normalized.startsWith('/studio/') ? normalized : DEFAULT_STUDIO_RETURN_TO;
+  return normalized.startsWith('/studio/') ? normalized : DEFAULT_RETURN_TO;
 }
 
 export const studioAuthGuard: CanActivateFn = async (
@@ -16,10 +15,10 @@ export const studioAuthGuard: CanActivateFn = async (
   state: RouterStateSnapshot,
 ) => {
   const router = inject(Router);
-  const session = inject(StudioSessionService);
+  const appContext = inject(AppContextService);
 
   try {
-    await session.ensureSession();
+    await appContext.ensureSession();
     return true;
   } catch {
     return router.createUrlTree(['/login'], {
@@ -31,16 +30,16 @@ export const studioAuthGuard: CanActivateFn = async (
   }
 };
 
-export const studioPermissionGuard: CanActivateFn = async (
+export const studioRoleGuard: CanActivateFn = async (
   route: ActivatedRouteSnapshot,
   state: RouterStateSnapshot,
 ) => {
   const router = inject(Router);
-  const session = inject(StudioSessionService);
-  const requiredPermission = route.data['requiredPermission'] as StudioPermission | undefined;
+  const appContext = inject(AppContextService);
+  const requiredRole = route.data['requiredRole'] as 'admin' | 'editor' | 'viewer' | undefined;
 
   try {
-    await session.ensureSession();
+    await appContext.ensureSession();
   } catch {
     return router.createUrlTree(['/login'], {
       queryParams: {
@@ -50,9 +49,15 @@ export const studioPermissionGuard: CanActivateFn = async (
     });
   }
 
-  if (!requiredPermission || session.hasPermission(requiredPermission)) {
+  if (!requiredRole) {
     return true;
   }
 
-  return router.createUrlTree(['/studio/dashboard']);
+  const role = appContext.role();
+  const rank: Record<string, number> = { viewer: 0, editor: 1, admin: 2 };
+  if ((rank[role] ?? 0) >= (rank[requiredRole] ?? 0)) {
+    return true;
+  }
+
+  return router.createUrlTree(['/studio/overview']);
 };

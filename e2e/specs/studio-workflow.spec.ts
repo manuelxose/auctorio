@@ -2,9 +2,15 @@ import { test, expect, type APIRequestContext } from '@playwright/test';
 
 const EMAIL = process.env.E2E_EMAIL || '';
 const PASSWORD = process.env.E2E_PASSWORD || '';
-const WORKSPACE = process.env.E2E_WORKSPACE || '';
 
 let api: APIRequestContext;
+
+type SessionView = {
+  user: { email: string };
+  role: string;
+  sites: Array<{ id: string; key: string; name: string }>;
+  activeSiteId: string | null;
+};
 
 test.beforeAll(async ({ playwright }) => {
   expect(EMAIL, 'E2E_EMAIL required').toBeTruthy();
@@ -13,49 +19,77 @@ test.beforeAll(async ({ playwright }) => {
   api = await playwright.request.newContext({
     baseURL: process.env.E2E_BASE_URL || 'https://auctorio.com',
   });
-
-  const login = await api.post('/studio/api/auth/login/password', {
-    data: { email: EMAIL, password: PASSWORD, workspaceId: WORKSPACE || null },
-  });
-  expect(login.status()).toBe(200);
-  const session = await login.json();
-  expect(session.user.email).toBe(EMAIL);
 });
 
 test.afterAll(async () => {
   await api?.dispose();
 });
 
-test('Studio: session, project creation and detail workbench render', async ({ browser }) => {
-  // Reuse the authenticated storage state through the API context.
+test('Login: one screen, two inputs, no workspace selection', async () => {
+  const login = await api.post('/studio/api/auth/login/password', {
+    data: { email: EMAIL, password: PASSWORD },
+  });
+  expect(login.status()).toBe(200);
+  const session = (await login.json()) as SessionView;
+  expect(session.user.email).toBe(EMAIL);
+  expect(session.sites.length).toBeGreaterThanOrEqual(2);
+  expect(session.sites.some((site) => site.key === 'guiatv-editorial')).toBe(true);
+  expect(session.sites.some((site) => site.key === 'tecnoria-main')).toBe(true);
+});
+
+test('Site switching: one session, scoped content per site', async () => {
   const cookies = await api.storageState();
 
-  const list = await api.get('/studio/api/backend/v2/sites?page=1&pageSize=50');
-  expect(list.status()).toBe(200);
-  const sites = await list.json();
-  const guiatvSite = sites.items.find((site: { key: string }) => site.key === 'guiatv-editorial');
-  expect(guiatvSite, 'guiatv-editorial site must exist').toBeTruthy();
+  // Switch to GuiaTV.
+  const sitesResponse = await api.get('/studio/api/sites');
+  expect(sitesResponse.status()).toBe(200);
+  const sites = ((await sitesResponse.json()) as { items: SessionView['sites'] }).items;
+  const guiatvSite = sites.find((site) => site.key === 'guiatv-editorial');
+  const tecnoriaSite = sites.find((site) => site.key === 'tecnoria-main');
+  expect(guiatvSite).toBeTruthy();
+  expect(tecnoriaSite).toBeTruthy();
+
+  const switchGuiatv = await api.post('/studio/api/session/active-site', {
+    data: { siteId: guiatvSite!.id },
+  });
+  expect(switchGuiatv.status()).toBe(200);
+  expect(((await switchGuiatv.json()) as SessionView).activeSiteId).toBe(guiatvSite!.id);
+
+  const guiatvProjects = await api.get('/studio/api/backend/v2/projects?page=1&pageSize=50');
+  expect(guiatvProjects.status()).toBe(200);
+
+  const switchTecnoria = await api.post('/studio/api/session/active-site', {
+    data: { siteId: tecnoriaSite!.id },
+  });
+  expect(switchTecnoria.status()).toBe(200);
+
+  const tecnoriaProjects = await api.get('/studio/api/backend/v2/projects?page=1&pageSize=50');
+  expect(tecnoriaProjects.status()).toBe(200);
+
+  expect(cookies).toBeTruthy();
+});
+
+test('Content workflow: create → generate → workspace renders', async ({ browser }) => {
+  const sites = ((await (await api.get('/studio/api/sites')).json()) as { items: SessionView['sites'] }).items;
+  const guiatvSite = sites.find((site) => site.key === 'guiatv-editorial');
+  await api.post('/studio/api/session/active-site', { data: { siteId: guiatvSite!.id } });
+  const cookies = await api.storageState();
 
   const created = await api.post('/studio/api/backend/v2/projects', {
     data: {
-      siteId: guiatvSite.id,
-      title: `E2E acceptance project ${Date.now()}`,
-      brief:
-        'Articulo de prueba E2E generado por el suite de aceptacion de Auctorio. Breve guia editorial sobre plataformas de streaming deportivo en Espana.',
+      siteId: guiatvSite!.id,
+      title: `E2E simplified studio ${Date.now()}`,
+      brief: 'Pieza de prueba del nuevo Studio simplificado: guia editorial sobre plataformas de streaming en Espana.',
       goal: 'article',
       primaryLanguage: 'es',
     },
   });
   expect(created.status()).toBe(201);
   const project = await created.json();
-  expect(project.id).toBeTruthy();
 
-  const detail = await api.get(`/studio/api/backend/v2/projects/${project.id}`);
-  expect(detail.status()).toBe(200);
-  const projectDetail = await detail.json();
-  expect(projectDetail.reviewGate.stage).toBe('awaiting_generation');
+  const generated = await api.post(`/studio/api/backend/v2/projects/${project.id}/generate`, {});
+  expect(generated.status()).toBe(202);
 
-  // Navigate the SSR Studio with the session cookie and verify the workbench renders.
   const context = await browser.newContext();
   await context.addCookies(
     cookies.cookies.map((cookie) => ({
@@ -67,15 +101,15 @@ test('Studio: session, project creation and detail workbench render', async ({ b
   );
 
   const page = await context.newPage();
-  await page.goto(`/studio/projects/${project.id}`);
-  await expect(page.getByText('Generate text')).toBeVisible();
-  await expect(page.getByText('Generate image')).toBeVisible();
+  await page.goto('/studio/content');
+  await expect(page.getByText('Content', { exact: true }).first()).toBeVisible();
+  await expect(page.getByText('+ New content').first()).toBeVisible();
   await expect(page.getByText(project.title).first()).toBeVisible();
-  await expect(page.getByText('awaiting generation', { exact: false }).first()).toBeVisible();
 
-  // Projects collection must list the new project.
-  await page.goto('/studio/projects');
+  await page.goto(`/studio/content/${project.id}`);
   await expect(page.getByText(project.title).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Quality' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Publishing' })).toBeVisible();
 
   await context.close();
 });

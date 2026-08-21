@@ -15,6 +15,7 @@ import {
 import { provideRouter, withInMemoryScrolling } from '@angular/router';
 import { routes } from './app.routes';
 import { ssrCookieInterceptor } from './infrastructure/http/ssr-cookie.interceptor';
+import { studioSiteInterceptor } from './infrastructure/http/studio-site.interceptor';
 
 export const appConfig: ApplicationConfig = {
   providers: [
@@ -28,6 +29,9 @@ export const appConfig: ApplicationConfig = {
       }),
     ),
     provideClientHydration(withEventReplay()),
-    provideHttpClient(withFetch(), withInterceptors([ssrCookieInterceptor])),
+    provideHttpClient(
+      withFetch(),
+      withInterceptors([ssrCookieInterceptor, studioSiteInterceptor]),
+    ),
   ],
 };

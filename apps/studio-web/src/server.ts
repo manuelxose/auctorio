@@ -17,10 +17,63 @@ import {
   type MarketingLocale,
 } from './app/content/marketing-content';
 
+type GlobalSite = {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  baseUrl: string | null;
+  tenantId: string;
+  role: 'admin' | 'editor' | 'viewer';
+  permissions: string[];
+};
+
+type GlobalSessionEntry = {
+  tenantId: string;
+  studioUserId: string;
+  sessionToken: string;
+  permissions: string[];
+};
+
 type SessionPayload = {
   authMode: 'api_key' | 'human' | 'oidc';
   apiKey?: string;
   sessionToken?: string;
+  user?: {
+    id: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+  sessions?: GlobalSessionEntry[];
+  sites?: GlobalSite[];
+  activeSiteId?: string | null;
+};
+
+type StudioSessionView = {
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+  role: 'admin' | 'editor' | 'viewer';
+  sites: Array<{
+    id: string;
+    key: string;
+    name: string;
+    type: string;
+    baseUrl: string | null;
+    role: 'admin' | 'editor' | 'viewer';
+  }>;
+  activeSiteId: string | null;
+};
+
+type GlobalLoginResponse = {
+  user: SessionPayload['user'];
+  sites: GlobalSite[];
+  sessions: GlobalSessionEntry[];
+  activeSiteId: string | null;
 };
 
 type HumanAuthMode = 'oidc' | 'password' | 'google' | 'launch';
@@ -179,7 +232,7 @@ const LAUNCH_SIGNATURE_HEADER = 'x-launch-signature';
 
 function resolveStudioReturnTo(value: unknown): string {
   const normalized = typeof value === 'string' ? value.trim() : '';
-  return normalized.startsWith(`${studioBasePath}/`) ? normalized : `${studioBasePath}/dashboard`;
+  return normalized.startsWith(`${studioBasePath}/`) ? normalized : `${studioBasePath}/overview`;
 }
 
 function normalizeBasePath(value: string): string {
@@ -425,6 +478,20 @@ function decryptSession(value: string | undefined): SessionPayload | null {
     return {
       authMode: 'api_key',
       apiKey: payload.apiKey.trim(),
+    };
+  }
+
+  if (
+    (payload.authMode === 'human' || payload.authMode === 'oidc') &&
+    Array.isArray(payload.sessions) &&
+    payload.sessions.length > 0
+  ) {
+    return {
+      authMode: payload.authMode,
+      user: payload.user,
+      sessions: payload.sessions,
+      sites: Array.isArray(payload.sites) ? payload.sites : [],
+      activeSiteId: payload.activeSiteId ?? payload.sites?.[0]?.id ?? null,
     };
   }
 
@@ -795,6 +862,11 @@ async function redeemInternalLaunchTicket(launchId: string): Promise<RedeemedLau
 async function validateSessionToken(
   sessionToken: string,
 ): Promise<InternalValidatedSession | null> {
+  const cached = sessionValidationCache.get(sessionToken);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.value;
+  }
+
   try {
     const response = await fetch(new URL('/internal/session/validate', backendBaseUrl), {
       method: 'POST',
@@ -809,10 +881,92 @@ async function validateSessionToken(
       return null;
     }
 
-    return (await response.json()) as InternalValidatedSession;
+    const value = (await response.json()) as InternalValidatedSession;
+    sessionValidationCache.set(sessionToken, {
+      value,
+      expiresAt: Date.now() + 60_000,
+    });
+    return value;
   } catch {
     return null;
   }
+}
+
+const sessionValidationCache = new Map<
+  string,
+  { value: InternalValidatedSession; expiresAt: number }
+>();
+
+function buildSessionView(payload: SessionPayload): StudioSessionView {
+  const sites = (payload.sites ?? []).map((site) => ({
+    id: site.id,
+    key: site.key,
+    name: site.name,
+    type: site.type,
+    baseUrl: site.baseUrl,
+    role: site.role,
+  }));
+
+  const activeSite = sites.find((site) => site.id === payload.activeSiteId) ?? sites[0] ?? null;
+  const role =
+    activeSite?.role ??
+    sites.reduce<'admin' | 'editor' | 'viewer'>((best, site) => {
+      if (best === 'admin' || site.role === 'admin') {
+        return 'admin';
+      }
+      if (best === 'editor' || site.role === 'editor') {
+        return 'editor';
+      }
+      return 'viewer';
+    }, 'viewer');
+
+  return {
+    user: payload.user ?? {
+      id: 'legacy-session',
+      email: '',
+      displayName: 'Session',
+      avatarUrl: null,
+    },
+    role,
+    sites,
+    activeSiteId: activeSite?.id ?? null,
+  };
+}
+
+function resolveRequestSiteId(req: express.Request): string | null {
+  const header = readHeaderValue(req.headers['x-studio-site-id']);
+  if (header?.trim()) {
+    return header.trim();
+  }
+
+  const rawUrl = String(req.originalUrl || '');
+  try {
+    const query = new URL(rawUrl, 'http://local').searchParams.get('siteId');
+    if (query?.trim()) {
+      return query.trim();
+    }
+  } catch {
+    // Ignore malformed URLs.
+  }
+
+  return null;
+}
+
+function resolveTargetSite(
+  payload: SessionPayload,
+  req: express.Request,
+): GlobalSite | null {
+  const sites = payload.sites ?? [];
+  if (sites.length === 0) {
+    return null;
+  }
+
+  const requested = resolveRequestSiteId(req);
+  if (requested) {
+    return sites.find((site) => site.id === requested) ?? null;
+  }
+
+  return sites.find((site) => site.id === payload.activeSiteId) ?? sites[0] ?? null;
 }
 
 async function revokeSessionToken(sessionToken: string): Promise<void> {
@@ -900,6 +1054,36 @@ async function resolveStudioSession(
       return null;
     }
     return { payload, session };
+  }
+
+  if (
+    (payload.authMode === 'human' || payload.authMode === 'oidc') &&
+    Array.isArray(payload.sessions)
+  ) {
+    const site = resolveTargetSite(payload, req);
+    if (!site) {
+      return null;
+    }
+    const entry = payload.sessions.find((item) => item.tenantId === site.tenantId);
+    if (!entry) {
+      return null;
+    }
+
+    const validated = await validateSessionToken(entry.sessionToken);
+    if (!validated) {
+      return null;
+    }
+
+    return {
+      payload,
+      session: validated.session,
+      validatedOidcSession: {
+        ...validated,
+        userId: entry.studioUserId,
+        permissions: entry.permissions,
+        tenantId: entry.tenantId,
+      },
+    };
   }
 
   if ((payload.authMode === 'oidc' || payload.authMode === 'human') && payload.sessionToken) {
@@ -1074,18 +1258,9 @@ app.get(`${studioBasePath}/health`, (_req, res) => {
   });
 });
 
-app.get('/login', (req, res) => {
-  const params = new URLSearchParams();
-  params.set('entry', 'public');
-
-  for (const key of ['workspace', 'returnTo', 'invite', 'reset', 'launch', 'email', 'reason']) {
-    const value = typeof req.query[key] === 'string' ? req.query[key].trim() : '';
-    if (value) {
-      params.set(key, value);
-    }
-  }
-
-  res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+app.get('/login', (_req, res, next) => {
+  // Canonical login is rendered by Angular directly; no server redirect.
+  next();
 });
 
 app.get(`${studioBasePath}/api/session/workspace`, (req, res) => {
@@ -1114,6 +1289,23 @@ app.get(`${studioBasePath}/api/session/workspace`, (req, res) => {
       error: 'internal_error',
       message: error instanceof Error ? error.message : 'Unexpected error',
     });
+  });
+});
+
+app.get(`${studioBasePath}/api/auth/providers`, (_req, res) => {
+  void (async () => {
+    const response = await fetch(new URL('/internal/auth/providers', backendBaseUrl), {
+      headers: getInternalHeaders(),
+    });
+
+    if (!response.ok) {
+      res.status(502).json({ error: 'backend_unavailable', message: 'providers unavailable' });
+      return;
+    }
+
+    res.json(await response.json());
+  })().catch(() => {
+    res.status(502).json({ error: 'backend_unavailable', message: 'providers unavailable' });
   });
 });
 
@@ -1148,17 +1340,24 @@ app.post(`${studioBasePath}/api/auth/login/password`, express.json({ limit: '32k
         }
       | undefined;
 
-    const result = await requestInternalPasswordLogin({
-      email: String(body?.email || '').trim(),
-      password: String(body?.password || ''),
-      workspaceId: body?.workspaceId ? String(body.workspaceId).trim() : null,
-    });
+    const result = await postInternalAuth<GlobalLoginResponse>(
+      '/internal/session/global-login/password',
+      {
+        email: String(body?.email || '').trim(),
+        password: String(body?.password || ''),
+      },
+    );
 
-    setSessionCookie(res, req, {
+    const payload: SessionPayload = {
       authMode: 'human',
-      sessionToken: result.sessionToken,
-    });
-    res.json(result.session);
+      user: result.user,
+      sessions: result.sessions,
+      sites: result.sites,
+      activeSiteId: result.activeSiteId,
+    };
+
+    setSessionCookie(res, req, payload);
+    res.json(buildSessionView(payload));
   })().catch((error: Error & { status?: number }) => {
     res.status(error.status || 500).json({
       error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
@@ -1177,17 +1376,24 @@ app.post(`${studioBasePath}/api/auth/login/google`, express.json({ limit: '32kb'
         }
       | undefined;
 
-    const result = await requestInternalGoogleLogin({
-      credential: String(body?.credential || '').trim(),
-      emailHint: body?.emailHint ? String(body.emailHint).trim() : null,
-      workspaceId: body?.workspaceId ? String(body.workspaceId).trim() : null,
-    });
+    const result = await postInternalAuth<GlobalLoginResponse>(
+      '/internal/session/global-login/google',
+      {
+        credential: String(body?.credential || '').trim(),
+        emailHint: body?.emailHint ? String(body.emailHint).trim() : null,
+      },
+    );
 
-    setSessionCookie(res, req, {
+    const payload: SessionPayload = {
       authMode: 'human',
-      sessionToken: result.sessionToken,
-    });
-    res.json(result.session);
+      user: result.user,
+      sessions: result.sessions,
+      sites: result.sites,
+      activeSiteId: result.activeSiteId,
+    };
+
+    setSessionCookie(res, req, payload);
+    res.json(buildSessionView(payload));
   })().catch((error: Error & { status?: number }) => {
     res.status(error.status || 500).json({
       error: error.status && error.status < 500 ? 'auth_error' : 'internal_error',
@@ -1611,13 +1817,49 @@ app.get(`${studioBasePath}/api/session/me`, (req, res) => {
       return;
     }
 
-    res.json(resolved.session);
+    res.json(buildSessionView(resolved.payload));
   })().catch((error) => {
     res.status(500).json({
       error: 'internal_error',
       message: error instanceof Error ? error.message : 'Unexpected error',
     });
   });
+});
+
+app.post(
+  `${studioBasePath}/api/session/active-site`,
+  express.json({ limit: '16kb' }),
+  (req, res) => {
+    const payload = readSession(req);
+    if (!payload || !Array.isArray(payload.sites)) {
+      res.status(401).json({ error: 'unauthorized', message: 'Missing studio session' });
+      return;
+    }
+
+    const siteId = String((req.body as { siteId?: string } | undefined)?.siteId || '').trim();
+    const site = payload.sites.find((item) => item.id === siteId);
+    if (!site) {
+      res.status(400).json({ error: 'bad_request', message: 'site_not_authorized' });
+      return;
+    }
+
+    const nextPayload: SessionPayload = {
+      ...payload,
+      activeSiteId: site.id,
+    };
+    setSessionCookie(res, req, nextPayload);
+    res.json(buildSessionView(nextPayload));
+  },
+);
+
+app.get(`${studioBasePath}/api/sites`, (req, res) => {
+  const payload = readSession(req);
+  if (!payload) {
+    res.status(401).json({ error: 'unauthorized', message: 'Missing studio session' });
+    return;
+  }
+
+  res.json({ items: buildSessionView(payload).sites });
 });
 
 app.use(`${studioBasePath}/api/backend`, proxyToBackend());
@@ -1698,7 +1940,7 @@ app.use((req, res, next) => {
             reason: 'session_expired',
             returnTo: requestedStudioPath,
           });
-          res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+          res.redirect(302, `/login?${params.toString()}`);
           return;
         }
       }
@@ -1707,7 +1949,7 @@ app.use((req, res, next) => {
         const params = new URLSearchParams({
           returnTo: requestedStudioPath,
         });
-        res.redirect(302, `${studioBasePath}/login?${params.toString()}`);
+        res.redirect(302, `/login?${params.toString()}`);
         return;
       }
 

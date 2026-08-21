@@ -261,13 +261,14 @@ test("robots.txt and segmented sitemaps expose only the public surface", async (
   assert.match(imageSitemap, /search-led-newsroom-1600\.webp/);
 });
 
-test("studio SSR redirects unauthenticated users to /studio/login", async () => {
+test("studio SSR redirects unauthenticated users to /login", async () => {
   const response = await fetch(`${studio.baseUrl}/studio/`, {
     redirect: "manual",
   });
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get("location"), "/studio/login?returnTo=%2Fstudio%2F");
+  const location = response.headers.get("location") || "";
+  assert.match(location, /\/login\?returnTo=%2Fstudio/);
 });
 
 test("studio login route remains public", async () => {
@@ -281,7 +282,7 @@ test("studio login route remains public", async () => {
   assert.match(html, /<app-root><\/app-root>/i);
 });
 
-test("studio login stores an encrypted HttpOnly cookie and session/me returns the tenant summary", async () => {
+test("studio login stores an encrypted HttpOnly cookie and session/me returns the user view", async () => {
   const loginResponse = await fetch(`${studio.baseUrl}/studio/api/session/login`, {
     method: "POST",
     headers: {
@@ -307,13 +308,14 @@ test("studio login stores an encrypted HttpOnly cookie and session/me returns th
 
   assert.equal(sessionResponse.status, 200);
   const payload = (await sessionResponse.json()) as {
-    tenant: { id: string; name: string };
-    siteCount: number;
-    projectCount: number;
+    user: { id: string; email: string };
+    role: string;
+    sites: unknown[];
+    activeSiteId: string | null;
   };
-  assert.equal(payload.tenant.id, "tenant-1");
-  assert.equal(payload.siteCount, 2);
-  assert.equal(payload.projectCount, 5);
+  assert.equal(payload.role, "viewer");
+  assert.ok(Array.isArray(payload.sites));
+  assert.equal(payload.activeSiteId, null);
 });
 
 test("studio backend proxy injects Authorization from the encrypted session cookie and logout clears the session", async () => {

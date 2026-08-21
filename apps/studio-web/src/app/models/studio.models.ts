@@ -54,82 +54,57 @@ export type StudioPermission =
 
 export type StudioAuthMode = 'api_key' | 'oidc' | 'password' | 'google' | 'launch';
 
+export type StudioRole = 'admin' | 'editor' | 'viewer';
+
+export type StudioSite = {
+  id: string;
+  key: string;
+  name: string;
+  type: SiteType;
+  baseUrl: string | null;
+  role: StudioRole;
+};
+
 export type StudioSession = {
-  tenant: {
-    id: string;
-    name: string;
-    slug: string | null;
-    status: string;
-  };
-  authMode: StudioAuthMode;
   user: {
     id: string;
     email: string;
     displayName: string;
     avatarUrl: string | null;
-    status: string;
-    lastLoginAt: string | null;
   };
-  roles: string[];
-  permissions: StudioPermission[];
-  identityProvider: {
-    enabled: boolean;
-    issuer: string | null;
-    provisioningMode: string;
-  } | null;
-  siteCount: number;
-  projectCount: number;
+  role: StudioRole;
+  sites: StudioSite[];
+  activeSiteId: string | null;
 };
 
-export type StudioLoginWorkspace = {
-  workspace: {
-    id: string;
-    name: string;
-    slug: string | null;
-    status: string;
-  };
-  membershipStatus: 'invited' | 'active' | 'suspended';
-  requiresSso: boolean;
-  preferred: boolean;
-};
-
-export type StudioLoginOptions = {
-  email: string;
-  account: {
-    id: string;
-    email: string;
-    displayName: string | null;
-    avatarUrl: string | null;
-    status: 'invited' | 'active' | 'suspended';
-    lastWorkspaceId: string | null;
-    emailVerifiedAt: string | null;
-  } | null;
-  accountState: 'invited' | 'active' | 'suspended' | 'no_access';
-  canUsePassword: boolean;
-  canUseGoogle: boolean;
+export type StudioAuthProviders = {
   googleClientId: string | null;
-  needsActivation: boolean;
-  localWorkspaces: StudioLoginWorkspace[];
-  ssoWorkspaces: StudioLoginWorkspace[];
-  recommendedWorkspaceId: string | null;
-  requestAccessUrl: string;
 };
 
-export type StudioWorkspaceAccess = {
-  workspace: {
+export type StudioMediaItem = {
+  id: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  prompt: string | null;
+  storagePath: string | null;
+  width: number | null;
+  height: number | null;
+  error: string | null;
+  assetUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+  variants: Array<{
     id: string;
-    name: string;
-    slug: string;
-    status: string;
-  };
-  authMode: 'api_key' | 'oidc';
-  apiKeyFallback: boolean;
-  identityProvider: {
-    configured: boolean;
-    enabled: boolean;
-    issuer: string | null;
-    provisioningMode: string | null;
-  };
+    kind: string;
+    storagePath: string;
+    mimeType: string;
+    width: number | null;
+    height: number | null;
+    publicUrl: string | null;
+  }>;
+  project: { id: string; title: string; siteId: string; site: { key: string; name: string } } | null;
+  version: { id: string; versionNumber: number } | null;
 };
 
 export type PublicationExecutionState = {

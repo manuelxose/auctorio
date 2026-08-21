@@ -1,6 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+import { Prisma } from "@prisma/client";
 import type { ProjectGoal, ProjectStatus, PublicationStatus, SiteType } from "@prisma/client";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
@@ -22,12 +23,15 @@ import {
   getProjectById,
   getPublicationJobById,
   getSiteById,
+  listMediaImages,
   listProjects,
   listPublicationJobs,
   listSites,
   updateProject,
   updateProjectStatus,
   updateSite,
+  updateVersionContent,
+  updateVersionQa,
 } from "./repository";
 import {
   acceptStudioInvitation,
@@ -41,6 +45,8 @@ import {
   getStudioIdentityProviderConfig,
   loginStudioAccountWithGoogle,
   loginStudioAccountWithPassword,
+  loginStudioAccountWithGoogleGlobal,
+  loginStudioAccountWithPasswordGlobal,
   getStudioSessionBySessionId,
   getStudioSessionByToken,
   inviteStudioUser,
@@ -64,6 +70,8 @@ import {
   retryImageGeneration,
   startProjectGeneration,
 } from "./orchestration";
+import { runVersionQa } from "./qa";
+import { getStudioGoogleClientId } from "./google";
 import {
   approveStudioPromptVersion,
   assignStudioPromptVersion,
@@ -122,6 +130,7 @@ const PROJECT_STATUSES: ProjectStatus[] = [
   "published",
   "publish_failed",
 ];
+const CONTENT_STATUSES = ["queued", "processing", "done", "failed", "retryable", "canceled"] as const;
 const PUBLICATION_STATUSES: PublicationStatus[] = [
   "queued",
   "processing",
@@ -888,6 +897,57 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         credential: body.credential?.trim() || "",
         emailHint: body.emailHint?.trim() || null,
         workspaceId: body.workspaceId?.trim() || null,
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.get("/internal/auth/providers", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    return reply.send({
+      googleClientId: getStudioGoogleClientId(),
+    });
+  });
+
+  fastify.post("/internal/session/global-login/password", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ email?: string; password?: string }>(request);
+    try {
+      const result = await loginStudioAccountWithPasswordGlobal({
+        email: body.email?.trim() || "",
+        password: body.password || "",
+      });
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return reply.code(getAuthErrorStatus(message)).send({
+        error: "auth_error",
+        message,
+      });
+    }
+  });
+
+  fastify.post("/internal/session/global-login/google", async (request, reply) => {
+    if (!requireInternalSecret(request, reply)) {
+      return;
+    }
+
+    const body = parseBody<{ credential?: string }>(request);
+    try {
+      const result = await loginStudioAccountWithGoogleGlobal({
+        credential: body.credential?.trim() || "",
       });
       return reply.send(result);
     } catch (error) {
@@ -1730,6 +1790,112 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       content_image_id: contentImageId,
       status: "queued",
     });
+  });
+
+  fastify.get("/v2/media", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+
+    const query = request.query as { page?: string; pageSize?: string; siteId?: string; status?: string };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 24);
+    if (query.status && !isOneOf(query.status, CONTENT_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${CONTENT_STATUSES.join(", ")}`);
+    }
+
+    const media = await listMediaImages(context.tenantId, {
+      siteId: query.siteId?.trim() || undefined,
+      status: query.status?.trim() || undefined,
+      page,
+      pageSize,
+    });
+
+    return reply.send({
+      ...media,
+      items: await Promise.all(
+        media.items.map(async (item) => ({
+          ...item,
+          assetUrl: await buildAssetPublicUrl(item.storagePath),
+          variants: await Promise.all(
+            item.variants.map(async (variant) => ({
+              ...variant,
+              publicUrl: await buildAssetPublicUrl(variant.storagePath),
+            })),
+          ),
+        })),
+      ),
+    });
+  });
+
+  fastify.patch("/v2/versions/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const versionId = (request.params as { id: string }).id;
+    if (!isUuid(versionId)) {
+      return badRequest(reply, "invalid version id");
+    }
+
+    const body = parseBody<{
+      title?: string;
+      excerpt?: string;
+      bodyHtml?: string;
+      seoTitle?: string;
+      seoDescription?: string;
+    }>(request);
+
+    try {
+      const version = await updateVersionContent(context.tenantId, versionId, {
+        title: body.title,
+        excerpt: body.excerpt,
+        bodyHtml: body.bodyHtml,
+        seoTitle: body.seoTitle,
+        seoDescription: body.seoDescription,
+      });
+      if (!version) {
+        return notFound(reply, "version not found");
+      }
+
+      const project = await getProjectById(context.tenantId, version.projectId);
+      const latestVersion = project?.versions[0] ?? null;
+      let qaReport: unknown = null;
+
+      if (latestVersion && latestVersion.id === version.id) {
+        qaReport = runVersionQa(
+          {
+            title: version.title,
+            excerpt: version.excerpt,
+            bodyHtml: version.bodyHtml,
+            seoTitle: version.seoTitle,
+            seoDescription: version.seoDescription,
+          },
+          isHeroImageReady(latestVersion.contentImage),
+        );
+        await updateVersionQa(
+          version.id,
+          (qaReport as { passed: boolean }).passed ? "qa_passed" : "qa_failed",
+          qaReport as Prisma.JsonObject,
+        );
+        await updateProjectStatus(
+          context.tenantId,
+          version.projectId,
+          (qaReport as { passed: boolean }).passed ? "in_review" : "qa_failed",
+        );
+      }
+
+      return reply.send({
+        id: version.id,
+        status: version.status,
+        qaReport,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return badRequest(reply, message);
+    }
   });
 
   fastify.get("/v2/publications", async (request, reply) => {

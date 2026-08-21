@@ -17,6 +17,8 @@ const mime_1 = require("../shared/utils/mime");
 const repository_1 = require("./repository");
 const auth_1 = require("./auth");
 const orchestration_1 = require("./orchestration");
+const qa_1 = require("./qa");
+const google_1 = require("./google");
 const prompts_1 = require("./prompts");
 const review_1 = require("./review");
 const security_1 = require("./security");
@@ -40,6 +42,7 @@ const PROJECT_STATUSES = [
     "published",
     "publish_failed",
 ];
+const CONTENT_STATUSES = ["queued", "processing", "done", "failed", "retryable", "canceled"];
 const PUBLICATION_STATUSES = [
     "queued",
     "processing",
@@ -661,6 +664,53 @@ function registerStudioRoutes(fastify) {
                 credential: body.credential?.trim() || "",
                 emailHint: body.emailHint?.trim() || null,
                 workspaceId: body.workspaceId?.trim() || null,
+            });
+            return reply.send(result);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return reply.code(getAuthErrorStatus(message)).send({
+                error: "auth_error",
+                message,
+            });
+        }
+    });
+    fastify.get("/internal/auth/providers", async (request, reply) => {
+        if (!requireInternalSecret(request, reply)) {
+            return;
+        }
+        return reply.send({
+            googleClientId: (0, google_1.getStudioGoogleClientId)(),
+        });
+    });
+    fastify.post("/internal/session/global-login/password", async (request, reply) => {
+        if (!requireInternalSecret(request, reply)) {
+            return;
+        }
+        const body = parseBody(request);
+        try {
+            const result = await (0, auth_1.loginStudioAccountWithPasswordGlobal)({
+                email: body.email?.trim() || "",
+                password: body.password || "",
+            });
+            return reply.send(result);
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return reply.code(getAuthErrorStatus(message)).send({
+                error: "auth_error",
+                message,
+            });
+        }
+    });
+    fastify.post("/internal/session/global-login/google", async (request, reply) => {
+        if (!requireInternalSecret(request, reply)) {
+            return;
+        }
+        const body = parseBody(request);
+        try {
+            const result = await (0, auth_1.loginStudioAccountWithGoogleGlobal)({
+                credential: body.credential?.trim() || "",
             });
             return reply.send(result);
         }
@@ -1331,6 +1381,81 @@ function registerStudioRoutes(fastify) {
             content_image_id: contentImageId,
             status: "queued",
         });
+    });
+    fastify.get("/v2/media", async (request, reply) => {
+        const context = await requireStudioContext(request, reply);
+        if (!context) {
+            return;
+        }
+        const query = request.query;
+        const page = parsePage(query.page, 1);
+        const pageSize = parsePageSize(query.pageSize, 24);
+        if (query.status && !isOneOf(query.status, CONTENT_STATUSES)) {
+            return badRequest(reply, `status must be one of: ${CONTENT_STATUSES.join(", ")}`);
+        }
+        const media = await (0, repository_1.listMediaImages)(context.tenantId, {
+            siteId: query.siteId?.trim() || undefined,
+            status: query.status?.trim() || undefined,
+            page,
+            pageSize,
+        });
+        return reply.send({
+            ...media,
+            items: await Promise.all(media.items.map(async (item) => ({
+                ...item,
+                assetUrl: await (0, orchestration_1.buildAssetPublicUrl)(item.storagePath),
+                variants: await Promise.all(item.variants.map(async (variant) => ({
+                    ...variant,
+                    publicUrl: await (0, orchestration_1.buildAssetPublicUrl)(variant.storagePath),
+                }))),
+            }))),
+        });
+    });
+    fastify.patch("/v2/versions/:id", async (request, reply) => {
+        const context = await requireStudioPermission(request, reply, "projects.manage");
+        if (!context) {
+            return;
+        }
+        const versionId = request.params.id;
+        if (!isUuid(versionId)) {
+            return badRequest(reply, "invalid version id");
+        }
+        const body = parseBody(request);
+        try {
+            const version = await (0, repository_1.updateVersionContent)(context.tenantId, versionId, {
+                title: body.title,
+                excerpt: body.excerpt,
+                bodyHtml: body.bodyHtml,
+                seoTitle: body.seoTitle,
+                seoDescription: body.seoDescription,
+            });
+            if (!version) {
+                return notFound(reply, "version not found");
+            }
+            const project = await (0, repository_1.getProjectById)(context.tenantId, version.projectId);
+            const latestVersion = project?.versions[0] ?? null;
+            let qaReport = null;
+            if (latestVersion && latestVersion.id === version.id) {
+                qaReport = (0, qa_1.runVersionQa)({
+                    title: version.title,
+                    excerpt: version.excerpt,
+                    bodyHtml: version.bodyHtml,
+                    seoTitle: version.seoTitle,
+                    seoDescription: version.seoDescription,
+                }, (0, review_1.isHeroImageReady)(latestVersion.contentImage));
+                await (0, repository_1.updateVersionQa)(version.id, qaReport.passed ? "qa_passed" : "qa_failed", qaReport);
+                await (0, repository_1.updateProjectStatus)(context.tenantId, version.projectId, qaReport.passed ? "in_review" : "qa_failed");
+            }
+            return reply.send({
+                id: version.id,
+                status: version.status,
+                qaReport,
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            return badRequest(reply, message);
+        }
     });
     fastify.get("/v2/publications", async (request, reply) => {
         const context = await requireStudioContext(request, reply);

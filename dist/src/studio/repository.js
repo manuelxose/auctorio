@@ -34,6 +34,8 @@ exports.getLatestVersion = getLatestVersion;
 exports.getLatestPublishedExternalId = getLatestPublishedExternalId;
 exports.getContentTextById = getContentTextById;
 exports.getContentImageById = getContentImageById;
+exports.listMediaImages = listMediaImages;
+exports.updateVersionContent = updateVersionContent;
 exports.getStudioSession = getStudioSession;
 const client_1 = require("@prisma/client");
 const prisma_1 = require("../infrastructure/db/prisma");
@@ -736,6 +738,94 @@ async function getContentImageById(tenantId, contentImageId) {
     return prisma.contentImage.findFirst({
         where: { tenantId, id: contentImageId },
         include: { assetVariants: true },
+    });
+}
+async function listMediaImages(tenantId, input) {
+    const page = input.page ?? 1;
+    const pageSize = input.pageSize ?? 24;
+    const skip = (page - 1) * pageSize;
+    const where = {
+        tenantId,
+        ...(input.siteId ? { topic: { projects: { some: { siteId: input.siteId } } } } : {}),
+        ...(input.status ? { status: input.status } : {}),
+    };
+    const [total, images] = await prisma.$transaction([
+        prisma.contentImage.count({ where }),
+        prisma.contentImage.findMany({
+            where,
+            orderBy: { createdAt: "desc" },
+            skip,
+            take: pageSize,
+            include: {
+                assetVariants: { orderBy: { createdAt: "asc" } },
+                versions: {
+                    orderBy: { versionNumber: "desc" },
+                    take: 1,
+                    include: {
+                        project: {
+                            select: {
+                                id: true,
+                                title: true,
+                                siteId: true,
+                                site: { select: { key: true, name: true } },
+                            },
+                        },
+                    },
+                },
+            },
+        }),
+    ]);
+    return {
+        items: images.map((image) => ({
+            id: image.id,
+            tenantId: image.tenantId,
+            status: image.status,
+            provider: image.provider,
+            model: image.model,
+            prompt: image.prompt,
+            storagePath: image.storagePath,
+            width: image.width,
+            height: image.height,
+            error: image.error,
+            createdAt: image.createdAt,
+            updatedAt: image.updatedAt,
+            variants: image.assetVariants.map((variant) => ({
+                id: variant.id,
+                kind: variant.kind,
+                storagePath: variant.storagePath,
+                mimeType: variant.mimeType,
+                width: variant.width,
+                height: variant.height,
+            })),
+            project: image.versions[0]?.project ?? null,
+            version: image.versions[0]
+                ? { id: image.versions[0].id, versionNumber: image.versions[0].versionNumber }
+                : null,
+        })),
+        page,
+        pageSize,
+        total,
+    };
+}
+async function updateVersionContent(tenantId, versionId, data) {
+    const version = await prisma.contentVersion.findFirst({
+        where: { tenantId, id: versionId },
+    });
+    if (!version) {
+        return null;
+    }
+    if (["approved", "published", "archived"].includes(version.status)) {
+        throw new Error("version_is_immutable");
+    }
+    return prisma.contentVersion.update({
+        where: { id: versionId },
+        data: {
+            title: data.title === undefined ? undefined : data.title.trim() || null,
+            excerpt: data.excerpt === undefined ? undefined : data.excerpt.trim() || null,
+            bodyHtml: data.bodyHtml === undefined ? undefined : data.bodyHtml,
+            seoTitle: data.seoTitle === undefined ? undefined : data.seoTitle.trim() || null,
+            seoDescription: data.seoDescription === undefined ? undefined : data.seoDescription.trim() || null,
+        },
     });
 }
 async function getStudioSession(tenantId) {

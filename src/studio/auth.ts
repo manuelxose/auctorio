@@ -1743,8 +1743,217 @@ export async function loginStudioAccountWithGoogle(
   });
 }
 
-export async function sendStudioPasswordReset(email: string): Promise<{ ok: true }> {
-  const normalizedEmail = normalizeStudioEmail(email);
+export type GlobalSiteSession = {
+  id: string;
+  key: string;
+  name: string;
+  type: string;
+  baseUrl: string | null;
+  tenantId: string;
+  role: "admin" | "editor" | "viewer";
+  permissions: string[];
+};
+
+export type GlobalStudioLoginResult = {
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+    avatarUrl: string | null;
+  };
+  sites: GlobalSiteSession[];
+  sessions: Array<{
+    tenantId: string;
+    studioUserId: string;
+    sessionToken: string;
+    permissions: string[];
+  }>;
+  activeSiteId: string | null;
+};
+
+function roleFromKeys(roleKeys: string[]): GlobalSiteSession["role"] {
+  if (roleKeys.includes("admin") || roleKeys.includes("owner")) {
+    return "admin";
+  }
+  if (
+    roleKeys.some((key) => ["editor", "reviewer", "publisher", "analyst"].includes(key))
+  ) {
+    return "editor";
+  }
+  return "viewer";
+}
+
+async function completeGlobalAccountLogin(params: {
+  account: AccountWithMemberships;
+  authMode: "password" | "google";
+}): Promise<GlobalStudioLoginResult> {
+  const memberships = splitMembershipsByAccess(params.account).local;
+  if (memberships.length === 0) {
+    throw new Error("user_not_authorized");
+  }
+
+  const lastLoginAt = new Date();
+  const primaryMembership = memberships[0];
+
+  await prisma.$transaction(async (tx) => {
+    await tx.studioAccount.update({
+      where: { id: params.account.id },
+      data: {
+        status: "active",
+        lastWorkspaceId: primaryMembership.tenantId,
+        emailVerifiedAt: params.account.emailVerifiedAt ?? lastLoginAt,
+        displayName: params.account.displayName || primaryMembership.displayName,
+        avatarUrl: params.account.avatarUrl || primaryMembership.avatarUrl,
+      },
+    });
+
+    await tx.studioUser.updateMany({
+      where: {
+        accountId: params.account.id,
+        status: "invited",
+      },
+      data: {
+        status: "active",
+      },
+    });
+  });
+
+  const sites: GlobalSiteSession[] = [];
+  const sessions: GlobalStudioLoginResult["sessions"] = [];
+
+  for (const membership of memberships) {
+    await ensureTenantBootstrap(membership.tenantId);
+    const user = await loadFullUser(membership.tenantId, membership.id);
+    if (!user) {
+      continue;
+    }
+
+    const roleKeys = buildRoleKeyList(user);
+    const permissions = buildPermissionList(user);
+    const role = roleFromKeys(roleKeys);
+
+    const tenantSites = await prisma.site.findMany({
+      where: { tenantId: membership.tenantId },
+      orderBy: { key: "asc" },
+    });
+    for (const site of tenantSites) {
+      sites.push({
+        id: site.id,
+        key: site.key,
+        name: site.name,
+        type: site.type,
+        baseUrl: site.baseUrl,
+        tenantId: membership.tenantId,
+        role,
+        permissions,
+      });
+    }
+
+    const sessionToken = await createStudioUserSession(
+      membership.tenantId,
+      membership.id,
+      params.authMode,
+    );
+    sessions.push({
+      tenantId: membership.tenantId,
+      studioUserId: membership.id,
+      sessionToken,
+      permissions,
+    });
+  }
+
+  if (sites.length === 0) {
+    throw new Error("user_not_authorized");
+  }
+
+  const preferredTenant = params.account.lastWorkspaceId || primaryMembership.tenantId;
+  const activeSite = sites.find((site) => site.tenantId === preferredTenant) ?? sites[0];
+
+  return {
+    user: {
+      id: params.account.id,
+      email: params.account.email,
+      displayName:
+        params.account.displayName || primaryMembership.displayName || params.account.email,
+      avatarUrl: params.account.avatarUrl || primaryMembership.avatarUrl || null,
+    },
+    sites,
+    sessions,
+    activeSiteId: activeSite.id,
+  };
+}
+
+export async function loginStudioAccountWithPasswordGlobal(
+  input: StudioPasswordLoginInput,
+): Promise<GlobalStudioLoginResult> {
+  const email = normalizeStudioEmail(input.email);
+  if (!email) {
+    throw new Error("email_required");
+  }
+  if (!input.password?.trim()) {
+    throw new Error("password_required");
+  }
+
+  const account = await getStudioAccountByEmail(email);
+  if (!account) {
+    throw new Error("user_not_authorized");
+  }
+  if (account.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+  if (!account.passwordHash) {
+    throw new Error(account.status === "invited" ? "activation_required" : "password_login_not_available");
+  }
+
+  const validPassword = await verifyStudioPassword(input.password, account.passwordHash);
+  if (!validPassword) {
+    throw new Error("invalid_credentials");
+  }
+
+  return completeGlobalAccountLogin({ account, authMode: "password" });
+}
+
+export async function loginStudioAccountWithGoogleGlobal(
+  input: StudioGoogleLoginInput,
+): Promise<GlobalStudioLoginResult> {
+  const identity = await verifyStudioGoogleCredential(input.credential);
+  const account =
+    (await getStudioAccountByGoogleSubject(identity.sub)) ??
+    (await getStudioAccountByEmail(identity.email));
+
+  if (!account) {
+    throw new Error("user_not_authorized");
+  }
+  if (account.status === "suspended") {
+    throw new Error("user_suspended");
+  }
+  if (!identity.emailVerified) {
+    throw new Error("google_email_not_verified");
+  }
+  if (account.googleSubject && account.googleSubject !== identity.sub) {
+    throw new Error("google_subject_mismatch");
+  }
+
+  await prisma.studioAccount.update({
+    where: { id: account.id },
+    data: {
+      googleSubject: identity.sub,
+      displayName: identity.name || account.displayName || undefined,
+      avatarUrl: identity.picture || account.avatarUrl || undefined,
+      emailVerifiedAt: account.emailVerifiedAt ?? new Date(),
+      status: "active",
+    },
+  });
+
+  const refreshed = await getStudioAccountByEmail(account.email);
+  if (!refreshed) {
+    throw new Error("account_not_found");
+  }
+
+  return completeGlobalAccountLogin({ account: refreshed, authMode: "google" });
+}
+
+export async function sendStudioPasswordReset(email: string): Promise<{ ok: true }> {  const normalizedEmail = normalizeStudioEmail(email);
   if (!normalizedEmail) {
     throw new Error("email_required");
   }
