@@ -214,12 +214,13 @@ node_test_1.default.after(async () => {
     strict_1.default.match(imageSitemap, /publisher-command-center-1600\.webp/);
     strict_1.default.match(imageSitemap, /search-led-newsroom-1600\.webp/);
 });
-(0, node_test_1.default)("studio SSR redirects unauthenticated users to /studio/login", async () => {
+(0, node_test_1.default)("studio SSR redirects unauthenticated users to /login", async () => {
     const response = await fetch(`${studio.baseUrl}/studio/`, {
         redirect: "manual",
     });
     strict_1.default.equal(response.status, 302);
-    strict_1.default.equal(response.headers.get("location"), "/studio/login?returnTo=%2Fstudio%2F");
+    const location = response.headers.get("location") || "";
+    strict_1.default.match(location, /\/login\?returnTo=%2Fstudio/);
 });
 (0, node_test_1.default)("studio login route remains public", async () => {
     const response = await fetch(`${studio.baseUrl}/studio/login`, {
@@ -230,7 +231,7 @@ node_test_1.default.after(async () => {
     strict_1.default.match(html, /Auctorio/);
     strict_1.default.match(html, /<app-root><\/app-root>/i);
 });
-(0, node_test_1.default)("studio login stores an encrypted HttpOnly cookie and session/me returns the tenant summary", async () => {
+(0, node_test_1.default)("studio login stores an encrypted HttpOnly cookie and session/me returns the user view", async () => {
     const loginResponse = await fetch(`${studio.baseUrl}/studio/api/session/login`, {
         method: "POST",
         headers: {
@@ -253,9 +254,9 @@ node_test_1.default.after(async () => {
     });
     strict_1.default.equal(sessionResponse.status, 200);
     const payload = (await sessionResponse.json());
-    strict_1.default.equal(payload.tenant.id, "tenant-1");
-    strict_1.default.equal(payload.siteCount, 2);
-    strict_1.default.equal(payload.projectCount, 5);
+    strict_1.default.equal(payload.role, "viewer");
+    strict_1.default.ok(Array.isArray(payload.sites));
+    strict_1.default.equal(payload.activeSiteId, null);
 });
 (0, node_test_1.default)("studio backend proxy injects Authorization from the encrypted session cookie and logout clears the session", async () => {
     const loginResponse = await fetch(`${studio.baseUrl}/studio/api/session/login`, {

@@ -10,22 +10,17 @@ import type {
   PublishProjectPayload,
   PublicationListItem,
   ProjectStatus,
-  StudioIdentityProviderConfig,
-  StudioLoginOptions,
+  StudioAuthProviders,
   StudioInvitationSummary,
-  StudioPromptAssignmentSummary,
-  StudioPromptPresetDetail,
-  StudioPromptPresetSummary,
-  StudioPromptVersionSummary,
+  StudioMediaItem,
   StudioProjectDetailView,
   StudioProjectSummary,
   StudioRoleSummary,
   StudioSession,
+  StudioSite,
   StudioSiteDetail,
   StudioSiteSummary,
   StudioUserSummary,
-  StudioWorkspaceAccess,
-  UpdateStudioIdentityProviderPayload,
   UpdateProjectPayload,
   UpdateSitePayload,
 } from '../models/studio.models';
@@ -36,10 +31,8 @@ export class StudioApiService {
   private readonly origin = inject(STUDIO_ORIGIN);
   private readonly apiBase = `${this.origin}/studio/api`;
 
-  getLoginOptions(email: string): Observable<StudioLoginOptions> {
-    return this.http.post<StudioLoginOptions>(`${this.apiBase}/auth/login/options`, {
-      email,
-    });
+  getAuthProviders(): Observable<StudioAuthProviders> {
+    return this.http.get<StudioAuthProviders>(`${this.apiBase}/auth/providers`);
   }
 
   loginWithPassword(payload: {
@@ -70,15 +63,8 @@ export class StudioApiService {
     token: string;
     password: string;
     workspaceId?: string | null;
-  }): Observable<StudioSession> {
-    return this.http.post<StudioSession>(`${this.apiBase}/auth/invitations/accept`, payload);
-  }
-
-  login(apiKey: string, workspace?: string): Observable<StudioSession> {
-    return this.http.post<StudioSession>(`${this.apiBase}/session/login`, {
-      apiKey,
-      ...(workspace ? { workspace } : {}),
-    });
+  }): Observable<unknown> {
+    return this.http.post<unknown>(`${this.apiBase}/auth/invitations/accept`, payload);
   }
 
   logout(): Observable<{ ok: true }> {
@@ -89,48 +75,15 @@ export class StudioApiService {
     return this.http.get<StudioSession>(`${this.apiBase}/session/me`);
   }
 
-  lookupWorkspaceAccess(workspace: string): Observable<StudioWorkspaceAccess> {
-    return this.http.get<StudioWorkspaceAccess>(`${this.apiBase}/session/workspace`, {
-      params: new HttpParams().set('workspace', workspace),
-    });
+  setActiveSite(siteId: string): Observable<StudioSession> {
+    return this.http.post<StudioSession>(`${this.apiBase}/session/active-site`, { siteId });
   }
 
-  getIdentityProvider(): Observable<StudioIdentityProviderConfig | null> {
-    return this.http.get<StudioIdentityProviderConfig | null>(
-      `${this.apiBase}/backend/v2/workspace/identity-provider`,
-    );
+  listSites(): Observable<{ items: StudioSite[] }> {
+    return this.http.get<{ items: StudioSite[] }>(`${this.apiBase}/sites`);
   }
 
-  updateIdentityProvider(
-    payload: UpdateStudioIdentityProviderPayload,
-  ): Observable<StudioIdentityProviderConfig> {
-    return this.http.patch<StudioIdentityProviderConfig>(
-      `${this.apiBase}/backend/v2/workspace/identity-provider`,
-      payload,
-    );
-  }
-
-  testIdentityProvider(
-    payload: UpdateStudioIdentityProviderPayload,
-  ): Observable<{
-    ok: boolean;
-    issuer?: string;
-    authorizationEndpoint?: string | null;
-    tokenEndpoint?: string | null;
-    scopesSupported?: unknown;
-    message?: string;
-  }> {
-    return this.http.post<{
-      ok: boolean;
-      issuer?: string;
-      authorizationEndpoint?: string | null;
-      tokenEndpoint?: string | null;
-      scopesSupported?: unknown;
-      message?: string;
-    }>(`${this.apiBase}/backend/v2/workspace/identity-provider/test`, payload);
-  }
-
-  listSites(page = 1, pageSize = 20): Observable<PaginatedResponse<StudioSiteSummary>> {
+  listTenantSites(page = 1, pageSize = 20): Observable<PaginatedResponse<StudioSiteSummary>> {
     return this.http.get<PaginatedResponse<StudioSiteSummary>>(
       `${this.apiBase}/backend/v2/sites`,
       {
@@ -236,6 +189,40 @@ export class StudioApiService {
     return this.http.post(`${this.apiBase}/backend/v2/content-images/${imageId}/retry`, {});
   }
 
+  listMedia(
+    page = 1,
+    pageSize = 24,
+    filters: { siteId?: string; status?: string } = {},
+  ): Observable<PaginatedResponse<StudioMediaItem>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.siteId) {
+      params = params.set('siteId', filters.siteId);
+    }
+    if (filters.status) {
+      params = params.set('status', filters.status);
+    }
+    return this.http.get<PaginatedResponse<StudioMediaItem>>(
+      `${this.apiBase}/backend/v2/media`,
+      { params },
+    );
+  }
+
+  updateVersionContent(
+    versionId: string,
+    payload: {
+      title?: string;
+      excerpt?: string;
+      bodyHtml?: string;
+      seoTitle?: string;
+      seoDescription?: string;
+    },
+  ): Observable<{ id: string; status: string; qaReport: unknown }> {
+    return this.http.patch<{ id: string; status: string; qaReport: unknown }>(
+      `${this.apiBase}/backend/v2/versions/${versionId}`,
+      payload,
+    );
+  }
+
   listPublications(
     page = 1,
     pageSize = 10,
@@ -289,117 +276,5 @@ export class StudioApiService {
 
   listRoles(): Observable<StudioRoleSummary[]> {
     return this.http.get<StudioRoleSummary[]>(`${this.apiBase}/backend/v2/roles`);
-  }
-
-  createRole(payload: {
-    key?: string;
-    name: string;
-    description?: string | null;
-    permissions: string[];
-    cloneFromRoleId?: string | null;
-  }): Observable<StudioRoleSummary> {
-    return this.http.post<StudioRoleSummary>(`${this.apiBase}/backend/v2/roles`, payload);
-  }
-
-  updateRole(
-    roleId: string,
-    payload: {
-      name?: string;
-      description?: string | null;
-      permissions?: string[];
-    },
-  ): Observable<StudioRoleSummary> {
-    return this.http.patch<StudioRoleSummary>(
-      `${this.apiBase}/backend/v2/roles/${roleId}`,
-      payload,
-    );
-  }
-
-  listPromptPresets(): Observable<StudioPromptPresetSummary[]> {
-    return this.http.get<StudioPromptPresetSummary[]>(`${this.apiBase}/backend/v2/prompts`);
-  }
-
-  getPromptPreset(
-    promptId: string,
-    projectId?: string | null,
-  ): Observable<StudioPromptPresetDetail> {
-    let params = new HttpParams();
-    if (projectId) {
-      params = params.set('projectId', projectId);
-    }
-    return this.http.get<StudioPromptPresetDetail>(
-      `${this.apiBase}/backend/v2/prompts/${promptId}`,
-      { params },
-    );
-  }
-
-  createPromptPreset(payload: {
-    key?: string;
-    name: string;
-    surface: string;
-    scope?: string;
-    siteId?: string | null;
-    description?: string | null;
-    systemTemplate?: string | null;
-    userTemplate: string;
-    variablesJson?: Record<string, unknown> | null;
-    notes?: string | null;
-  }): Observable<StudioPromptPresetDetail> {
-    return this.http.post<StudioPromptPresetDetail>(
-      `${this.apiBase}/backend/v2/prompts`,
-      payload,
-    );
-  }
-
-  createPromptVersion(
-    promptId: string,
-    payload: {
-      systemTemplate?: string | null;
-      userTemplate: string;
-      variablesJson?: Record<string, unknown> | null;
-      notes?: string | null;
-    },
-  ): Observable<StudioPromptVersionSummary> {
-    return this.http.post<StudioPromptVersionSummary>(
-      `${this.apiBase}/backend/v2/prompts/${promptId}/versions`,
-      payload,
-    );
-  }
-
-  updatePromptVersion(
-    promptId: string,
-    versionId: string,
-    payload: {
-      status?: string;
-      systemTemplate?: string | null;
-      userTemplate?: string;
-      variablesJson?: Record<string, unknown> | null;
-      notes?: string | null;
-    },
-  ): Observable<StudioPromptVersionSummary> {
-    return this.http.patch<StudioPromptVersionSummary>(
-      `${this.apiBase}/backend/v2/prompts/${promptId}/versions/${versionId}`,
-      payload,
-    );
-  }
-
-  approvePromptVersion(
-    promptId: string,
-    versionId: string,
-  ): Observable<StudioPromptVersionSummary> {
-    return this.http.post<StudioPromptVersionSummary>(
-      `${this.apiBase}/backend/v2/prompts/${promptId}/versions/${versionId}/approve`,
-      {},
-    );
-  }
-
-  assignPromptVersion(
-    promptId: string,
-    payload: { versionId: string; siteId?: string | null },
-  ): Observable<StudioPromptAssignmentSummary> {
-    return this.http.post<StudioPromptAssignmentSummary>(
-      `${this.apiBase}/backend/v2/prompts/${promptId}/assignments`,
-      payload,
-    );
   }
 }

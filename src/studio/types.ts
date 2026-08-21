@@ -359,6 +359,31 @@ export type AssignStudioPromptInput = {
   siteId?: string | null;
 };
 
+export type StudioMediaItem = {
+  id: string;
+  tenantId: string;
+  status: string;
+  provider: string | null;
+  model: string | null;
+  prompt: string | null;
+  storagePath: string | null;
+  width: number | null;
+  height: number | null;
+  error: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  variants: Array<{
+    id: string;
+    kind: string;
+    storagePath: string;
+    mimeType: string;
+    width: number | null;
+    height: number | null;
+  }>;
+  project: { id: string; title: string; siteId: string; site: { key: string; name: string } } | null;
+  version: { id: string; versionNumber: number } | null;
+};
+
 export type StudioSiteSummary = Pick<
   Site,
   | "id"
