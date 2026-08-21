@@ -35,11 +35,17 @@ export async function verifyStudioGoogleCredential(
     throw new Error("google_login_not_configured");
   }
 
-  const ticket = await getClient().verifyIdToken({
-    idToken: credential,
-    audience: clientId,
-  });
-  const payload = ticket.getPayload();
+  let payload;
+  try {
+    const ticket = await getClient().verifyIdToken({
+      idToken: credential,
+      audience: clientId,
+    });
+    payload = ticket.getPayload();
+  } catch {
+    throw new Error("google_identity_invalid");
+  }
+
   if (!payload?.sub || !payload.email) {
     throw new Error("google_identity_invalid");
   }
