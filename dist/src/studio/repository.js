@@ -353,6 +353,13 @@ async function listProjects(tenantId, input) {
                         qaState: mapQaState(latestVersion.status),
                         hasAsset: (0, review_1.isHeroImageReady)(latestVersion.contentImage),
                         assetUrl: latestVersion.contentImage?.storagePath ?? null,
+                        image: latestVersion.contentImage
+                            ? {
+                                id: latestVersion.contentImage.id,
+                                status: latestVersion.contentImage.status,
+                                error: latestVersion.contentImage.error,
+                            }
+                            : null,
                         promptPresetVersionId: latestVersion.contentText?.promptPresetVersion?.id ??
                             latestVersion.contentImage?.promptPresetVersion?.id ??
                             null,

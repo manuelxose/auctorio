@@ -155,15 +155,23 @@ export type ReviewGateStage =
   | 'publish_failed'
   | 'published';
 
+export type ReviewGateIssue = {
+  code: string;
+  severity: 'blocking' | 'warning';
+  message: string;
+};
+
 export type ReviewGateSummary = {
   stage: ReviewGateStage;
   compareReady: boolean;
   approvalReady: boolean;
   publishReady: boolean;
+  ready: boolean;
   blockerCount: number;
   warningCount: number;
   blockers: string[];
   warnings: string[];
+  issues: ReviewGateIssue[];
   nextAction: string;
   primaryConcern: string;
 };

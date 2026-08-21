@@ -315,8 +315,10 @@ test("POST /v2/projects/:id/approve rejects versions that look qa_passed but sti
     });
 
     assert.equal(response.statusCode, 400);
-    const payload = response.json() as { message: string };
-    assert.equal(payload.message, "Featured image is still missing.");
+    const payload = response.json() as { error: { code: string; message: string; requestId: string | null } };
+    assert.equal(payload.error.code, "bad_request");
+    assert.equal(payload.error.message, "Featured image is still missing.");
+    assert.ok(payload.error.requestId);
   } finally {
     await server.close();
     await cleanupFixture(fixture.tenantId);
@@ -351,8 +353,10 @@ test("POST /v2/projects/:id/publish rejects approved versions when gate blockers
     });
 
     assert.equal(response.statusCode, 400);
-    const payload = response.json() as { message: string };
-    assert.equal(payload.message, "Featured image is still missing.");
+    const payload = response.json() as { error: { code: string; message: string; requestId: string | null } };
+    assert.equal(payload.error.code, "bad_request");
+    assert.equal(payload.error.message, "Featured image is still missing.");
+    assert.ok(payload.error.requestId);
   } finally {
     await server.close();
     await cleanupFixture(fixture.tenantId);

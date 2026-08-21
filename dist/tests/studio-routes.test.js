@@ -233,7 +233,9 @@ node_test_1.default.after(async () => {
         });
         strict_1.default.equal(response.statusCode, 400);
         const payload = response.json();
-        strict_1.default.equal(payload.message, "Featured image is still missing.");
+        strict_1.default.equal(payload.error.code, "bad_request");
+        strict_1.default.equal(payload.error.message, "Featured image is still missing.");
+        strict_1.default.ok(payload.error.requestId);
     }
     finally {
         await server.close();
@@ -266,7 +268,9 @@ node_test_1.default.after(async () => {
         });
         strict_1.default.equal(response.statusCode, 400);
         const payload = response.json();
-        strict_1.default.equal(payload.message, "Featured image is still missing.");
+        strict_1.default.equal(payload.error.code, "bad_request");
+        strict_1.default.equal(payload.error.message, "Featured image is still missing.");
+        strict_1.default.ok(payload.error.requestId);
     }
     finally {
         await server.close();
