@@ -161,12 +161,26 @@ const STUDIO_PERMISSIONS_HEADER = "x-studio-permissions";
 const STUDIO_SIGNATURE_HEADER = "x-studio-signature";
 const STUDIO_TIMESTAMP_HEADER = "x-studio-timestamp";
 
+function errorBody(reply: FastifyReply, code: string, message: string) {
+  return {
+    error: {
+      code,
+      message,
+      requestId: reply.request.id ?? null,
+    },
+  };
+}
+
 function badRequest(reply: FastifyReply, message: string) {
-  return reply.code(400).send({ error: "bad_request", message });
+  return reply.code(400).send(errorBody(reply, "bad_request", message));
 }
 
 function notFound(reply: FastifyReply, message: string) {
-  return reply.code(404).send({ error: "not_found", message });
+  return reply.code(404).send(errorBody(reply, "not_found", message));
+}
+
+function authErrorReply(reply: FastifyReply, status: number, message: string) {
+  return reply.code(status).send(errorBody(reply, "auth_error", message));
 }
 
 function getAuthErrorStatus(message: string): number {

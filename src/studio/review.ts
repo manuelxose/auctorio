@@ -2,6 +2,7 @@ import type { ProjectStatus, VersionStatus } from "@prisma/client";
 import type { ReviewGateSummary, ReviewGateStage } from "./types";
 
 type QaCheckLike = {
+  key: string;
   passed: boolean;
   message: string;
   severity: "error" | "warning";
@@ -63,6 +64,7 @@ function normalizeQaReport(value: unknown): QaReportLike | null {
       }
 
       const item = check as {
+        key?: unknown;
         passed?: unknown;
         message?: unknown;
         severity?: unknown;
@@ -77,12 +79,13 @@ function normalizeQaReport(value: unknown): QaReportLike | null {
       }
 
       return {
+        key: typeof item.key === "string" && item.key.trim() ? item.key.trim() : "qa_check",
         passed: item.passed,
         message: item.message,
         severity: item.severity,
       } satisfies QaCheckLike;
     })
-    .filter((check): check is QaCheckLike => Boolean(check));
+    .filter((check): check is QaCheckLike => check !== null);
 
   return {
     passed: candidate.passed,
@@ -94,6 +97,18 @@ function pushUnique(target: string[], value: string) {
   const normalized = value.trim();
   if (normalized && !target.includes(normalized)) {
     target.push(normalized);
+  }
+}
+
+function pushUniqueIssue(
+  target: { code: string; severity: "blocking" | "warning"; message: string }[],
+  code: string,
+  severity: "blocking" | "warning",
+  message: string,
+) {
+  const normalized = message.trim();
+  if (normalized && !target.some((issue) => issue.code === code && issue.message === normalized)) {
+    target.push({ code, severity, message: normalized });
   }
 }
 
@@ -185,26 +200,32 @@ function resolveNextAction(stage: ReviewGateStage): string {
 export function buildReviewGate(input: BuildReviewGateInput): ReviewGateSummary {
   const blockers: string[] = [];
   const warnings: string[] = [];
+  const issues: { code: string; severity: "blocking" | "warning"; message: string }[] = [];
   const latestVersion = input.latestVersion;
 
   if (!latestVersion) {
     blockers.push("No generated version exists yet.");
+    pushUniqueIssue(issues, "version_missing", "blocking", "No generated version exists yet.");
   } else {
     if (!latestVersion.title?.trim()) {
       pushUnique(blockers, "Latest version has no title yet.");
+      pushUniqueIssue(issues, "title_missing", "blocking", "Latest version has no title yet.");
     }
 
     if (countWordsFromHtml(latestVersion.bodyHtml) === 0) {
       pushUnique(blockers, "Latest version has no rendered body yet.");
+      pushUniqueIssue(issues, "body_missing", "blocking", "Latest version has no rendered body yet.");
     }
 
     if (!latestVersion.hasAsset) {
       pushUnique(blockers, "Featured image is still missing.");
+      pushUniqueIssue(issues, "hero_image_missing", "blocking", "Featured image is still missing or not ready.");
     }
 
     const qaReport = normalizeQaReport(latestVersion.qaReport);
     if (!qaReport) {
       pushUnique(blockers, "QA report is missing for the latest version.");
+      pushUniqueIssue(issues, "qa_report_missing", "blocking", "QA report is missing for the latest version.");
     } else {
       for (const check of qaReport.checks) {
         if (check.passed) {
@@ -213,8 +234,10 @@ export function buildReviewGate(input: BuildReviewGateInput): ReviewGateSummary 
 
         if (check.severity === "error") {
           pushUnique(blockers, check.message);
+          pushUniqueIssue(issues, check.key || "qa_check", "blocking", check.message);
         } else {
           pushUnique(warnings, check.message);
+          pushUniqueIssue(issues, check.key || "qa_check", "warning", check.message);
         }
       }
     }
@@ -224,19 +247,23 @@ export function buildReviewGate(input: BuildReviewGateInput): ReviewGateSummary 
       !latestVersion.feedback?.trim()
     ) {
       pushUnique(warnings, "No reviewer note has been recorded for the latest decision.");
+      pushUniqueIssue(issues, "reviewer_note_missing", "warning", "No reviewer note has been recorded for the latest decision.");
     }
 
     if (input.versionCount < 2) {
       pushUnique(warnings, "Only one saved version exists, so compare history is still shallow.");
+      pushUniqueIssue(issues, "version_history_shallow", "warning", "Only one saved version exists, so compare history is still shallow.");
     }
 
     if (!latestVersion.seoTitle?.trim() || !latestVersion.seoDescription?.trim()) {
       pushUnique(warnings, "SEO metadata is incomplete for the latest version.");
+      pushUniqueIssue(issues, "seo_metadata_incomplete", "warning", "SEO metadata is incomplete for the latest version.");
     }
   }
 
   if (input.projectStatus === "publish_failed") {
     pushUnique(warnings, "The latest publication attempt failed and needs operator review.");
+    pushUniqueIssue(issues, "publication_failed", "warning", "The latest publication attempt failed and needs operator review.");
   }
 
   const stage = resolveStage(input.projectStatus, latestVersion, blockers.length);
@@ -249,10 +276,12 @@ export function buildReviewGate(input: BuildReviewGateInput): ReviewGateSummary 
     publishReady:
       blockers.length === 0 &&
       ["approved", "publish_queued", "publish_failed", "published"].includes(stage),
+    ready: blockers.length === 0,
     blockerCount: blockers.length,
     warningCount: warnings.length,
     blockers,
     warnings,
+    issues,
     nextAction,
     primaryConcern: blockers[0] ?? warnings[0] ?? nextAction,
   };

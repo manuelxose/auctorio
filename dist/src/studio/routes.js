@@ -66,11 +66,23 @@ const STUDIO_SESSION_HEADER = "x-studio-session-id";
 const STUDIO_PERMISSIONS_HEADER = "x-studio-permissions";
 const STUDIO_SIGNATURE_HEADER = "x-studio-signature";
 const STUDIO_TIMESTAMP_HEADER = "x-studio-timestamp";
+function errorBody(reply, code, message) {
+    return {
+        error: {
+            code,
+            message,
+            requestId: reply.request.id ?? null,
+        },
+    };
+}
 function badRequest(reply, message) {
-    return reply.code(400).send({ error: "bad_request", message });
+    return reply.code(400).send(errorBody(reply, "bad_request", message));
 }
 function notFound(reply, message) {
-    return reply.code(404).send({ error: "not_found", message });
+    return reply.code(404).send(errorBody(reply, "not_found", message));
+}
+function authErrorReply(reply, status, message) {
+    return reply.code(status).send(errorBody(reply, "auth_error", message));
 }
 function getAuthErrorStatus(message) {
     if ([
@@ -381,6 +393,13 @@ async function toVersionSummary(version) {
         qaState: mapQaState(version.status),
         hasAsset: (0, review_1.isHeroImageReady)(version.contentImage),
         assetUrl: await (0, orchestration_1.buildAssetPublicUrl)(version.contentImage?.storagePath),
+        image: version.contentImage
+            ? {
+                id: version.contentImage.id,
+                status: version.contentImage.status,
+                error: version.contentImage.error,
+            }
+            : null,
         ...readPromptFields(version),
         wordCount: (0, review_1.countWordsFromHtml)(version.bodyHtml),
         qaFailureCount: (0, review_1.countQaFailures)(version.qaReport),
