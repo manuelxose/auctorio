@@ -31,6 +31,14 @@ export function buildTextPrompt(input: TextPromptInput): TextPromptOutput {
     typeof input.options?.revision_feedback === "string"
       ? input.options.revision_feedback
       : undefined;
+  const siteType =
+    typeof input.options?.site_type === "string"
+      ? String(input.options.site_type).trim().toLowerCase()
+      : undefined;
+  const destinationGuidance =
+    siteType === "guiatv"
+      ? "Destination: GuiaTV (guiaprogramaciontv.com). Suitable formats: TV guides, streaming guides, football and sports articles, rankings, editorial explainers, platform comparisons, schedules, evergreen SEO content and relevant news. Write with the depth a TV programming audience expects, use practical channel and platform facts when provided, and structure the SEO metadata around real programming queries."
+      : undefined;
   const targetAudience =
     typeof input.options?.target_audience === "string"
       ? input.options.target_audience
@@ -50,7 +58,7 @@ export function buildTextPrompt(input: TextPromptInput): TextPromptOutput {
 
   const systemPrompt =
     input.type === "seo"
-      ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.`
+      ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}`
       : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.`;
 
   const facts = input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)";
@@ -68,6 +76,7 @@ export function buildTextPrompt(input: TextPromptInput): TextPromptOutput {
     seoRules ? `SEO rules JSON: ${seoRules}` : null,
     metadata ? `Structured metadata JSON: ${metadata}` : null,
     revisionFeedback ? `Revision feedback: ${revisionFeedback}` : null,
+    destinationGuidance ? `Editorial guidance: ${destinationGuidance}` : null,
     input.type === "instagram" && hashtags ? "Include relevant hashtags." : null,
     input.type === "seo"
       ? "Write production-ready editorial content with a clear title, a compelling introduction, H2 sections, actionable detail, and a strong ending. Return clean HTML or clearly structured markdown."

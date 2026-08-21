@@ -150,6 +150,7 @@ export async function startProjectGeneration(
       goal: project.goal,
       site_id: project.siteId,
       site_name: project.site.name,
+      site_type: project.site.type,
       brand_voice: project.site.brandVoice ?? {},
       seo_rules: project.site.seoRules ?? {},
       metadata: project.metadata ?? {},

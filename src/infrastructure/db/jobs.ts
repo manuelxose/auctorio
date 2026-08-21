@@ -37,6 +37,8 @@ export async function markJobProcessing(jobId: string) {
     data: {
       status: "processing",
       startedAt: new Date(),
+      attempts: { increment: 1 },
+      lastError: null,
     },
   });
 }

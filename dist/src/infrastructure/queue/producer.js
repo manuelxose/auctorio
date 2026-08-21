@@ -7,6 +7,7 @@ exports.enqueuePublishingJob = enqueuePublishingJob;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("./redis");
 const queues_1 = require("./queues");
+const env_1 = require("../../shared/utils/env");
 const queues = new Map();
 function getQueue(name) {
     const existing = queues.get(name);
@@ -19,39 +20,29 @@ function getQueue(name) {
     queues.set(name, queue);
     return queue;
 }
+function retryOptions() {
+    const attempts = Math.max(1, (0, env_1.getNumberEnv)("WORKER_MAX_ATTEMPTS", 3));
+    const backoffMs = Math.max(250, (0, env_1.getNumberEnv)("WORKER_BACKOFF_MS", 2_000));
+    return {
+        attempts,
+        backoff: { type: "exponential", delay: backoffMs },
+        removeOnComplete: 100,
+        removeOnFail: 200,
+    };
+}
 async function enqueueScrapingJob(jobId, data) {
     const queue = getQueue(queues_1.QUEUE_NAMES.scraping);
-    await queue.add("scraping", data, {
-        jobId,
-        attempts: 1,
-        removeOnComplete: 100,
-        removeOnFail: 100,
-    });
+    await queue.add("scraping", data, { jobId, ...retryOptions() });
 }
 async function enqueueTextJob(jobId, data) {
     const queue = getQueue(queues_1.QUEUE_NAMES.text);
-    await queue.add("text", data, {
-        jobId,
-        attempts: 1,
-        removeOnComplete: 100,
-        removeOnFail: 100,
-    });
+    await queue.add("text", data, { jobId, ...retryOptions() });
 }
 async function enqueueImageJob(jobId, data) {
     const queue = getQueue(queues_1.QUEUE_NAMES.image);
-    await queue.add("image", data, {
-        jobId,
-        attempts: 1,
-        removeOnComplete: 100,
-        removeOnFail: 100,
-    });
+    await queue.add("image", data, { jobId, ...retryOptions() });
 }
 async function enqueuePublishingJob(jobId, data) {
     const queue = getQueue(queues_1.QUEUE_NAMES.publishing);
-    await queue.add("publishing", data, {
-        jobId,
-        attempts: 1,
-        removeOnComplete: 100,
-        removeOnFail: 100,
-    });
+    await queue.add("publishing", data, { jobId, ...retryOptions() });
 }
