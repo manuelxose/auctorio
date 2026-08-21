@@ -13,6 +13,50 @@ const env_2 = require("../shared/utils/env");
 function asRecord(value) {
     return value && typeof value === "object" ? value : {};
 }
+const GUIATV_CONTENT_TYPES = new Set([
+    "guide",
+    "ranking",
+    "trend",
+    "news",
+    "analysis",
+    "preview",
+    "match-report",
+]);
+const GUIATV_CONTENT_TYPE_ALIASES = {
+    faq: "guide",
+    article: "guide",
+    blog: "news",
+    comparison: "guide",
+};
+const GUIATV_RELATED_ROUTE_KEYS = new Set(["platforms", "guide", "explore", "stats", "comparison"]);
+const GUIATV_RELATED_PLATFORM_KEYS = new Set([
+    "netflix",
+    "prime-video",
+    "disney-plus",
+    "max",
+    "movistar-plus",
+    "skyshowtime",
+    "apple-tv-plus",
+    "filmin",
+    "rtve-play",
+    "atresplayer",
+    "mitele",
+    "pluto-tv",
+    "rakuten-tv",
+]);
+function normalizeGuiaTvContentType(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (GUIATV_CONTENT_TYPES.has(normalized)) {
+        return normalized;
+    }
+    return GUIATV_CONTENT_TYPE_ALIASES[normalized] ?? "guide";
+}
+function filterGuiaTvRelatedPlatformKeys(keys) {
+    return keys.filter((key) => GUIATV_RELATED_PLATFORM_KEYS.has(key));
+}
+function filterGuiaTvRelatedRouteKeys(keys) {
+    return keys.filter((key) => GUIATV_RELATED_ROUTE_KEYS.has(key));
+}
 function readCredentialRef(ref) {
     if (!ref) {
         return "";
@@ -164,12 +208,12 @@ class GuiaTvPublisher {
             excerpt: context.version.excerpt || "",
             content: context.version.bodyHtml || "",
             categories,
-            contentType: String(metadata.contentType || "guide"),
+            contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
             featured: Boolean(metadata.featured),
             primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
             targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
-            relatedPlatformKeys: getStringArray(metadata.relatedPlatformKeys),
-            relatedRouteKeys: getStringArray(metadata.relatedRouteKeys),
+            relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
+            relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
             faqItems: getFaqItems(context.project),
             evergreen: metadata.evergreen !== false,
             featuredImage: assetUrl ?? undefined,

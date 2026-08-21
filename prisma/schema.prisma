@@ -484,6 +484,7 @@ model PublicationJob {
   versionId      String            @db.Uuid @map("version_id")
   status         PublicationStatus @default(queued)
   action         PublicationAction @default(publish)
+  idempotencyKey String?           @map("idempotency_key")
   externalId     String?           @map("external_id")
   externalUrl    String?           @map("external_url")
   requestPayload Json?             @map("request_payload")
@@ -503,6 +504,7 @@ model PublicationJob {
   @@index([tenantId, siteId, status])
   @@index([tenantId, projectId, versionId])
   @@index([tenantId, requestedByStudioUserId])
+  @@unique([tenantId, idempotencyKey])
   @@map("publication_jobs")
 }
 

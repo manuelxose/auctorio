@@ -14,6 +14,7 @@ import {
   approveVersion,
   createProject,
   createPublicationJob,
+  findPublicationJobByIdempotency,
   getLatestPublishedExternalId,
   createSite,
   getLatestVersion,
@@ -1489,6 +1490,26 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "project has no published or synced external content");
     }
 
+    const idempotencyKey = [
+      "pub",
+      project.site.id,
+      project.id,
+      latestVersion.id,
+      action,
+      targetStatus,
+    ].join(":");
+
+    const existing = await findPublicationJobByIdempotency(context.tenantId, idempotencyKey);
+    if (existing && (existing.status === "queued" || existing.status === "processing")) {
+      return reply.code(202).send({
+        publication_id: existing.id,
+        project_id: project.id,
+        version_id: latestVersion.id,
+        status: existing.status,
+        reused: true,
+      });
+    }
+
     const publication = await createPublicationJob(
       context.tenantId,
       project.site.id,
@@ -1501,6 +1522,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         requestedBy: context.userId ? "studio_user" : "studio",
       },
       context.userId,
+      idempotencyKey,
     );
     await updateProjectStatus(context.tenantId, project.id, "publish_queued");
     await queuePublication(publication.id);

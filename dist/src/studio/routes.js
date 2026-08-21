@@ -1141,11 +1141,29 @@ function registerStudioRoutes(fastify) {
         if (action === "unpublish" && !latestExternalId) {
             return badRequest(reply, "project has no published or synced external content");
         }
+        const idempotencyKey = [
+            "pub",
+            project.site.id,
+            project.id,
+            latestVersion.id,
+            action,
+            targetStatus,
+        ].join(":");
+        const existing = await (0, repository_1.findPublicationJobByIdempotency)(context.tenantId, idempotencyKey);
+        if (existing && (existing.status === "queued" || existing.status === "processing")) {
+            return reply.code(202).send({
+                publication_id: existing.id,
+                project_id: project.id,
+                version_id: latestVersion.id,
+                status: existing.status,
+                reused: true,
+            });
+        }
         const publication = await (0, repository_1.createPublicationJob)(context.tenantId, project.site.id, project.id, latestVersion.id, action, {
             action,
             targetStatus,
             requestedBy: context.userId ? "studio_user" : "studio",
-        }, context.userId);
+        }, context.userId, idempotencyKey);
         await (0, repository_1.updateProjectStatus)(context.tenantId, project.id, "publish_queued");
         await (0, orchestration_1.queuePublication)(publication.id);
         return reply.code(202).send({

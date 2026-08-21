@@ -22,6 +22,7 @@ exports.replaceDerivatives = replaceDerivatives;
 exports.updateVersionQa = updateVersionQa;
 exports.approveVersion = approveVersion;
 exports.createPublicationJob = createPublicationJob;
+exports.findPublicationJobByIdempotency = findPublicationJobByIdempotency;
 exports.getPublicationJobById = getPublicationJobById;
 exports.listPublicationJobs = listPublicationJobs;
 exports.updatePublicationJob = updatePublicationJob;
@@ -550,7 +551,7 @@ async function approveVersion(tenantId, projectId, versionId, approvedBy, approv
     });
     return updateProjectStatus(tenantId, projectId, "approved");
 }
-async function createPublicationJob(tenantId, siteId, projectId, versionId, action = "publish", requestPayload, requestedByStudioUserId) {
+async function createPublicationJob(tenantId, siteId, projectId, versionId, action = "publish", requestPayload, requestedByStudioUserId, idempotencyKey) {
     return prisma.publicationJob.create({
         data: {
             tenantId,
@@ -559,10 +560,21 @@ async function createPublicationJob(tenantId, siteId, projectId, versionId, acti
             versionId,
             action,
             status: "queued",
+            idempotencyKey: idempotencyKey ?? null,
             requestedByStudioUserId: requestedByStudioUserId ?? null,
             requestPayload: requestPayload
                 ? requestPayload
                 : client_1.Prisma.JsonNull,
+        },
+    });
+}
+async function findPublicationJobByIdempotency(tenantId, idempotencyKey) {
+    return prisma.publicationJob.findUnique({
+        where: {
+            tenantId_idempotencyKey: {
+                tenantId,
+                idempotencyKey,
+            },
         },
     });
 }

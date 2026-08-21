@@ -35,6 +35,8 @@ async function markJobProcessing(jobId) {
         data: {
             status: "processing",
             startedAt: new Date(),
+            attempts: { increment: 1 },
+            lastError: null,
         },
     });
 }

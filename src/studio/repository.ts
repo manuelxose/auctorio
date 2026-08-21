@@ -631,6 +631,7 @@ export async function createPublicationJob(
     requestedBy?: string;
   } | null,
   requestedByStudioUserId?: string | null,
+  idempotencyKey?: string | null,
 ): Promise<PublicationJob> {
   return prisma.publicationJob.create({
     data: {
@@ -640,10 +641,25 @@ export async function createPublicationJob(
       versionId,
       action,
       status: "queued",
+      idempotencyKey: idempotencyKey ?? null,
       requestedByStudioUserId: requestedByStudioUserId ?? null,
       requestPayload: requestPayload
         ? (requestPayload as Prisma.InputJsonObject)
         : Prisma.JsonNull,
+    },
+  });
+}
+
+export async function findPublicationJobByIdempotency(
+  tenantId: string,
+  idempotencyKey: string,
+) {
+  return prisma.publicationJob.findUnique({
+    where: {
+      tenantId_idempotencyKey: {
+        tenantId,
+        idempotencyKey,
+      },
     },
   });
 }

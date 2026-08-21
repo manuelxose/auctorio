@@ -27,6 +27,57 @@ function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
 }
 
+const GUIATV_CONTENT_TYPES = new Set([
+  "guide",
+  "ranking",
+  "trend",
+  "news",
+  "analysis",
+  "preview",
+  "match-report",
+]);
+
+const GUIATV_CONTENT_TYPE_ALIASES: Record<string, string> = {
+  faq: "guide",
+  article: "guide",
+  blog: "news",
+  comparison: "guide",
+};
+
+const GUIATV_RELATED_ROUTE_KEYS = new Set(["platforms", "guide", "explore", "stats", "comparison"]);
+
+const GUIATV_RELATED_PLATFORM_KEYS = new Set([
+  "netflix",
+  "prime-video",
+  "disney-plus",
+  "max",
+  "movistar-plus",
+  "skyshowtime",
+  "apple-tv-plus",
+  "filmin",
+  "rtve-play",
+  "atresplayer",
+  "mitele",
+  "pluto-tv",
+  "rakuten-tv",
+]);
+
+function normalizeGuiaTvContentType(value: string): string {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (GUIATV_CONTENT_TYPES.has(normalized)) {
+    return normalized;
+  }
+  return GUIATV_CONTENT_TYPE_ALIASES[normalized] ?? "guide";
+}
+
+function filterGuiaTvRelatedPlatformKeys(keys: string[]): string[] {
+  return keys.filter((key) => GUIATV_RELATED_PLATFORM_KEYS.has(key));
+}
+
+function filterGuiaTvRelatedRouteKeys(keys: string[]): string[] {
+  return keys.filter((key) => GUIATV_RELATED_ROUTE_KEYS.has(key));
+}
+
 function readCredentialRef(ref: string | null | undefined): string {
   if (!ref) {
     return "";
@@ -175,7 +226,6 @@ class GuiaTvPublisher implements PublisherAdapter {
   private getAdminKey(site: Site): string {
     return readCredentialRef(site.publishingCredentialsRef);
   }
-
   private getHeaders(site: Site): Record<string, string> {
     const adminKey = this.getAdminKey(site);
     if (!adminKey) {
@@ -211,12 +261,12 @@ class GuiaTvPublisher implements PublisherAdapter {
       excerpt: context.version.excerpt || "",
       content: context.version.bodyHtml || "",
       categories,
-      contentType: String(metadata.contentType || "guide"),
+      contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
       featured: Boolean(metadata.featured),
       primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
       targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
-      relatedPlatformKeys: getStringArray(metadata.relatedPlatformKeys),
-      relatedRouteKeys: getStringArray(metadata.relatedRouteKeys),
+      relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
+      relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
       faqItems: getFaqItems(context.project),
       evergreen: metadata.evergreen !== false,
       featuredImage: assetUrl ?? undefined,
