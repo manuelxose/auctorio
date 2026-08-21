@@ -556,6 +556,13 @@ async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionS
     qaState: mapQaState(version.status),
     hasAsset: isHeroImageReady(version.contentImage),
     assetUrl: await buildAssetPublicUrl(version.contentImage?.storagePath),
+    image: version.contentImage
+      ? {
+          id: version.contentImage.id,
+          status: version.contentImage.status,
+          error: version.contentImage.error,
+        }
+      : null,
     ...readPromptFields(version),
     wordCount: countWordsFromHtml(version.bodyHtml),
     qaFailureCount: countQaFailures(version.qaReport),

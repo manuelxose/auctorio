@@ -232,6 +232,10 @@ export class StudioApiService {
     });
   }
 
+  retryImage(imageId: string): Observable<unknown> {
+    return this.http.post(`${this.apiBase}/backend/v2/content-images/${imageId}/retry`, {});
+  }
+
   listPublications(
     page = 1,
     pageSize = 10,
