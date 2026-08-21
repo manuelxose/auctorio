@@ -250,7 +250,7 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
   process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
 
   const server = await createMockServer((req, res, bodyText) => {
-    if (req.url === "/blog" && req.method === "POST") {
+    if (req.url === "/v2/blog" && req.method === "POST") {
       const body = JSON.parse(bodyText) as Record<string, unknown>;
       assert.equal(req.headers["x-admin-key"], "guiatv-secret");
       assert.equal(body.status, "draft");
@@ -270,7 +270,7 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
       return;
     }
 
-    if (req.url === "/blog/post-1" && req.method === "PUT") {
+    if (req.url === "/v2/blog/post-1" && req.method === "PUT") {
       const body = JSON.parse(bodyText) as Record<string, unknown>;
       assert.equal(req.headers["x-admin-key"], "guiatv-secret");
       assert.equal(body.status, "publish");
@@ -289,7 +289,7 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
       return;
     }
 
-    if (req.url === "/blog/post-1" && req.method === "DELETE") {
+    if (req.url === "/v2/blog/post-1" && req.method === "DELETE") {
       assert.equal(req.headers["x-admin-key"], "guiatv-secret");
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");

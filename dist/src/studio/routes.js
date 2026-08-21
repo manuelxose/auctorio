@@ -1169,13 +1169,38 @@ function registerStudioRoutes(fastify) {
             targetStatus,
         ].join(":");
         const existing = await (0, repository_1.findPublicationJobByIdempotency)(context.tenantId, idempotencyKey);
-        if (existing && (existing.status === "queued" || existing.status === "processing")) {
+        if (existing) {
+            if (existing.status === "queued" || existing.status === "processing") {
+                return reply.code(202).send({
+                    publication_id: existing.id,
+                    project_id: project.id,
+                    version_id: latestVersion.id,
+                    status: existing.status,
+                    reused: true,
+                });
+            }
+            if (existing.status === "draft_synced" || existing.status === "published") {
+                return reply.code(202).send({
+                    publication_id: existing.id,
+                    project_id: project.id,
+                    version_id: latestVersion.id,
+                    status: existing.status,
+                    reused: true,
+                });
+            }
+            const retried = await (0, repository_1.resetPublicationJobForRetry)(existing.id, {
+                action,
+                targetStatus,
+                requestedBy: context.userId ? "studio_user" : "studio",
+            }, context.userId);
+            await (0, repository_1.updateProjectStatus)(context.tenantId, project.id, "publish_queued");
+            await (0, orchestration_1.queuePublication)(retried.id);
             return reply.code(202).send({
-                publication_id: existing.id,
+                publication_id: retried.id,
                 project_id: project.id,
                 version_id: latestVersion.id,
-                status: existing.status,
-                reused: true,
+                status: "queued",
+                retried: true,
             });
         }
         const publication = await (0, repository_1.createPublicationJob)(context.tenantId, project.site.id, project.id, latestVersion.id, action, {

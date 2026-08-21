@@ -200,7 +200,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["PUBLISH_DRY_RUN"] = "false";
     process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
     const server = await createMockServer((req, res, bodyText) => {
-        if (req.url === "/blog" && req.method === "POST") {
+        if (req.url === "/v2/blog" && req.method === "POST") {
             const body = JSON.parse(bodyText);
             strict_1.default.equal(req.headers["x-admin-key"], "guiatv-secret");
             strict_1.default.equal(body.status, "draft");
@@ -217,7 +217,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
             }));
             return;
         }
-        if (req.url === "/blog/post-1" && req.method === "PUT") {
+        if (req.url === "/v2/blog/post-1" && req.method === "PUT") {
             const body = JSON.parse(bodyText);
             strict_1.default.equal(req.headers["x-admin-key"], "guiatv-secret");
             strict_1.default.equal(body.status, "publish");
@@ -233,7 +233,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
             }));
             return;
         }
-        if (req.url === "/blog/post-1" && req.method === "DELETE") {
+        if (req.url === "/v2/blog/post-1" && req.method === "DELETE") {
             strict_1.default.equal(req.headers["x-admin-key"], "guiatv-secret");
             res.statusCode = 200;
             res.setHeader("content-type", "application/json");

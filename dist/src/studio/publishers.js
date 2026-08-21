@@ -234,19 +234,34 @@ class GuiaTvPublisher {
         const assetUrl = await resolveAssetUrl(context);
         const payload = this.buildPayload(context, assetUrl, "draft");
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/blog`, {
-            method: "POST",
-            headers: this.getHeaders(context.site),
-            body: payload,
-            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
-            retries: 1,
-        });
+        const response = await this.postJson(`${siteBaseUrl}/v2/blog`, context, payload);
         return {
             externalId: String(response.data?.post?.id || ""),
             externalUrl: response.data?.post?.link || null,
             effectiveTargetStatus: "draft",
             responsePayload: response,
         };
+    }
+    async postJson(url, context, payload) {
+        try {
+            return await (0, http_1.fetchJson)(url, {
+                method: "POST",
+                headers: this.getHeaders(context.site),
+                body: payload,
+                timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+                retries: 1,
+            });
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            if (/status=401|status=403/.test(message)) {
+                throw new Error(`guiatv_admin_key_rejected. The configured x-admin-key was not accepted by ${url}. Verify GUIATV_AUCTORIO_ADMIN_KEY matches the destination ANALYTICS_ADMIN_KEY.`);
+            }
+            if (/status=404/.test(message)) {
+                throw new Error(`guiatv_endpoint_not_found at ${url}. The GuiaTV admin API is served under /v2/blog.`);
+            }
+            throw error;
+        }
     }
     async updateDraft(context, externalId) {
         const dryRun = await this.maybeDryRun(context, "updateDraft", externalId);
@@ -256,7 +271,7 @@ class GuiaTvPublisher {
         const assetUrl = await resolveAssetUrl(context);
         const payload = this.buildPayload(context, assetUrl, "draft");
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/blog/${externalId}`, {
+        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/v2/blog/${externalId}`, {
             method: "PUT",
             headers: this.getHeaders(context.site),
             body: payload,
@@ -279,7 +294,7 @@ class GuiaTvPublisher {
             const assetUrl = await resolveAssetUrl(context);
             const payload = this.buildPayload(context, assetUrl, "publish");
             const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-            const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/blog/${externalId}`, {
+            const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/v2/blog/${externalId}`, {
                 method: "PUT",
                 headers: this.getHeaders(context.site),
                 body: payload,
@@ -305,7 +320,7 @@ class GuiaTvPublisher {
             return dryRun;
         }
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/blog/${externalId}`, {
+        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/v2/blog/${externalId}`, {
             method: "DELETE",
             headers: this.getHeaders(context.site),
             timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),

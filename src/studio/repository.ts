@@ -671,6 +671,29 @@ export async function findPublicationJobByIdempotency(
   });
 }
 
+export async function resetPublicationJobForRetry(
+  publicationJobId: string,
+  requestPayload?: {
+    action?: PublicationAction;
+    targetStatus?: PublicationTargetStatus;
+    requestedBy?: string;
+  } | null,
+  requestedByStudioUserId?: string | null,
+) {
+  return prisma.publicationJob.update({
+    where: { id: publicationJobId },
+    data: {
+      status: "queued",
+      error: null,
+      responsePayload: Prisma.JsonNull,
+      requestedByStudioUserId: requestedByStudioUserId ?? null,
+      requestPayload: requestPayload
+        ? (requestPayload as Prisma.InputJsonObject)
+        : Prisma.JsonNull,
+    },
+  });
+}
+
 export async function getPublicationJobById(tenantId: string | null | undefined, publicationJobId: string) {
   return prisma.publicationJob.findFirst({
     where: {
