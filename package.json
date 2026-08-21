@@ -9,6 +9,7 @@
     "test": "npx prisma migrate deploy && npm run build && npm run build:studio && node --test dist/tests/**/*.test.js",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:live:guiatv": "ts-node scripts/live-guiatv-contract.ts",
+    "verify:platforms": "ts-node scripts/verify-platform-credentials.ts",
     "dev:studio": "npm --prefix apps/studio-web run dev:ssr",
     "serve:studio": "npm --prefix apps/studio-web run serve:ssr",
     "bootstrap:studio-access": "ts-node scripts/bootstrap-studio-access.ts",
