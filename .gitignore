@@ -17,3 +17,5 @@ apps/studio-web/releases/
 tmp-storage/
 current
 releases/
+test-results/
+playwright-report/
