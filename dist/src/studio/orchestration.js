@@ -1,4 +1,7 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildAssetPublicUrl = buildAssetPublicUrl;
 exports.startProjectGeneration = startProjectGeneration;
@@ -7,6 +10,7 @@ exports.syncTextResultToStudio = syncTextResultToStudio;
 exports.syncImageResultToStudio = syncImageResultToStudio;
 exports.queuePublication = queuePublication;
 exports.retryImageGeneration = retryImageGeneration;
+const node_crypto_1 = __importDefault(require("node:crypto"));
 const producer_1 = require("../infrastructure/queue/producer");
 const prisma_1 = require("../infrastructure/db/prisma");
 const env_1 = require("../shared/utils/env");
@@ -201,7 +205,7 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, qaReport.passed ? "in_review" : "qa_failed");
 }
 async function queuePublication(publicationJobId) {
-    await (0, producer_1.enqueuePublishingJob)(publicationJobId, {
+    await (0, producer_1.enqueuePublishingJob)(node_crypto_1.default.randomUUID(), {
         publicationJobId,
     });
 }

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import { Prisma, type ContentProject, type DerivativeType, type Site } from "@prisma/client";
 import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
@@ -275,7 +276,7 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
 }
 
 export async function queuePublication(publicationJobId: string) {
-  await enqueuePublishingJob(publicationJobId, {
+  await enqueuePublishingJob(crypto.randomUUID(), {
     publicationJobId,
   });
 }
