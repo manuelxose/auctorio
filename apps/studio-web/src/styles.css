@@ -2047,3 +2047,12 @@ a.au-row:hover { background: #f8fafc; }
   .au-inline { flex-direction: column; align-items: stretch; }
   .au-topbar__actions .au-button--sm { display: none; }
 }
+
+/* ── Google Sign-In ── */
+.au-google-button {
+  margin-top: 12px;
+  display: flex;
+  justify-content: center;
+  min-height: 40px;
+  align-items: center;
+}
