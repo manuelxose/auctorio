@@ -4,6 +4,7 @@ exports.enqueueScrapingJob = enqueueScrapingJob;
 exports.enqueueTextJob = enqueueTextJob;
 exports.enqueueImageJob = enqueueImageJob;
 exports.enqueuePublishingJob = enqueuePublishingJob;
+exports.getPublishingQueue = getPublishingQueue;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("./redis");
 const queues_1 = require("./queues");
@@ -45,4 +46,7 @@ async function enqueueImageJob(jobId, data) {
 async function enqueuePublishingJob(jobId, data) {
     const queue = getQueue(queues_1.QUEUE_NAMES.publishing);
     await queue.add("publishing", data, { jobId, ...retryOptions() });
+}
+async function getPublishingQueue() {
+    return getQueue(queues_1.QUEUE_NAMES.publishing);
 }

@@ -1524,6 +1524,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     const existing = await findPublicationJobByIdempotency(context.tenantId, idempotencyKey);
     if (existing) {
       if (existing.status === "queued" || existing.status === "processing") {
+        await queuePublication(existing.id);
         return reply.code(202).send({
           publication_id: existing.id,
           project_id: project.id,

@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Prisma, type ContentProject, type DerivativeType, type Site } from "@prisma/client";
-import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob } from "../infrastructure/queue/producer";
+import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob, getPublishingQueue } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
@@ -276,6 +276,13 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
 }
 
 export async function queuePublication(publicationJobId: string) {
+  const queue = await getPublishingQueue();
+  const inFlight = await queue.getJobs(["waiting", "active", "delayed"], 0, -1);
+  const alreadyQueued = inFlight.some((job) => job.data?.publicationJobId === publicationJobId);
+  if (alreadyQueued) {
+    return;
+  }
+
   await enqueuePublishingJob(crypto.randomUUID(), {
     publicationJobId,
   });
