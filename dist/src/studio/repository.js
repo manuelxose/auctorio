@@ -23,6 +23,7 @@ exports.updateVersionQa = updateVersionQa;
 exports.approveVersion = approveVersion;
 exports.createPublicationJob = createPublicationJob;
 exports.findPublicationJobByIdempotency = findPublicationJobByIdempotency;
+exports.resetPublicationJobForRetry = resetPublicationJobForRetry;
 exports.getPublicationJobById = getPublicationJobById;
 exports.listPublicationJobs = listPublicationJobs;
 exports.updatePublicationJob = updatePublicationJob;
@@ -582,6 +583,20 @@ async function findPublicationJobByIdempotency(tenantId, idempotencyKey) {
                 tenantId,
                 idempotencyKey,
             },
+        },
+    });
+}
+async function resetPublicationJobForRetry(publicationJobId, requestPayload, requestedByStudioUserId) {
+    return prisma.publicationJob.update({
+        where: { id: publicationJobId },
+        data: {
+            status: "queued",
+            error: null,
+            responsePayload: client_1.Prisma.JsonNull,
+            requestedByStudioUserId: requestedByStudioUserId ?? null,
+            requestPayload: requestPayload
+                ? requestPayload
+                : client_1.Prisma.JsonNull,
         },
     });
 }

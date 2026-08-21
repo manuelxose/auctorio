@@ -289,15 +289,10 @@ class GuiaTvPublisher implements PublisherAdapter {
     const assetUrl = await resolveAssetUrl(context);
     const payload = this.buildPayload(context, assetUrl, "draft");
     const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-    const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(
-      `${siteBaseUrl}/blog`,
-      {
-        method: "POST",
-        headers: this.getHeaders(context.site),
-        body: payload,
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      },
+    const response = await this.postJson(
+      `${siteBaseUrl}/v2/blog`,
+      context,
+      payload,
     );
 
     return {
@@ -306,6 +301,31 @@ class GuiaTvPublisher implements PublisherAdapter {
       effectiveTargetStatus: "draft",
       responsePayload: response as Record<string, unknown>,
     };
+  }
+
+  private async postJson(url: string, context: PublisherContext, payload: Record<string, unknown>) {
+    try {
+      return await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(url, {
+        method: "POST",
+        headers: this.getHeaders(context.site),
+        body: payload,
+        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+        retries: 1,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/status=401|status=403/.test(message)) {
+        throw new Error(
+          `guiatv_admin_key_rejected. The configured x-admin-key was not accepted by ${url}. Verify GUIATV_AUCTORIO_ADMIN_KEY matches the destination ANALYTICS_ADMIN_KEY.`,
+        );
+      }
+      if (/status=404/.test(message)) {
+        throw new Error(
+          `guiatv_endpoint_not_found at ${url}. The GuiaTV admin API is served under /v2/blog.`,
+        );
+      }
+      throw error;
+    }
   }
 
   async updateDraft(context: PublisherContext, externalId: string): Promise<PublishResult> {
@@ -318,7 +338,7 @@ class GuiaTvPublisher implements PublisherAdapter {
     const payload = this.buildPayload(context, assetUrl, "draft");
     const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
     const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(
-      `${siteBaseUrl}/blog/${externalId}`,
+      `${siteBaseUrl}/v2/blog/${externalId}`,
       {
         method: "PUT",
         headers: this.getHeaders(context.site),
@@ -347,7 +367,7 @@ class GuiaTvPublisher implements PublisherAdapter {
       const payload = this.buildPayload(context, assetUrl, "publish");
       const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
       const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(
-        `${siteBaseUrl}/blog/${externalId}`,
+        `${siteBaseUrl}/v2/blog/${externalId}`,
         {
           method: "PUT",
           headers: this.getHeaders(context.site),
@@ -380,7 +400,7 @@ class GuiaTvPublisher implements PublisherAdapter {
 
     const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
     const response = await fetchJson<{ data?: { deleted?: boolean; id?: string } }>(
-      `${siteBaseUrl}/blog/${externalId}`,
+      `${siteBaseUrl}/v2/blog/${externalId}`,
       {
         method: "DELETE",
         headers: this.getHeaders(context.site),

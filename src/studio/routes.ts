@@ -15,6 +15,7 @@ import {
   createProject,
   createPublicationJob,
   findPublicationJobByIdempotency,
+  resetPublicationJobForRetry,
   getLatestPublishedExternalId,
   createSite,
   getLatestVersion,
@@ -1521,13 +1522,45 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     ].join(":");
 
     const existing = await findPublicationJobByIdempotency(context.tenantId, idempotencyKey);
-    if (existing && (existing.status === "queued" || existing.status === "processing")) {
+    if (existing) {
+      if (existing.status === "queued" || existing.status === "processing") {
+        return reply.code(202).send({
+          publication_id: existing.id,
+          project_id: project.id,
+          version_id: latestVersion.id,
+          status: existing.status,
+          reused: true,
+        });
+      }
+
+      if (existing.status === "draft_synced" || existing.status === "published") {
+        return reply.code(202).send({
+          publication_id: existing.id,
+          project_id: project.id,
+          version_id: latestVersion.id,
+          status: existing.status,
+          reused: true,
+        });
+      }
+
+      const retried = await resetPublicationJobForRetry(
+        existing.id,
+        {
+          action,
+          targetStatus,
+          requestedBy: context.userId ? "studio_user" : "studio",
+        },
+        context.userId,
+      );
+      await updateProjectStatus(context.tenantId, project.id, "publish_queued");
+      await queuePublication(retried.id);
+
       return reply.code(202).send({
-        publication_id: existing.id,
+        publication_id: retried.id,
         project_id: project.id,
         version_id: latestVersion.id,
-        status: existing.status,
-        reused: true,
+        status: "queued",
+        retried: true,
       });
     }
 
