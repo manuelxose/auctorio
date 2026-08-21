@@ -36,5 +36,5 @@ test("runVersionQa fails when image and body are missing", () => {
   );
 
   assert.equal(report.passed, false);
-  assert.equal(report.checks.some((check) => check.key === "image_present" && check.passed === false), true);
+  assert.equal(report.checks.some((check) => check.key === "image_ready" && check.passed === false), true);
 });

@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.getEnv = getEnv;
 exports.getNumberEnv = getNumberEnv;
+exports.isProductionEnv = isProductionEnv;
 exports.getBooleanEnv = getBooleanEnv;
 exports.getJsonEnv = getJsonEnv;
 exports.requireEnv = requireEnv;
@@ -23,6 +24,9 @@ function getNumberEnv(key, fallback) {
         return fallback;
     }
     return parsed;
+}
+function isProductionEnv() {
+    return getEnv("NODE_ENV", "") === "production" || getEnv("APP_ENV", "") === "production";
 }
 function getBooleanEnv(key, fallback) {
     const value = getEnv(key, "");

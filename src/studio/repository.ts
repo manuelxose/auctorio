@@ -29,7 +29,7 @@ import type {
   UpdateSiteInput,
 } from "./types";
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml } from "./review";
+import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
 import { STUDIO_PERMISSIONS } from "./security";
 
 const prisma = getPrismaClient();
@@ -295,6 +295,7 @@ export async function listProjects(
             },
             contentImage: {
               include: {
+                assetVariants: true,
                 promptPresetVersion: {
                   include: {
                     preset: true,
@@ -353,7 +354,7 @@ export async function listProjects(
                 feedback: latestVersion.feedback,
                 bodyHtml: latestVersion.bodyHtml,
                 qaReport: latestVersion.qaReport,
-                hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+                hasAsset: isHeroImageReady(latestVersion.contentImage),
               }
             : null,
         }),
@@ -373,7 +374,7 @@ export async function listProjects(
             approvedBy: latestVersion.approvedBy,
             publishedAt: latestVersion.publishedAt,
             qaState: mapQaState(latestVersion.status),
-            hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+            hasAsset: isHeroImageReady(latestVersion.contentImage),
             assetUrl: latestVersion.contentImage?.storagePath ?? null,
             promptPresetVersionId:
               latestVersion.contentText?.promptPresetVersion?.id ??
@@ -811,9 +812,13 @@ export async function getContentTextById(tenantId: string, contentTextId: string
   });
 }
 
-export async function getContentImageById(tenantId: string, contentImageId: string): Promise<ContentImage | null> {
+export async function getContentImageById(
+  tenantId: string,
+  contentImageId: string,
+): Promise<(ContentImage & { assetVariants: AssetVariant[] }) | null> {
   return prisma.contentImage.findFirst({
     where: { tenantId, id: contentImageId },
+    include: { assetVariants: true },
   });
 }
 

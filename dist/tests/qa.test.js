@@ -28,5 +28,5 @@ const qa_1 = require("../src/studio/qa");
         seoDescription: "Descripcion corta",
     }, false);
     strict_1.default.equal(report.passed, false);
-    strict_1.default.equal(report.checks.some((check) => check.key === "image_present" && check.passed === false), true);
+    strict_1.default.equal(report.checks.some((check) => check.key === "image_ready" && check.passed === false), true);
 });

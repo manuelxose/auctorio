@@ -59,6 +59,7 @@ import {
   buildAssetPublicUrl,
   queuePublication,
   requestImageGenerationForVersion,
+  retryImageGeneration,
   startProjectGeneration,
 } from "./orchestration";
 import {
@@ -70,7 +71,7 @@ import {
   listStudioPromptPresets,
   updateStudioPromptVersion,
 } from "./prompts";
-import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml } from "./review";
+import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
 import {
   buildStudioProxySignature,
   hasStudioPermission,
@@ -552,7 +553,7 @@ async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionS
     approvedBy: version.approvedBy,
     publishedAt: version.publishedAt,
     qaState: mapQaState(version.status),
-    hasAsset: Boolean(version.contentImage?.storagePath),
+    hasAsset: isHeroImageReady(version.contentImage),
     assetUrl: await buildAssetPublicUrl(version.contentImage?.storagePath),
     ...readPromptFields(version),
     wordCount: countWordsFromHtml(version.bodyHtml),
@@ -568,6 +569,8 @@ async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionS
 
 function buildProjectReviewGate(project: ProjectRecord) {
   const latestVersionRecord = project.versions[0] ?? null;
+  const latestImage = latestVersionRecord?.contentImage ?? null;
+  const heroReady = isHeroImageReady(latestImage);
 
   return buildReviewGate({
     projectStatus: project.status,
@@ -582,7 +585,7 @@ function buildProjectReviewGate(project: ProjectRecord) {
           feedback: latestVersionRecord.feedback,
           bodyHtml: latestVersionRecord.bodyHtml,
           qaReport: latestVersionRecord.qaReport,
-          hasAsset: Boolean(latestVersionRecord.contentImage?.storagePath),
+          hasAsset: heroReady,
         }
       : null,
   });
@@ -1508,6 +1511,30 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       version_id: latestVersion.id,
       status: "queued",
     });
+  });
+
+  fastify.post("/v2/content-images/:id/retry", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const imageId = (request.params as { id: string }).id;
+    if (!isUuid(imageId)) {
+      return badRequest(reply, "invalid image id");
+    }
+
+    try {
+      const jobId = await retryImageGeneration(context.tenantId, imageId);
+      return reply.code(202).send({
+        job_id: jobId,
+        content_image_id: imageId,
+        status: "queued",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return badRequest(reply, message);
+    }
   });
 
   fastify.post("/v2/assets/generate", async (request, reply) => {

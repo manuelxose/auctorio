@@ -5,7 +5,7 @@ function hasAtLeastWords(value, minWords) {
     const words = value.trim().split(/\s+/).filter(Boolean);
     return words.length >= minWords;
 }
-function runVersionQa(version, hasImage) {
+function runVersionQa(version, imageReady) {
     const body = String(version.bodyHtml || "").trim();
     const title = String(version.title || "").trim();
     const excerpt = String(version.excerpt || "").trim();
@@ -49,9 +49,9 @@ function runVersionQa(version, hasImage) {
             severity: "warning",
         },
         {
-            key: "image_present",
-            passed: hasImage,
-            message: "La version debe disponer de una imagen destacada.",
+            key: "image_ready",
+            passed: imageReady,
+            message: "La version debe disponer de una imagen destacada lista: estado done, archivo persistente y variante hero generada.",
             severity: "error",
         },
     ];

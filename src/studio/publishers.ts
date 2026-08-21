@@ -10,6 +10,7 @@ import type {
   PublisherContext,
 } from "./types";
 import { buildAssetPublicUrl } from "./orchestration";
+import { isProductionEnv } from "../shared/utils/env";
 
 type TecnoriaCredentials = {
   token?: string;
@@ -154,6 +155,10 @@ function getDryRunDecision(hasResolvedCredentials: boolean): DryRunDecision {
   }
 
   if (!hasResolvedCredentials) {
+    if (isProductionEnv()) {
+      throw new Error("publishing_missing_credentials");
+    }
+
     return {
       enabled: true,
       reason: "missing_publishing_credentials",

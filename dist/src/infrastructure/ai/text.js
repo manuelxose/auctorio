@@ -67,13 +67,16 @@ class MockTextProvider {
 function getTextProvider() {
     const provider = (0, env_1.getEnv)("TEXT_PROVIDER", "mock").toLowerCase();
     if (provider === "mock") {
+        if ((0, env_1.isProductionEnv)()) {
+            throw new Error("TEXT_PROVIDER=mock is not allowed in production. Set TEXT_PROVIDER, TEXT_API_BASE_URL, TEXT_API_KEY and TEXT_MODEL.");
+        }
         return new MockTextProvider();
     }
     const baseUrl = (0, env_1.getEnv)("TEXT_API_BASE_URL", "");
     const apiKey = (0, env_1.getEnv)("TEXT_API_KEY", "");
     const model = (0, env_1.getEnv)("TEXT_MODEL", "");
-    if (!baseUrl || !apiKey) {
-        throw new Error("TEXT_API_BASE_URL and TEXT_API_KEY are required for text provider");
+    if (!baseUrl || !apiKey || !model) {
+        throw new Error("TEXT_API_BASE_URL, TEXT_API_KEY and TEXT_MODEL are required for text provider");
     }
     return new OpenAICompatibleTextProvider(provider, baseUrl, apiKey, model);
 }

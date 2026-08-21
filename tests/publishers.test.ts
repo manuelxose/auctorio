@@ -199,8 +199,8 @@ test.afterEach(() => {
 
 for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"] as const) {
   test(`publisher ${siteType} falls back to dry-run when credentials are missing`, async () => {
-    process.env["APP_ENV"] = "production";
-    process.env["NODE_ENV"] = "production";
+    process.env["APP_ENV"] = "development";
+    process.env["NODE_ENV"] = "development";
     process.env["PUBLISH_DRY_RUN"] = "false";
 
     const result = await getPublisher(buildContext(siteType).site).publish(buildContext(siteType));
@@ -209,6 +209,17 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"] as const) {
     assert.equal(String(responsePayload["mode"]), "dry_run");
     assert.equal(String(responsePayload["reason"]), "missing_publishing_credentials");
     assert.match(String(result.externalId), /^dryrun-/);
+  });
+
+  test(`publisher ${siteType} fails loudly in production when credentials are missing`, async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+
+    await assert.rejects(
+      () => getPublisher(buildContext(siteType).site).publish(buildContext(siteType)),
+      /publishing_missing_credentials/,
+    );
   });
 }
 

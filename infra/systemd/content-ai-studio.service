@@ -7,9 +7,9 @@ Wants=content-ai-api.service
 Type=simple
 User=contentai
 Group=contentai
-WorkingDirectory=/var/www/auctorio/apps/studio-web
-EnvironmentFile=/etc/auctorio/studio.env
-ExecStart=/var/www/bin/run-release-entry.sh /var/www/auctorio/apps/studio-web/releases/current/server/server.mjs
+WorkingDirectory=/var/www/content-ai-platform/apps/studio-web
+EnvironmentFile=/etc/content-ai-platform/studio.env
+ExecStart=/var/www/bin/run-release-entry.sh /var/www/content-ai-platform/apps/studio-web/releases/current/server/server.mjs
 Restart=always
 RestartSec=2
 

@@ -3,7 +3,7 @@ import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob } from "../infras
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
-import { createAssetVariant, attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
+import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQa } from "./qa";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
@@ -248,17 +248,6 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
     return;
   }
 
-  if (image.storagePath) {
-    await createAssetVariant({
-      tenantId,
-      contentImageId: image.id,
-      storagePath: image.storagePath,
-      mimeType: getContentTypeFromPath(image.storagePath),
-      width: image.width,
-      height: image.height,
-    });
-  }
-
   const qaReport = runVersionQa(
     {
       title: version.title,
@@ -267,7 +256,9 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
       seoTitle: version.seoTitle,
       seoDescription: version.seoDescription,
     },
-    Boolean(image.storagePath),
+    image.status === "done" &&
+      Boolean(image.storagePath) &&
+      image.assetVariants.some((variant) => variant.kind === "hero"),
   );
 
   await updateVersionQa(
@@ -286,4 +277,57 @@ export async function queuePublication(publicationJobId: string) {
   await enqueuePublishingJob(publicationJobId, {
     publicationJobId,
   });
+}
+
+export async function retryImageGeneration(tenantId: string, contentImageId: string) {
+  const image = await prisma.contentImage.findFirst({
+    where: { id: contentImageId, tenantId },
+  });
+  if (!image) {
+    throw new Error("image_not_found");
+  }
+  if (image.status === "processing" || image.status === "queued") {
+    throw new Error("image_already_in_flight");
+  }
+  if (image.status !== "failed" && image.status !== "retryable") {
+    throw new Error("image_not_retryable");
+  }
+
+  const topic = await prisma.topic.findFirst({
+    where: { id: image.topicId, tenantId },
+  });
+  if (!topic) {
+    throw new Error("topic_not_found");
+  }
+
+  const version = await findVersionByImageId(tenantId, contentImageId);
+
+  await prisma.contentImage.update({
+    where: { id: contentImageId },
+    data: { status: "queued", error: null },
+  });
+
+  const imageJob = await prisma.job.create({
+    data: {
+      tenantId,
+      type: "image",
+      status: "queued",
+    },
+  });
+
+  await enqueueImageJob(imageJob.id, {
+    jobId: imageJob.id,
+    tenantId,
+    topicId: topic.id,
+    contentImageId,
+    mode: image.textId ? "contextual" : "independent",
+    textId: image.textId ?? undefined,
+    options: {
+      site_id: version?.project.siteId ?? undefined,
+      goal: version?.project.goal ?? undefined,
+      promptPresetVersionId: image.promptPresetVersionId ?? undefined,
+    },
+  });
+
+  return imageJob.id;
 }

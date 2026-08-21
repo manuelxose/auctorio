@@ -18,6 +18,10 @@ export function getNumberEnv(key: string, fallback: number): number {
   return parsed;
 }
 
+export function isProductionEnv(): boolean {
+  return getEnv("NODE_ENV", "") === "production" || getEnv("APP_ENV", "") === "production";
+}
+
 export function getBooleanEnv(key: string, fallback: boolean): boolean {
   const value = getEnv(key, "");
   if (!value) {

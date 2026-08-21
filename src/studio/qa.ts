@@ -6,7 +6,7 @@ function hasAtLeastWords(value: string, minWords: number): boolean {
   return words.length >= minWords;
 }
 
-export function runVersionQa(version: Pick<ContentVersion, "title" | "excerpt" | "bodyHtml" | "seoTitle" | "seoDescription">, hasImage: boolean): QaReport {
+export function runVersionQa(version: Pick<ContentVersion, "title" | "excerpt" | "bodyHtml" | "seoTitle" | "seoDescription">, imageReady: boolean): QaReport {
   const body = String(version.bodyHtml || "").trim();
   const title = String(version.title || "").trim();
   const excerpt = String(version.excerpt || "").trim();
@@ -51,9 +51,10 @@ export function runVersionQa(version: Pick<ContentVersion, "title" | "excerpt" |
       severity: "warning",
     },
     {
-      key: "image_present",
-      passed: hasImage,
-      message: "La version debe disponer de una imagen destacada.",
+      key: "image_ready",
+      passed: imageReady,
+      message:
+        "La version debe disponer de una imagen destacada lista: estado done, archivo persistente y variante hero generada.",
       severity: "error",
     },
   ];

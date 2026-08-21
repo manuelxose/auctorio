@@ -5,9 +5,10 @@ import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
 import { markJobDone, markJobFailed, markJobProcessing } from "../db/jobs";
 import { getPrismaClient } from "../db/prisma";
-import { getImageProvider } from "../ai/image";
+import { getImageProvider, ImageDownloadError } from "../ai/image";
 import { resolveImagePrompt } from "../../studio/prompts";
 import { saveImageAsset } from "../storage/local-storage";
+import { buildImageDerivatives } from "../storage/image-processing";
 import { syncImageResultToStudio } from "../../studio/orchestration";
 
 type ImageJobData = {
@@ -112,8 +113,19 @@ export async function runImageWorker() {
         extension,
       });
 
+      const storageRoot = getEnv("STORAGE_ROOT", "/var/www/auctorio/storage");
+      const processed = await buildImageDerivatives({
+        storageRoot,
+        originalRelativePath: stored.relativePath,
+        tenantId: data.tenantId,
+        contentImageId: data.contentImageId,
+      });
+
       const parsed = parseSize(size);
       const costUsd = computeImageCost();
+
+      const width = processed.width || (parsed.width ?? null);
+      const height = processed.height || (parsed.height ?? null);
 
       await prisma.contentImage.update({
         where: { id: data.contentImageId },
@@ -124,10 +136,33 @@ export async function runImageWorker() {
           prompt: prompt.userPrompt,
           promptPresetVersionId: prompt.promptPresetVersionId,
           storagePath: stored.relativePath,
-          width: parsed.width ?? null,
-          height: parsed.height ?? null,
+          width,
+          height,
           costUsd,
         },
+      });
+
+      await prisma.assetVariant.createMany({
+        data: [
+          {
+            tenantId: data.tenantId,
+            contentImageId: data.contentImageId,
+            kind: "original",
+            storagePath: stored.relativePath,
+            mimeType: result.contentType,
+            width,
+            height,
+          },
+          ...processed.derivatives.map((derivative) => ({
+            tenantId: data.tenantId,
+            contentImageId: data.contentImageId,
+            kind: derivative.kind,
+            storagePath: derivative.storagePath,
+            mimeType: derivative.mimeType,
+            width: derivative.width,
+            height: derivative.height,
+          })),
+        ],
       });
 
       await prisma.aiAudit.create({
@@ -138,7 +173,15 @@ export async function runImageWorker() {
           model: result.model,
           prompt: prompt.userPrompt,
           promptPresetVersionId: prompt.promptPresetVersionId,
-          response: JSON.stringify({ storage_path: stored.relativePath }),
+          response: JSON.stringify({
+            storage_path: stored.relativePath,
+            variants: processed.derivatives.map((derivative) => ({
+              kind: derivative.kind,
+              storage_path: derivative.storagePath,
+              width: derivative.width,
+              height: derivative.height,
+            })),
+          }),
           usageJson: Prisma.JsonNull,
         },
       });
@@ -164,9 +207,13 @@ export async function runImageWorker() {
     const data = job.data as ImageJobData | undefined;
     await markJobFailed(job.id.toString(), err.message);
     if (data?.contentImageId) {
+      const retryable = err instanceof ImageDownloadError && err.retryable;
       await prisma.contentImage.update({
         where: { id: data.contentImageId },
-        data: { status: "failed", error: err.message },
+        data: {
+          status: retryable ? "retryable" : "failed",
+          error: err.message,
+        },
       });
     }
   });
