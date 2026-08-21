@@ -205,6 +205,12 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, qaReport.passed ? "in_review" : "qa_failed");
 }
 async function queuePublication(publicationJobId) {
+    const queue = await (0, producer_1.getPublishingQueue)();
+    const inFlight = await queue.getJobs(["waiting", "active", "delayed"], 0, -1);
+    const alreadyQueued = inFlight.some((job) => job.data?.publicationJobId === publicationJobId);
+    if (alreadyQueued) {
+        return;
+    }
     await (0, producer_1.enqueuePublishingJob)(node_crypto_1.default.randomUUID(), {
         publicationJobId,
     });

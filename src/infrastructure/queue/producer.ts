@@ -48,3 +48,7 @@ export async function enqueuePublishingJob(jobId: string, data: Record<string, u
   const queue = getQueue(QUEUE_NAMES.publishing);
   await queue.add("publishing", data, { jobId, ...retryOptions() });
 }
+
+export async function getPublishingQueue() {
+  return getQueue(QUEUE_NAMES.publishing);
+}
