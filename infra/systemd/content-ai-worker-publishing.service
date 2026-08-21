@@ -1,0 +1,17 @@
+[Unit]
+Description=Content AI Platform Publishing Worker
+After=network.target postgresql.service valkey.service
+Wants=postgresql.service valkey.service
+
+[Service]
+Type=simple
+User=contentai
+Group=contentai
+WorkingDirectory=/var/www/content-ai-platform
+EnvironmentFile=/etc/content-ai-platform/app.env
+ExecStart=/usr/bin/node /var/www/content-ai-platform/dist/scripts/start-worker-publishing.js
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

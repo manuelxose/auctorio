@@ -1,4 +1,4 @@
-import { getEnv, getNumberEnv } from "../../shared/utils/env";
+import { getEnv, getNumberEnv, isProductionEnv } from "../../shared/utils/env";
 import { fetchJson } from "../../shared/utils/http";
 
 export type TextGenerationInput = {
@@ -100,6 +100,11 @@ class MockTextProvider implements TextProvider {
 export function getTextProvider(): TextProvider {
   const provider = getEnv("TEXT_PROVIDER", "mock").toLowerCase();
   if (provider === "mock") {
+    if (isProductionEnv()) {
+      throw new Error(
+        "TEXT_PROVIDER=mock is not allowed in production. Set TEXT_PROVIDER, TEXT_API_BASE_URL, TEXT_API_KEY and TEXT_MODEL.",
+      );
+    }
     return new MockTextProvider();
   }
 
@@ -107,8 +112,10 @@ export function getTextProvider(): TextProvider {
   const apiKey = getEnv("TEXT_API_KEY", "");
   const model = getEnv("TEXT_MODEL", "");
 
-  if (!baseUrl || !apiKey) {
-    throw new Error("TEXT_API_BASE_URL and TEXT_API_KEY are required for text provider");
+  if (!baseUrl || !apiKey || !model) {
+    throw new Error(
+      "TEXT_API_BASE_URL, TEXT_API_KEY and TEXT_MODEL are required for text provider",
+    );
   }
 
   return new OpenAICompatibleTextProvider(provider, baseUrl, apiKey, model);

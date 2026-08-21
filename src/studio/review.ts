@@ -24,6 +24,22 @@ type ReviewVersionInput = {
   hasAsset: boolean;
 };
 
+export type ImageReadinessInput = {
+  status?: string | null;
+  storagePath?: string | null;
+  assetVariants?: Array<{ kind: string } | null> | null;
+};
+
+export function isHeroImageReady(image: ImageReadinessInput | null | undefined): boolean {
+  return Boolean(
+    image &&
+      image.status === "done" &&
+      image.storagePath &&
+      Array.isArray(image.assetVariants) &&
+      image.assetVariants.some((variant) => variant && variant.kind === "hero"),
+  );
+}
+
 type BuildReviewGateInput = {
   projectStatus: ProjectStatus;
   versionCount: number;

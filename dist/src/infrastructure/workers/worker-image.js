@@ -11,6 +11,7 @@ const prisma_1 = require("../db/prisma");
 const image_1 = require("../ai/image");
 const prompts_1 = require("../../studio/prompts");
 const local_storage_1 = require("../storage/local-storage");
+const image_processing_1 = require("../storage/image-processing");
 const orchestration_1 = require("../../studio/orchestration");
 function parseSize(size) {
     if (!size) {
@@ -89,8 +90,17 @@ async function runImageWorker() {
             bytes: result.bytes,
             extension,
         });
+        const storageRoot = (0, env_1.getEnv)("STORAGE_ROOT", "/var/www/auctorio/storage");
+        const processed = await (0, image_processing_1.buildImageDerivatives)({
+            storageRoot,
+            originalRelativePath: stored.relativePath,
+            tenantId: data.tenantId,
+            contentImageId: data.contentImageId,
+        });
         const parsed = parseSize(size);
         const costUsd = computeImageCost();
+        const width = processed.width || (parsed.width ?? null);
+        const height = processed.height || (parsed.height ?? null);
         await prisma.contentImage.update({
             where: { id: data.contentImageId },
             data: {
@@ -100,10 +110,32 @@ async function runImageWorker() {
                 prompt: prompt.userPrompt,
                 promptPresetVersionId: prompt.promptPresetVersionId,
                 storagePath: stored.relativePath,
-                width: parsed.width ?? null,
-                height: parsed.height ?? null,
+                width,
+                height,
                 costUsd,
             },
+        });
+        await prisma.assetVariant.createMany({
+            data: [
+                {
+                    tenantId: data.tenantId,
+                    contentImageId: data.contentImageId,
+                    kind: "original",
+                    storagePath: stored.relativePath,
+                    mimeType: result.contentType,
+                    width,
+                    height,
+                },
+                ...processed.derivatives.map((derivative) => ({
+                    tenantId: data.tenantId,
+                    contentImageId: data.contentImageId,
+                    kind: derivative.kind,
+                    storagePath: derivative.storagePath,
+                    mimeType: derivative.mimeType,
+                    width: derivative.width,
+                    height: derivative.height,
+                })),
+            ],
         });
         await prisma.aiAudit.create({
             data: {
@@ -113,7 +145,15 @@ async function runImageWorker() {
                 model: result.model,
                 prompt: prompt.userPrompt,
                 promptPresetVersionId: prompt.promptPresetVersionId,
-                response: JSON.stringify({ storage_path: stored.relativePath }),
+                response: JSON.stringify({
+                    storage_path: stored.relativePath,
+                    variants: processed.derivatives.map((derivative) => ({
+                        kind: derivative.kind,
+                        storage_path: derivative.storagePath,
+                        width: derivative.width,
+                        height: derivative.height,
+                    })),
+                }),
                 usageJson: client_1.Prisma.JsonNull,
             },
         });
@@ -134,9 +174,13 @@ async function runImageWorker() {
         const data = job.data;
         await (0, jobs_1.markJobFailed)(job.id.toString(), err.message);
         if (data?.contentImageId) {
+            const retryable = err instanceof image_1.ImageDownloadError && err.retryable;
             await prisma.contentImage.update({
                 where: { id: data.contentImageId },
-                data: { status: "failed", error: err.message },
+                data: {
+                    status: retryable ? "retryable" : "failed",
+                    error: err.message,
+                },
             });
         }
     });

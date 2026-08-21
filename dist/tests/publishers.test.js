@@ -162,14 +162,20 @@ node_test_1.default.afterEach(() => {
 });
 for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     (0, node_test_1.default)(`publisher ${siteType} falls back to dry-run when credentials are missing`, async () => {
-        process.env["APP_ENV"] = "production";
-        process.env["NODE_ENV"] = "production";
+        process.env["APP_ENV"] = "development";
+        process.env["NODE_ENV"] = "development";
         process.env["PUBLISH_DRY_RUN"] = "false";
         const result = await (0, publishers_1.getPublisher)(buildContext(siteType).site).publish(buildContext(siteType));
         const responsePayload = result.responsePayload;
         strict_1.default.equal(String(responsePayload["mode"]), "dry_run");
         strict_1.default.equal(String(responsePayload["reason"]), "missing_publishing_credentials");
         strict_1.default.match(String(result.externalId), /^dryrun-/);
+    });
+    (0, node_test_1.default)(`publisher ${siteType} fails loudly in production when credentials are missing`, async () => {
+        process.env["APP_ENV"] = "production";
+        process.env["NODE_ENV"] = "production";
+        process.env["PUBLISH_DRY_RUN"] = "false";
+        await strict_1.default.rejects(() => (0, publishers_1.getPublisher)(buildContext(siteType).site).publish(buildContext(siteType)), /publishing_missing_credentials/);
     });
 }
 (0, node_test_1.default)("publisher dry-run can be forced by env even if credentials exist", async () => {

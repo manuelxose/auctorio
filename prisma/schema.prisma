@@ -34,6 +34,7 @@ enum ContentStatus {
   processing
   done
   failed
+  retryable
   canceled
 }
 
@@ -120,6 +121,7 @@ enum PublicationAction {
 enum AssetKind {
   original
   hero
+  og
   thumbnail
   social_square
   social_story

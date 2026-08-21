@@ -9,6 +9,7 @@ const node_path_1 = __importDefault(require("node:path"));
 const http_1 = require("../shared/utils/http");
 const env_1 = require("../shared/utils/env");
 const orchestration_1 = require("./orchestration");
+const env_2 = require("../shared/utils/env");
 function asRecord(value) {
     return value && typeof value === "object" ? value : {};
 }
@@ -118,6 +119,9 @@ function getDryRunDecision(hasResolvedCredentials) {
         };
     }
     if (!hasResolvedCredentials) {
+        if ((0, env_2.isProductionEnv)()) {
+            throw new Error("publishing_missing_credentials");
+        }
         return {
             enabled: true,
             reason: "missing_publishing_credentials",

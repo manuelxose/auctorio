@@ -273,6 +273,7 @@ async function listProjects(tenantId, input) {
                         },
                         contentImage: {
                             include: {
+                                assetVariants: true,
                                 promptPresetVersion: {
                                     include: {
                                         preset: true,
@@ -329,7 +330,7 @@ async function listProjects(tenantId, input) {
                             feedback: latestVersion.feedback,
                             bodyHtml: latestVersion.bodyHtml,
                             qaReport: latestVersion.qaReport,
-                            hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+                            hasAsset: (0, review_1.isHeroImageReady)(latestVersion.contentImage),
                         }
                         : null,
                 }),
@@ -349,7 +350,7 @@ async function listProjects(tenantId, input) {
                         approvedBy: latestVersion.approvedBy,
                         publishedAt: latestVersion.publishedAt,
                         qaState: mapQaState(latestVersion.status),
-                        hasAsset: Boolean(latestVersion.contentImage?.storagePath),
+                        hasAsset: (0, review_1.isHeroImageReady)(latestVersion.contentImage),
                         assetUrl: latestVersion.contentImage?.storagePath ?? null,
                         promptPresetVersionId: latestVersion.contentText?.promptPresetVersion?.id ??
                             latestVersion.contentImage?.promptPresetVersion?.id ??
@@ -700,6 +701,7 @@ async function getContentTextById(tenantId, contentTextId) {
 async function getContentImageById(tenantId, contentImageId) {
     return prisma.contentImage.findFirst({
         where: { tenantId, id: contentImageId },
+        include: { assetVariants: true },
     });
 }
 async function getStudioSession(tenantId) {

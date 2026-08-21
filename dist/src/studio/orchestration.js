@@ -6,9 +6,9 @@ exports.requestImageGenerationForVersion = requestImageGenerationForVersion;
 exports.syncTextResultToStudio = syncTextResultToStudio;
 exports.syncImageResultToStudio = syncImageResultToStudio;
 exports.queuePublication = queuePublication;
+exports.retryImageGeneration = retryImageGeneration;
 const producer_1 = require("../infrastructure/queue/producer");
 const prisma_1 = require("../infrastructure/db/prisma");
-const mime_1 = require("../shared/utils/mime");
 const env_1 = require("../shared/utils/env");
 const repository_1 = require("./repository");
 const qa_1 = require("./qa");
@@ -187,23 +187,15 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     if (!version) {
         return;
     }
-    if (image.storagePath) {
-        await (0, repository_1.createAssetVariant)({
-            tenantId,
-            contentImageId: image.id,
-            storagePath: image.storagePath,
-            mimeType: (0, mime_1.getContentTypeFromPath)(image.storagePath),
-            width: image.width,
-            height: image.height,
-        });
-    }
     const qaReport = (0, qa_1.runVersionQa)({
         title: version.title,
         excerpt: version.excerpt,
         bodyHtml: version.bodyHtml,
         seoTitle: version.seoTitle,
         seoDescription: version.seoDescription,
-    }, Boolean(image.storagePath));
+    }, image.status === "done" &&
+        Boolean(image.storagePath) &&
+        image.assetVariants.some((variant) => variant.kind === "hero"));
     await (0, repository_1.updateVersionQa)(version.id, qaReport.passed ? "qa_passed" : "qa_failed", qaReport);
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, qaReport.passed ? "in_review" : "qa_failed");
 }
@@ -211,4 +203,50 @@ async function queuePublication(publicationJobId) {
     await (0, producer_1.enqueuePublishingJob)(publicationJobId, {
         publicationJobId,
     });
+}
+async function retryImageGeneration(tenantId, contentImageId) {
+    const image = await prisma.contentImage.findFirst({
+        where: { id: contentImageId, tenantId },
+    });
+    if (!image) {
+        throw new Error("image_not_found");
+    }
+    if (image.status === "processing" || image.status === "queued") {
+        throw new Error("image_already_in_flight");
+    }
+    if (image.status !== "failed" && image.status !== "retryable") {
+        throw new Error("image_not_retryable");
+    }
+    const topic = await prisma.topic.findFirst({
+        where: { id: image.topicId, tenantId },
+    });
+    if (!topic) {
+        throw new Error("topic_not_found");
+    }
+    const version = await (0, repository_1.findVersionByImageId)(tenantId, contentImageId);
+    await prisma.contentImage.update({
+        where: { id: contentImageId },
+        data: { status: "queued", error: null },
+    });
+    const imageJob = await prisma.job.create({
+        data: {
+            tenantId,
+            type: "image",
+            status: "queued",
+        },
+    });
+    await (0, producer_1.enqueueImageJob)(imageJob.id, {
+        jobId: imageJob.id,
+        tenantId,
+        topicId: topic.id,
+        contentImageId,
+        mode: image.textId ? "contextual" : "independent",
+        textId: image.textId ?? undefined,
+        options: {
+            site_id: version?.project.siteId ?? undefined,
+            goal: version?.project.goal ?? undefined,
+            promptPresetVersionId: image.promptPresetVersionId ?? undefined,
+        },
+    });
+    return imageJob.id;
 }
