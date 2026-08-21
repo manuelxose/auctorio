@@ -376,6 +376,13 @@ export async function listProjects(
             qaState: mapQaState(latestVersion.status),
             hasAsset: isHeroImageReady(latestVersion.contentImage),
             assetUrl: latestVersion.contentImage?.storagePath ?? null,
+            image: latestVersion.contentImage
+              ? {
+                  id: latestVersion.contentImage.id,
+                  status: latestVersion.contentImage.status,
+                  error: latestVersion.contentImage.error,
+                }
+              : null,
             promptPresetVersionId:
               latestVersion.contentText?.promptPresetVersion?.id ??
               latestVersion.contentImage?.promptPresetVersion?.id ??

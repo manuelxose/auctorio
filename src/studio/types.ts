@@ -442,6 +442,11 @@ export type VersionSummary = Pick<
   qaState: "not_ready" | "failed" | "passed" | "approved" | "published";
   hasAsset: boolean;
   assetUrl: string | null;
+  image: {
+    id: string;
+    status: string;
+    error: string | null;
+  } | null;
   promptPresetVersionId: string | null;
   promptVersionLabel: string | null;
   promptPresetName: string | null;

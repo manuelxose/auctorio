@@ -1,5 +1,5 @@
 import { CommonModule, DatePipe } from '@angular/common';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, DestroyRef, OnInit, inject } from '@angular/core';
 import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import type {
@@ -110,6 +110,14 @@ const WORKBENCH_CONFIGS: Record<ProjectWorkbenchView, WorkbenchConfig> = {
             (click)="generateAsset()"
           >
             Generate image
+          </button>
+          <button
+            type="button"
+            class="console-button console-button--secondary"
+            *ngIf="imageNeedsRetry"
+            (click)="retryImage()"
+          >
+            Retry image
           </button>
           <button
             type="button"
@@ -742,6 +750,7 @@ const WORKBENCH_CONFIGS: Record<ProjectWorkbenchView, WorkbenchConfig> = {
 export class ProjectDetailPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
   private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly goals: ProjectGoal[] = [
     'article',
@@ -823,6 +832,7 @@ export class ProjectDetailPageComponent implements OnInit {
   error = '';
   notice = '';
   view: ProjectWorkbenchView = 'overview';
+  pollTimer: ReturnType<typeof setInterval> | null = null;
 
   get workbench(): WorkbenchConfig {
     return WORKBENCH_CONFIGS[this.view];
@@ -1037,6 +1047,7 @@ export class ProjectDetailPageComponent implements OnInit {
     this.view =
       (this.route.snapshot.data['projectWorkbenchView'] as ProjectWorkbenchView | undefined) ??
       'overview';
+    this.destroyRef.onDestroy(() => this.stopPolling());
     this.loadSites();
     this.loadProject();
   }
@@ -1104,13 +1115,33 @@ export class ProjectDetailPageComponent implements OnInit {
   }
 
   generate(): void {
-    this.runAction(() => this.api.generateProject(this.requireProjectId()));
+    this.runAction(() => this.api.generateProject(this.requireProjectId()), { poll: true });
   }
 
   generateAsset(): void {
     this.runAction(() =>
       this.api.generateAsset(this.requireProjectId(), this.project?.latestVersion?.id),
+      { poll: true },
     );
+  }
+
+  retryImage(): void {
+    const imageId = this.project?.latestVersion?.image?.id;
+    if (!imageId) {
+      return;
+    }
+
+    this.error = '';
+    this.notice = '';
+    this.api.retryImage(imageId).subscribe({
+      next: () => {
+        this.notice = 'Image retry queued. The worker will retry the failed generation.';
+        this.startPolling();
+      },
+      error: (error) => {
+        this.error = formatApiError(error);
+      },
+    });
   }
 
   approve(): void {
@@ -1118,29 +1149,35 @@ export class ProjectDetailPageComponent implements OnInit {
   }
 
   publish(): void {
-    this.runAction(() =>
-      this.api.publishProject(this.requireProjectId(), {
-        action: 'publish',
-        targetStatus: 'publish',
-      }),
+    this.runAction(
+      () =>
+        this.api.publishProject(this.requireProjectId(), {
+          action: 'publish',
+          targetStatus: 'publish',
+        }),
+      { poll: true },
     );
   }
 
   syncDraft(): void {
-    this.runAction(() =>
-      this.api.publishProject(this.requireProjectId(), {
-        action: 'update',
-        targetStatus: 'draft',
-      }),
+    this.runAction(
+      () =>
+        this.api.publishProject(this.requireProjectId(), {
+          action: 'update',
+          targetStatus: 'draft',
+        }),
+      { poll: true },
     );
   }
 
   unpublish(): void {
-    this.runAction(() =>
-      this.api.publishProject(this.requireProjectId(), {
-        action: 'unpublish',
-        targetStatus: 'publish',
-      }),
+    this.runAction(
+      () =>
+        this.api.publishProject(this.requireProjectId(), {
+          action: 'unpublish',
+          targetStatus: 'publish',
+        }),
+      { poll: true },
     );
   }
 
@@ -1150,8 +1187,9 @@ export class ProjectDetailPageComponent implements OnInit {
       return;
     }
 
-    this.runAction(() =>
-      this.api.reviseProject(this.requireProjectId(), this.feedbackControl.value.trim()),
+    this.runAction(
+      () => this.api.reviseProject(this.requireProjectId(), this.feedbackControl.value.trim()),
+      { poll: true },
     );
   }
 
@@ -1161,7 +1199,10 @@ export class ProjectDetailPageComponent implements OnInit {
     this.contextForm.markAsPristine();
   }
 
-  private runAction(requestFactory: () => ReturnType<StudioApiService['approveProject']>): void {
+  private runAction(
+    requestFactory: () => ReturnType<StudioApiService['approveProject']>,
+    options: { poll?: boolean } = {},
+  ): void {
     this.error = '';
     this.notice = '';
 
@@ -1169,11 +1210,65 @@ export class ProjectDetailPageComponent implements OnInit {
       next: () => {
         this.notice = 'Action submitted successfully.';
         this.loadProject();
+        if (options.poll) {
+          this.startPolling();
+        }
       },
       error: (error) => {
         this.error = formatApiError(error);
       },
     });
+  }
+
+  get imageNeedsRetry(): boolean {
+    const image = this.project?.latestVersion?.image ?? null;
+    return Boolean(image && (image.status === 'failed' || image.status === 'retryable'));
+  }
+
+  private isWorkInFlight(): boolean {
+    const project = this.project;
+    if (!project) {
+      return false;
+    }
+
+    const imageStatus = project.latestVersion?.image?.status;
+    if (imageStatus === 'queued' || imageStatus === 'processing') {
+      return true;
+    }
+
+    return ['awaiting_generation', 'publish_queued'].includes(project.reviewGate.stage);
+  }
+
+  private startPolling(): void {
+    this.stopPolling();
+    let attempts = 0;
+    this.pollTimer = setInterval(() => {
+      attempts += 1;
+      if (attempts > 60) {
+        this.stopPolling();
+        this.notice = 'Polling stopped after 4 minutes. Use Refresh to check the latest state.';
+        return;
+      }
+      this.api.getProject(this.requireProjectId()).subscribe({
+        next: (project) => {
+          this.project = project;
+          if (!this.isWorkInFlight()) {
+            this.stopPolling();
+          }
+        },
+        error: (error) => {
+          this.stopPolling();
+          this.error = formatApiError(error);
+        },
+      });
+    }, 4000);
+  }
+
+  private stopPolling(): void {
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
+    }
   }
 
   private requireProjectId(): string {
