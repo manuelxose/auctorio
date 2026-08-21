@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: auctorio
+          POSTGRES_PASSWORD: auctorio
+          POSTGRES_DB: auctorio_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U auctorio"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://auctorio:auctorio@localhost:5432/auctorio_test
+      REDIS_URL: redis://localhost:6379
+      NODE_ENV: development
+      APP_ENV: ci
+      PUBLISH_DRY_RUN: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Validate migrations match the schema
+        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DATABASE_URL" --exit-code
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm run build:studio
+      - run: npm test

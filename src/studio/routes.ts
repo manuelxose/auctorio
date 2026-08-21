@@ -466,6 +466,74 @@ async function handleReadyCheck() {
   } finally {
     redis.disconnect();
   }
+
+  const storageRoot = path.resolve(getEnv("STORAGE_ROOT", "/var/www/auctorio/storage"));
+  const probePath = path.join(storageRoot, ".health-probe");
+  await fs.writeFile(probePath, `${Date.now()}`);
+  await fs.unlink(probePath);
+}
+
+type DestinationHealth = {
+  siteId: string;
+  siteKey: string;
+  siteType: string;
+  baseUrl: string | null;
+  reachable: boolean;
+  status: number | null;
+  latencyMs: number | null;
+  error: string | null;
+};
+
+async function checkDestinationHealth(): Promise<DestinationHealth[]> {
+  const prisma = getPrismaClient();
+  const sites = await prisma.site.findMany({ select: { id: true, key: true, type: true, baseUrl: true } });
+
+  return Promise.all(
+    sites.map(async (site): Promise<DestinationHealth> => {
+      const baseUrl = String(site.baseUrl || "").trim();
+      if (!baseUrl) {
+        return {
+          siteId: site.id,
+          siteKey: site.key,
+          siteType: site.type,
+          baseUrl: null,
+          reachable: false,
+          status: null,
+          latencyMs: null,
+          error: "no baseUrl configured",
+        };
+      }
+
+      const startedAt = Date.now();
+      try {
+        const response = await fetch(baseUrl, {
+          signal: AbortSignal.timeout(6_000),
+          redirect: "follow",
+        });
+        return {
+          siteId: site.id,
+          siteKey: site.key,
+          siteType: site.type,
+          baseUrl,
+          reachable: response.ok,
+          status: response.status,
+          latencyMs: Date.now() - startedAt,
+          error: response.ok ? null : `HTTP ${response.status}`,
+        };
+      } catch (error) {
+        return {
+          siteId: site.id,
+          siteKey: site.key,
+          siteType: site.type,
+          baseUrl,
+          reachable: false,
+          status: null,
+          latencyMs: Date.now() - startedAt,
+          error: (error as { cause?: { code?: string } })?.cause?.code || (error as Error).message,
+        };
+      }
+    }),
+  );
 }
 
 async function serveAsset(request: FastifyRequest, reply: FastifyReply) {
@@ -702,6 +770,20 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     try {
       await handleReadyCheck();
       return reply.send({ status: "ok" });
+    } catch (error) {
+      return reply.code(503).send({
+        status: "degraded",
+        message: String(error),
+      });
+    }
+  });
+
+  fastify.get("/health/destinations", async (_request, reply) => {
+    try {
+      return reply.send({
+        status: "ok",
+        destinations: await checkDestinationHealth(),
+      });
     } catch (error) {
       return reply.code(503).send({
         status: "degraded",

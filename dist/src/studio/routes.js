@@ -314,6 +314,58 @@ async function handleReadyCheck() {
     finally {
         redis.disconnect();
     }
+    const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/auctorio/storage"));
+    const probePath = node_path_1.default.join(storageRoot, ".health-probe");
+    await node_fs_1.promises.writeFile(probePath, `${Date.now()}`);
+    await node_fs_1.promises.unlink(probePath);
+}
+async function checkDestinationHealth() {
+    const prisma = (0, prisma_1.getPrismaClient)();
+    const sites = await prisma.site.findMany({ select: { id: true, key: true, type: true, baseUrl: true } });
+    return Promise.all(sites.map(async (site) => {
+        const baseUrl = String(site.baseUrl || "").trim();
+        if (!baseUrl) {
+            return {
+                siteId: site.id,
+                siteKey: site.key,
+                siteType: site.type,
+                baseUrl: null,
+                reachable: false,
+                status: null,
+                latencyMs: null,
+                error: "no baseUrl configured",
+            };
+        }
+        const startedAt = Date.now();
+        try {
+            const response = await fetch(baseUrl, {
+                signal: AbortSignal.timeout(6_000),
+                redirect: "follow",
+            });
+            return {
+                siteId: site.id,
+                siteKey: site.key,
+                siteType: site.type,
+                baseUrl,
+                reachable: response.ok,
+                status: response.status,
+                latencyMs: Date.now() - startedAt,
+                error: response.ok ? null : `HTTP ${response.status}`,
+            };
+        }
+        catch (error) {
+            return {
+                siteId: site.id,
+                siteKey: site.key,
+                siteType: site.type,
+                baseUrl,
+                reachable: false,
+                status: null,
+                latencyMs: Date.now() - startedAt,
+                error: error?.cause?.code || error.message,
+            };
+        }
+    }));
 }
 async function serveAsset(request, reply) {
     const params = request.params;
@@ -512,6 +564,20 @@ function registerStudioRoutes(fastify) {
         try {
             await handleReadyCheck();
             return reply.send({ status: "ok" });
+        }
+        catch (error) {
+            return reply.code(503).send({
+                status: "degraded",
+                message: String(error),
+            });
+        }
+    });
+    fastify.get("/health/destinations", async (_request, reply) => {
+        try {
+            return reply.send({
+                status: "ok",
+                destinations: await checkDestinationHealth(),
+            });
         }
         catch (error) {
             return reply.code(503).send({
