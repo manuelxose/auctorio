@@ -1,5 +1,5 @@
-import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { CommonModule, isPlatformBrowser } from '@angular/common';
+import { Component, OnDestroy, OnInit, inject, PLATFORM_ID } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   ActivatedRoute,
@@ -12,77 +12,154 @@ import {
 import { Subscription, filter, startWith } from 'rxjs';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
+import { ThemeService } from '../services/theme.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import type { StudioSession, StudioSite } from '../models/studio.models';
 
 type NavItem = {
   label: string;
   path: string;
+  icon: string;
 };
 
 @Component({
   selector: 'app-app-shell',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, RouterLinkActive, RouterOutlet],
+  imports: [
+    CommonModule,
+    FormsModule,
+    RouterLink,
+    RouterLinkActive,
+    RouterOutlet,
+    AppIconComponent,
+    AppPopoverComponent,
+  ],
   template: `
-    <div class="au-shell" *ngIf="!loading; else bootState">
+    <div class="au-app au-shell" *ngIf="!loading; else bootState">
       <aside class="au-sidebar" [class.is-open]="menuOpen">
-        <a class="au-sidebar__brand" routerLink="/studio/overview" (click)="menuOpen = false">
-          <span class="au-brand__mark">AU</span>
-          <span class="au-brand__name">Auctorio</span>
-        </a>
-
-        <div class="au-sidebar__section">
-          <label class="au-select au-select--site">
-            <span class="au-select__label">Site</span>
-            <select class="au-input" [ngModel]="activeSiteId" (ngModelChange)="onSiteChange($event)">
-              <option *ngFor="let site of sites" [ngValue]="site.id">
-                {{ site.name }}
-              </option>
-            </select>
-          </label>
+        <div class="au-sidebar__head">
+          <a class="au-brand" routerLink="/studio/overview" (click)="menuOpen = false">
+            <span class="au-brand__mark">AU</span>
+            <span class="au-brand__name">Auctorio</span>
+          </a>
         </div>
 
-        <nav class="au-nav" aria-label="Primary">
+        <!-- Site switcher -->
+        <div class="au-ws">
+          <button
+            class="au-ws__trigger"
+            type="button"
+            #siteTrigger
+            (click)="siteMenu.toggle(siteTrigger)"
+            [attr.aria-expanded]="siteMenu.isOpen()"
+            aria-haspopup="menu"
+            aria-label="Switch site"
+          >
+            <span class="au-ws__icon">{{ siteInitials }}</span>
+            <span class="au-ws__name">{{ activeSiteName }}</span>
+            <app-icon name="chevron-down" class="au-faint"></app-icon>
+          </button>
+          <app-popover #siteMenu>
+            <div class="au-menu">
+              <div class="au-menu__label">Switch site</div>
+              <button
+                class="au-menu__item"
+                type="button"
+                *ngFor="let site of sites"
+                [class.is-active]="site.id === activeSiteId"
+                (click)="selectSite(site.id, siteMenu)"
+              >
+                <span class="au-ws__icon">{{ siteInitialsOf(site) }}</span>
+                {{ site.name }}
+                <span class="au-menu__meta">{{ site.role }}</span>
+              </button>
+              <div class="au-menu__sep"></div>
+              <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="siteMenu.hide(); menuOpen = false">
+                <app-icon name="settings"></app-icon>
+                Manage sites
+              </a>
+            </div>
+          </app-popover>
+        </div>
+
+        <!-- Grouped navigation -->
+        <nav class="au-nav" *ngFor="let group of navGroups" [attr.aria-label]="group.label">
+          <div class="au-nav__label">{{ group.label }}</div>
           <a
-            *ngFor="let item of primaryNav"
-            class="au-nav__item"
+            class="au-nav-item"
+            *ngFor="let item of group.items"
             [routerLink]="item.path"
             routerLinkActive="is-active"
             (click)="menuOpen = false"
           >
-            <svg class="au-nav__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path [attr.d]="iconPath(item.path)" />
-            </svg>
+            <app-icon [name]="item.icon"></app-icon>
             {{ item.label }}
           </a>
         </nav>
 
-        <nav class="au-nav au-nav--secondary" aria-label="Secondary">
+        <nav class="au-nav au-mt-2" aria-label="System">
           <a
-            class="au-nav__item"
-            routerLink="/studio/settings"
+            class="au-nav-item"
+            routerLink="/studio/settings/profile"
             routerLinkActive="is-active"
             (click)="menuOpen = false"
           >
-            <svg class="au-nav__icon" viewBox="0 0 24 24" aria-hidden="true">
-              <path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z M12 2v3 M12 19v3 M4.9 4.9l2.1 2.1 M17 17l2.1 2.1 M2 12h3 M19 12h3 M4.9 19.1 7 17 M17 7l2.1-2.1" />
-            </svg>
+            <app-icon name="settings"></app-icon>
             Settings
           </a>
         </nav>
 
+        <!-- User area -->
         <div class="au-sidebar__footer">
           <div class="au-user" *ngIf="session">
-            <span class="au-avatar">{{ initials }}</span>
-            <span class="au-user__name">{{ session.user.displayName }}</span>
+            <button
+              class="au-user__btn"
+              type="button"
+              #userTrigger
+              (click)="userMenu.toggle(userTrigger)"
+              [attr.aria-expanded]="userMenu.isOpen()"
+              aria-haspopup="menu"
+            >
+              <span class="au-avatar">{{ initials }}</span>
+              <span class="au-user__meta">
+                <span class="au-user__name">{{ session.user.displayName }}</span>
+                <span class="au-user__role">{{ session.role }}</span>
+              </span>
+              <app-icon name="chevron-down" class="au-faint"></app-icon>
+            </button>
+            <app-popover #userMenu>
+              <div class="au-menu">
+                <div class="au-menu__label au-truncate">{{ session.user.email }}</div>
+                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide(); menuOpen = false">
+                  <app-icon name="user"></app-icon>
+                  Profile
+                </a>
+                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide(); menuOpen = false">
+                  <app-icon name="globe"></app-icon>
+                  Sites
+                </a>
+                <button class="au-menu__item" type="button" (click)="cycleTheme()">
+                  <app-icon [name]="themeIcon"></app-icon>
+                  Appearance
+                  <span class="au-menu__meta">{{ themeLabel }}</span>
+                </button>
+                <div class="au-menu__sep"></div>
+                <button class="au-menu__item is-danger" type="button" (click)="logout()">
+                  <app-icon name="logout"></app-icon>
+                  Log out
+                </button>
+              </div>
+            </app-popover>
           </div>
-          <button class="au-button au-button--ghost au-button--block" type="button" (click)="logout()">
-            Log out
-          </button>
         </div>
       </aside>
 
-      <main class="au-main">
+      @if (menuOpen) {
+        <div class="au-backdrop" (click)="menuOpen = false"></div>
+      }
+
+      <div class="au-main">
         <header class="au-topbar">
           <button
             class="au-menu-toggle"
@@ -94,21 +171,52 @@ type NavItem = {
             <span></span><span></span><span></span>
           </button>
           <div class="au-topbar__context">
-            <span class="au-tag">{{ activeSiteName }}</span>
             <span class="au-topbar__title">{{ sectionTitle }}</span>
           </div>
           <div class="au-topbar__actions">
-            <a class="au-button au-button--primary au-button--sm" routerLink="/studio/content/new">
-              + New content
-            </a>
+            <div class="au-split">
+              <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
+                <app-icon name="plus"></app-icon>
+                New content
+              </a>
+              <button
+                class="au-split__caret"
+                type="button"
+                #createTrigger
+                (click)="createMenu.toggle(createTrigger)"
+                [attr.aria-expanded]="createMenu.isOpen()"
+                aria-haspopup="menu"
+                aria-label="More creation options"
+              >
+                <app-icon name="chevron-down"></app-icon>
+              </button>
+            </div>
+            <app-popover #createMenu>
+              <div class="au-menu">
+                <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()">
+                  <app-icon name="plus"></app-icon>
+                  New article
+                </a>
+                <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()">
+                  <app-icon name="sparkles"></app-icon>
+                  Generate editorial plan
+                </a>
+                <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()">
+                  <app-icon name="sources"></app-icon>
+                  Add source
+                </a>
+              </div>
+            </app-popover>
           </div>
         </header>
-        <router-outlet></router-outlet>
-      </main>
+        <div class="au-content">
+          <router-outlet></router-outlet>
+        </div>
+      </div>
     </div>
 
     <ng-template #bootState>
-      <div class="au-boot">
+      <div class="au-app au-boot">
         <span class="au-spinner" aria-label="Loading"></span>
       </div>
     </ng-template>
@@ -119,18 +227,35 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly seo = inject(SeoService);
   private readonly appContext = inject(AppContextService);
+  private readonly themeService = inject(ThemeService);
+  private readonly platformId = inject(PLATFORM_ID);
 
-  readonly primaryNav: NavItem[] = [
-    { label: 'Overview', path: '/studio/overview' },
-    { label: 'Calendar', path: '/studio/calendar' },
-    { label: 'Editorial Plan', path: '/studio/editorial-plan' },
-    { label: 'Content', path: '/studio/content' },
-    { label: 'Publications', path: '/studio/publications' },
-    { label: 'Inbox', path: '/studio/inbox' },
-    { label: 'Sources', path: '/studio/sources' },
-    { label: 'Automation', path: '/studio/automation' },
-    { label: 'Media', path: '/studio/media' },
-    { label: 'Connections', path: '/studio/connections' },
+  readonly navGroups: Array<{ label: string; items: NavItem[] }> = [
+    {
+      label: 'Workspace',
+      items: [
+        { label: 'Overview', path: '/studio/overview', icon: 'overview' },
+        { label: 'Inbox', path: '/studio/inbox', icon: 'inbox' },
+        { label: 'Editorial Plan', path: '/studio/editorial-plan', icon: 'plan' },
+        { label: 'Content', path: '/studio/content', icon: 'content' },
+        { label: 'Calendar', path: '/studio/calendar', icon: 'calendar' },
+      ],
+    },
+    {
+      label: 'Publish',
+      items: [
+        { label: 'Publications', path: '/studio/publications', icon: 'publications' },
+        { label: 'Media', path: '/studio/media', icon: 'media' },
+        { label: 'Connections', path: '/studio/connections', icon: 'connections' },
+      ],
+    },
+    {
+      label: 'Operate',
+      items: [
+        { label: 'Sources', path: '/studio/sources', icon: 'sources' },
+        { label: 'Automation', path: '/studio/automation', icon: 'automation' },
+      ],
+    },
   ];
 
   private subscription: Subscription | null = null;
@@ -146,15 +271,23 @@ export class AppShellComponent implements OnInit, OnDestroy {
     return this.sites.find((site) => site.id === this.activeSiteId)?.name ?? 'All sites';
   }
 
+  get siteInitials(): string {
+    return this.initialsOf(this.activeSiteName);
+  }
+
   get initials(): string {
     const label = this.session?.user.displayName?.trim() || this.session?.user.email || 'AU';
-    return (
-      label
-        .split(/\s+/)
-        .slice(0, 2)
-        .map((part) => part[0]?.toUpperCase() ?? '')
-        .join('') || 'AU'
-    );
+    return this.initialsOf(label) || 'AU';
+  }
+
+  get themeIcon(): string {
+    const preference = this.themeService.preference();
+    return preference === 'light' ? 'sun' : preference === 'dark' ? 'moon' : 'monitor';
+  }
+
+  get themeLabel(): string {
+    const preference = this.themeService.preference();
+    return preference === 'light' ? 'Light' : preference === 'dark' ? 'Dark' : 'System';
   }
 
   ngOnInit(): void {
@@ -176,27 +309,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.subscription?.unsubscribe();
   }
 
-  iconPath(path: string): string {
-    switch (path) {
-      case '/studio/overview':
-        return 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3Z';
-      case '/studio/calendar':
-        return 'M4 5h16a1 1 0 0 1 1 1v14H3V6a1 1 0 0 1 1-1Z M3 9h18 M8 3v4 M16 3v4 M7 13h3 M14 13h3 M7 17h3 M14 17h3';
-      case '/studio/content':
-        return 'M7 3h7l4 4v14H7Z M14 3v5h5 M10 12h5 M10 16h5';
-      case '/studio/publications':
-        return 'M3 11 21 3l-8 18-2.5-7.5Z M3 21h18';
-      case '/studio/inbox':
-        return 'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M3 7l9 6 9-6';
-      case '/studio/sources':
-        return 'M12 3a9 9 0 1 0 9 9 M12 3a9 9 0 0 1 9 9 M12 3v18 M3 12h18';
-      case '/studio/automation':
-        return 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1';
-      case '/studio/media':
-        return 'M3 5h18v14H3Z M3 16l5-5 4 4 3-3 6 6 M8.5 9.5a1 1 0 1 0 0-.01';
-      default:
-        return 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z';
-    }
+  siteInitialsOf(site: StudioSite): string {
+    return this.initialsOf(site.name);
+  }
+
+  private initialsOf(name: string): string {
+    return (
+      name
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() ?? '')
+        .join('') || 'AU'
+    );
   }
 
   private async bootstrap(): Promise<void> {
@@ -217,14 +342,32 @@ export class AppShellComponent implements OnInit, OnDestroy {
       void this.router.navigate(['/login'], {
         queryParams: { reason: 'session_expired', returnTo: this.router.url },
       });
+    } finally {
+      this.dismissBootOverlay();
     }
   }
 
-  async onSiteChange(siteId: string): Promise<void> {
+  private dismissBootOverlay(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
+    document.body.classList.remove('studio-boot-pending');
+    window.dispatchEvent(new Event('auctorio:studio-ready'));
+  }
+
+  async selectSite(siteId: string, menu?: AppPopoverComponent): Promise<void> {
+    menu?.hide();
+    if (siteId === this.activeSiteId) {
+      return;
+    }
     const session = await this.appContext.switchSite(siteId);
     this.session = session;
     this.sites = session?.sites ?? [];
     this.activeSiteId = session?.activeSiteId ?? null;
+  }
+
+  cycleTheme(): void {
+    this.themeService.cycle();
   }
 
   logout(): void {

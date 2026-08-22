@@ -4,153 +4,178 @@ import { FormsModule } from '@angular/forms';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
+import { ConfirmService } from '../services/confirm.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppPopoverComponent } from '../components/ui/app-popover.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { SourceType, StudioSite, StudioSource } from '../models/studio.models';
 
 @Component({
   selector: 'app-sources-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppPopoverComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Content acquisition</p>
           <h1 class="au-page__title">Sources</h1>
           <p class="au-page__subtitle">RSS, Atom, pages, sitemaps and APIs that feed the editorial pipeline.</p>
         </div>
-        <button class="au-button au-button--primary" type="button" (click)="showForm = !showForm">
-          {{ showForm ? 'Close form' : '+ Add source' }}
-        </button>
+        <div class="au-page__actions">
+          <button class="au-btn au-btn--primary" type="button" (click)="showForm = !showForm">
+            <app-icon name="plus"></app-icon>
+            {{ showForm ? 'Close form' : 'Add source' }}
+          </button>
+        </div>
       </header>
 
-      <section class="au-surface au-surface--form" *ngIf="showForm">
-        <h3 class="au-form__title">{{ editingId ? 'Edit source' : 'New source' }}</h3>
-        <div class="au-form-grid">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="showForm">
+        <h2 class="au-panel__title">{{ editingId ? 'Edit source' : 'New source' }}</h2>
+        <p class="au-panel__subtitle au-mb-3">Sources provide input. They are separate from publishing connections.</p>
+        <div class="au-field-grid">
           <label class="au-field">
-            <span>Name</span>
+            <span class="au-field__label">Name</span>
             <input class="au-input" type="text" [(ngModel)]="form.name" placeholder="e.g. El Mundo Deportes RSS" />
           </label>
           <label class="au-field">
-            <span>Type</span>
-            <select class="au-input" [(ngModel)]="form.type">
+            <span class="au-field__label">Type</span>
+            <select class="au-select" [(ngModel)]="form.type">
               <option *ngFor="let type of sourceTypes" [ngValue]="type">{{ type }}</option>
             </select>
           </label>
           <label class="au-field">
-            <span>URL</span>
+            <span class="au-field__label">URL</span>
             <input class="au-input" type="url" [(ngModel)]="form.url" placeholder="https://…" [disabled]="form.type === 'manual'" />
           </label>
           <label class="au-field">
-            <span>Site</span>
-            <select class="au-input" [(ngModel)]="form.siteId">
+            <span class="au-field__label">Site</span>
+            <select class="au-select" [(ngModel)]="form.siteId">
               <option [ngValue]="null">All sites</option>
               <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
             </select>
           </label>
           <label class="au-field">
-            <span>Refresh (minutes)</span>
+            <span class="au-field__label">Refresh (minutes)</span>
             <input class="au-input" type="number" min="5" [(ngModel)]="form.refreshIntervalMinutes" />
           </label>
           <label class="au-field">
-            <span>Priority (-5..5)</span>
+            <span class="au-field__label">Priority (-5..5)</span>
             <input class="au-input" type="number" min="-5" max="5" [(ngModel)]="form.priority" />
           </label>
           <label class="au-field">
-            <span>Trust (0..1)</span>
+            <span class="au-field__label">Trust (0..1)</span>
             <input class="au-input" type="number" min="0" max="1" step="0.05" [(ngModel)]="form.trustScore" />
           </label>
           <label class="au-field">
-            <span>Language</span>
+            <span class="au-field__label">Language</span>
             <input class="au-input" type="text" [(ngModel)]="form.language" />
           </label>
-          <label class="au-field au-field--wide">
-            <span>Categories (comma separated)</span>
+          <label class="au-field">
+            <span class="au-field__label">Categories (comma separated)</span>
             <input class="au-input" type="text" [(ngModel)]="form.categoriesText" placeholder="football, streaming, technology" />
           </label>
         </div>
-        <div class="au-form-actions">
-          <button class="au-button au-button--ghost" type="button" *ngIf="editingId" (click)="resetForm()">Cancel</button>
-          <button class="au-button au-button--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save source' }}</button>
+        <div class="au-form__actions">
+          <button class="au-btn au-btn--ghost" type="button" *ngIf="editingId" (click)="resetForm()">Cancel</button>
+          <button class="au-btn au-btn--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save source' }}</button>
         </div>
       </section>
 
-      <section class="au-surface au-surface--table">
-        <div class="au-empty" *ngIf="sources.length === 0">No sources yet. Add your first RSS feed.</div>
-        <table class="au-table" *ngIf="sources.length > 0">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Type</th>
-              <th>URL</th>
-              <th>Status</th>
-              <th>Last fetch</th>
-              <th>Last success</th>
-              <th>Errors</th>
-              <th>Stories</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let source of sources">
-              <td>
-                <div class="au-cell-title">{{ source.name }}</div>
-                <div class="au-cell-meta">{{ source.site?.name ?? 'All sites' }} · priority {{ source.priority }}</div>
-              </td>
-              <td><span class="au-tag au-tag--muted">{{ source.type }}</span></td>
-              <td class="au-cell-meta au-cell-url">{{ source.url || '—' }}</td>
-              <td>
-                <span class="au-tag" [class.au-tag--success]="source.enabled" [class.au-tag--muted]="!source.enabled">
-                  {{ source.enabled ? 'enabled' : 'disabled' }}
-                </span>
-              </td>
-              <td class="au-cell-date">{{ dateLabel(source.lastFetchedAt) }}</td>
-              <td class="au-cell-date">{{ dateLabel(source.lastSuccessAt) }}</td>
-              <td>
-                <span class="au-tag" [class.au-tag--danger]="source.consecutiveFailures > 0">{{ source.consecutiveFailures }}</span>
-              </td>
-              <td>{{ source.discoveredCount }}</td>
-              <td class="au-cell-actions">
-                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="test(source)">Test</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="fetch(source)" [disabled]="fetching[source.id]">Fetch now</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="toggle(source)">{{ source.enabled ? 'Disable' : 'Enable' }}</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="edit(source)">Edit</button>
-                <button class="au-button au-button--ghost au-button--xs au-button--danger" type="button" (click)="remove(source)">Delete</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <section class="au-panel">
+        <app-empty-state
+          *ngIf="sources.length === 0"
+          icon="sources"
+          title="Connect a source to start discovering content"
+          text="Add an RSS feed, sitemap or page. Discovered stories land in the Inbox."
+        >
+          <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="showForm = true">Add source</button>
+        </app-empty-state>
+        <div class="au-table-wrap" *ngIf="sources.length > 0">
+          <table class="au-table">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>URL</th>
+                <th>Status</th>
+                <th>Last fetch</th>
+                <th>Errors</th>
+                <th>Stories</th>
+                <th style="width: 44px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let source of sources">
+                <td>
+                  <span class="au-table__title">{{ source.name }}</span>
+                  <span class="au-table__sub">{{ source.site?.name ?? 'All sites' }} · priority {{ source.priority }}</span>
+                </td>
+                <td><span class="au-badge au-badge--outline">{{ source.type }}</span></td>
+                <td class="au-muted au-truncate" style="max-width: 240px">{{ source.url || '—' }}</td>
+                <td>
+                  <span class="au-badge" [class.au-badge--success]="source.enabled" [class.au-badge--neutral]="!source.enabled">
+                    {{ source.enabled ? 'enabled' : 'disabled' }}
+                  </span>
+                </td>
+                <td class="au-nowrap au-muted">{{ dateLabel(source.lastFetchedAt) }}</td>
+                <td>
+                  <span class="au-badge" [class.au-badge--danger]="source.consecutiveFailures > 0" [class.au-badge--neutral]="source.consecutiveFailures === 0">
+                    {{ source.consecutiveFailures }} errors
+                  </span>
+                </td>
+                <td>{{ source.discoveredCount }}</td>
+                <td>
+                  <button
+                    class="au-btn au-btn--ghost au-btn--icon au-btn--sm"
+                    type="button"
+                    #menuTrigger
+                    (click)="rowMenu.toggle(menuTrigger)"
+                    [attr.aria-label]="'Actions for ' + source.name"
+                    aria-haspopup="menu"
+                  >
+                    <app-icon name="dots"></app-icon>
+                  </button>
+                  <app-popover #rowMenu>
+                    <div class="au-menu">
+                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); test(source)">
+                        <app-icon name="circle-check"></app-icon>
+                        Test connection
+                      </button>
+                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); fetch(source)" [disabled]="fetching[source.id]">
+                        <app-icon name="refresh"></app-icon>
+                        Fetch now
+                      </button>
+                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); toggle(source)">
+                        <app-icon name="pause"></app-icon>
+                        {{ source.enabled ? 'Disable' : 'Enable' }}
+                      </button>
+                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); edit(source)">
+                        <app-icon name="edit"></app-icon>
+                        Edit
+                      </button>
+                      <div class="au-menu__sep"></div>
+                      <button class="au-menu__item is-danger" type="button" (click)="rowMenu.hide(); remove(source)">
+                        <app-icon name="trash"></app-icon>
+                        Delete
+                      </button>
+                    </div>
+                  </app-popover>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </section>
-
-      <div class="au-notice" *ngIf="feedback">
-        {{ feedback }}
-      </div>
     </section>
   `,
-  styles: [
-    `
-      .au-surface--form { padding: 1rem 1.25rem; margin-bottom: 1rem; }
-      .au-form__title { margin: 0 0 0.9rem; }
-      .au-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.8rem; }
-      .au-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--au-muted, #6b7280); }
-      .au-field--wide { grid-column: span 2; }
-      .au-form-actions { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
-      .au-surface--table { overflow-x: auto; }
-      .au-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-      .au-table th { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--au-border, #e5e7eb); color: var(--au-muted, #6b7280); font-weight: 600; white-space: nowrap; }
-      .au-table td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); vertical-align: top; }
-      .au-cell-title { font-weight: 600; }
-      .au-cell-meta { font-size: 0.72rem; color: var(--au-muted, #6b7280); }
-      .au-cell-url { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-      .au-cell-date { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 0.75rem; color: var(--au-muted, #6b7280); }
-      .au-cell-actions { white-space: nowrap; }
-      .au-button--xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-      .au-button--danger { color: var(--au-danger, #dc2626); }
-      .au-notice { padding: 0.6rem 0.9rem; border-radius: 8px; background: var(--au-surface-subtle, #f9fafb); font-size: 0.85rem; }
-    `,
-  ],
 })
 export class SourcesPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   sourceTypes: SourceType[] = ['rss', 'atom', 'html', 'sitemap', 'api', 'manual'];
   sources: StudioSource[] = [];
@@ -220,7 +245,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       next: () => {
         this.saving = false;
         this.resetForm();
-        this.feedback = 'Source saved.';
+        this.toast.success('Source saved.');
         this.load();
       },
       error: (error) => {
@@ -266,9 +291,11 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     this.feedback = `Testing ${source.name}…`;
     this.api.testSource(source.id).subscribe({
       next: (result) => {
-        this.feedback = result.ok
-          ? `Test OK: ${result.itemCount ?? 0} items returned.`
-          : `Test failed: ${result.message}`;
+        if (result.ok) {
+          this.toast.success(`${source.name}: test OK, ${result.itemCount ?? 0} items returned.`);
+        } else {
+          this.toast.error(`Test failed: ${result.message}`);
+        }
       },
       error: (error) => {
         this.feedback = String(error?.error?.message ?? 'Test failed.');
@@ -281,9 +308,11 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     this.api.fetchSource(source.id).subscribe({
       next: (result) => {
         this.fetching[source.id] = false;
-        this.feedback = result.failed
-          ? `Fetch failed: ${result.error}`
-          : `Fetch complete: ${result.created} new, ${result.duplicates} duplicates.`;
+        if (result.failed) {
+          this.toast.error(`Fetch failed: ${result.error}`);
+        } else {
+          this.toast.success(`Fetch complete: ${result.created} new, ${result.duplicates} duplicates.`);
+        }
         this.load(true);
       },
       error: (error) => {
@@ -295,7 +324,10 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
 
   toggle(source: StudioSource): void {
     this.api.updateSource(source.id, { enabled: !source.enabled }).subscribe({
-      next: () => this.load(),
+      next: () => {
+        this.toast.success(source.enabled ? 'Source disabled.' : 'Source enabled.');
+        this.load();
+      },
       error: (error) => {
         this.feedback = String(error?.error?.message ?? 'Update failed.');
       },
@@ -303,12 +335,22 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   }
 
   remove(source: StudioSource): void {
-    if (!window.confirm(`Delete source "${source.name}"?\n\nDiscovered stories stay in the inbox but will no longer refresh.`)) {
+    void this.confirmRemove(source);
+  }
+
+  private async confirmRemove(source: StudioSource): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Delete source "${source.name}"?`,
+      message: 'Discovered stories stay in the inbox but will no longer refresh.',
+      confirmLabel: 'Delete source',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
     this.api.deleteSource(source.id).subscribe({
       next: () => {
-        this.feedback = 'Source deleted.';
+        this.toast.success('Source deleted.');
         this.load();
       },
       error: (error) => {

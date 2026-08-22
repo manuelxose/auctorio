@@ -4,29 +4,35 @@ import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
 import type { StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-content-new-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
   template: `
     <section class="au-page au-page--narrow">
-      <a class="au-link" routerLink="/studio/content">← Content</a>
+      <a class="au-link au-mb-2" routerLink="/studio/content">
+        <app-icon name="chevron-left"></app-icon>
+        Back to content
+      </a>
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">New piece</p>
           <h1 class="au-page__title">New content</h1>
           <p class="au-page__subtitle">Generation starts right after creation.</p>
         </div>
       </header>
 
-      <section class="au-surface au-surface--padded">
-        <form class="au-form" (ngSubmit)="submit()">
+      <section class="au-panel au-panel--padded">
+        <form (ngSubmit)="submit()">
           <label class="au-field">
             <span class="au-field__label">Destination</span>
-            <select class="au-input" name="site" [(ngModel)]="siteId" required>
+            <select class="au-select" name="site" [(ngModel)]="siteId" required>
               <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
             </select>
+            <span class="au-field__hint">The site this piece will be published to.</span>
           </label>
 
           <label class="au-field">
@@ -44,7 +50,7 @@ import type { StudioSite } from '../models/studio.models';
 
           <label class="au-field">
             <span class="au-field__label">What do you want to create?</span>
-            <select class="au-input" name="goal" [(ngModel)]="goal">
+            <select class="au-select" name="goal" [(ngModel)]="goal">
               <option value="article">Article</option>
               <option value="comparison">Comparison</option>
               <option value="landing">Landing page</option>
@@ -56,7 +62,7 @@ import type { StudioSite } from '../models/studio.models';
           <label class="au-field">
             <span class="au-field__label">Additional instructions</span>
             <textarea
-              class="au-input"
+              class="au-textarea"
               name="brief"
               rows="4"
               placeholder="Audience, angle, sections, tone…"
@@ -65,8 +71,8 @@ import type { StudioSite } from '../models/studio.models';
           </label>
 
           <details class="au-advanced">
-            <summary class="au-link">Advanced options</summary>
-            <label class="au-field">
+            <summary>Advanced options</summary>
+            <label class="au-field au-mt-3">
               <span class="au-field__label">Slug</span>
               <input class="au-input" type="text" name="slug" [(ngModel)]="slug" />
             </label>
@@ -83,8 +89,9 @@ import type { StudioSite } from '../models/studio.models';
           <p class="au-error" *ngIf="error">{{ error }}</p>
 
           <div class="au-form__actions">
-            <a class="au-button au-button--ghost" routerLink="/studio/content">Cancel</a>
-            <button class="au-button au-button--primary" type="submit" [disabled]="busy">
+            <a class="au-btn au-btn--secondary" routerLink="/studio/content">Cancel</a>
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="busy">
+              <app-icon name="sparkles"></app-icon>
               {{ busy ? 'Creating…' : 'Create & Generate' }}
             </button>
           </div>

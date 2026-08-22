@@ -4,6 +4,9 @@ import { FormsModule } from '@angular/forms';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { SourceItemStatus, StudioSite, StudioSource, StudioSourceItem, StudioStoryCluster } from '../models/studio.models';
 
 type InboxTab = 'inbox' | 'clusters';
@@ -11,27 +14,50 @@ type InboxTab = 'inbox' | 'clusters';
 @Component({
   selector: 'app-inbox-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Discovery</p>
           <h1 class="au-page__title">Inbox</h1>
-          <p class="au-page__subtitle">The newsroom wire: newly discovered stories across your sources.</p>
+          <p class="au-page__subtitle">Stories discovered across your sources, ready to triage.</p>
+        </div>
+        <div class="au-page__actions">
+          <a class="au-btn au-btn--secondary" routerLink="/studio/sources">
+            <app-icon name="sources"></app-icon>
+            Manage sources
+          </a>
         </div>
       </header>
 
-      <nav class="au-tabs">
-        <button class="au-tab" [class.is-active]="tab === 'inbox'" type="button" (click)="setTab('inbox')">Stories</button>
-        <button class="au-tab" [class.is-active]="tab === 'clusters'" type="button" (click)="setTab('clusters')">Clusters</button>
-      </nav>
+      <div class="au-tabs">
+        <button class="au-tab" [class.is-active]="tab === 'inbox'" type="button" (click)="setTab('inbox')">
+          Stories
+          <span class="au-badge au-badge--neutral">{{ tab === 'inbox' ? total : '…' }}</span>
+        </button>
+        <button class="au-tab" [class.is-active]="tab === 'clusters'" type="button" (click)="setTab('clusters')">
+          Clusters
+          <span class="au-badge au-badge--neutral">{{ tab === 'clusters' ? clusters.length : '…' }}</span>
+        </button>
+      </div>
 
-      <div class="au-toolbar au-toolbar--wrap" *ngIf="tab === 'inbox'">
-        <select class="au-input au-input--inline" [(ngModel)]="filters.sourceId" (ngModelChange)="applyFilters()">
+      <div class="au-toolbar" *ngIf="tab === 'inbox'">
+        <div class="au-search">
+          <app-icon name="search"></app-icon>
+          <input
+            class="au-input au-input--search"
+            type="search"
+            placeholder="Search stories…"
+            [(ngModel)]="filters.search"
+            (keyup.enter)="applyFilters()"
+          />
+        </div>
+        <select class="au-select au-filter-select" [(ngModel)]="filters.sourceId" (ngModelChange)="applyFilters()" aria-label="Filter by source">
           <option value="">All sources</option>
           <option *ngFor="let source of sources" [ngValue]="source.id">{{ source.name }}</option>
         </select>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()">
+        <select class="au-select au-filter-select" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()" aria-label="Filter by status">
           <option value="candidate">Candidates</option>
           <option value="discovered">New</option>
           <option value="selected">Selected</option>
@@ -39,111 +65,141 @@ type InboxTab = 'inbox' | 'clusters';
           <option value="processed">Processed</option>
           <option value="">All</option>
         </select>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()">
-          <option value="score">Sort by score</option>
-          <option value="discovered">Sort by date</option>
+        <select class="au-select au-filter-select" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()" aria-label="Sort stories">
+          <option value="score">Highest score first</option>
+          <option value="discovered">Newest first</option>
         </select>
-        <input
-          class="au-input au-input--search"
-          type="search"
-          placeholder="Search stories…"
-          [(ngModel)]="filters.search"
-          (keyup.enter)="applyFilters()"
-        />
-        <button class="au-button au-button--ghost" type="button" (click)="load()">Refresh</button>
+        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="load()" [disabled]="loading">
+          <app-icon name="refresh"></app-icon>
+          Refresh
+        </button>
       </div>
 
       <ng-container *ngIf="tab === 'inbox'">
-        <section class="au-surface au-surface--list">
-          <div class="au-empty" *ngIf="items.length === 0">No stories here. Fetch a source or adjust the filters.</div>
-          <article class="au-inbox-card" *ngFor="let item of items">
-            <img class="au-inbox-card__img" *ngIf="firstImage(item)" [src]="firstImage(item)" alt="" />
-            <div class="au-inbox-card__body">
-              <div class="au-inbox-card__meta">
-                <span class="au-tag au-tag--muted">{{ item.source.name }}</span>
-                <span class="au-tag" *ngIf="item.cluster">cluster ×{{ item.cluster.sourceCount }}</span>
-                <span class="au-tag" *ngIf="item.score !== null" [class.au-tag--success]="item.score >= 0.7" [title]="scoreExplanation(item)">
-                  ★ {{ scorePct(item) }}
-                </span>
-                <span class="au-inbox-card__status">{{ item.processingStatus }}</span>
-                <span class="au-inbox-card__date">{{ dateLabel(item.discoveredAt) }}</span>
-              </div>
-              <h3 class="au-inbox-card__title">{{ item.title }}</h3>
-              <p class="au-inbox-card__desc">{{ item.description || '—' }}</p>
-              <div class="au-inbox-card__actions">
-                <span class="au-select au-select--inline">
-                  <select class="au-input au-input--sm" [(ngModel)]="siteForItem[item.id]" (ngModelChange)="onSiteChosen($event, item.id)">
-                    <option [ngValue]="null" disabled>Create article on…</option>
-                    <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-                  </select>
-                </span>
-                <button class="au-button au-button--primary au-button--sm" type="button" (click)="createArticle(item)" [disabled]="!siteForItem[item.id] || creating[item.id]">
-                  {{ creating[item.id] ? 'Creating…' : 'Rewrite as news article' }}
-                </button>
-                <button class="au-button au-button--ghost au-button--sm" type="button" (click)="select(item)">Select</button>
-                <button class="au-button au-button--ghost au-button--sm" type="button" (click)="reject(item)">Ignore</button>
-                <a class="au-link au-link--sm" *ngIf="item.canonicalUrl" [href]="item.canonicalUrl" target="_blank" rel="noopener">Open source ↗</a>
-              </div>
-              <div class="au-inbox-card__note" *ngIf="noticeFor[item.id]">{{ noticeFor[item.id] }}</div>
+        <section class="au-panel">
+          @if (loading && items.length === 0) {
+            <div class="au-skeleton-row">
+              <div class="au-skeleton au-skeleton-avatar"></div>
+              <div class="au-skeleton au-skeleton-line"></div>
+              <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
             </div>
-          </article>
+            <div class="au-skeleton-row">
+              <div class="au-skeleton au-skeleton-avatar"></div>
+              <div class="au-skeleton au-skeleton-line"></div>
+              <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
+            </div>
+            <div class="au-skeleton-row">
+              <div class="au-skeleton au-skeleton-avatar"></div>
+              <div class="au-skeleton au-skeleton-line"></div>
+              <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
+            </div>
+          } @else if (items.length === 0) {
+            <app-empty-state
+              icon="inbox"
+              title="No stories to triage"
+              text="Stories appear here once a source fetches them. Add a source or adjust the filters."
+            >
+              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/sources">Add source</a>
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="clearFilters()">Reset filters</button>
+            </app-empty-state>
+          } @else {
+            <div class="au-feed">
+              <article class="au-feed__item" *ngFor="let item of items">
+                <img class="au-feed__img" *ngIf="firstImage(item)" [src]="firstImage(item)" alt="" loading="lazy" />
+                <div class="au-feed__body">
+                  <div class="au-feed__meta">
+                    <span class="au-badge au-badge--outline">{{ item.source.name }}</span>
+                    <span class="au-badge au-badge--brand" *ngIf="item.cluster">cluster ×{{ item.cluster.sourceCount }}</span>
+                    <span
+                      class="au-badge"
+                      *ngIf="item.score !== null"
+                      [class.au-badge--success]="item.score >= 0.7"
+                      [class.au-badge--warning]="item.score >= 0.4 && item.score < 0.7"
+                      [class.au-badge--neutral]="item.score < 0.4"
+                      [title]="scoreExplanation(item)"
+                    >
+                      score {{ scorePct(item) }}
+                    </span>
+                    <span class="au-feed__date">{{ dateLabel(item.discoveredAt) }}</span>
+                  </div>
+                  <h3 class="au-feed__title">{{ item.title }}</h3>
+                  <p class="au-feed__desc">{{ item.description || '—' }}</p>
+                  <div class="au-feed__actions">
+                    <select
+                      class="au-select au-filter-select"
+                      [(ngModel)]="siteForItem[item.id]"
+                      (ngModelChange)="onSiteChosen($event, item.id)"
+                      aria-label="Create article on site"
+                    >
+                      <option [ngValue]="null" disabled>Create article on…</option>
+                      <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
+                    </select>
+                    <button
+                      class="au-btn au-btn--primary au-btn--sm"
+                      type="button"
+                      (click)="createArticle(item)"
+                      [disabled]="!siteForItem[item.id] || creating[item.id]"
+                    >
+                      <app-icon name="sparkles"></app-icon>
+                      {{ creating[item.id] ? 'Creating…' : 'Rewrite as news article' }}
+                    </button>
+                    <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="select(item)">Select</button>
+                    <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="reject(item)">Ignore</button>
+                    <a class="au-link" *ngIf="item.canonicalUrl" [href]="item.canonicalUrl" target="_blank" rel="noopener">
+                      Open source
+                      <app-icon name="external"></app-icon>
+                    </a>
+                  </div>
+                  <div class="au-feed__note" *ngIf="noticeFor[item.id]">{{ noticeFor[item.id] }}</div>
+                </div>
+              </article>
+            </div>
+            @if (totalPages > 1) {
+              <div class="au-pager">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page <= 1" (click)="goPage(page - 1)">
+                  Previous
+                </button>
+                <span>Page {{ page }} of {{ totalPages }} · {{ total }} stories</span>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page >= totalPages" (click)="goPage(page + 1)">
+                  Next
+                </button>
+              </div>
+            }
+          }
         </section>
-        <div class="au-pagination" *ngIf="totalPages > 1">
-          <button class="au-button au-button--ghost" type="button" [disabled]="page <= 1" (click)="goPage(page - 1)">‹ Prev</button>
-          <span>Page {{ page }} of {{ totalPages }} ({{ total }} items)</span>
-          <button class="au-button au-button--ghost" type="button" [disabled]="page >= totalPages" (click)="goPage(page + 1)">Next ›</button>
-        </div>
       </ng-container>
 
-      <section class="au-surface au-surface--list" *ngIf="tab === 'clusters'">
-        <div class="au-empty" *ngIf="clusters.length === 0">No story clusters yet.</div>
-        <article class="au-inbox-card" *ngFor="let cluster of clusters">
-          <div class="au-inbox-card__body">
-            <div class="au-inbox-card__meta">
-              <span class="au-tag">×{{ cluster.sourceCount }} sources</span>
-              <span class="au-tag au-tag--muted">{{ cluster.status }}</span>
-              <span class="au-inbox-card__date">{{ dateLabel(cluster.lastSeenAt) }}</span>
+      <section class="au-panel" *ngIf="tab === 'clusters'">
+        <app-empty-state
+          *ngIf="clusters.length === 0"
+          icon="layers"
+          title="No story clusters yet"
+          text="Clusters appear when the same story is discovered across several sources."
+        ></app-empty-state>
+        <div class="au-feed" *ngIf="clusters.length > 0">
+          <article class="au-feed__item" *ngFor="let cluster of clusters">
+            <div class="au-feed__body">
+              <div class="au-feed__meta">
+                <span class="au-badge au-badge--brand">×{{ cluster.sourceCount }} sources</span>
+                <span class="au-badge au-badge--neutral">{{ cluster.status }}</span>
+                <span class="au-feed__date">{{ dateLabel(cluster.lastSeenAt) }}</span>
+              </div>
+              <h3 class="au-feed__title">{{ cluster.headline }}</h3>
+              <p class="au-feed__desc">{{ cluster.summary }}</p>
+              <div class="au-feed__meta">
+                <span class="au-badge au-badge--outline" *ngFor="let member of cluster.items">{{ member.source.name }}</span>
+              </div>
             </div>
-            <h3 class="au-inbox-card__title">{{ cluster.headline }}</h3>
-            <p class="au-inbox-card__desc">{{ cluster.summary }}</p>
-            <div class="au-inbox-card__sources">
-              <span class="au-tag au-tag--muted" *ngFor="let member of cluster.items">{{ member.source.name }}</span>
-            </div>
-          </div>
-        </article>
+          </article>
+        </div>
       </section>
     </section>
   `,
-  styles: [
-    `
-      .au-toolbar--wrap { flex-wrap: wrap; }
-      .au-surface--list { padding: 0.25rem 0.75rem; }
-      .au-inbox-card { display: flex; gap: 0.9rem; padding: 0.9rem 0.35rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); }
-      .au-inbox-card:last-child { border-bottom: none; }
-      .au-inbox-card__img { width: 84px; height: 84px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
-      .au-inbox-card__body { flex: 1; min-width: 0; }
-      .au-inbox-card__meta { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
-      .au-inbox-card__status { font-size: 0.7rem; text-transform: uppercase; color: var(--au-muted, #6b7280); }
-      .au-inbox-card__date { font-size: 0.72rem; color: var(--au-muted, #6b7280); }
-      .au-inbox-card__title { margin: 0.35rem 0; font-size: 1.02rem; }
-      .au-inbox-card__desc { font-size: 0.85rem; color: var(--au-text-subtle, #4b5563); margin: 0 0 0.5rem; max-width: 900px; }
-      .au-inbox-card__actions { display: flex; gap: 0.45rem; align-items: center; flex-wrap: wrap; }
-      .au-inbox-card__note { margin-top: 0.45rem; font-size: 0.8rem; color: var(--au-success, #16a34a); }
-      .au-inbox-card__sources { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.4rem; }
-      .au-button--sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
-      .au-input--sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; }
-      .au-link--sm { font-size: 0.8rem; }
-      .au-pagination { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; font-size: 0.85rem; }
-      @media (max-width: 640px) {
-        .au-inbox-card { flex-direction: column; }
-        .au-inbox-card__img { width: 100%; height: 150px; }
-      }
-    `,
-  ],
 })
 export class InboxPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly toast = inject(ToastService);
 
   tab: InboxTab = 'inbox';
   items: StudioSourceItem[] = [];
@@ -153,6 +209,7 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   page = 1;
   pageSize = 20;
   total = 0;
+  loading = false;
   siteForItem: Record<string, string | null> = {};
   creating: Record<string, boolean> = {};
   noticeFor: Record<string, string> = {};
@@ -188,6 +245,12 @@ export class InboxPageComponent implements OnInit, OnDestroy {
     this.load();
   }
 
+  clearFilters(): void {
+    this.filters = { sourceId: '', status: 'candidate', search: '', sort: 'score' };
+    this.page = 1;
+    this.load();
+  }
+
   applyFilters(): void {
     this.page = 1;
     this.load();
@@ -199,14 +262,20 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   }
 
   load(silent = false): void {
+    if (!silent) {
+      this.loading = true;
+    }
     if (this.tab === 'clusters') {
       this.api.listStoryClusters(1, 50).subscribe({
         next: (response) => {
           this.clusters = response.items;
+          this.loading = false;
         },
         error: () => {
+          this.clusters = [];
+          this.loading = false;
           if (!silent) {
-            this.clusters = [];
+            this.toast.error('Could not load story clusters.');
           }
         },
       });
@@ -223,11 +292,14 @@ export class InboxPageComponent implements OnInit, OnDestroy {
         next: (response) => {
           this.items = response.items;
           this.total = response.total;
+          this.loading = false;
         },
         error: () => {
+          this.items = [];
+          this.total = 0;
+          this.loading = false;
           if (!silent) {
-            this.items = [];
-            this.total = 0;
+            this.toast.error('Could not load the inbox. Check that your sources are connected and try again.');
           }
         },
       });
@@ -264,12 +336,11 @@ export class InboxPageComponent implements OnInit, OnDestroy {
       .createProjectFromSourceItem({ siteId, sourceItemId: item.id, goal: 'news_article' })
       .subscribe({
         next: (result) => {
-          this.noticeFor[item.id] =
-            result.kind === 'update'
-              ? `Updated existing article (v${result.projectId.slice(0, 8)}) with the new source facts.`
-              : 'Article created. Generation started.';
           this.creating[item.id] = false;
           this.load(true);
+          this.toast.success(
+            result.kind === 'update' ? 'Existing article updated with the new source facts.' : 'Article created. Generation started.',
+          );
         },
         error: (error) => {
           const message = String(error?.error?.message ?? error?.message ?? 'Failed to create article.');
@@ -280,15 +351,22 @@ export class InboxPageComponent implements OnInit, OnDestroy {
             this.noticeFor[item.id] = message;
           }
           this.creating[item.id] = false;
+          this.toast.error('The article could not be created.');
         },
       });
   }
 
   select(item: StudioSourceItem): void {
-    this.api.setSourceItemStatus(item.id, 'selected').subscribe(() => this.load(true));
+    this.api.setSourceItemStatus(item.id, 'selected').subscribe({
+      next: () => this.load(true),
+      error: () => this.toast.error('The story could not be selected.'),
+    });
   }
 
   reject(item: StudioSourceItem): void {
-    this.api.setSourceItemStatus(item.id, 'rejected').subscribe(() => this.load(true));
+    this.api.setSourceItemStatus(item.id, 'rejected').subscribe({
+      next: () => this.load(true),
+      error: () => this.toast.error('The story could not be dismissed.'),
+    });
   }
 }

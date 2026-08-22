@@ -5,6 +5,10 @@ import { RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
+import { ConfirmService } from '../services/confirm.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { CalendarEvent, PublicationChannel, StudioProjectSummary, StudioSite, PublishingAccount } from '../models/studio.models';
 
 type CalendarView = 'list' | 'day' | 'week' | 'month';
@@ -12,57 +16,108 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
 @Component({
   selector: 'app-calendar-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
           <p class="au-page__subtitle">Every scheduled article and social post, in one timeline.</p>
         </div>
-        <div class="au-header-actions">
-          <select class="au-input au-input--inline" [(ngModel)]="channelFilter" (ngModelChange)="load()">
+        <div class="au-page__actions">
+          <select class="au-select au-filter-select" [(ngModel)]="channelFilter" (ngModelChange)="load()" aria-label="Filter by channel">
             <option value="">All channels</option>
             <option value="website">Website</option>
             <option value="x">X</option>
             <option value="instagram">Instagram</option>
           </select>
-          <select class="au-input au-input--inline" [(ngModel)]="siteFilter" (ngModelChange)="load()">
+          <select class="au-select au-filter-select" [(ngModel)]="siteFilter" (ngModelChange)="load()" aria-label="Filter by site">
             <option value="">All sites</option>
             <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
           </select>
         </div>
       </header>
 
-      <nav class="au-tabs">
+      <div class="au-tabs">
         <button *ngFor="let view of views" class="au-tab" [class.is-active]="view.key === viewMode" type="button" (click)="setView(view.key)">
           {{ view.label }}
         </button>
-        <span class="au-tabs__spacer"></span>
-        <button class="au-tab au-tab--nav" type="button" (click)="move(-1)">‹</button>
+        <div class="au-toolbar__spacer"></div>
+        <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" (click)="move(-1)" aria-label="Previous period">
+          <app-icon name="chevron-left"></app-icon>
+        </button>
         <span class="au-calendar-label">{{ rangeLabel }}</span>
-        <button class="au-tab au-tab--nav" type="button" (click)="move(1)">›</button>
-      </nav>
+        <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" (click)="move(1)" aria-label="Next period">
+          <app-icon name="chevron-right"></app-icon>
+        </button>
+      </div>
 
-      <p class="au-banner au-banner--error" *ngIf="error">{{ error }}</p>
-      <p class="au-banner au-banner--success" *ngIf="notice">{{ notice }}</p>
-      <p class="au-hint" *ngIf="dragHint">Drag a card to move it. Drop to reschedule.</p>
+      <div class="au-banner au-banner--error" *ngIf="error">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">{{ error }}</span>
+        <button class="au-banner__action" type="button" (click)="load()">Retry</button>
+      </div>
+      <div class="au-banner au-banner--success" *ngIf="notice">
+        <app-icon name="circle-check"></app-icon>
+        <span class="au-banner__text">{{ notice }}</span>
+      </div>
 
-      <section class="au-surface au-surface--padded">
-        <h2 class="au-surface__title">Schedule a publication</h2>
-        <form class="au-form au-form-grid au-form-grid--4" (ngSubmit)="createFromCalendar()">
-          <label class="au-field"><span>Content</span><select class="au-input" name="projectId" [(ngModel)]="draft.projectId" required><option value="" disabled>Select content</option><option *ngFor="let project of projects" [value]="project.id">{{ project.title }}</option></select></label>
-          <label class="au-field"><span>Channel</span><select class="au-input" name="channel" [(ngModel)]="draft.channel"><option value="website">Website</option><option value="x">X</option><option value="instagram">Instagram</option></select></label>
-          <label class="au-field" *ngIf="draft.channel === 'website'"><span>Site</span><select class="au-input" name="siteId" [(ngModel)]="draft.siteId"><option value="">Default site</option><option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option></select></label>
-          <label class="au-field" *ngIf="draft.channel !== 'website'"><span>Account</span><select class="au-input" name="accountId" [(ngModel)]="draft.accountId"><option value="">Default account</option><option *ngFor="let account of accountsForChannel" [value]="account.id">{{ account.displayName }}</option></select></label>
-          <label class="au-field"><span>When</span><input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required /></label>
-          <button class="au-button au-button--primary" type="submit" [disabled]="creating">{{ creating ? 'Scheduling…' : 'Add to calendar' }}</button>
+      <section class="au-panel au-panel--padded au-mb-3">
+        <h2 class="au-panel__title">Schedule a publication</h2>
+        <p class="au-panel__subtitle au-mb-3">Pick content, a channel and a time. Social channels need an approved social piece on the content.</p>
+        <form class="au-field-grid au-calendar-form" (ngSubmit)="createFromCalendar()">
+          <label class="au-field au-mb-0">
+            <span class="au-field__label">Content</span>
+            <select class="au-select" name="projectId" [(ngModel)]="draft.projectId" required>
+              <option value="" disabled>Select content</option>
+              <option *ngFor="let project of projects" [value]="project.id">{{ project.title }}</option>
+            </select>
+          </label>
+          <label class="au-field au-mb-0">
+            <span class="au-field__label">Channel</span>
+            <select class="au-select" name="channel" [(ngModel)]="draft.channel">
+              <option value="website">Website</option>
+              <option value="x">X</option>
+              <option value="instagram">Instagram</option>
+            </select>
+          </label>
+          <label class="au-field au-mb-0" *ngIf="draft.channel === 'website'">
+            <span class="au-field__label">Site</span>
+            <select class="au-select" name="siteId" [(ngModel)]="draft.siteId">
+              <option value="">Default site</option>
+              <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
+            </select>
+          </label>
+          <label class="au-field au-mb-0" *ngIf="draft.channel !== 'website'">
+            <span class="au-field__label">Account</span>
+            <select class="au-select" name="accountId" [(ngModel)]="draft.accountId">
+              <option value="">Default account</option>
+              <option *ngFor="let account of accountsForChannel" [value]="account.id">{{ account.displayName }}</option>
+            </select>
+          </label>
+          <label class="au-field au-mb-0">
+            <span class="au-field__label">When</span>
+            <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required />
+          </label>
+          <div class="au-form__actions au-mt-0 au-mb-0">
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="creating">
+              <app-icon name="plus"></app-icon>
+              {{ creating ? 'Scheduling…' : 'Add to calendar' }}
+            </button>
+          </div>
         </form>
       </section>
 
       <!-- List / agenda -->
-      <section class="au-surface" *ngIf="viewMode === 'list'">
-        <div class="au-empty" *ngIf="events.length === 0">Nothing scheduled in this range.</div>
+      <section class="au-panel au-panel--padded" *ngIf="viewMode === 'list'">
+        <p class="au-hint au-mb-2" *ngIf="dragHint">Drag a card to move it. Drop to reschedule.</p>
+        <app-empty-state
+          *ngIf="events.length === 0"
+          icon="calendar"
+          title="Nothing scheduled yet"
+          text="Add a publication above or schedule from the content workspace."
+        ></app-empty-state>
         <div *ngFor="let group of groupedEvents" class="au-calendar-group">
           <h3 class="au-calendar-group__date">{{ group.label }}</h3>
           <div
@@ -112,91 +167,51 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
     <ng-template #cardTpl let-event>
       <div class="au-calendar-card__body">
         <span class="au-calendar-time">{{ timeLabel(event.scheduledFor) }}</span>
-        <span class="au-channel-badge" [ngClass]="'au-channel-badge--' + event.channel">{{ event.channel }}</span>
-        <img class="au-calendar-thumb" *ngIf="event.thumbnail" [src]="event.thumbnail" alt="" />
+        <span class="au-channel" [class]="'au-channel--' + event.channel">{{ event.channel }}</span>
+        <img class="au-calendar-thumb" *ngIf="event.thumbnail" [src]="event.thumbnail" alt="" loading="lazy" />
         <div class="au-calendar-card__text">
           <strong>{{ event.title }}</strong>
           <span class="au-calendar-card__meta">{{ event.destination }} · {{ event.projectTitle }}</span>
-          <span class="au-tag" [ngClass]="statusClass(event.status)">{{ event.status }}</span>
-          <span class="au-calendar-card__meta" *ngIf="event.automated">🤖 auto</span>
+          <span class="au-inline au-mt-1">
+            <span class="au-badge" [class]="statusClass(event.status)">{{ event.status }}</span>
+            <span class="au-badge au-badge--brand" *ngIf="event.automated">automatic</span>
+          </span>
           <span class="au-calendar-card__error" *ngIf="event.lastError">{{ event.lastError }}</span>
         </div>
         <div class="au-calendar-card__actions" (click)="$event.stopPropagation()">
-          <button class="au-button au-button--ghost au-button--xs" type="button" [routerLink]="['/studio/content', event.projectId]">Open</button>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
+            Open
+          </button>
           <button
             *ngIf="event.status === 'scheduled' || event.status === 'failed'"
-            class="au-button au-button--ghost au-button--xs" type="button" (click)="publishNow(event)"
-          >Publish now</button>
+            class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="publishNow(event)"
+          >
+            <app-icon name="play"></app-icon>
+            Publish now
+          </button>
           <button
             *ngIf="event.status === 'scheduled'"
-            class="au-button au-button--ghost au-button--xs au-button--danger" type="button" (click)="cancel(event)"
-          >Cancel</button>
+            class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="cancel(event)"
+          >
+            Cancel
+          </button>
           <button
             *ngIf="event.status === 'failed'"
-            class="au-button au-button--ghost au-button--xs" type="button" (click)="retry(event)"
-          >Retry</button>
+            class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="retry(event)"
+          >
+            <app-icon name="refresh"></app-icon>
+            Retry
+          </button>
         </div>
       </div>
     </ng-template>
   `,
-  styles: [
-    `
-      .au-header-actions { display: flex; gap: 0.5rem; }
-      .au-input--inline { width: auto; }
-      .au-tabs__spacer { flex: 1; }
-      .au-tab--nav { padding: 0.5rem 0.6rem; }
-      .au-calendar-label { font-weight: 600; margin: 0 0.5rem; }
-      .au-form-grid--4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; gap: 0.8rem; display: grid; }
-      .au-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--au-muted, #6b7280); }
-      .au-hint { color: var(--au-muted, #6b7280); font-size: 0.8rem; }
-      .au-calendar-group__date {
-        margin: 1rem 0 0.5rem; font-size: 0.85rem; text-transform: uppercase;
-        letter-spacing: 0.05em; color: var(--au-muted, #6b7280);
-      }
-      .au-calendar-card {
-        background: var(--au-surface, #fff); border: 1px solid var(--au-border, #e5e7eb);
-        border-radius: 8px; padding: 0.65rem 0.8rem; margin-bottom: 0.5rem; cursor: grab;
-        transition: box-shadow 120ms ease;
-      }
-      .au-calendar-card:hover { box-shadow: 0 2px 8px rgb(0 0 0 / 8%); }
-      .au-calendar-card.is-dragging { opacity: 0.4; }
-      .au-calendar-card__body { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-      .au-calendar-time { font-variant-numeric: tabular-nums; font-weight: 700; min-width: 3.2rem; }
-      .au-channel-badge { text-transform: uppercase; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; }
-      .au-channel-badge--website { background: #dbeafe; color: #1d4ed8; }
-      .au-channel-badge--x { background: #111; color: #fff; }
-      .au-channel-badge--instagram { background: #fdf2f8; color: #be185d; }
-      .au-calendar-thumb { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
-      .au-calendar-card__text { display: flex; flex-direction: column; gap: 2px; min-width: 220px; flex: 1; }
-      .au-calendar-card__meta { font-size: 0.75rem; color: var(--au-muted, #6b7280); }
-      .au-calendar-card__error { font-size: 0.72rem; color: var(--au-danger, #dc2626); }
-      .au-calendar-card__actions { display: flex; gap: 0.35rem; margin-left: auto; }
-      .au-button--xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-      .au-button--danger { color: var(--au-danger, #dc2626); }
-      .au-calendar-grid { display: grid; gap: 0.75rem; }
-      .au-calendar-grid:not(.au-calendar-grid--month) { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-      .au-calendar-grid--month { grid-template-columns: repeat(7, 1fr); }
-      .au-calendar-col { background: var(--au-surface-subtle, #f9fafb); border-radius: 8px; padding: 0.6rem; min-height: 180px; }
-      .au-calendar-col__empty { color: var(--au-muted, #6b7280); font-size: 0.8rem; text-align: center; padding: 1rem; }
-      .au-calendar-day { position: relative; min-height: 68px; border: 1px solid var(--au-border, #e5e7eb); border-radius: 8px; padding: 0.4rem; cursor: pointer; }
-      .au-calendar-day__num { font-weight: 600; }
-      .au-calendar-day__num.is-today { color: var(--au-primary, #4f46e5); }
-      .au-calendar-day__count { position: absolute; top: 0.4rem; right: 0.5rem; font-size: 0.75rem; }
-      .au-calendar-day__markers { display: flex; gap: 3px; margin-top: 0.4rem; }
-      .au-channel-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-      .au-channel-dot--website { background: #3b82f6; }
-      .au-channel-dot--x { background: #111; }
-      .au-channel-dot--instagram { background: #ec4899; }
-      @media (max-width: 640px) {
-        .au-calendar-grid--month { grid-template-columns: repeat(7, 1fr); overflow-x: auto; }
-        .au-calendar-card__actions { width: 100%; }
-      }
-    `,
-  ],
 })
 export class CalendarPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   views: Array<{ key: CalendarView; label: string }> = [
     { key: 'list', label: 'List' },
@@ -383,14 +398,14 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   statusClass(status: string): string {
     switch (status) {
       case 'published':
-        return 'au-tag--success';
+        return 'au-badge--success';
       case 'failed':
-        return 'au-tag--danger';
+        return 'au-badge--danger';
       case 'scheduled':
       case 'queued':
-        return 'au-tag--warning';
+        return 'au-badge--warning';
       default:
-        return '';
+        return 'au-badge--neutral';
     }
   }
 
@@ -439,7 +454,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     // Optimistic update.
     eventItem.scheduledFor = target.toISOString();
     this.api.reschedulePublication(eventItem.id, target.toISOString()).subscribe({
-      next: () => this.load(true),
+      next: () => {
+        this.toast.success('Publication rescheduled.');
+        this.load(true);
+      },
       error: () => {
         eventItem.scheduledFor = previous; // rollback
         this.error = 'The publication could not be rescheduled.';
@@ -456,14 +474,24 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   cancel(eventItem: CalendarEvent): void {
-    const confirmed = window.confirm(
-      `Cancel this scheduled ${eventItem.channel} publication?\n\n"${eventItem.title}"\n\nThis only cancels the local schedule. Content already published externally is not affected.`,
-    );
+    void this.confirmCancel(eventItem);
+  }
+
+  private async confirmCancel(eventItem: CalendarEvent): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Cancel this scheduled ${eventItem.channel} publication?`,
+      message: `"${eventItem.title}" — this only cancels the local schedule. Content already published externally is not affected.`,
+      confirmLabel: 'Cancel publication',
+      danger: true,
+    });
     if (!confirmed) {
       return;
     }
     this.api.cancelPublication(eventItem.id).subscribe({
-      next: () => this.load(true),
+      next: () => {
+        this.toast.success('Publication canceled.');
+        this.load(true);
+      },
       error: () => { this.error = 'The publication could not be canceled.'; this.load(true); },
     });
   }
@@ -492,7 +520,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     }).subscribe({
       next: () => {
         this.creating = false;
-        this.notice = 'Publication added to the calendar.';
+        this.toast.success('Publication added to the calendar.');
         this.draft = { projectId: '', channel: 'website', siteId: '', accountId: '', scheduledFor: '' };
         this.load(true);
       },

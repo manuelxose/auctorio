@@ -3,6 +3,8 @@ import { Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { PublicationListItem, PublishingAccount, StudioSite } from '../models/studio.models';
 import { formatRelativeTime } from '../utils/content-status';
 
@@ -11,54 +13,85 @@ type PublishingTab = 'queue' | 'published' | 'destinations';
 @Component({
   selector: 'app-publishing-page',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Release management</p>
           <h1 class="au-page__title">Publishing</h1>
           <p class="au-page__subtitle">Queue, published items and destinations.</p>
         </div>
+        <div class="au-page__actions">
+          <a class="au-btn au-btn--secondary" routerLink="/studio/publications">
+            <app-icon name="publications"></app-icon>
+            Publication records
+          </a>
+        </div>
       </header>
 
-      <nav class="au-tabs" aria-label="Publishing sections">
-        <button class="au-tab" [class.is-active]="tab === 'queue'" type="button" (click)="setTab('queue')">Queue</button>
+      <div class="au-tabs" aria-label="Publishing sections">
+        <button class="au-tab" [class.is-active]="tab === 'queue'" type="button" (click)="setTab('queue')">
+          Queue
+          <span class="au-badge au-badge--neutral">{{ items.length }}</span>
+        </button>
         <button class="au-tab" [class.is-active]="tab === 'published'" type="button" (click)="setTab('published')">Published</button>
         <button class="au-tab" [class.is-active]="tab === 'destinations'" type="button" (click)="setTab('destinations')">Destinations</button>
-      </nav>
+      </div>
 
-      <section class="au-surface" *ngIf="tab !== 'destinations'">
-        <div class="au-empty" *ngIf="filtered.length === 0">Nothing here yet.</div>
-        <div class="au-row" *ngFor="let item of filtered">
+      <section class="au-panel" *ngIf="tab !== 'destinations'">
+        <app-empty-state
+          *ngIf="filtered.length === 0"
+          icon="clock"
+          [title]="tab === 'published' ? 'Nothing published yet' : 'Queue is empty'"
+          [text]="tab === 'published' ? 'Published items appear here after the first successful publication.' : 'Scheduled publications appear here while waiting to run.'"
+        >
+          <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/calendar">Open calendar</a>
+        </app-empty-state>
+        <a class="au-row" *ngFor="let item of filtered" [routerLink]="['/studio/content', item.project.id]">
+          <app-icon name="content" class="au-faint"></app-icon>
           <span class="au-row__title">{{ item.project.title || 'Publication' }}</span>
-          <span class="au-tag">{{ item.site.name }}</span>
+          <span class="au-badge au-badge--neutral">{{ item.site.name }}</span>
           <span
-            class="au-tag"
-            [class.au-tag--success]="item.status === 'published' || item.status === 'draft_synced'"
-            [class.au-tag--danger]="item.status === 'failed'"
+            class="au-badge"
+            [class.au-badge--success]="item.status === 'published' || item.status === 'draft_synced'"
+            [class.au-badge--danger]="item.status === 'failed'"
+            [class.au-badge--warning]="item.status === 'processing' || item.status === 'queued'"
           >
             {{ item.status }}
           </span>
           <span class="au-row__meta">{{ formatRelativeTime(item.createdAt) }}</span>
-          <span class="au-row__meta" *ngIf="item.error">{{ item.error }}</span>
+          <span class="au-row__error" *ngIf="item.error">{{ item.error }}</span>
           <a
             class="au-link"
             *ngIf="item.externalUrl"
             [href]="externalLink(item)"
             target="_blank"
             rel="noopener"
+            (click)="$event.stopPropagation()"
           >
-            Open ↗
+            Open
+            <app-icon name="external"></app-icon>
           </a>
-        </div>
+        </a>
       </section>
 
-      <section class="au-surface" *ngIf="tab === 'destinations'">
-        <div class="au-empty" *ngIf="accounts.length === 0">No publishing destinations configured. <a class="au-link" routerLink="/studio/connections">Add a connection</a></div>
+      <section class="au-panel" *ngIf="tab === 'destinations'">
+        <app-empty-state
+          *ngIf="accounts.length === 0"
+          icon="connections"
+          title="No publishing destinations configured"
+          text="Add a website or social account to publish content."
+        >
+          <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/connections">Add a connection</a>
+        </app-empty-state>
         <div class="au-row" *ngFor="let account of accounts">
+          <span class="au-platform-icon" style="width: 26px; height: 26px; flex-basis: 26px; font-size: 9px">{{ account.platform === 'x' ? 'X' : account.platform === 'instagram' ? 'IG' : 'WEB' }}</span>
           <span class="au-row__title">{{ account.displayName }}</span>
-          <span class="au-tag">{{ account.platform }}</span>
-          <span class="au-tag" [class.au-tag--success]="account.status === 'active' && account.enabled" [class.au-tag--danger]="account.status === 'error'">{{ account.enabled ? account.status : 'disabled' }}</span>
+          <span class="au-badge au-badge--outline">{{ account.platform }}</span>
+          <span class="au-badge" [class.au-badge--success]="account.status === 'active' && account.enabled" [class.au-badge--danger]="account.status === 'error'" [class.au-badge--neutral]="!account.enabled">
+            {{ account.enabled ? account.status : 'disabled' }}
+          </span>
           <span class="au-row__meta">{{ account.site?.name || 'Workspace default' }}</span>
           <a class="au-link" routerLink="/studio/connections">Manage</a>
         </div>
