@@ -54,6 +54,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Calendar', title: 'Calendar' } },
       },
       {
+        path: 'editorial-plan',
+        loadComponent: () => import('./pages/editorial-plan-page.component').then((m) => m.EditorialPlanPageComponent),
+        data: { studioMeta: { section: 'Editorial Plan', title: 'Editorial Plan' } },
+      },
+      {
         path: 'publications',
         loadComponent: () => import('./pages/publications-page.component').then((m) => m.PublicationsPageComponent),
         data: { studioMeta: { section: 'Publications', title: 'Publications' } },
@@ -82,6 +87,11 @@ export const routes: Routes = [
         path: 'publishing',
         loadComponent: () => import('./pages/publishing-page.component').then((m) => m.PublishingPageComponent),
         data: { studioMeta: { section: 'Publishing', title: 'Publishing' } },
+      },
+      {
+        path: 'connections',
+        loadComponent: () => import('./pages/connections-page.component').then((m) => m.ConnectionsPageComponent),
+        data: { studioMeta: { section: 'Connections', title: 'Connections' } },
       },
       {
         path: 'settings',

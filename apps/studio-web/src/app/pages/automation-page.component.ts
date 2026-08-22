@@ -92,6 +92,12 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
         </div>
 
         <h3 class="au-form__title au-form__title--spaced">Pipeline flags</h3>
+        <div class="au-automation-modes" role="group" aria-label="Automation mode">
+          <button class="au-mode" [class.is-active]="mode === 'manual'" type="button" (click)="setMode('manual')"><strong>Manual</strong><span>AI assists. You approve and publish.</span></button>
+          <button class="au-mode" [class.is-active]="mode === 'approval'" type="button" (click)="setMode('approval')"><strong>Approval required</strong><span>AI drafts and schedules after human approval.</span></button>
+          <button class="au-mode au-mode--warning" [class.is-active]="mode === 'automatic'" type="button" (click)="setMode('automatic')"><strong>Automatic</strong><span>AI may publish within these limits.</span></button>
+        </div>
+        <div class="au-banner au-banner--warning" *ngIf="mode === 'automatic'">Automatic publishing is enabled for this site. Review destinations, windows, and daily limits before saving.</div>
         <div class="au-form-grid au-form-grid--3">
           <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoGenerate" /> Auto-generate articles</label>
           <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoApprove" /> Auto-approve when QA passes</label>
@@ -206,6 +212,13 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
       .au-button--sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
       .au-button--danger { color: var(--au-danger, #dc2626); }
       .au-slots { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+      .au-automation-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; margin: 0 0 1rem; }
+      .au-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; padding: 0.8rem; border: 1px solid var(--au-border, #e5e7eb); border-radius: 8px; background: transparent; color: var(--au-text, #111827); text-align: left; cursor: pointer; }
+      .au-mode span { color: var(--au-muted, #6b7280); font-size: 0.75rem; }
+      .au-mode.is-active { border-color: var(--au-accent, #2563eb); box-shadow: 0 0 0 2px var(--au-accent-soft, #dbeafe); }
+      .au-mode--warning.is-active { border-color: var(--au-warning, #d97706); }
+      .au-banner--warning { background: #fffbeb; color: #92400e; padding: 0.65rem 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; font-size: 0.8rem; }
+      @media (max-width: 720px) { .au-automation-modes { grid-template-columns: 1fr; } }
       .au-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.2rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); }
       .au-row__title { font-weight: 600; min-width: 160px; }
       .au-row__meta { font-size: 0.78rem; color: var(--au-muted, #6b7280); }
@@ -228,6 +241,12 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   feedback = '';
   private refreshSubscription: Subscription | null = null;
 
+  get mode(): 'manual' | 'approval' | 'automatic' {
+    if (this.policy?.autoPublish) return 'automatic';
+    if (this.policy?.autoGenerate || this.policy?.autoApprove || this.policy?.autoSchedule) return 'approval';
+    return 'manual';
+  }
+
   get nextSlots(): Array<{ channel: string; at: string }> {
     return this.status?.nextSlots ?? [];
   }
@@ -235,7 +254,11 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.sites = this.appContext.sites();
     this.load();
-    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.loadStatus());
+    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => {
+      if (!document.hidden) {
+        this.loadStatus();
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -269,6 +292,26 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
       },
       error: () => undefined,
     });
+  }
+
+  setMode(mode: 'manual' | 'approval' | 'automatic'): void {
+    if (!this.policy) return;
+    if (mode === 'manual') {
+      this.policy.autoGenerate = false;
+      this.policy.autoApprove = false;
+      this.policy.autoSchedule = false;
+      this.policy.autoPublish = false;
+    } else if (mode === 'approval') {
+      this.policy.autoGenerate = true;
+      this.policy.autoApprove = false;
+      this.policy.autoSchedule = true;
+      this.policy.autoPublish = false;
+    } else {
+      this.policy.autoGenerate = true;
+      this.policy.autoApprove = true;
+      this.policy.autoSchedule = true;
+      this.policy.autoPublish = true;
+    }
   }
 
   save(): void {

@@ -914,6 +914,7 @@ export async function listMediaImages(
   input: {
     siteId?: string;
     status?: string;
+    unusedOnly?: boolean;
     page?: number;
     pageSize?: number;
   },
@@ -926,6 +927,7 @@ export async function listMediaImages(
     tenantId,
     ...(input.siteId ? { topic: { projects: { some: { siteId: input.siteId } } } } : {}),
     ...(input.status ? { status: input.status as ContentStatus } : {}),
+    ...(input.unusedOnly ? { versions: { none: {} } } : {}),
   };
 
   const [total, images] = await prisma.$transaction([

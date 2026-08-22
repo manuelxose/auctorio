@@ -733,6 +733,39 @@ export type PublishingAccount = {
   site: { id: string; name: string; key: string } | null;
 };
 
+export type EditorialPlanItem = {
+  id: string;
+  projectId: string | null;
+  title: string;
+  workingTitle: string | null;
+  topic: string | null;
+  channel: 'website' | 'x' | 'instagram';
+  scheduledFor: string | null;
+  primaryKeyword: string | null;
+  secondaryKeywords: unknown;
+  seoTitle: string | null;
+  metaDescription: string | null;
+  socialHook: string | null;
+  imageConcept: string | null;
+  status: string;
+};
+
+export type EditorialPlan = {
+  id: string;
+  name: string;
+  status: 'draft' | 'generating' | 'ready' | 'failed' | 'archived';
+  dateFrom: string;
+  dateTo: string;
+  objective: string | null;
+  timezone: string;
+  siteId: string | null;
+  provider: string | null;
+  model: string | null;
+  error: string | null;
+  items?: EditorialPlanItem[];
+  _count?: { items: number };
+};
+
 export type PublishingWindow = { channel: string; days: number[]; from: string; to: string };
 
 export type AutomationPolicy = {
@@ -768,6 +801,16 @@ export type AutomationPolicy = {
   socialTimingMinutesInstagram: number;
   createdAt: string;
   updatedAt: string;
+};
+
+export type AiUsageRow = {
+  provider: string;
+  model: string;
+  textCount: number;
+  imageCount: number;
+  tokensInput: number;
+  tokensOutput: number;
+  costUsd: number;
 };
 
 export type AutomationStatus = {
@@ -809,6 +852,26 @@ export type StudioOverview = {
     failed: number;
   };
   sources: { total: number; enabled: number; degraded: number; failing: number };
+  connections: Array<{
+    id: string;
+    platform: 'website' | 'x' | 'instagram';
+    displayName: string;
+    enabled: boolean;
+    status: string;
+    lastVerifiedAt: string | null;
+    siteName: string | null;
+  }>;
+  planCoverage: {
+    today: number;
+    week: {
+      total: number;
+      generated: number;
+      approved: number;
+      website: number;
+      x: number;
+      instagram: number;
+    };
+  };
   automation: {
     enabled: boolean;
     state: string;

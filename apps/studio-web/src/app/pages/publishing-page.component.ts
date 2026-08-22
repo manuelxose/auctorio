@@ -3,7 +3,7 @@ import { Component, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
-import type { PublicationListItem, StudioSite } from '../models/studio.models';
+import type { PublicationListItem, PublishingAccount, StudioSite } from '../models/studio.models';
 import { formatRelativeTime } from '../utils/content-status';
 
 type PublishingTab = 'queue' | 'published' | 'destinations';
@@ -30,8 +30,8 @@ type PublishingTab = 'queue' | 'published' | 'destinations';
       <section class="au-surface" *ngIf="tab !== 'destinations'">
         <div class="au-empty" *ngIf="filtered.length === 0">Nothing here yet.</div>
         <div class="au-row" *ngFor="let item of filtered">
-          <span class="au-row__title">{{ item.project?.title || 'Publication' }}</span>
-          <span class="au-tag">{{ item.site?.name }}</span>
+          <span class="au-row__title">{{ item.project.title || 'Publication' }}</span>
+          <span class="au-tag">{{ item.site.name }}</span>
           <span
             class="au-tag"
             [class.au-tag--success]="item.status === 'published' || item.status === 'draft_synced'"
@@ -54,13 +54,13 @@ type PublishingTab = 'queue' | 'published' | 'destinations';
       </section>
 
       <section class="au-surface" *ngIf="tab === 'destinations'">
-        <div class="au-empty" *ngIf="sites.length === 0">No destinations configured.</div>
-        <div class="au-row" *ngFor="let site of sites">
-          <span class="au-row__title">{{ site.name }}</span>
-          <span class="au-tag">{{ site.type }}</span>
-          <span class="au-tag au-tag--success">Connected</span>
-          <span class="au-row__meta">{{ site.baseUrl || '—' }}</span>
-          <a class="au-link" routerLink="/studio/settings/sites">Manage</a>
+        <div class="au-empty" *ngIf="accounts.length === 0">No publishing destinations configured. <a class="au-link" routerLink="/studio/connections">Add a connection</a></div>
+        <div class="au-row" *ngFor="let account of accounts">
+          <span class="au-row__title">{{ account.displayName }}</span>
+          <span class="au-tag">{{ account.platform }}</span>
+          <span class="au-tag" [class.au-tag--success]="account.status === 'active' && account.enabled" [class.au-tag--danger]="account.status === 'error'">{{ account.enabled ? account.status : 'disabled' }}</span>
+          <span class="au-row__meta">{{ account.site?.name || 'Workspace default' }}</span>
+          <a class="au-link" routerLink="/studio/connections">Manage</a>
         </div>
       </section>
     </section>
@@ -73,6 +73,7 @@ export class PublishingPageComponent implements OnInit {
   tab: PublishingTab = 'queue';
   items: PublicationListItem[] = [];
   sites: StudioSite[] = [];
+  accounts: PublishingAccount[] = [];
 
   get filtered(): PublicationListItem[] {
     if (this.tab === 'published') {
@@ -83,6 +84,9 @@ export class PublishingPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
+    this.api.listPublishingAccounts().subscribe({
+      next: (response) => { this.accounts = response.items; },
+    });
     this.api.listPublications(1, 50).subscribe({
       next: (response) => {
         this.items = response.items;

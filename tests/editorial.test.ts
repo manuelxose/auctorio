@@ -26,10 +26,19 @@ import {
   validateSocialPiece,
 } from "../src/studio/social";
 import {
+  assertSafeAutomationPolicy,
   generateEditorialSlots,
   isDayActive,
   readPublishingWindows,
 } from "../src/studio/automation";
+
+test("automation rejects auto-publish without the full guarded pipeline", () => {
+  assert.throws(
+    () => assertSafeAutomationPolicy({ autoPublish: true, autoGenerate: true, autoApprove: false, autoSchedule: true }),
+    /auto_publish_requires_generation_approval_and_schedule/,
+  );
+  assert.doesNotThrow(() => assertSafeAutomationPolicy({ autoPublish: true, autoGenerate: true, autoApprove: true, autoSchedule: true }));
+});
 
 test("normalizeCanonicalUrl strips tracking params and fragments", () => {
   const normalized = normalizeCanonicalUrl(

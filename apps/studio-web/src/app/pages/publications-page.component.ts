@@ -57,6 +57,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
         </select>
         <button class="au-button au-button--ghost" type="button" (click)="load()">Refresh</button>
       </div>
+      <div class="au-banner au-banner--error" *ngIf="error">{{ error }}</div>
 
       <section class="au-surface au-surface--table">
         <div class="au-empty" *ngIf="items.length === 0">No publications match the current filters.</div>
@@ -95,6 +96,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
               <td class="au-cell-date">{{ dateLabel(item.publishedAt) }}</td>
               <td class="au-cell-date">{{ dateLabel(item.updatedAt) }}</td>
               <td class="au-cell-actions">
+                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="inspect(item)">Details</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'failed'" (click)="retry(item)">Retry</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'scheduled' || item.status === 'ready' || item.status === 'draft'" (click)="publishNow(item)">Publish now</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'scheduled'" (click)="cancel(item)">Cancel</button>
@@ -111,6 +113,13 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
           <button class="au-button au-button--ghost" type="button" [disabled]="page >= totalPages" (click)="goPage(page + 1)">Next ›</button>
         </div>
       </section>
+
+      <aside class="au-publication-detail" *ngIf="selected" aria-label="Publication details">
+        <div class="au-publication-detail__head"><div><p class="au-eyebrow">Operational record</p><h2>{{ selected.project?.title || 'Publication' }}</h2></div><button class="au-button au-button--ghost au-button--sm" type="button" (click)="selected = null" aria-label="Close publication details">Close</button></div>
+        <dl class="au-kv"><dt>Channel</dt><dd>{{ selected.channel }}</dd><dt>Destination</dt><dd>{{ destination(selected) }}</dd><dt>Status</dt><dd><span class="au-tag" [ngClass]="statusClass(selected.status)">{{ selected.status }}</span></dd><dt>Attempts</dt><dd>{{ selected.attempts?.length || 0 }}</dd><dt>Failure</dt><dd>{{ selected.lastError || 'No failure recorded' }}</dd></dl>
+        <form class="au-form" *ngIf="canEdit(selected)" (ngSubmit)="saveSchedule()"><label class="au-field"><span class="au-field__label">Scheduled time</span><input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="scheduleDraft" required /></label><button class="au-button au-button--primary" type="submit" [disabled]="saving">{{ saving ? 'Saving...' : 'Save schedule' }}</button></form>
+        <div class="au-publication-attempts" *ngIf="selected.attempts?.length"><h3>Attempt history</h3><div class="au-row" *ngFor="let attempt of selected.attempts"><span class="au-row__title">Attempt {{ attempt.attemptNumber }}</span><span class="au-tag">{{ attempt.status }}</span><span class="au-row__meta">{{ dateLabel(attempt.startedAt) }}</span></div></div>
+      </aside>
     </section>
   `,
   styles: [
@@ -134,6 +143,11 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
       .au-channel-badge--website { background: #dbeafe; color: #1d4ed8; }
       .au-channel-badge--x { background: #111; color: #fff; }
       .au-channel-badge--instagram { background: #fdf2f8; color: #be185d; }
+      .au-publication-detail { margin-top: 1rem; padding: 1rem; border: 1px solid var(--au-border, #e5e7eb); border-radius: 12px; background: var(--au-surface, #fff); }
+      .au-publication-detail__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+      .au-publication-detail h2 { margin: 0; font-size: 1.1rem; }
+      .au-publication-detail h3 { margin: 1rem 0 0.4rem; font-size: 0.9rem; }
+      .au-publication-attempts .au-row { padding: 0.5rem 0; }
     `,
   ],
 })
@@ -147,6 +161,10 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   page = 1;
   pageSize = 20;
   total = 0;
+  selected: StudioPublication | null = null;
+  scheduleDraft = '';
+  saving = false;
+  error = '';
   filters = {
     channel: '' as '' | PublicationChannel,
     status: '' as '' | PublicationState,
@@ -165,7 +183,11 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.sites = this.appContext.sites();
     this.load();
-    this.refreshSubscription = timer(30_000, 30_000).subscribe(() => this.load(true));
+    this.refreshSubscription = timer(30_000, 30_000).subscribe(() => {
+      if (!document.hidden) {
+        this.load(true);
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -212,6 +234,18 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
       return item.site?.name ?? 'Website';
     }
     return item.account?.displayName ?? item.channel;
+  }
+
+  inspect(item: StudioPublication): void {
+    this.api.getPublication(item.id).subscribe({ next: (publication) => { this.selected = publication; this.scheduleDraft = publication.scheduledFor ? new Date(publication.scheduledFor).toISOString().slice(0, 16) : ''; }, error: () => { this.error = 'Publication details could not be loaded.'; } });
+  }
+
+  canEdit(item: StudioPublication): boolean { return ['draft', 'ready', 'scheduled', 'failed', 'canceled'].includes(item.status); }
+
+  saveSchedule(): void {
+    if (!this.selected || !this.scheduleDraft) return;
+    this.saving = true;
+    this.api.reschedulePublication(this.selected.id, new Date(this.scheduleDraft).toISOString()).subscribe({ next: (publication) => { this.selected = { ...this.selected!, ...publication }; this.saving = false; this.load(true); }, error: () => { this.saving = false; this.error = 'Publication schedule could not be updated.'; } });
   }
 
   statusClass(status: string): string {

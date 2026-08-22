@@ -5,7 +5,7 @@ import { RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
-import type { CalendarEvent, PublicationChannel, StudioSite } from '../models/studio.models';
+import type { CalendarEvent, PublicationChannel, StudioProjectSummary, StudioSite, PublishingAccount } from '../models/studio.models';
 
 type CalendarView = 'list' | 'day' | 'week' | 'month';
 
@@ -44,7 +44,21 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <button class="au-tab au-tab--nav" type="button" (click)="move(1)">›</button>
       </nav>
 
+      <p class="au-banner au-banner--error" *ngIf="error">{{ error }}</p>
+      <p class="au-banner au-banner--success" *ngIf="notice">{{ notice }}</p>
       <p class="au-hint" *ngIf="dragHint">Drag a card to move it. Drop to reschedule.</p>
+
+      <section class="au-surface au-surface--padded">
+        <h2 class="au-surface__title">Schedule a publication</h2>
+        <form class="au-form au-form-grid au-form-grid--4" (ngSubmit)="createFromCalendar()">
+          <label class="au-field"><span>Content</span><select class="au-input" name="projectId" [(ngModel)]="draft.projectId" required><option value="" disabled>Select content</option><option *ngFor="let project of projects" [value]="project.id">{{ project.title }}</option></select></label>
+          <label class="au-field"><span>Channel</span><select class="au-input" name="channel" [(ngModel)]="draft.channel"><option value="website">Website</option><option value="x">X</option><option value="instagram">Instagram</option></select></label>
+          <label class="au-field" *ngIf="draft.channel === 'website'"><span>Site</span><select class="au-input" name="siteId" [(ngModel)]="draft.siteId"><option value="">Default site</option><option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option></select></label>
+          <label class="au-field" *ngIf="draft.channel !== 'website'"><span>Account</span><select class="au-input" name="accountId" [(ngModel)]="draft.accountId"><option value="">Default account</option><option *ngFor="let account of accountsForChannel" [value]="account.id">{{ account.displayName }}</option></select></label>
+          <label class="au-field"><span>When</span><input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required /></label>
+          <button class="au-button au-button--primary" type="submit" [disabled]="creating">{{ creating ? 'Scheduling…' : 'Add to calendar' }}</button>
+        </form>
+      </section>
 
       <!-- List / agenda -->
       <section class="au-surface" *ngIf="viewMode === 'list'">
@@ -132,6 +146,8 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
       .au-tabs__spacer { flex: 1; }
       .au-tab--nav { padding: 0.5rem 0.6rem; }
       .au-calendar-label { font-weight: 600; margin: 0 0.5rem; }
+      .au-form-grid--4 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; gap: 0.8rem; display: grid; }
+      .au-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--au-muted, #6b7280); }
       .au-hint { color: var(--au-muted, #6b7280); font-size: 0.8rem; }
       .au-calendar-group__date {
         margin: 1rem 0 0.5rem; font-size: 0.85rem; text-transform: uppercase;
@@ -195,6 +211,16 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   siteFilter = '';
   anchor = new Date();
   dragHint = false;
+  error = '';
+  notice = '';
+  creating = false;
+  projects: StudioProjectSummary[] = [];
+  accounts: PublishingAccount[] = [];
+  draft = { projectId: '', channel: 'website' as PublicationChannel, siteId: '', accountId: '', scheduledFor: '' };
+
+  get accountsForChannel(): PublishingAccount[] {
+    return this.accounts.filter((account) => account.platform === this.draft.channel && account.enabled);
+  }
 
   private draggedEvent: CalendarEvent | null = null;
   private refreshSubscription: Subscription | null = null;
@@ -212,8 +238,28 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
+    this.api.listProjects({ page: 1, pageSize: 50 }).subscribe({
+      next: (response) => {
+        this.projects = response.items;
+      },
+      error: () => {
+        this.projects = [];
+      },
+    });
+    this.api.listPublishingAccounts().subscribe({
+      next: (response) => {
+        this.accounts = response.items;
+      },
+      error: () => {
+        this.accounts = [];
+      },
+    });
     this.load();
-    this.refreshSubscription = timer(30_000, 30_000).subscribe(() => this.load(true));
+    this.refreshSubscription = timer(30_000, 30_000).subscribe(() => {
+      if (!document.hidden) {
+        this.load(true);
+      }
+    });
   }
 
   ngOnDestroy(): void {
@@ -241,6 +287,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   load(silent = false): void {
+    if (!silent) this.error = '';
     const { from, to } = this.range();
     this.api
       .listCalendar(from.toISOString(), to.toISOString(), this.channelFilter ? (this.channelFilter as PublicationChannel) : undefined, this.siteFilter || undefined)
@@ -250,7 +297,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
         },
         error: () => {
           if (!silent) {
-            this.events = [];
+            this.error = 'Calendar could not be loaded. Try again.';
           }
         },
       });
@@ -383,6 +430,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   private reschedule(eventItem: CalendarEvent, target: Date): void {
+    if (eventItem.status === 'published') {
+      this.error = 'Published items cannot be rescheduled.';
+      return;
+    }
     this.dragHint = false;
     const previous = eventItem.scheduledFor;
     // Optimistic update.
@@ -391,6 +442,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       next: () => this.load(true),
       error: () => {
         eventItem.scheduledFor = previous; // rollback
+        this.error = 'The publication could not be rescheduled.';
         this.load(true);
       },
     });
@@ -399,7 +451,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   publishNow(eventItem: CalendarEvent): void {
     this.api.publishNow(eventItem.id).subscribe({
       next: () => this.load(true),
-      error: () => this.load(true),
+      error: () => { this.error = 'The publication could not be published.'; this.load(true); },
     });
   }
 
@@ -412,14 +464,42 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     }
     this.api.cancelPublication(eventItem.id).subscribe({
       next: () => this.load(true),
-      error: () => this.load(true),
+      error: () => { this.error = 'The publication could not be canceled.'; this.load(true); },
     });
   }
 
   retry(eventItem: CalendarEvent): void {
     this.api.retryPublication(eventItem.id).subscribe({
       next: () => this.load(true),
-      error: () => this.load(true),
+      error: () => { this.error = 'The publication could not be retried.'; this.load(true); },
+    });
+  }
+
+  createFromCalendar(): void {
+    if (!this.draft.projectId || !this.draft.scheduledFor) {
+      this.error = 'Select content and a scheduled time.';
+      return;
+    }
+    this.creating = true;
+    this.error = '';
+    this.notice = '';
+    this.api.createPublication({
+      projectId: this.draft.projectId,
+      channel: this.draft.channel,
+      siteId: this.draft.channel === 'website' ? (this.draft.siteId || undefined) : undefined,
+      accountId: this.draft.channel !== 'website' ? (this.draft.accountId || undefined) : undefined,
+      scheduledFor: new Date(this.draft.scheduledFor).toISOString(),
+    }).subscribe({
+      next: () => {
+        this.creating = false;
+        this.notice = 'Publication added to the calendar.';
+        this.draft = { projectId: '', channel: 'website', siteId: '', accountId: '', scheduledFor: '' };
+        this.load(true);
+      },
+      error: (err) => {
+        this.creating = false;
+        this.error = err?.error?.error?.message || 'The publication could not be scheduled.';
+      },
     });
   }
 }

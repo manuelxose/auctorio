@@ -8,6 +8,7 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
 import { getEnv } from "../shared/utils/env";
 import { getContentTypeFromPath } from "../shared/utils/mime";
+import { writeAudit } from "./audit";
 import {
   approveVersion,
   createProject,
@@ -1373,6 +1374,83 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     return reply.send({ ok: true });
   });
 
+  fastify.post("/v2/projects/:id/duplicate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+
+    const project = await prisma.contentProject.findFirst({
+      where: { id: projectId, tenantId: context.tenantId },
+      include: {
+        versions: {
+          orderBy: { versionNumber: "desc" },
+          take: 1,
+          select: {
+            title: true,
+            excerpt: true,
+            bodyHtml: true,
+            seoTitle: true,
+            seoDescription: true,
+          },
+        },
+      },
+    });
+    if (!project) {
+      return notFound(reply, "project not found");
+    }
+
+    const duplicate = await prisma.contentProject.create({
+      data: {
+        tenantId: project.tenantId,
+        siteId: project.siteId,
+        topicId: project.topicId,
+        title: `${project.title} (copy)`,
+        brief: project.brief,
+        goal: project.goal,
+        status: "draft",
+        primaryLanguage: project.primaryLanguage,
+        metadata: {
+          duplicatedFromProjectId: project.id,
+        } as Prisma.InputJsonObject,
+      },
+    });
+
+    const source = project.versions[0];
+    if (source) {
+      await prisma.contentVersion.create({
+        data: {
+          tenantId: duplicate.tenantId,
+          projectId: duplicate.id,
+          versionNumber: 1,
+          status: "draft",
+          title: source.title,
+          excerpt: source.excerpt,
+          bodyHtml: source.bodyHtml,
+          seoTitle: source.seoTitle,
+          seoDescription: source.seoDescription,
+        },
+      });
+    }
+
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: "project.duplicated",
+      entityType: "content_project",
+      entityId: duplicate.id,
+      metadata: { sourceProjectId: project.id },
+    });
+
+    return reply.code(201).send({ id: duplicate.id });
+  });
+
   fastify.post("/v2/content-images/:id/retry", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "projects.manage");
     if (!context) {
@@ -1439,7 +1517,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return;
     }
 
-    const query = request.query as { page?: string; pageSize?: string; siteId?: string; status?: string };
+    const query = request.query as { page?: string; pageSize?: string; siteId?: string; status?: string; unused?: string };
     const page = parsePage(query.page, 1);
     const pageSize = parsePageSize(query.pageSize, 24);
     if (query.status && !isOneOf(query.status, CONTENT_STATUSES)) {
@@ -1449,6 +1527,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     const media = await listMediaImages(context.tenantId, {
       siteId: query.siteId?.trim() || undefined,
       status: query.status?.trim() || undefined,
+      unusedOnly: query.unused === "true",
       page,
       pageSize,
     });
@@ -1468,6 +1547,87 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         })),
       ),
     });
+  });
+
+  fastify.post("/v2/media/bulk-delete", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const body = parseBody<{ itemIds?: string[] }>(request);
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0 || body.itemIds.some((id) => !isUuid(id))) {
+      return badRequest(reply, "itemIds must contain valid ids");
+    }
+    const itemIds = [...new Set(body.itemIds)];
+    const images = await prisma.contentImage.findMany({
+      where: { tenantId: context.tenantId, id: { in: itemIds } },
+      include: { assetVariants: true, _count: { select: { versions: true } } },
+    });
+    if (images.length !== itemIds.length) return notFound(reply, "one or more media assets were not found");
+    const used = images.find((image) => image._count.versions > 0);
+    if (used) return conflict(reply, `media ${used.id} is used by ${used._count.versions} version(s); detach it before deleting`);
+    const storageRoot = path.resolve(getEnv("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+    const paths = images.flatMap((image) => [image.storagePath, ...image.assetVariants.map((variant) => variant.storagePath)])
+      .filter((value): value is string => Boolean(value)).map((value) => path.resolve(storageRoot, value));
+    if (paths.some((filePath) => filePath === storageRoot || !filePath.startsWith(`${storageRoot}${path.sep}`))) {
+      return badRequest(reply, "invalid media storage path");
+    }
+    await prisma.contentImage.deleteMany({ where: { tenantId: context.tenantId, id: { in: itemIds } } });
+    await Promise.all(paths.map(async (filePath) => { try { await fs.unlink(filePath); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; } }));
+    await writeAudit({ tenantId: context.tenantId, actorType: "user", actorUserId: context.userId, action: "media.bulk_deleted", metadata: { count: images.length } });
+    return reply.send({ ok: true, deletedCount: images.length });
+  });
+
+  fastify.delete("/v2/media/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const imageId = (request.params as { id: string }).id;
+    if (!isUuid(imageId)) {
+      return badRequest(reply, "invalid image id");
+    }
+
+    const image = await prisma.contentImage.findFirst({
+      where: { id: imageId, tenantId: context.tenantId },
+      include: { assetVariants: true, _count: { select: { versions: true } } },
+    });
+    if (!image) {
+      return notFound(reply, "media not found");
+    }
+    if (image._count.versions > 0) {
+      return conflict(reply, `media is used by ${image._count.versions} version(s); detach it before deleting`);
+    }
+
+    const storageRoot = path.resolve(getEnv("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+    const paths = [image.storagePath, ...image.assetVariants.map((variant) => variant.storagePath)]
+      .filter((value): value is string => Boolean(value))
+      .map((value) => path.resolve(storageRoot, value));
+    for (const filePath of paths) {
+      if (filePath === storageRoot || !filePath.startsWith(`${storageRoot}${path.sep}`)) {
+        return badRequest(reply, "invalid media storage path");
+      }
+    }
+
+    await prisma.contentImage.delete({ where: { id: image.id } });
+    await Promise.all(paths.map(async (filePath) => {
+      try {
+        await fs.unlink(filePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw error;
+        }
+      }
+    }));
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: "media.deleted",
+      entityType: "content_image",
+      entityId: image.id,
+      metadata: { variantCount: image.assetVariants.length },
+    });
+    return reply.send({ ok: true });
   });
 
   fastify.patch("/v2/versions/:id", async (request, reply) => {

@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
-import type { StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
+import type { AiUsageRow, StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
 
 type SettingsSection = 'profile' | 'sites' | 'team' | 'ai';
 
@@ -87,6 +87,17 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'ai';
         <p class="au-page__subtitle">
           Generation uses the default editorial profile of each site. Advanced prompt management is available to administrators through the API.
         </p>
+        <h3 class="au-surface__title">Usage by provider and model</h3>
+        <div class="au-empty" *ngIf="usageRows.length === 0">No AI usage recorded for this workspace yet.</div>
+        <div class="au-usage" *ngIf="usageRows.length > 0">
+          <div class="au-usage__row" *ngFor="let row of usageRows">
+            <span class="au-usage__model">{{ row.provider }} / {{ row.model }}</span>
+            <span class="au-tag">{{ row.textCount }} texts</span>
+            <span class="au-tag">{{ row.imageCount }} images</span>
+            <span class="au-tag">{{ row.tokensInput + row.tokensOutput }} tokens</span>
+            <span class="au-tag au-tag--muted">{{ costLabel(row) }}</span>
+          </div>
+        </div>
       </section>
     </section>
   `,
@@ -99,6 +110,7 @@ export class SettingsPageComponent implements OnInit {
   section: SettingsSection = 'profile';
   tenantSites: StudioSiteSummary[] = [];
   users: StudioUserSummary[] = [];
+  usageRows: AiUsageRow[] = [];
   inviteEmail = '';
   inviteRole = 'editor';
   inviting = false;
@@ -145,6 +157,14 @@ export class SettingsPageComponent implements OnInit {
         this.users = [];
       },
     });
+    this.api.getAiUsage().subscribe({
+      next: (usage) => {
+        this.usageRows = usage.rows;
+      },
+      error: () => {
+        this.usageRows = [];
+      },
+    });
   }
 
   setSection(section: SettingsSection): void {
@@ -155,6 +175,10 @@ export class SettingsPageComponent implements OnInit {
 
   rolesLabel(member: StudioUserSummary): string {
     return member.roles.map((role) => role.key).join(', ') || '—';
+  }
+
+  costLabel(row: AiUsageRow): string {
+    return `$${row.costUsd.toFixed(4)}`;
   }
 
   invite(): void {

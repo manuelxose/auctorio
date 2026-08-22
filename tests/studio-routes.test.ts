@@ -130,6 +130,119 @@ test("GET /v2/sites returns paginated site summaries", async () => {
   }
 });
 
+test("DELETE /v2/media/:id removes an unused asset and preserves the audit contract", async () => {
+  const fixture = await createFixture();
+  const topic = await prisma.topic.create({
+    data: {
+      tenantId: fixture.tenantId,
+      title: "Media test topic",
+      description: "Topic for media deletion coverage",
+      status: "active",
+    },
+  });
+  const image = await prisma.contentImage.create({
+    data: {
+      tenantId: fixture.tenantId,
+      topicId: topic.id,
+      status: "done",
+    },
+  });
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const response = await server.inject({
+      method: "DELETE",
+      url: `/v2/media/${image.id}`,
+    });
+
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.json(), { ok: true });
+    assert.equal(await prisma.contentImage.findUnique({ where: { id: image.id } }), null);
+    assert.equal(
+      await prisma.auditLog.count({
+        where: { tenantId: fixture.tenantId, action: "media.deleted", entityId: image.id },
+      }),
+      1,
+    );
+  } finally {
+    await server.close();
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("DELETE /v2/media/:id refuses an asset still used by content", async () => {
+  const fixture = await createFixture();
+  const topic = await prisma.topic.create({
+    data: {
+      tenantId: fixture.tenantId,
+      title: "In-use media topic",
+      description: "Topic for media protection coverage",
+      status: "active",
+    },
+  });
+  const image = await prisma.contentImage.create({
+    data: { tenantId: fixture.tenantId, topicId: topic.id, status: "done" },
+  });
+  await prisma.contentVersion.update({
+    where: { id: fixture.versionId },
+    data: { contentImageId: image.id },
+  });
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const response = await server.inject({ method: "DELETE", url: `/v2/media/${image.id}` });
+
+    assert.equal(response.statusCode, 409);
+    assert.match(response.json().error.message, /used by 1 version/);
+    assert.ok(await prisma.contentImage.findUnique({ where: { id: image.id } }));
+  } finally {
+    await server.close();
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("publishing accounts expose real state and never credential references", async () => {
+  const fixture = await createFixture();
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const created = await server.inject({
+      method: "POST",
+      url: "/v2/publishing-accounts",
+      payload: {
+        platform: "website",
+        displayName: "QA website",
+        credentialsRef: "QA_SECRET_REF",
+        siteId: fixture.siteId,
+      },
+    });
+    assert.equal(created.statusCode, 201);
+    const createdBody = created.json();
+    assert.equal(createdBody.status, "pending");
+    assert.equal(createdBody.hasCredentials, true);
+    assert.equal(createdBody.credentialsRef, undefined);
+
+    const listed = await server.inject({ method: "GET", url: "/v2/publishing-accounts" });
+    assert.equal(listed.statusCode, 200);
+    const listBody = listed.json() as { items: Array<Record<string, unknown>> };
+    const found = listBody.items.find((item) => item.id === createdBody.id);
+    assert.ok(found);
+    assert.equal(found.hasCredentials, true);
+    assert.equal(found.credentialsRef, undefined);
+    assert.equal(JSON.stringify(found).includes("QA_SECRET_REF"), false);
+
+    const removed = await server.inject({ method: "DELETE", url: `/v2/publishing-accounts/${createdBody.id}` });
+    assert.equal(removed.statusCode, 200);
+    assert.equal(
+      await prisma.publishingAccount.count({ where: { tenantId: fixture.tenantId } }),
+      0,
+    );
+  } finally {
+    await server.close();
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
 test("GET /v2/projects returns filtered project summaries", async () => {
   const fixture = await createFixture();
   const server = buildStudioTestServer(fixture.tenantId);
@@ -179,6 +292,111 @@ test("GET /v2/projects returns filtered project summaries", async () => {
   }
 });
 
+test("Editorial plan bulk operations approve, reject and delete rows", async () => {
+  const fixture = await createFixture();
+  const plan = await prisma.editorialPlan.create({
+    data: {
+      tenantId: fixture.tenantId,
+      siteId: fixture.siteId,
+      name: "Bulk plan test",
+      dateFrom: new Date("2026-08-22T00:00:00.000Z"),
+      dateTo: new Date("2026-08-29T00:00:00.000Z"),
+      status: "ready",
+    },
+  });
+  const items = await Promise.all([
+    prisma.editorialPlanItem.create({
+      data: { tenantId: fixture.tenantId, planId: plan.id, siteId: fixture.siteId, title: "Row one", channel: "website", scheduledFor: new Date("2026-08-23T10:00:00.000Z") },
+    }),
+    prisma.editorialPlanItem.create({
+      data: { tenantId: fixture.tenantId, planId: plan.id, siteId: fixture.siteId, title: "Row two", channel: "x", scheduledFor: new Date("2026-08-23T11:00:00.000Z") },
+    }),
+  ]);
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const approved = await server.inject({
+      method: "POST",
+      url: "/v2/editorial-plan-items/bulk-approve",
+      payload: { itemIds: items.map((item) => item.id) },
+    });
+    assert.equal(approved.statusCode, 200);
+    assert.equal(approved.json().updatedCount, 2);
+
+    const rejected = await server.inject({
+      method: "POST",
+      url: "/v2/editorial-plan-items/bulk-status",
+      payload: { itemIds: [items[1].id], status: "rejected" },
+    });
+    assert.equal(rejected.statusCode, 200);
+    assert.equal(rejected.json().updatedCount, 1);
+    assert.equal((await prisma.editorialPlanItem.findUnique({ where: { id: items[1].id } }))?.status, "rejected");
+
+    const deleted = await server.inject({
+      method: "POST",
+      url: "/v2/editorial-plan-items/bulk-delete",
+      payload: { itemIds: items.map((item) => item.id) },
+    });
+    assert.equal(deleted.statusCode, 200);
+    assert.equal(deleted.json().deletedCount, 2);
+    assert.equal(await prisma.editorialPlanItem.count({ where: { tenantId: fixture.tenantId } }), 0);
+  } finally {
+    await server.close();
+    await prisma.editorialPlanItem.deleteMany({ where: { tenantId: fixture.tenantId } });
+    await prisma.editorialPlan.deleteMany({ where: { tenantId: fixture.tenantId } });
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("Editorial plan rows can be approved, edited and deleted without creating content", async () => {
+  const fixture = await createFixture();
+  const plan = await prisma.editorialPlan.create({
+    data: {
+      tenantId: fixture.tenantId,
+      siteId: fixture.siteId,
+      name: "Plan test",
+      dateFrom: new Date("2026-08-22T00:00:00.000Z"),
+      dateTo: new Date("2026-08-29T00:00:00.000Z"),
+      status: "ready",
+    },
+  });
+  const item = await prisma.editorialPlanItem.create({
+    data: {
+      tenantId: fixture.tenantId,
+      planId: plan.id,
+      siteId: fixture.siteId,
+      title: "Plan item",
+      channel: "website",
+      scheduledFor: new Date("2026-08-23T10:00:00.000Z"),
+    },
+  });
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const edited = await server.inject({
+      method: "PATCH",
+      url: `/v2/editorial-plan-items/${item.id}`,
+      payload: { title: "Edited plan item", primaryKeyword: "editorial workflow" },
+    });
+    assert.equal(edited.statusCode, 200);
+    assert.equal(edited.json().title, "Edited plan item");
+
+    const approved = await server.inject({ method: "POST", url: `/v2/editorial-plan-items/${item.id}/approve` });
+    assert.equal(approved.statusCode, 200);
+    assert.equal(approved.json().status, "approved");
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: fixture.tenantId } }), 1);
+
+    const deleted = await server.inject({ method: "DELETE", url: `/v2/editorial-plan-items/${item.id}` });
+    assert.equal(deleted.statusCode, 200);
+    assert.equal(await prisma.editorialPlanItem.findUnique({ where: { id: item.id } }), null);
+  } finally {
+    await server.close();
+    await prisma.editorialPlanItem.deleteMany({ where: { tenantId: fixture.tenantId } });
+    await prisma.editorialPlan.deleteMany({ where: { tenantId: fixture.tenantId } });
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
 test("GET /v2/projects/:id returns review gate and version insights", async () => {
   const fixture = await createFixture();
   const server = buildStudioTestServer(fixture.tenantId);
@@ -213,6 +431,39 @@ test("GET /v2/projects/:id returns review gate and version insights", async () =
     assert.equal(payload.versions[0]?.versionNumber, 1);
     assert.equal(payload.versions[0]?.wordCount, 8);
     assert.equal(payload.versions[0]?.qaFailureCount, 0);
+  } finally {
+    await server.close();
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("POST /v2/projects/:id/duplicate copies the project and latest version", async () => {
+  const fixture = await createFixture();
+  const server = buildStudioTestServer(fixture.tenantId);
+
+  try {
+    const response = await server.inject({
+      method: "POST",
+      url: `/v2/projects/${fixture.projectId}/duplicate`,
+    });
+
+    assert.equal(response.statusCode, 201);
+    const duplicateId = (response.json() as { id: string }).id;
+    const duplicate = await prisma.contentProject.findUnique({
+      where: { id: duplicateId },
+      include: { versions: true },
+    });
+    assert.ok(duplicate);
+    assert.ok(duplicate.title.endsWith("(copy)"));
+    assert.equal(duplicate.brief, "Brief de prueba para los listados del studio");
+    assert.equal(duplicate.versions.length, 1);
+    assert.equal(duplicate.versions[0]?.bodyHtml, "<p>Contenido de prueba suficientemente largo para el listado.</p>");
+    assert.equal(
+      await prisma.auditLog.count({
+        where: { tenantId: fixture.tenantId, action: "project.duplicated", entityId: duplicateId },
+      }),
+      1,
+    );
   } finally {
     await server.close();
     await cleanupFixture(fixture.tenantId);

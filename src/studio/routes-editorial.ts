@@ -55,7 +55,20 @@ import {
   updateSocialContent,
 } from "./social";
 import { listAudit } from "./audit";
+import { writeAudit } from "./audit";
 import { buildAssetPublicUrl } from "./orchestration";
+import {
+  bulkApproveEditorialPlanItems,
+  bulkDeleteEditorialPlanItems,
+  bulkSetEditorialPlanItemStatus,
+  deleteEditorialPlanItem,
+  generateContentFromEditorialPlanItem,
+  generateEditorialPlan,
+  getEditorialPlan,
+  listEditorialPlans,
+  setEditorialPlanItemStatus,
+  updateEditorialPlanItem,
+} from "./editorial-plan";
 
 const prisma = getPrismaClient();
 
@@ -1041,6 +1054,15 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         configuration: body.configuration ? (body.configuration as Prisma.InputJsonObject) : Prisma.JsonNull,
       },
     });
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: "connection.created",
+      entityType: "publishing_account",
+      entityId: account.id,
+      metadata: { platform: account.platform, siteId: account.siteId, hasCredentials: Boolean(account.credentialsRef) },
+    });
     return reply.code(201).send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
   });
 
@@ -1079,6 +1101,15 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         configuration: body.configuration ? (body.configuration as Prisma.InputJsonObject) : undefined,
       },
     });
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: body.credentialsRef === undefined ? "connection.updated" : "connection.credential_replaced",
+      entityType: "publishing_account",
+      entityId: account.id,
+      metadata: { platform: account.platform, enabled: account.enabled, hasCredentials: Boolean(account.credentialsRef) },
+    });
     return reply.send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
   });
 
@@ -1096,6 +1127,15 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return notFound(reply, "account not found");
     }
     await prisma.publishingAccount.delete({ where: { id: existing.id } });
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: "connection.deleted",
+      entityType: "publishing_account",
+      entityId: existing.id,
+      metadata: { platform: existing.platform, siteId: existing.siteId },
+    });
     return reply.send({ ok: true });
   });
 
@@ -1128,6 +1168,15 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         status: result.ok ? "active" : "error",
         lastVerifiedAt: new Date(),
       },
+    });
+    await writeAudit({
+      tenantId: context.tenantId,
+      actorType: "user",
+      actorUserId: context.userId,
+      action: "connection.tested",
+      entityType: "publishing_account",
+      entityId: account.id,
+      metadata: { platform: account.platform, ok: result.ok },
     });
     return reply.send(result);
   });
@@ -1222,6 +1271,220 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const body = parseBody<{ siteId?: string }>(request);
     const policy = await resumeAutomation(context.tenantId, parseOptionalString(body.siteId) ?? null, context.userId);
     return reply.send(policy);
+  });
+
+  // ──────────────────────────────────────────────────────────── Editorial plans
+
+  fastify.get("/v2/editorial-plans", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const query = request.query as { page?: string; pageSize?: string };
+    return reply.send(await listEditorialPlans(
+      context.tenantId,
+      parsePage(query.page, 1),
+      parsePageSize(query.pageSize, 20),
+    ));
+  });
+
+  fastify.get("/v2/editorial-plans/:id", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    const plan = await getEditorialPlan(context.tenantId, planId);
+    if (!plan) return notFound(reply, "editorial plan not found");
+    return reply.send(plan);
+  });
+
+  fastify.post("/v2/editorial-plans/generate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const body = parseBody<{
+      siteId?: string;
+      briefId?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      objective?: string;
+      channels?: string[];
+      publicationCount?: number;
+      frequency?: string;
+      timezone?: string;
+      accountIds?: string[];
+      language?: string;
+      audience?: string;
+      topics?: string[];
+      excludedTopics?: string[];
+    }>(request);
+    const dateFrom = parseIsoDate(body.dateFrom);
+    const dateTo = parseIsoDate(body.dateTo);
+    const channels = (body.channels ?? []).filter((channel): channel is (typeof PUBLICATION_CHANNELS)[number] =>
+      isOneOf(channel, PUBLICATION_CHANNELS),
+    );
+    if (!dateFrom || !dateTo) return badRequest(reply, "dateFrom and dateTo are required ISO dates");
+    if (!body.siteId || !isUuid(body.siteId)) return badRequest(reply, "siteId is required and must be a valid id");
+    if (channels.length === 0) return badRequest(reply, "channels must include website, x, or instagram");
+    if (!body.publicationCount) return badRequest(reply, "publicationCount must be greater than zero");
+    try {
+      const plan = await generateEditorialPlan({
+        tenantId: context.tenantId,
+        siteId: parseOptionalString(body.siteId),
+        briefId: parseOptionalString(body.briefId),
+        dateFrom,
+        dateTo,
+        objective: parseOptionalString(body.objective),
+        channels,
+        publicationCount: body.publicationCount,
+        frequency: parseOptionalString(body.frequency),
+        timezone: parseOptionalString(body.timezone) ?? "Europe/Madrid",
+        accountIds: body.accountIds ?? [],
+        language: parseOptionalString(body.language) ?? "es",
+        audience: parseOptionalString(body.audience),
+        topics: body.topics ?? [],
+        excludedTopics: body.excludedTopics ?? [],
+        userId: context.userId,
+      });
+      return reply.code(201).send(plan);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.patch("/v2/editorial-plan-items/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    const body = parseBody<Record<string, unknown>>(request);
+    const updated = await updateEditorialPlanItem(context.tenantId, itemId, {
+      title: typeof body.title === "string" ? body.title : undefined,
+      workingTitle: typeof body.workingTitle === "string" || body.workingTitle === null ? body.workingTitle : undefined,
+      topic: typeof body.topic === "string" || body.topic === null ? body.topic : undefined,
+      scheduledFor: body.scheduledFor === null ? null : parseIsoDate(body.scheduledFor),
+      primaryKeyword: typeof body.primaryKeyword === "string" || body.primaryKeyword === null ? body.primaryKeyword : undefined,
+      seoTitle: typeof body.seoTitle === "string" || body.seoTitle === null ? body.seoTitle : undefined,
+      metaDescription: typeof body.metaDescription === "string" || body.metaDescription === null ? body.metaDescription : undefined,
+      socialHook: typeof body.socialHook === "string" || body.socialHook === null ? body.socialHook : undefined,
+      imageConcept: typeof body.imageConcept === "string" || body.imageConcept === null ? body.imageConcept : undefined,
+      priority: typeof body.priority === "number" ? body.priority : undefined,
+      notes: typeof body.notes === "string" || body.notes === null ? body.notes : undefined,
+    });
+    if (!updated) return notFound(reply, "editorial plan item not found");
+    return reply.send(updated);
+  });
+
+  fastify.post("/v2/editorial-plan-items/:id/approve", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "review.approve");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    const updated = await setEditorialPlanItemStatus(context.tenantId, itemId, "approved", context.userId);
+    if (!updated) return notFound(reply, "editorial plan item not found");
+    return reply.send(updated);
+  });
+
+  fastify.post("/v2/editorial-plan-items/bulk-approve", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "review.approve");
+    if (!context) return;
+    const body = parseBody<{ itemIds?: string[] }>(request);
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0 || body.itemIds.some((id) => !isUuid(id))) return badRequest(reply, "itemIds must contain valid ids");
+    return reply.send(await bulkApproveEditorialPlanItems(context.tenantId, body.itemIds, context.userId));
+  });
+
+  fastify.post("/v2/editorial-plan-items/bulk-status", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "review.approve");
+    if (!context) return;
+    const body = parseBody<{ itemIds?: string[]; status?: string }>(request);
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0 || body.itemIds.some((id) => !isUuid(id))) return badRequest(reply, "itemIds must contain valid ids");
+    if (!body.status || !["approved", "rejected", "proposed", "canceled"].includes(body.status)) return badRequest(reply, "status must be one of: approved, rejected, proposed, canceled");
+    return reply.send(await bulkSetEditorialPlanItemStatus(context.tenantId, body.itemIds, body.status as "approved" | "rejected" | "proposed" | "canceled", context.userId));
+  });
+
+  fastify.post("/v2/editorial-plan-items/bulk-delete", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const body = parseBody<{ itemIds?: string[] }>(request);
+    if (!Array.isArray(body.itemIds) || body.itemIds.length === 0 || body.itemIds.some((id) => !isUuid(id))) return badRequest(reply, "itemIds must contain valid ids");
+    try {
+      return reply.send(await bulkDeleteEditorialPlanItems(context.tenantId, body.itemIds, context.userId));
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.delete("/v2/editorial-plan-items/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    try {
+      const deleted = await deleteEditorialPlanItem(context.tenantId, itemId, context.userId);
+      if (!deleted) return notFound(reply, "editorial plan item not found");
+      return reply.send(deleted);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.post("/v2/editorial-plan-items/:id/generate-content", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    try {
+      const result = await generateContentFromEditorialPlanItem(context.tenantId, itemId, context.userId);
+      if (!result) return notFound(reply, "editorial plan item not found");
+      return reply.code(202).send(result);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────── AI usage
+
+  fastify.get("/v2/ai-usage", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) return;
+    const [textGroups, imageGroups] = await Promise.all([
+      prisma.contentText.groupBy({
+        by: ["provider", "model"],
+        where: { tenantId: context.tenantId },
+        _count: { _all: true },
+        _sum: { costUsd: true, tokensInput: true, tokensOutput: true },
+      }),
+      prisma.contentImage.groupBy({
+        by: ["provider", "model"],
+        where: { tenantId: context.tenantId },
+        _count: { _all: true },
+        _sum: { costUsd: true },
+      }),
+    ]);
+    const rows = new Map<string, { provider: string; model: string; textCount: number; imageCount: number; tokensInput: number; tokensOutput: number; costUsd: number }>();
+    for (const group of textGroups) {
+      const key = `${group.provider ?? "unknown"}|${group.model ?? "unknown"}`;
+      rows.set(key, {
+        provider: group.provider ?? "unknown",
+        model: group.model ?? "unknown",
+        textCount: group._count._all,
+        imageCount: 0,
+        tokensInput: group._sum.tokensInput ?? 0,
+        tokensOutput: group._sum.tokensOutput ?? 0,
+        costUsd: Number(group._sum.costUsd ?? 0),
+      });
+    }
+    for (const group of imageGroups) {
+      const key = `${group.provider ?? "unknown"}|${group.model ?? "unknown"}`;
+      const existing = rows.get(key);
+      rows.set(key, {
+        provider: existing?.provider ?? group.provider ?? "unknown",
+        model: existing?.model ?? group.model ?? "unknown",
+        textCount: existing?.textCount ?? 0,
+        imageCount: group._count._all,
+        tokensInput: existing?.tokensInput ?? 0,
+        tokensOutput: existing?.tokensOutput ?? 0,
+        costUsd: (existing?.costUsd ?? 0) + Number(group._sum.costUsd ?? 0),
+      });
+    }
+    return reply.send({ rows: Array.from(rows.values()) });
   });
 
   // ──────────────────────────────────────────────────────────── Campaigns & briefs
@@ -1381,6 +1644,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+    const weekEnd = new Date(dayStart.getTime() + 7 * 24 * 3_600_000);
 
     const [
       todayPlannedArticles,
@@ -1395,6 +1659,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       sources,
       recentPublications,
       automation,
+      connections,
+      weekPlanItems,
+      todayPlanCount,
     ] = await Promise.all([
       prisma.publication.count({
         where: { tenantId, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
@@ -1428,6 +1695,34 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         },
       }),
       getAutomationStatus(tenantId, null),
+      prisma.publishingAccount.findMany({
+        where: { tenantId },
+        orderBy: [{ platform: "asc" }, { displayName: "asc" }],
+        select: {
+          id: true,
+          platform: true,
+          displayName: true,
+          enabled: true,
+          status: true,
+          lastVerifiedAt: true,
+          site: { select: { name: true } },
+        },
+      }),
+      prisma.editorialPlanItem.findMany({
+        where: {
+          tenantId,
+          scheduledFor: { gte: dayStart, lt: weekEnd },
+          status: { notIn: ["canceled", "rejected"] },
+        },
+        select: { channel: true, status: true, projectId: true },
+      }),
+      prisma.editorialPlanItem.count({
+        where: {
+          tenantId,
+          scheduledFor: { gte: dayStart, lt: dayEnd },
+          status: { notIn: ["canceled", "rejected"] },
+        },
+      }),
     ]);
 
     return reply.send({
@@ -1456,6 +1751,26 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         pausedReason: automation.pausedReason,
         warnings: automation.warnings,
         nextSlots: automation.nextSlots.slice(0, 5),
+      },
+      connections: connections.map((connection) => ({
+        id: connection.id,
+        platform: connection.platform,
+        displayName: connection.displayName,
+        enabled: connection.enabled,
+        status: connection.status,
+        lastVerifiedAt: connection.lastVerifiedAt,
+        siteName: connection.site?.name ?? null,
+      })),
+      planCoverage: {
+        today: todayPlanCount,
+        week: {
+          total: weekPlanItems.length,
+          generated: weekPlanItems.filter((item) => item.projectId !== null).length,
+          approved: weekPlanItems.filter((item) => item.status === "approved").length,
+          website: weekPlanItems.filter((item) => item.channel === "website").length,
+          x: weekPlanItems.filter((item) => item.channel === "x").length,
+          instagram: weekPlanItems.filter((item) => item.channel === "instagram").length,
+        },
       },
       recentPublications: recentPublications.map((publication) => ({
         id: publication.id,

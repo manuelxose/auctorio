@@ -123,12 +123,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   readonly primaryNav: NavItem[] = [
     { label: 'Overview', path: '/studio/overview' },
     { label: 'Calendar', path: '/studio/calendar' },
+    { label: 'Editorial Plan', path: '/studio/editorial-plan' },
     { label: 'Content', path: '/studio/content' },
     { label: 'Publications', path: '/studio/publications' },
     { label: 'Inbox', path: '/studio/inbox' },
     { label: 'Sources', path: '/studio/sources' },
     { label: 'Automation', path: '/studio/automation' },
     { label: 'Media', path: '/studio/media' },
+    { label: 'Connections', path: '/studio/connections' },
   ];
 
   private subscription: Subscription | null = null;

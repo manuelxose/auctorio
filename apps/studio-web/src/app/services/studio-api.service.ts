@@ -3,6 +3,7 @@ import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import type {
+  AiUsageRow,
   AutomationPolicy,
   AutomationStatus,
   CalendarEvent,
@@ -16,6 +17,7 @@ import type {
   ProjectStatus,
   PublishProjectPayload,
   PublishingAccount,
+  EditorialPlan,
   PublishingWindow,
   SourceItemStatus,
   SourceType,
@@ -171,6 +173,10 @@ export class StudioApiService {
     );
   }
 
+  duplicateProject(projectId: string): Observable<{ id: string }> {
+    return this.http.post<{ id: string }>(`${this.apiBase}/backend/v2/projects/${projectId}/duplicate`, {});
+  }
+
   getProject(projectId: string): Observable<StudioProjectDetailView> {
     return this.http.get<StudioProjectDetailView>(
       `${this.apiBase}/backend/v2/projects/${projectId}`,
@@ -214,10 +220,18 @@ export class StudioApiService {
     return this.http.post(`${this.apiBase}/backend/v2/content-images/${imageId}/retry`, {});
   }
 
+  deleteMedia(imageId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/media/${imageId}`);
+  }
+
+  bulkDeleteMedia(itemIds: string[]): Observable<{ ok: true; deletedCount: number }> {
+    return this.http.post<{ ok: true; deletedCount: number }>(`${this.apiBase}/backend/v2/media/bulk-delete`, { itemIds });
+  }
+
   listMedia(
     page = 1,
     pageSize = 24,
-    filters: { siteId?: string; status?: string } = {},
+    filters: { siteId?: string; status?: string; unused?: boolean } = {},
   ): Observable<PaginatedResponse<StudioMediaItem>> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (filters.siteId) {
@@ -225,6 +239,9 @@ export class StudioApiService {
     }
     if (filters.status) {
       params = params.set('status', filters.status);
+    }
+    if (filters.unused) {
+      params = params.set('unused', 'true');
     }
     return this.http.get<PaginatedResponse<StudioMediaItem>>(
       `${this.apiBase}/backend/v2/media`,
@@ -565,7 +582,7 @@ export class StudioApiService {
   }
 
   createPublishingAccount(payload: {
-    platform: 'x' | 'instagram';
+    platform: 'website' | 'x' | 'instagram';
     displayName: string;
     credentialsRef?: string;
     externalAccountId?: string;
@@ -584,6 +601,61 @@ export class StudioApiService {
 
   verifyPublishingAccount(accountId: string): Observable<{ ok: boolean; message: string }> {
     return this.http.post<{ ok: boolean; message: string }>(`${this.apiBase}/backend/v2/publishing-accounts/${accountId}/verify`, {});
+  }
+
+  listEditorialPlans(page = 1, pageSize = 20): Observable<PaginatedResponse<EditorialPlan>> {
+    return this.http.get<PaginatedResponse<EditorialPlan>>(`${this.apiBase}/backend/v2/editorial-plans`, {
+      params: new HttpParams().set('page', page).set('pageSize', pageSize),
+    });
+  }
+
+  getEditorialPlan(planId: string): Observable<EditorialPlan> {
+    return this.http.get<EditorialPlan>(`${this.apiBase}/backend/v2/editorial-plans/${planId}`);
+  }
+
+  generateEditorialPlan(payload: {
+    siteId?: string;
+    dateFrom: string;
+    dateTo: string;
+    objective?: string;
+    channels: Array<'website' | 'x' | 'instagram'>;
+    publicationCount: number;
+    frequency?: string;
+    timezone?: string;
+    language?: string;
+    audience?: string;
+    topics?: string[];
+    excludedTopics?: string[];
+  }): Observable<EditorialPlan> {
+    return this.http.post<EditorialPlan>(`${this.apiBase}/backend/v2/editorial-plans/generate`, payload);
+  }
+
+  updateEditorialPlanItem(itemId: string, payload: Record<string, unknown>): Observable<EditorialPlan['items'] extends Array<infer Item> ? Item : never> {
+    return this.http.patch<EditorialPlan['items'] extends Array<infer Item> ? Item : never>(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}`, payload);
+  }
+
+  approveEditorialPlanItem(itemId: string): Observable<unknown> {
+    return this.http.post(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}/approve`, {});
+  }
+
+  bulkApproveEditorialPlanItems(itemIds: string[]): Observable<{ updatedCount: number }> {
+    return this.http.post<{ updatedCount: number }>(`${this.apiBase}/backend/v2/editorial-plan-items/bulk-approve`, { itemIds });
+  }
+
+  bulkSetEditorialPlanItemStatus(itemIds: string[], status: 'approved' | 'rejected' | 'proposed' | 'canceled'): Observable<{ updatedCount: number }> {
+    return this.http.post<{ updatedCount: number }>(`${this.apiBase}/backend/v2/editorial-plan-items/bulk-status`, { itemIds, status });
+  }
+
+  bulkDeleteEditorialPlanItems(itemIds: string[]): Observable<{ deletedCount: number }> {
+    return this.http.post<{ deletedCount: number }>(`${this.apiBase}/backend/v2/editorial-plan-items/bulk-delete`, { itemIds });
+  }
+
+  deleteEditorialPlanItem(itemId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}`);
+  }
+
+  generateContentFromEditorialPlanItem(itemId: string): Observable<unknown> {
+    return this.http.post(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}/generate-content`, {});
   }
 
   getAutomationPolicy(siteId?: string): Observable<AutomationPolicy> {
@@ -618,6 +690,10 @@ export class StudioApiService {
 
   getOverview(): Observable<StudioOverview> {
     return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`);
+  }
+
+  getAiUsage(): Observable<{ rows: AiUsageRow[] }> {
+    return this.http.get<{ rows: AiUsageRow[] }>(`${this.apiBase}/backend/v2/ai-usage`);
   }
 
   getWorkerHealth(): Observable<WorkerHealth> {

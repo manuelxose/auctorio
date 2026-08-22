@@ -787,6 +787,7 @@ async function listMediaImages(tenantId, input) {
         tenantId,
         ...(input.siteId ? { topic: { projects: { some: { siteId: input.siteId } } } } : {}),
         ...(input.status ? { status: input.status } : {}),
+        ...(input.unusedOnly ? { versions: { none: {} } } : {}),
     };
     const [total, images] = await prisma.$transaction([
         prisma.contentImage.count({ where }),
