@@ -124,6 +124,50 @@ import type { StudioOverview, WorkerHealth } from '../models/studio.models';
         </section>
       </div>
 
+      <div class="au-grid au-grid--dash" *ngIf="overview">
+        <section class="au-surface au-surface--padded">
+          <header class="au-surface__header">
+            <h2 class="au-surface__title">Destinations</h2>
+            <a class="au-link" routerLink="/studio/connections">Connections</a>
+          </header>
+          <div class="au-empty" *ngIf="overview.connections.length === 0">No publishing destinations connected yet.</div>
+          <div class="au-row" *ngFor="let connection of overview.connections">
+            <span class="au-row__title">{{ connection.displayName }}</span>
+            <span class="au-channel-badge" [ngClass]="'au-channel-badge--' + connection.platform">{{ connection.platform }}</span>
+            <span class="au-tag" [class.au-tag--success]="connection.enabled && connection.status === 'active'" [class.au-tag--danger]="connection.enabled && connection.status === 'error'" [class.au-tag--muted]="!connection.enabled">
+              {{ !connection.enabled ? 'Disabled' : connection.status === 'active' ? 'Connected' : 'Action required' }}
+            </span>
+          </div>
+        </section>
+
+        <section class="au-surface au-surface--padded">
+          <header class="au-surface__header">
+            <h2 class="au-surface__title">Editorial plan</h2>
+            <a class="au-link" routerLink="/studio/editorial-plan">Open plan</a>
+          </header>
+          <div class="au-row">
+            <span class="au-row__title">Planned today</span>
+            <span class="au-tag au-tag--success">{{ overview.planCoverage.today }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Planned this week</span>
+            <span class="au-tag">{{ overview.planCoverage.week.total }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Generated</span>
+            <span class="au-tag">{{ overview.planCoverage.week.generated }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Approved</span>
+            <span class="au-tag au-tag--success">{{ overview.planCoverage.week.approved }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">By channel</span>
+            <span class="au-row__meta">Web {{ overview.planCoverage.week.website }} · X {{ overview.planCoverage.week.x }} · IG {{ overview.planCoverage.week.instagram }}</span>
+          </div>
+        </section>
+      </div>
+
       <section class="au-surface" *ngIf="overview">
         <header class="au-surface__header">
           <h2 class="au-surface__title">Recent publications</h2>
@@ -200,7 +244,11 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.load();
-    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.load());
+    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => {
+      if (!document.hidden) {
+        this.load();
+      }
+    });
   }
 
   ngOnDestroy(): void {

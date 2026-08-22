@@ -271,6 +271,27 @@ enum PublicationState {
   unpublished
 }
 
+enum EditorialPlanStatus {
+  draft
+  generating
+  ready
+  failed
+  archived
+}
+
+enum EditorialPlanItemStatus {
+  proposed
+  approved
+  rejected
+  content_pending
+  generating
+  content_ready
+  review_required
+  scheduled
+  published
+  canceled
+}
+
 enum PublicationAttemptStatus {
   queued
   running
@@ -326,6 +347,8 @@ model Tenant {
   campaigns Campaign[]
   editorialBriefs EditorialBrief[]
   auditLogs AuditLog[]
+  editorialPlans EditorialPlan[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@map("tenants")
 }
@@ -502,6 +525,8 @@ model Site {
   publishingAccounts PublishingAccount[]
   automationPolicies AutomationPolicy[]
   publications    Publication[]
+  editorialPlans EditorialPlan[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -543,6 +568,7 @@ model ContentProject {
   publicationJobs PublicationJob[]
   socialContents  SocialContent[]
   publications    Publication[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, siteId, status])
   @@index([tenantId, topicId])
@@ -750,6 +776,7 @@ model StudioUser {
   approvedPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionApprovedBy")
   createdPromptAssignments StudioPromptAssignment[] @relation("StudioPromptAssignmentCreatedBy")
   auditLogs AuditLog[] @relation("AuditLogActor")
+  editorialPlanItems EditorialPlanItem[] @relation("EditorialPlanItemAssignee")
 
   @@unique([tenantId, email])
   @@index([accountId])
@@ -1006,6 +1033,7 @@ model SourceItem {
   source   ContentSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   cluster  StoryCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   projects ContentProject[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@unique([tenantId, sourceId, externalId])
   @@unique([tenantId, contentHash])
@@ -1087,6 +1115,7 @@ model PublishingAccount {
   tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site         Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
   publications Publication[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, platform, status])
   @@map("publishing_accounts")
@@ -1220,6 +1249,7 @@ model Campaign {
   tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   projects     ContentProject[]
   publications Publication[]
+  editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, status])
   @@map("campaigns")
@@ -1245,9 +1275,99 @@ model EditorialBrief {
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   projects ContentProject[]
+  editorialPlans EditorialPlan[]
 
   @@index([tenantId, active])
   @@map("editorial_briefs")
+}
+
+model EditorialPlan {
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @db.Uuid @map("tenant_id")
+  siteId            String?            @db.Uuid @map("site_id")
+  briefId           String?            @db.Uuid @map("brief_id")
+  name              String
+  status            EditorialPlanStatus @default(draft)
+  dateFrom          DateTime           @map("date_from")
+  dateTo            DateTime           @map("date_to")
+  objective         String?
+  channels         Json?
+  accountIds       Json?               @map("account_ids")
+  frequency        String?
+  timezone         String              @default("Europe/Madrid")
+  configuration    Json?
+  provider         String?
+  model            String?
+  promptVersion    String?              @map("prompt_version")
+  generatedOutput  Json?                @map("generated_output")
+  error            String?              @db.Text
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  brief EditorialBrief? @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  items EditorialPlanItem[]
+
+  @@index([tenantId, status, dateFrom, dateTo])
+  @@index([tenantId, siteId, createdAt])
+  @@map("editorial_plans")
+}
+
+model EditorialPlanItem {
+  id                    String                  @id @default(uuid()) @db.Uuid
+  tenantId              String                  @db.Uuid @map("tenant_id")
+  planId                String                  @db.Uuid @map("plan_id")
+  siteId                String?                 @db.Uuid @map("site_id")
+  accountId             String?                 @db.Uuid @map("account_id")
+  campaignId            String?                 @db.Uuid @map("campaign_id")
+  sourceItemId          String?                 @db.Uuid @map("source_item_id")
+  projectId             String?                 @db.Uuid @map("project_id")
+  assignedUserId        String?                 @db.Uuid @map("assigned_user_id")
+  scheduledFor          DateTime?               @map("scheduled_for")
+  title                 String
+  workingTitle          String?                 @map("working_title")
+  topic                 String?
+  channel               PublicationChannel
+  newsOrEvergreen       String?                 @map("news_or_evergreen")
+  objective             String?
+  audience              String?
+  searchIntent          String?                 @map("search_intent")
+  primaryKeyword        String?                 @map("primary_keyword")
+  secondaryKeywords     Json?                   @map("secondary_keywords")
+  relatedEntities       Json?                   @map("related_entities")
+  suggestedSlug         String?                 @map("suggested_slug")
+  seoTitle              String?                 @map("seo_title")
+  metaDescription       String?                 @map("meta_description")
+  socialHook            String?                 @map("social_hook")
+  cta                   String?
+  suggestedHashtags     Json?                   @map("suggested_hashtags")
+  imageConcept          String?                 @map("image_concept")
+  imageRequirements     String?                 @map("image_requirements")
+  priority              Int                     @default(0)
+  status                EditorialPlanItemStatus @default(proposed)
+  contentGenerationStatus String                @default("pending") @map("content_generation_status")
+  approvalStatus        String                @default("pending") @map("approval_status")
+  publicationStatus     String?               @map("publication_status")
+  notes                 String?                 @db.Text
+  metadata              Json?
+  createdAt             DateTime                @default(now()) @map("created_at")
+  updatedAt             DateTime                @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan EditorialPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  account PublishingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sourceItem SourceItem? @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  project ContentProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assignedUser StudioUser? @relation("EditorialPlanItemAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, planId, status])
+  @@index([tenantId, channel, scheduledFor])
+  @@index([tenantId, siteId, scheduledFor])
+  @@index([tenantId, projectId])
+  @@map("editorial_plan_items")
 }
 
 model AuditLog {

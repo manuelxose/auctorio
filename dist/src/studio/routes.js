@@ -11,6 +11,7 @@ const prisma_1 = require("../infrastructure/db/prisma");
 const redis_1 = require("../infrastructure/queue/redis");
 const env_1 = require("../shared/utils/env");
 const mime_1 = require("../shared/utils/mime");
+const audit_1 = require("./audit");
 const repository_1 = require("./repository");
 const auth_1 = require("./auth");
 const orchestration_1 = require("./orchestration");
@@ -1023,6 +1024,76 @@ function registerStudioRoutes(fastify) {
         });
         return reply.send({ ok: true });
     });
+    fastify.post("/v2/projects/:id/duplicate", async (request, reply) => {
+        const context = await (0, http_utils_1.requireStudioPermission)(request, reply, "projects.manage");
+        if (!context) {
+            return;
+        }
+        const projectId = request.params.id;
+        if (!(0, http_utils_1.isUuid)(projectId)) {
+            return (0, http_utils_1.badRequest)(reply, "invalid project id");
+        }
+        const project = await prisma.contentProject.findFirst({
+            where: { id: projectId, tenantId: context.tenantId },
+            include: {
+                versions: {
+                    orderBy: { versionNumber: "desc" },
+                    take: 1,
+                    select: {
+                        title: true,
+                        excerpt: true,
+                        bodyHtml: true,
+                        seoTitle: true,
+                        seoDescription: true,
+                    },
+                },
+            },
+        });
+        if (!project) {
+            return (0, http_utils_1.notFound)(reply, "project not found");
+        }
+        const duplicate = await prisma.contentProject.create({
+            data: {
+                tenantId: project.tenantId,
+                siteId: project.siteId,
+                topicId: project.topicId,
+                title: `${project.title} (copy)`,
+                brief: project.brief,
+                goal: project.goal,
+                status: "draft",
+                primaryLanguage: project.primaryLanguage,
+                metadata: {
+                    duplicatedFromProjectId: project.id,
+                },
+            },
+        });
+        const source = project.versions[0];
+        if (source) {
+            await prisma.contentVersion.create({
+                data: {
+                    tenantId: duplicate.tenantId,
+                    projectId: duplicate.id,
+                    versionNumber: 1,
+                    status: "draft",
+                    title: source.title,
+                    excerpt: source.excerpt,
+                    bodyHtml: source.bodyHtml,
+                    seoTitle: source.seoTitle,
+                    seoDescription: source.seoDescription,
+                },
+            });
+        }
+        await (0, audit_1.writeAudit)({
+            tenantId: context.tenantId,
+            actorType: "user",
+            actorUserId: context.userId,
+            action: "project.duplicated",
+            entityType: "content_project",
+            entityId: duplicate.id,
+            metadata: { sourceProjectId: project.id },
+        });
+        return reply.code(201).send({ id: duplicate.id });
+    });
     fastify.post("/v2/content-images/:id/retry", async (request, reply) => {
         const context = await (0, http_utils_1.requireStudioPermission)(request, reply, "projects.manage");
         if (!context) {
@@ -1085,6 +1156,7 @@ function registerStudioRoutes(fastify) {
         const media = await (0, repository_1.listMediaImages)(context.tenantId, {
             siteId: query.siteId?.trim() || undefined,
             status: query.status?.trim() || undefined,
+            unusedOnly: query.unused === "true",
             page,
             pageSize,
         });
@@ -1099,6 +1171,91 @@ function registerStudioRoutes(fastify) {
                 }))),
             }))),
         });
+    });
+    fastify.post("/v2/media/bulk-delete", async (request, reply) => {
+        const context = await (0, http_utils_1.requireStudioPermission)(request, reply, "projects.manage");
+        if (!context)
+            return;
+        const body = (0, http_utils_1.parseBody)(request);
+        if (!Array.isArray(body.itemIds) || body.itemIds.length === 0 || body.itemIds.some((id) => !(0, http_utils_1.isUuid)(id))) {
+            return (0, http_utils_1.badRequest)(reply, "itemIds must contain valid ids");
+        }
+        const itemIds = [...new Set(body.itemIds)];
+        const images = await prisma.contentImage.findMany({
+            where: { tenantId: context.tenantId, id: { in: itemIds } },
+            include: { assetVariants: true, _count: { select: { versions: true } } },
+        });
+        if (images.length !== itemIds.length)
+            return (0, http_utils_1.notFound)(reply, "one or more media assets were not found");
+        const used = images.find((image) => image._count.versions > 0);
+        if (used)
+            return (0, http_utils_1.conflict)(reply, `media ${used.id} is used by ${used._count.versions} version(s); detach it before deleting`);
+        const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+        const paths = images.flatMap((image) => [image.storagePath, ...image.assetVariants.map((variant) => variant.storagePath)])
+            .filter((value) => Boolean(value)).map((value) => node_path_1.default.resolve(storageRoot, value));
+        if (paths.some((filePath) => filePath === storageRoot || !filePath.startsWith(`${storageRoot}${node_path_1.default.sep}`))) {
+            return (0, http_utils_1.badRequest)(reply, "invalid media storage path");
+        }
+        await prisma.contentImage.deleteMany({ where: { tenantId: context.tenantId, id: { in: itemIds } } });
+        await Promise.all(paths.map(async (filePath) => { try {
+            await node_fs_1.promises.unlink(filePath);
+        }
+        catch (error) {
+            if (error.code !== "ENOENT")
+                throw error;
+        } }));
+        await (0, audit_1.writeAudit)({ tenantId: context.tenantId, actorType: "user", actorUserId: context.userId, action: "media.bulk_deleted", metadata: { count: images.length } });
+        return reply.send({ ok: true, deletedCount: images.length });
+    });
+    fastify.delete("/v2/media/:id", async (request, reply) => {
+        const context = await (0, http_utils_1.requireStudioPermission)(request, reply, "projects.manage");
+        if (!context) {
+            return;
+        }
+        const imageId = request.params.id;
+        if (!(0, http_utils_1.isUuid)(imageId)) {
+            return (0, http_utils_1.badRequest)(reply, "invalid image id");
+        }
+        const image = await prisma.contentImage.findFirst({
+            where: { id: imageId, tenantId: context.tenantId },
+            include: { assetVariants: true, _count: { select: { versions: true } } },
+        });
+        if (!image) {
+            return (0, http_utils_1.notFound)(reply, "media not found");
+        }
+        if (image._count.versions > 0) {
+            return (0, http_utils_1.conflict)(reply, `media is used by ${image._count.versions} version(s); detach it before deleting`);
+        }
+        const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/content-ai-platform/storage"));
+        const paths = [image.storagePath, ...image.assetVariants.map((variant) => variant.storagePath)]
+            .filter((value) => Boolean(value))
+            .map((value) => node_path_1.default.resolve(storageRoot, value));
+        for (const filePath of paths) {
+            if (filePath === storageRoot || !filePath.startsWith(`${storageRoot}${node_path_1.default.sep}`)) {
+                return (0, http_utils_1.badRequest)(reply, "invalid media storage path");
+            }
+        }
+        await prisma.contentImage.delete({ where: { id: image.id } });
+        await Promise.all(paths.map(async (filePath) => {
+            try {
+                await node_fs_1.promises.unlink(filePath);
+            }
+            catch (error) {
+                if (error.code !== "ENOENT") {
+                    throw error;
+                }
+            }
+        }));
+        await (0, audit_1.writeAudit)({
+            tenantId: context.tenantId,
+            actorType: "user",
+            actorUserId: context.userId,
+            action: "media.deleted",
+            entityType: "content_image",
+            entityId: image.id,
+            metadata: { variantCount: image.assetVariants.length },
+        });
+        return reply.send({ ok: true });
     });
     fastify.patch("/v2/versions/:id", async (request, reply) => {
         const context = await (0, http_utils_1.requireStudioPermission)(request, reply, "projects.manage");

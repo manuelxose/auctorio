@@ -210,7 +210,7 @@ type ProjectPublication = {
                   <span class="au-social-card__count" [class.is-over]="isOverLimit(piece)">
                     {{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}
                   </span>
-                  <span class="au-social-card__meta" *ngIf="piece.threadPosition !== null">post {{ (piece.threadPosition ?? 0) + 1 }}</span>
+                  <span class="au-social-card__meta" *ngIf="piece.threadPosition !== null">post {{ piece.threadPosition + 1 }}</span>
                 </header>
                 <textarea class="au-input au-input--social" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)"></textarea>
                 <div class="au-social-card__hashtags" *ngIf="piece.hashtags?.length">

@@ -131,6 +131,12 @@ export function sanitizePolicyInput(input: UpdatePolicyInput): UpdatePolicyInput
   return sanitized;
 }
 
+export function assertSafeAutomationPolicy(input: UpdatePolicyInput): void {
+  if (input.autoPublish && (!input.autoGenerate || !input.autoApprove || !input.autoSchedule)) {
+    throw new Error("auto_publish_requires_generation_approval_and_schedule");
+  }
+}
+
 export async function updatePolicy(
   tenantId: string,
   siteId: string | null,
@@ -139,6 +145,7 @@ export async function updatePolicy(
 ): Promise<AutomationPolicy> {
   const policy = await getOrCreatePolicy(tenantId, siteId);
   const sanitized = sanitizePolicyInput(input);
+  assertSafeAutomationPolicy(sanitized);
   const previous = {
     articlesPerDay: policy.articlesPerDay,
     xPostsPerDay: policy.xPostsPerDay,

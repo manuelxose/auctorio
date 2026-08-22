@@ -108,6 +108,7 @@ import { formatRelativeTime, stageLabel, stageTone } from '../utils/content-stat
               <td class="au-cell-date">{{ formatRelativeTime(item.updatedAt) }}</td>
               <td class="au-cell-actions">
                 <a class="au-button au-button--ghost au-button--xs" [routerLink]="['/studio/content', item.id]">Open</a>
+                <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="!showArchived" (click)="duplicateOne(item)">Duplicate</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.reviewGate.approvalReady" (click)="approveOne(item)">Approve</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="!showArchived" (click)="removeOne(item)">Delete</button>
                 <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="showArchived" (click)="restoreOne(item)">Restore</button>
@@ -238,6 +239,13 @@ export class ContentListPageComponent implements OnInit {
 
   approveOne(item: StudioProjectSummary): void {
     this.api.approveProject(item.id).subscribe({
+      next: () => this.load(),
+      error: () => this.load(),
+    });
+  }
+
+  duplicateOne(item: StudioProjectSummary): void {
+    this.api.duplicateProject(item.id).subscribe({
       next: () => this.load(),
       error: () => this.load(),
     });
