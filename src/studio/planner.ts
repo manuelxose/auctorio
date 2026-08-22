@@ -137,6 +137,13 @@ export async function createProjectFromSourceItem(
     });
     const result = await startProjectGeneration(coverage.project.id, tenantId);
     await prisma.sourceItem.update({ where: { id: item.id }, data: { processingStatus: "processed" } });
+    await prisma.contentProject.update({
+      where: { id: coverage.project.id },
+      data: {
+        sourceItemId: item.id,
+        ...(item.clusterId ? { clusterId: item.clusterId } : {}),
+      },
+    });
     await markClusterSelected(tenantId, item.clusterId);
 
     await writeAudit({
