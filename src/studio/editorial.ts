@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { ContentProject, SourceItem, StoryCluster } from "@prisma/client";
+import type { ContentProject, SourceItem, SourceItemStatus, StoryCluster } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { normalizeText } from "../shared/utils/text";
 import { sha256 } from "../shared/utils/hash";
@@ -180,6 +180,28 @@ export function scoreSourceItem(item: Pick<SourceItem, "title" | "description" |
     score: clampScore(total),
     explanation,
   };
+}
+
+export async function scoreAndPromoteSourceItem(
+  tenantId: string,
+  item: Pick<SourceItem, "id" | "title" | "description" | "publishedAt" | "discoveredAt" | "categories" | "sourceId">,
+  context: ScoringContext,
+): Promise<{ score: number; processingStatus: SourceItemStatus }> {
+  const scored = scoreSourceItem(item, context);
+  await prisma.sourceItem.update({
+    where: { id: item.id },
+    data: {
+      score: scored.score,
+      scoreExplanation: scored.explanation as unknown as Prisma.InputJsonValue,
+    },
+  });
+  await assignSourceItemToCluster(tenantId, item);
+  const processingStatus: SourceItemStatus = scored.score >= 0.4 ? "candidate" : "parsed";
+  await prisma.sourceItem.update({
+    where: { id: item.id },
+    data: { processingStatus },
+  });
+  return { score: scored.score, processingStatus };
 }
 
 // ────────────────────────────────────────────────────────────── Story clustering
