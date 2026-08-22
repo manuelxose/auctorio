@@ -7,9 +7,9 @@ Wants=postgresql.service valkey.service
 Type=simple
 User=contentai
 Group=contentai
-WorkingDirectory=/var/www/auctorio
+WorkingDirectory=/var/www/content-ai-platform
 EnvironmentFile=/etc/content-ai-platform/app.env
-ExecStart=/usr/bin/node /var/www/auctorio/dist/scripts/start-worker-discovery.js
+ExecStart=/usr/bin/node /var/www/content-ai-platform/dist/scripts/start-worker-discovery.js
 Restart=always
 RestartSec=2
 

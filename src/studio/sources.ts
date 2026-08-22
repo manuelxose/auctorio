@@ -7,6 +7,7 @@ import { fetchUrl, validateScrapeUrl } from "../infrastructure/scraping";
 import { normalizeText } from "../shared/utils/text";
 import { sha256 } from "../shared/utils/hash";
 import { getNumberEnv } from "../shared/utils/env";
+import { scoreAndPromoteSourceItem } from "./editorial";
 import { writeAudit } from "./audit";
 import type { PaginatedResult } from "./types";
 
@@ -778,10 +779,14 @@ export async function fetchSourceNow(tenantId: string, sourceId: string): Promis
     const items = await adapter.fetch(source);
     result.fetched = items.length;
 
+    const createdItemIds: string[] = [];
     for (const item of items) {
       const upserted = await upsertSourceItem(tenantId, source.id, item);
       if (upserted.created) {
         result.created += 1;
+        if (upserted.sourceItemId) {
+          createdItemIds.push(upserted.sourceItemId);
+        }
       } else {
         result.duplicates += 1;
       }
@@ -795,6 +800,21 @@ export async function fetchSourceNow(tenantId: string, sourceId: string): Promis
         consecutiveFailures: 0,
       },
     });
+
+    // Score, cluster and promote freshly discovered items immediately so the
+    // inbox is useful right after a fetch.
+    const context = { sourceTrustScore: source.trustScore, sourcePriority: source.priority };
+    for (const itemId of createdItemIds) {
+      const item = await prisma.sourceItem.findFirst({ where: { id: itemId, tenantId } });
+      if (!item) {
+        continue;
+      }
+      try {
+        await scoreAndPromoteSourceItem(tenantId, item, context);
+      } catch (error) {
+        result.error = error instanceof Error ? error.message : String(error);
+      }
+    }
 
     await writeAudit({
       tenantId,

@@ -1,12 +1,7 @@
-import { Prisma } from "@prisma/client";
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
 import { listDueSources, fetchSourceNow } from "../../studio/sources";
-import {
-  assignSourceItemToCluster,
-  scoreSourceItem,
-  type ScoringContext,
-} from "../../studio/editorial";
+import { scoreAndPromoteSourceItem } from "../../studio/editorial";
 
 const prisma = getPrismaClient();
 
@@ -18,6 +13,8 @@ export type DiscoveryTickResult = {
 };
 
 async function scoreAndClusterItems(tenantId: string): Promise<{ clustered: number }> {
+  // Backfill safety net for items that were ingested before immediate scoring
+  // (e.g. created by another process or before a restart).
   const unscored = await prisma.sourceItem.findMany({
     where: {
       tenantId,
@@ -38,26 +35,9 @@ async function scoreAndClusterItems(tenantId: string): Promise<{ clustered: numb
       continue;
     }
 
-    const context: ScoringContext = {
+    await scoreAndPromoteSourceItem(tenantId, item, {
       sourceTrustScore: source.trustScore,
       sourcePriority: source.priority,
-    };
-    const scored = scoreSourceItem(item, context);
-
-    await prisma.sourceItem.update({
-      where: { id: item.id },
-      data: {
-        score: scored.score,
-        scoreExplanation: scored.explanation as unknown as Prisma.InputJsonValue,
-      },
-    });
-
-    await assignSourceItemToCluster(tenantId, item);
-    await prisma.sourceItem.update({
-      where: { id: item.id },
-      data: {
-        processingStatus: scored.score >= 0.4 ? "candidate" : "parsed",
-      },
     });
     clustered += 1;
   }
