@@ -4,6 +4,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.scrapeSource = scrapeSource;
+exports.fetchUrl = fetchUrl;
+exports.validateScrapeUrl = validateScrapeUrl;
 const fast_xml_parser_1 = require("fast-xml-parser");
 const cheerio_1 = require("cheerio");
 const promises_1 = __importDefault(require("node:dns/promises"));
@@ -40,6 +42,7 @@ async function fetchUrl(url, options) {
             headers: {
                 accept: options.accept,
                 "user-agent": userAgent,
+                ...(options.headers ?? {}),
             },
             signal: controller.signal,
         });

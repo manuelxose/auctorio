@@ -1,7 +1,10 @@
-# Content AI Platform
+# Content AI Platform — Auctorio
 
-Backend para generacion de contenido con IA, workflow editorial y publicacion multi-site.
-Estado: vertical slice operativa para studio central + API publica v1/v2.
+Plataforma editorial autonoma: ingesta de noticias, reescritura original con IA, generacion de imagenes,
+derivados sociales (X / Instagram), calendario editorial, programacion y publicacion multi-canal.
+
+Estado: vertical slice operativa evolucionada a plataforma editorial completa
+(studio central + API publica v1/v2 + sources/inbox + publicaciones durables + automatizacion).
 
 Documentacion:
 - docs/architecture.md
@@ -10,49 +13,91 @@ Documentacion:
 
 Estructura:
 - src/domain: entidades, casos de uso, interfaces
-- src/application: servicios y politicas
+- src/application: servicios y politicas (prompts, costos)
 - src/infrastructure: db, colas, IA, scraping, storage, workers
 - src/web: API HTTP (Fastify)
+- src/studio: plataforma editorial (sources, inbox, social, publications, automation, audit)
 - apps/studio-web: Angular 20 SSR + BFF seguro bajo `/studio`
 - storage: assets locales generados
 
-Pendiente:
-- Configurar systemd/pm2 para procesos en VPS (opcional)
+## Flujo editorial
 
-CLI:
-- Crear tenant: ts-node scripts/create-tenant.ts <tenant-name>
-- Rotar API key: ts-node scripts/rotate-api-key.ts <tenant-id-or-name>
-- Cambiar estado tenant: ts-node scripts/set-tenant-status.ts <tenant-id-or-name> <active|suspended>
+SOURCE → DISCOVERY → SOURCE ITEM → CANDIDATE → CONTENT PROJECT → ARTICLE VERSION
+→ MEDIA → SOCIAL DERIVATIVES → REVIEW → SCHEDULE → CHANNEL PUBLICATIONS → PUBLISHED
+→ MONITOR / UPDATE / UNPUBLISH
 
-Arranque local:
+### Modo manual
+1. `Sources` → añadir una fuente RSS/Atom/HTML/sitemap/API (o pegar URL en `Inbox` → Rewrite as news article).
+2. `Inbox` → seleccionar historia → `Rewrite as news article` crea un proyecto con hechos de la fuente.
+3. Workspace → generar articulo (news_article: reescritura original con grounding factual), hero image, SEO.
+4. Tab `Social` → generar copia para X (post/thread) e Instagram (caption/story), editar y aprobar.
+5. Tab `Schedule` → programar articulo (website) y posts sociales (X/Instagram) con fecha/hora.
+6. `Calendar` → ver todo el plan; arrastrar para reprogramar; publicar ya / cancelar / reintentar.
+7. `Publications` → lista operativa con filtros, paginacion, reintentos y despublicacion.
+
+### Modo automatico
+1. `Automation` → habilitar politica (articulos/dia, X posts/dia, Instagram posts/dia, ventanas, limites).
+2. `Sources` → añadir fuentes habilitadas.
+3. Workers (discovery + automation + scheduler + publishing + social) descubren, puntuan,
+   deduplican, generan, aprueban (segun politica), programan slots y publican sin superar limites.
+4. `Automation` → Pause detiene nuevas publicaciones automaticas sin corromper trabajos activos.
+
+## Arranque local
+
 - API: npm run start:api
+- Worker discovery (fuentes): npm run start:worker:discovery
+- Worker automation (planificador editorial): npm run start:worker:automation
+- Worker scheduler (publicaciones vencidas): npm run start:worker:scheduler
 - Worker scraping: npm run start:worker:scraping
 - Worker texto: npm run start:worker:text
 - Worker imagen: npm run start:worker:image
-- Worker publishing: npm run start:worker:publishing
+- Worker publishing (websites): npm run start:worker:publishing
+- Worker social (generacion + X/Instagram): npm run start:worker:social
 - Studio SSR: npm run build:studio && npm run serve:studio
 
-API expuesta:
+Produccion: unit files systemd en `infra/systemd/` (api, studio, 8 workers).
+
+## Conectar X / Instagram
+
+1. Crear cuenta en `Automation → Social accounts` (o `POST /v2/publishing-accounts`).
+   - `platform=x`, `credentialsRef=X_PUBLISHER_CREDENTIALS`
+   - `platform=instagram`, `credentialsRef=INSTAGRAM_PUBLISHER_CREDENTIALS`
+2. Definir la variable de entorno con el JSON de credenciales (ver .env.example).
+3. `Verify` valida las credenciales sin exponerlas (nunca viajan al navegador).
+
+## API expuesta
+
 - `/v1/*`: capa baja de topics/facts/generate-text/generate-image
-- `/v2/*`: studio multi-site para sites, projects, approvals, assets y publications
+- `/v2/*`: studio multi-site + plataforma editorial:
+  - `sites`, `projects`, `versions`, `prompts`, `users/roles` (existente)
+  - `sources`, `source-items`, `story-clusters` (ingesta y wire)
+  - `publications`, `publication-jobs`, `calendar` (programacion durable)
+  - `projects/:id/social`, `social/:id` (derivados sociales)
+  - `publishing-accounts` (X / Instagram)
+  - `automation` (+ pause/resume/status), `campaigns`, `briefs`, `audit`, `overview`
 - `/assets/*`: serving publico de imagenes generadas
-- `/health`, `/health/live`, `/health/ready`: probes operativas
+- `/health`, `/health/live`, `/health/ready`, `/v2/health/workers`: probes operativas
 
-Studio SSR:
-- Base path: `/studio`
-- BFF: `/studio/api/session/*` y `/studio/api/backend/*`
-- Login: selector de workspace con SSO OIDC cuando existe identity provider y fallback por API key cuando el tenant todavía no lo tiene configurado
-- Variables: `STUDIO_BASE_PATH`, `STUDIO_API_INTERNAL_URL`, `STUDIO_SESSION_SECRET`, `STUDIO_COOKIE_NAME`, `STUDIO_ALLOWED_HOSTS`
-- Runtime actual en produccion en esta maquina:
-  - Studio SSR: `http://127.0.0.1:4400`
-  - API/BFF interna: `http://127.0.0.1:4401`
+## Modo de publicacion (dry-run)
 
-Modo de publicacion:
-- `PUBLISH_DRY_RUN=true` por defecto fuera de produccion
-- Si faltan credenciales de publicacion resueltas, los publishers ejecutan mock-safe y dejan trazabilidad normal en `publication_jobs`
-- `/v2/projects/:id/publish` soporta `targetStatus=draft|publish` y `action=publish|update|unpublish`
+- `PUBLISH_DRY_RUN=true` por defecto fuera de produccion. Aplica a websites, X e Instagram.
+- En dry-run: pipeline completo, payload validado, IDs externos simulados (`dryrun-*`),
+  trazabilidad normal en `publications`/`publication_attempts`/`publication_jobs`. Nunca crea contenido publico real.
+- Sin credenciales resueltas en produccion, los publishers fallan con `publishing_missing_credentials`.
 
-Verificacion:
+## Fiabilidad
+
+- Programacion: durables en PostgreSQL (`publications`), el scheduler reclama con `FOR UPDATE SKIP LOCKED`
+  y encola; multiples workers no duplican publicaciones.
+- Idempotencia: keys deterministicas por (site+project+version+action) y por publication.
+- Reintentos: clasificacion transient/permanent, backoff exponencial, max reintentos configurable,
+  `failed` inspeccionable y reintentable desde el Studio.
+- Estados: maquina de estados explicita (draft→ready→scheduled→queued→publishing→published/failed/unpublished).
+- Limites de seguridad: articulos/hora-dia, social/hora-dia, cola maxima; la automatizacion nunca los supera.
+
+## Verificacion
+
 - `npm run typecheck`
 - `npm test`
 - `npm run build:studio`
+- `npx prisma validate` / `npx prisma migrate deploy`

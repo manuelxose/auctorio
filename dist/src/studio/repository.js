@@ -204,6 +204,10 @@ async function getProjectById(tenantId, projectId) {
         include: {
             site: true,
             topic: true,
+            sourceItem: { select: { id: true, title: true, canonicalUrl: true, source: { select: { id: true, name: true } } } },
+            cluster: { select: { id: true, headline: true, sourceCount: true } },
+            campaign: { select: { id: true, name: true } },
+            editorialBrief: { select: { id: true, name: true } },
             versions: {
                 orderBy: { versionNumber: "desc" },
                 include: {
@@ -235,6 +239,15 @@ async function getProjectById(tenantId, projectId) {
             publicationJobs: {
                 orderBy: { createdAt: "desc" },
             },
+            socialContents: { orderBy: { createdAt: "asc" } },
+            publications: {
+                orderBy: { createdAt: "desc" },
+                include: {
+                    account: { select: { id: true, platform: true, displayName: true } },
+                    site: { select: { id: true, key: true, name: true } },
+                    attempts: { orderBy: { attemptNumber: "desc" }, take: 5 },
+                },
+            },
         },
     });
 }
@@ -244,9 +257,19 @@ async function listProjects(tenantId, input) {
     const skip = (page - 1) * pageSize;
     const where = {
         tenantId,
+        ...(input.includeArchived ? {} : { deletedAt: null }),
         ...(input.siteId ? { siteId: input.siteId } : {}),
         ...(input.status ? { status: input.status } : {}),
         ...(input.goal ? { goal: input.goal } : {}),
+        ...(input.origin ? { origin: input.origin } : {}),
+        ...(input.search
+            ? {
+                OR: [
+                    { title: { contains: input.search, mode: "insensitive" } },
+                    { brief: { contains: input.search, mode: "insensitive" } },
+                ],
+            }
+            : {}),
     };
     const [total, projects] = await prisma.$transaction([
         prisma.contentProject.count({ where }),
@@ -259,6 +282,7 @@ async function listProjects(tenantId, input) {
                 _count: {
                     select: {
                         versions: true,
+                        socialContents: true,
                     },
                 },
                 site: true,
@@ -296,6 +320,12 @@ async function listProjects(tenantId, input) {
                     orderBy: { createdAt: "desc" },
                     take: 1,
                 },
+                publications: {
+                    where: { status: { not: "deleted" } },
+                    select: { id: true, channel: true, status: true, scheduledFor: true, publishedAt: true },
+                    orderBy: { scheduledFor: "desc" },
+                    take: 10,
+                },
             },
         }),
     ]);
@@ -309,6 +339,7 @@ async function listProjects(tenantId, input) {
                 brief: project.brief,
                 goal: project.goal,
                 status: project.status,
+                origin: project.origin,
                 primaryLanguage: project.primaryLanguage,
                 createdAt: project.createdAt,
                 updatedAt: project.updatedAt,
@@ -321,6 +352,14 @@ async function listProjects(tenantId, input) {
                     baseUrl: project.site.baseUrl,
                 },
                 versionCount: project._count.versions,
+                socialCount: project._count.socialContents,
+                publications: project.publications.map((publication) => ({
+                    id: publication.id,
+                    channel: publication.channel,
+                    status: publication.status,
+                    scheduledFor: publication.scheduledFor,
+                    publishedAt: publication.publishedAt,
+                })),
                 reviewGate: (0, review_1.buildReviewGate)({
                     projectStatus: project.status,
                     versionCount: project._count.versions,

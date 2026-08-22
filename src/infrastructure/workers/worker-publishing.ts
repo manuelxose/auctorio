@@ -15,6 +15,9 @@ import { buildAssetPublicUrl } from "../../studio/orchestration";
 import { getEnv } from "../../shared/utils/env";
 import type { PublicationStatus } from "@prisma/client";
 import type { PublishResult, PublicationTargetStatus } from "../../studio/types";
+import { getPrismaClient } from "../db/prisma";
+
+const prisma = getPrismaClient();
 
 type PublishingJobData = {
   publicationJobId: string;
@@ -133,6 +136,8 @@ export async function processPublishingJob(
     publishedAt: status === "canceled" ? null : new Date(),
   });
 
+  await syncDurablePublication(publication.id, status, result, externalId);
+
   if (status === "published") {
     await dependencies.markProjectPublished(
       publication.tenantId,
@@ -148,6 +153,61 @@ export async function processPublishingJob(
     publication.projectId,
     publication.versionId,
   );
+}
+
+async function syncDurablePublication(
+  publicationJobId: string,
+  jobStatus: PublicationStatus,
+  result: PublishResult,
+  externalId: string | null,
+): Promise<void> {
+  const durable = await prisma.publication.findFirst({
+    where: { publicationJobId },
+  });
+  if (!durable) {
+    return;
+  }
+
+  if (jobStatus === "published") {
+    await prisma.publication.update({
+      where: { id: durable.id },
+      data: {
+        status: "published",
+        publishedAt: new Date(),
+        externalId: result.externalId ?? externalId ?? durable.externalId,
+        externalUrl: result.externalUrl ?? durable.externalUrl,
+        lastError: null,
+        failureReason: null,
+        failureClass: null,
+      },
+    });
+    return;
+  }
+
+  if (jobStatus === "canceled") {
+    const wasUnpublish =
+      durable.metadata && typeof durable.metadata === "object"
+        ? (durable.metadata as Record<string, unknown>).unpublishRequested === true
+        : false;
+    await prisma.publication.update({
+      where: { id: durable.id },
+      data: wasUnpublish
+        ? { status: "unpublished", publishedAt: null }
+        : { status: "canceled", lastError: null },
+    });
+    return;
+  }
+
+  if (jobStatus === "draft_synced") {
+    await prisma.publication.update({
+      where: { id: durable.id },
+      data: {
+        status: "ready",
+        externalId: result.externalId ?? externalId ?? durable.externalId,
+        externalUrl: result.externalUrl ?? durable.externalUrl,
+      },
+    });
+  }
 }
 
 export async function runPublishingWorker() {
@@ -184,6 +244,17 @@ export async function runPublishingWorker() {
       error: err.message,
     });
     await updateProjectStatus(publication.tenantId, publication.projectId, "publish_failed");
+
+    await prisma.publication.updateMany({
+      where: { publicationJobId },
+      data: {
+        status: "failed",
+        lastError: err.message,
+        failureClass: "transient",
+        failureReason: "website_publish_failed",
+        nextRetryAt: new Date(Date.now() + 60_000),
+      },
+    });
   });
 
   console.log("[worker:publishing] started", { queue: QUEUE_NAMES.publishing });

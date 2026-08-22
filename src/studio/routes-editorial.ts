@@ -1,0 +1,1537 @@
+import { Prisma } from "@prisma/client";
+import type { FastifyInstance } from "fastify";
+import { getPrismaClient } from "../infrastructure/db/prisma";
+import { QUEUE_NAMES } from "../infrastructure/queue/queues";
+import {
+  badRequest,
+  conflict,
+  isOneOf,
+  isUuid,
+  notFound,
+  parseBody,
+  parseOptionalString,
+  parsePage,
+  parsePageSize,
+  requireStudioContext,
+  requireStudioPermission,
+} from "./http-utils";
+import {
+  createSource,
+  deleteSource,
+  fetchSourceNow,
+  getSource,
+  getSourceItemDetail,
+  listSourceItems,
+  listSources,
+  markSourceItemsStatus,
+  setSourceItemStatus,
+  testSourceFetch,
+  updateSource,
+} from "./sources";
+import { listStoryClusters, setClusterStatus } from "./editorial";
+import { createProjectFromSourceItem } from "./planner";
+import {
+  createPublication,
+  deletePublication,
+  getPublication,
+  listPublications,
+  retryPublication,
+  unpublishPublication,
+  updatePublicationSchedule,
+} from "./publication";
+import { listCalendarEvents } from "./calendar";
+import {
+  getAutomationStatus,
+  getOrCreatePolicy,
+  pauseAutomation,
+  resumeAutomation,
+  updatePolicy,
+  type UpdatePolicyInput,
+} from "./automation";
+import {
+  createSocialGenerationJobs,
+  listSocialContent,
+  regenerateSocial,
+  updateSocialContent,
+} from "./social";
+import { listAudit } from "./audit";
+import { buildAssetPublicUrl } from "./orchestration";
+
+const prisma = getPrismaClient();
+
+const SOURCE_TYPES = ["rss", "atom", "html", "sitemap", "api", "manual"] as const;
+const SOURCE_ITEM_STATUSES = [
+  "discovered",
+  "fetched",
+  "parsed",
+  "duplicate",
+  "rejected",
+  "candidate",
+  "selected",
+  "processed",
+  "failed",
+] as const;
+const CLUSTER_STATUSES = ["open", "selected", "covered", "rejected", "archived"] as const;
+const PUBLICATION_CHANNELS = ["website", "x", "instagram"] as const;
+const PUBLICATION_STATES = [
+  "draft",
+  "ready",
+  "scheduled",
+  "queued",
+  "publishing",
+  "published",
+  "failed",
+  "canceled",
+  "deleted",
+  "unpublished",
+] as const;
+const ACCOUNT_PLATFORMS = ["website", "x", "instagram"] as const;
+const ACCOUNT_STATUSES = ["pending", "active", "error", "disabled"] as const;
+const SOCIAL_CHANNELS = ["x", "instagram"] as const;
+const SOCIAL_EDITORIAL_STATUSES = ["draft", "approved", "rejected"] as const;
+
+function parseIsoDate(value: unknown): Date | null {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const parsed = new Date(String(value));
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+// ────────────────────────────────────────────────────────────── Sources
+
+export function registerEditorialRoutes(fastify: FastifyInstance) {
+  fastify.get("/v2/sources", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as { page?: string; pageSize?: string; type?: string; enabled?: string };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 20);
+    if (query.type && !isOneOf(query.type, SOURCE_TYPES)) {
+      return badRequest(reply, `type must be one of: ${SOURCE_TYPES.join(", ")}`);
+    }
+    const sources = await listSources(context.tenantId, {
+      page,
+      pageSize,
+      type: query.type,
+      enabled: query.enabled === undefined ? undefined : query.enabled === "true",
+    });
+    return reply.send(sources);
+  });
+
+  fastify.post("/v2/sources", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{
+      siteId?: string;
+      name?: string;
+      type?: string;
+      url?: string;
+      enabled?: boolean;
+      priority?: number;
+      trustScore?: number;
+      language?: string;
+      country?: string;
+      categories?: string[];
+      tags?: string[];
+      refreshIntervalMinutes?: number;
+      configuration?: Record<string, unknown>;
+    }>(request);
+
+    if (!body.name?.trim() || !body.type) {
+      return badRequest(reply, "name and type are required");
+    }
+    if (!isOneOf(body.type, SOURCE_TYPES)) {
+      return badRequest(reply, `type must be one of: ${SOURCE_TYPES.join(", ")}`);
+    }
+    if (body.type !== "manual" && !body.url?.trim()) {
+      return badRequest(reply, "url is required for this source type");
+    }
+
+    try {
+      const source = await createSource(context.tenantId, {
+        siteId: parseOptionalString(body.siteId),
+        name: body.name.trim(),
+        type: body.type as (typeof SOURCE_TYPES)[number],
+        url: parseOptionalString(body.url),
+        enabled: body.enabled ?? true,
+        priority: body.priority ?? 0,
+        trustScore: body.trustScore ?? 0.5,
+        language: body.language ?? "es",
+        country: parseOptionalString(body.country),
+        categories: body.categories ?? null,
+        tags: body.tags ?? null,
+        refreshIntervalMinutes: body.refreshIntervalMinutes ?? 30,
+        configuration: body.configuration ?? null,
+      });
+      return reply.code(201).send(source);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/unique constraint|Unique constraint/i.test(message)) {
+        return conflict(reply, "source name already exists");
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.get("/v2/sources/:id", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    const source = await getSource(context.tenantId, sourceId);
+    if (!source) {
+      return notFound(reply, "source not found");
+    }
+    return reply.send(source);
+  });
+
+  fastify.patch("/v2/sources/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    const body = parseBody<{
+      siteId?: string;
+      name?: string;
+      type?: string;
+      url?: string;
+      enabled?: boolean;
+      priority?: number;
+      trustScore?: number;
+      language?: string;
+      country?: string;
+      categories?: string[];
+      tags?: string[];
+      refreshIntervalMinutes?: number;
+      configuration?: Record<string, unknown>;
+    }>(request);
+    if (body.type && !isOneOf(body.type, SOURCE_TYPES)) {
+      return badRequest(reply, `type must be one of: ${SOURCE_TYPES.join(", ")}`);
+    }
+
+    const source = await updateSource(context.tenantId, sourceId, {
+      siteId: parseOptionalString(body.siteId),
+      name: body.name?.trim(),
+      type: body.type as (typeof SOURCE_TYPES)[number] | undefined,
+      url: parseOptionalString(body.url),
+      enabled: body.enabled,
+      priority: body.priority,
+      trustScore: body.trustScore,
+      language: body.language,
+      country: parseOptionalString(body.country),
+      categories: body.categories,
+      tags: body.tags,
+      refreshIntervalMinutes: body.refreshIntervalMinutes,
+      configuration: body.configuration,
+    });
+    if (!source) {
+      return notFound(reply, "source not found");
+    }
+    return reply.send(source);
+  });
+
+  fastify.delete("/v2/sources/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    const deleted = await deleteSource(context.tenantId, sourceId);
+    if (!deleted) {
+      return notFound(reply, "source not found");
+    }
+    return reply.send({ ok: true });
+  });
+
+  fastify.post("/v2/sources/:id/test", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    const source = await getSource(context.tenantId, sourceId);
+    if (!source) {
+      return notFound(reply, "source not found");
+    }
+    try {
+      const result = await testSourceFetch(context.tenantId, {
+        type: source.type,
+        url: source.url,
+        configuration: source.configuration as Record<string, unknown> | null,
+      });
+      return reply.send(result);
+    } catch (error) {
+      return reply.code(502).send({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  fastify.post("/v2/sources/:id/fetch", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    try {
+      const result = await fetchSourceNow(context.tenantId, sourceId);
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "source_not_found") {
+        return notFound(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────── Inbox
+
+  fastify.get("/v2/source-items", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as {
+      page?: string;
+      pageSize?: string;
+      sourceId?: string;
+      status?: string;
+      clusterId?: string;
+      search?: string;
+      minScore?: string;
+      sort?: string;
+      direction?: string;
+    };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 20);
+    if (query.status && !isOneOf(query.status, SOURCE_ITEM_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${SOURCE_ITEM_STATUSES.join(", ")}`);
+    }
+    if (query.sort && !isOneOf(query.sort, ["discovered", "score"] as const)) {
+      return badRequest(reply, "sort must be one of: discovered, score");
+    }
+    if (query.direction && !isOneOf(query.direction, ["asc", "desc"] as const)) {
+      return badRequest(reply, "direction must be one of: asc, desc");
+    }
+
+    const items = await listSourceItems(context.tenantId, {
+      page,
+      pageSize,
+      sourceId: query.sourceId,
+      status: query.status as (typeof SOURCE_ITEM_STATUSES)[number] | undefined,
+      clusterId: query.clusterId,
+      search: parseOptionalString(query.search) ?? undefined,
+      minScore: query.minScore ? Number.parseFloat(query.minScore) : undefined,
+      sort: query.sort as "discovered" | "score" | undefined,
+      direction: query.direction as "asc" | "desc" | undefined,
+    });
+
+    return reply.send(items);
+  });
+
+  fastify.get("/v2/source-items/:id", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) {
+      return badRequest(reply, "invalid source item id");
+    }
+    const item = await getSourceItemDetail(context.tenantId, itemId);
+    if (!item) {
+      return notFound(reply, "source item not found");
+    }
+    return reply.send(item);
+  });
+
+  fastify.post("/v2/source-items/:id/select", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) {
+      return badRequest(reply, "invalid source item id");
+    }
+    const item = await setSourceItemStatus(context.tenantId, itemId, "selected", { userId: context.userId });
+    if (!item) {
+      return notFound(reply, "source item not found");
+    }
+    return reply.send(item);
+  });
+
+  fastify.post("/v2/source-items/:id/reject", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) {
+      return badRequest(reply, "invalid source item id");
+    }
+    const item = await setSourceItemStatus(context.tenantId, itemId, "rejected", { userId: context.userId });
+    if (!item) {
+      return notFound(reply, "source item not found");
+    }
+    return reply.send(item);
+  });
+
+  fastify.post("/v2/source-items/bulk", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{ itemIds?: string[]; status?: string }>(request);
+    if (!Array.isArray(body.itemIds) || !body.status) {
+      return badRequest(reply, "itemIds and status are required");
+    }
+    if (!isOneOf(body.status, SOURCE_ITEM_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${SOURCE_ITEM_STATUSES.join(", ")}`);
+    }
+    const updated = await markSourceItemsStatus(
+      context.tenantId,
+      body.itemIds.filter(isUuid),
+      body.status as (typeof SOURCE_ITEM_STATUSES)[number],
+    );
+    return reply.send({ updated: updated.count });
+  });
+
+  fastify.post("/v2/source-items/:id/create-project", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) {
+      return badRequest(reply, "invalid source item id");
+    }
+    const body = parseBody<{
+      siteId?: string;
+      goal?: string;
+      allowUpdateExisting?: boolean;
+    }>(request);
+    if (!body.siteId || !isUuid(body.siteId)) {
+      return badRequest(reply, "siteId is required");
+    }
+    if (body.goal && !isOneOf(body.goal, ["news_article", "article"] as const)) {
+      return badRequest(reply, "goal must be one of: news_article, article");
+    }
+
+    try {
+      const result = await createProjectFromSourceItem({
+        tenantId: context.tenantId,
+        siteId: body.siteId,
+        sourceItemId: itemId,
+        goal: body.goal as "news_article" | "article" | undefined,
+        allowUpdateExisting: body.allowUpdateExisting ?? false,
+        userId: context.userId,
+      });
+      return reply.code(201).send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.startsWith("already_covered")) {
+        return conflict(reply, message);
+      }
+      if (message === "source_item_not_found") {
+        return notFound(reply, message);
+      }
+      if (message === "site_not_found") {
+        return notFound(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────── Story clusters
+
+  fastify.get("/v2/story-clusters", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as { page?: string; pageSize?: string; status?: string };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 20);
+    if (query.status && !isOneOf(query.status, CLUSTER_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${CLUSTER_STATUSES.join(", ")}`);
+    }
+    return reply.send(
+      await listStoryClusters(context.tenantId, { page, pageSize, status: query.status }),
+    );
+  });
+
+  fastify.patch("/v2/story-clusters/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const clusterId = (request.params as { id: string }).id;
+    if (!isUuid(clusterId)) {
+      return badRequest(reply, "invalid cluster id");
+    }
+    const body = parseBody<{ status?: string }>(request);
+    if (!body.status || !isOneOf(body.status, CLUSTER_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${CLUSTER_STATUSES.join(", ")}`);
+    }
+    const cluster = await setClusterStatus(context.tenantId, clusterId, body.status as (typeof CLUSTER_STATUSES)[number]);
+    if (!cluster) {
+      return notFound(reply, "cluster not found");
+    }
+    return reply.send(cluster);
+  });
+
+  // ──────────────────────────────────────────────────────────── Publications
+
+  fastify.get("/v2/publications", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as {
+      page?: string;
+      pageSize?: string;
+      channel?: string;
+      status?: string;
+      projectId?: string;
+      siteId?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: string;
+      direction?: string;
+      failed?: string;
+    };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 20);
+    if (query.channel && !isOneOf(query.channel, PUBLICATION_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${PUBLICATION_CHANNELS.join(", ")}`);
+    }
+    if (query.status && !isOneOf(query.status, PUBLICATION_STATES)) {
+      return badRequest(reply, `status must be one of: ${PUBLICATION_STATES.join(", ")}`);
+    }
+    if (query.sort && !isOneOf(query.sort, ["scheduled", "created", "updated"] as const)) {
+      return badRequest(reply, "sort must be one of: scheduled, created, updated");
+    }
+    if (query.direction && !isOneOf(query.direction, ["asc", "desc"] as const)) {
+      return badRequest(reply, "direction must be one of: asc, desc");
+    }
+
+    const publications = await listPublications(context.tenantId, {
+      page,
+      pageSize,
+      channel: query.channel as (typeof PUBLICATION_CHANNELS)[number] | undefined,
+      status: query.status as (typeof PUBLICATION_STATES)[number] | undefined,
+      projectId: query.projectId,
+      siteId: query.siteId,
+      search: parseOptionalString(query.search) ?? undefined,
+      dateFrom: query.dateFrom,
+      dateTo: query.dateTo,
+      sort: query.sort as "scheduled" | "created" | "updated" | undefined,
+      direction: query.direction as "asc" | "desc" | undefined,
+      failedOnly: query.failed === "true",
+    });
+
+    return reply.send({
+      ...publications,
+      items: await Promise.all(
+        publications.items.map(async (publication) => ({
+          ...publication,
+          assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath ?? null),
+        })),
+      ),
+    });
+  });
+
+  fastify.get("/v2/publications/:id", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    const publication = await getPublication(context.tenantId, publicationId);
+    if (!publication) {
+      return notFound(reply, "publication not found");
+    }
+    return reply.send({
+      ...publication,
+      assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath ?? null),
+    });
+  });
+
+  fastify.post("/v2/publications", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{
+      projectId?: string;
+      versionId?: string;
+      channel?: string;
+      accountId?: string;
+      siteId?: string;
+      socialContentId?: string;
+      scheduledFor?: string;
+      campaignId?: string;
+    }>(request);
+    if (!body.projectId || !isUuid(body.projectId)) {
+      return badRequest(reply, "projectId is required");
+    }
+    if (!body.channel || !isOneOf(body.channel, PUBLICATION_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${PUBLICATION_CHANNELS.join(", ")}`);
+    }
+
+    const project = await prisma.contentProject.findFirst({
+      where: { id: body.projectId, tenantId: context.tenantId },
+      include: { versions: { orderBy: { versionNumber: "desc" }, take: 1 } },
+    });
+    if (!project) {
+      return notFound(reply, "project not found");
+    }
+    const versionId = body.versionId ?? project.versions[0]?.id;
+    if (!versionId) {
+      return badRequest(reply, "project has no versions");
+    }
+
+    try {
+      const publication = await createPublication({
+        tenantId: context.tenantId,
+        projectId: project.id,
+        versionId,
+        channel: body.channel as (typeof PUBLICATION_CHANNELS)[number],
+        accountId: body.accountId ?? null,
+        siteId: body.siteId ?? (body.channel === "website" ? project.siteId : null),
+        socialContentId: body.socialContentId ?? null,
+        scheduledFor: parseIsoDate(body.scheduledFor),
+        campaignId: body.campaignId ?? null,
+        manualOverride: true,
+      });
+      return reply.code(201).send(publication);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.patch("/v2/publications/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    const body = parseBody<{ scheduledFor?: string; accountId?: string | null }>(request);
+    try {
+      const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
+        scheduledFor: parseIsoDate(body.scheduledFor) ?? undefined,
+        accountId: body.accountId,
+      });
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_not_editable" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.delete("/v2/publications/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    try {
+      const publication = await deletePublication(context.tenantId, publicationId);
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.post("/v2/publications/:id/schedule", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    const body = parseBody<{ scheduledFor?: string }>(request);
+    const scheduledFor = parseIsoDate(body.scheduledFor);
+    if (!scheduledFor) {
+      return badRequest(reply, "scheduledFor (ISO date) is required");
+    }
+    try {
+      const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_not_editable" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.post("/v2/publications/:id/reschedule", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    const body = parseBody<{ scheduledFor?: string }>(request);
+    const scheduledFor = parseIsoDate(body.scheduledFor);
+    if (!scheduledFor) {
+      return badRequest(reply, "scheduledFor (ISO date) is required");
+    }
+    try {
+      const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_not_editable" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.post("/v2/publications/:id/publish-now", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    try {
+      const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
+        scheduledFor: new Date(Date.now() + 1000),
+      });
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_not_editable" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.post("/v2/publications/:id/cancel", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    try {
+      const publication = await updatePublicationSchedule(context.tenantId, publicationId, { cancel: true });
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_not_editable" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.post("/v2/publications/:id/retry", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    try {
+      const publication = await retryPublication(context.tenantId, publicationId);
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.post("/v2/publications/:id/unpublish", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) {
+      return;
+    }
+    const publicationId = (request.params as { id: string }).id;
+    if (!isUuid(publicationId)) {
+      return badRequest(reply, "invalid publication id");
+    }
+    try {
+      const publication = await unpublishPublication(context.tenantId, publicationId);
+      if (!publication) {
+        return notFound(reply, "publication not found");
+      }
+      return reply.send(publication);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_missing_external_id") {
+        return conflict(reply, "publication has no external id to unpublish");
+      }
+      return conflict(reply, message);
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────── Calendar
+
+  fastify.get("/v2/calendar", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as { from?: string; to?: string; channel?: string; siteId?: string };
+    const from = parseIsoDate(query.from) ?? new Date(Date.now() - 7 * 24 * 3_600_000);
+    const to = parseIsoDate(query.to) ?? new Date(Date.now() + 7 * 24 * 3_600_000);
+    if (query.channel && !isOneOf(query.channel, PUBLICATION_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${PUBLICATION_CHANNELS.join(", ")}`);
+    }
+    const events = await listCalendarEvents(context.tenantId, {
+      from,
+      to,
+      channel: query.channel as (typeof PUBLICATION_CHANNELS)[number] | undefined,
+      siteId: query.siteId,
+    });
+    return reply.send({ items: events });
+  });
+
+  // ──────────────────────────────────────────────────────────── Social
+
+  fastify.get("/v2/projects/:id/social", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+    const channel = parseOptionalString((request.query as { channel?: string }).channel);
+    if (channel && !isOneOf(channel, SOCIAL_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${SOCIAL_CHANNELS.join(", ")}`);
+    }
+    const social = await listSocialContent(context.tenantId, {
+      projectId,
+      channel: channel as "x" | "instagram" | undefined,
+    });
+    return reply.send({ items: social });
+  });
+
+  fastify.post("/v2/projects/:id/social/generate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+    const body = parseBody<{
+      channels?: string[];
+      threadLength?: number;
+      versionId?: string;
+    }>(request);
+    const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is "x" | "instagram" =>
+      isOneOf(channel, SOCIAL_CHANNELS),
+    );
+    if (channels.length === 0) {
+      return badRequest(reply, "channels must include x and/or instagram");
+    }
+
+    const project = await prisma.contentProject.findFirst({
+      where: { id: projectId, tenantId: context.tenantId },
+      include: { versions: { orderBy: { versionNumber: "desc" }, take: 1 } },
+    });
+    if (!project) {
+      return notFound(reply, "project not found");
+    }
+    const versionId = body.versionId ?? project.versions[0]?.id;
+    if (!versionId) {
+      return badRequest(reply, "project has no versions");
+    }
+
+    try {
+      const result = await createSocialGenerationJobs(context.tenantId, {
+        projectId,
+        versionId,
+        channels,
+        threadLength: body.threadLength ?? 1,
+      });
+      return reply.code(202).send({ job_id: result.jobId, status: "queued" });
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.patch("/v2/social/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const socialId = (request.params as { id: string }).id;
+    if (!isUuid(socialId)) {
+      return badRequest(reply, "invalid social content id");
+    }
+    const body = parseBody<{
+      body?: string;
+      hashtags?: string[];
+      editorialStatus?: string;
+      mediaAssetIds?: string[];
+    }>(request);
+    if (body.editorialStatus && !isOneOf(body.editorialStatus, SOCIAL_EDITORIAL_STATUSES)) {
+      return badRequest(reply, `editorialStatus must be one of: ${SOCIAL_EDITORIAL_STATUSES.join(", ")}`);
+    }
+    const social = await updateSocialContent(context.tenantId, socialId, {
+      body: body.body,
+      hashtags: body.hashtags,
+      editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
+      mediaAssetIds: body.mediaAssetIds,
+    });
+    if (!social) {
+      return notFound(reply, "social content not found");
+    }
+    return reply.send(social);
+  });
+
+  fastify.post("/v2/social/:id/regenerate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const socialId = (request.params as { id: string }).id;
+    if (!isUuid(socialId)) {
+      return badRequest(reply, "invalid social content id");
+    }
+    const result = await regenerateSocial(context.tenantId, socialId);
+    if (!result) {
+      return notFound(reply, "social content not found");
+    }
+    return reply.code(202).send({ job_id: result.jobId, status: "queued" });
+  });
+
+  // ──────────────────────────────────────────────────────────── Publishing accounts
+
+  fastify.get("/v2/publishing-accounts", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as { platform?: string };
+    if (query.platform && !isOneOf(query.platform, ACCOUNT_PLATFORMS)) {
+      return badRequest(reply, `platform must be one of: ${ACCOUNT_PLATFORMS.join(", ")}`);
+    }
+    const accounts = await prisma.publishingAccount.findMany({
+      where: {
+        tenantId: context.tenantId,
+        ...(query.platform ? { platform: query.platform as (typeof ACCOUNT_PLATFORMS)[number] } : {}),
+      },
+      orderBy: { platform: "asc" },
+      include: { site: { select: { id: true, name: true, key: true } } },
+    });
+    return reply.send({
+      items: accounts.map((account) => ({
+        ...account,
+        hasCredentials: Boolean(account.credentialsRef),
+        credentialsRef: undefined,
+      })),
+    });
+  });
+
+  fastify.post("/v2/publishing-accounts", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{
+      platform?: string;
+      displayName?: string;
+      externalAccountId?: string;
+      credentialsRef?: string;
+      siteId?: string;
+      enabled?: boolean;
+      configuration?: Record<string, unknown>;
+    }>(request);
+    if (!body.platform || !isOneOf(body.platform, ACCOUNT_PLATFORMS)) {
+      return badRequest(reply, `platform must be one of: ${ACCOUNT_PLATFORMS.join(", ")}`);
+    }
+    if (!body.displayName?.trim()) {
+      return badRequest(reply, "displayName is required");
+    }
+    if (body.platform !== "website" && !body.credentialsRef?.trim()) {
+      return badRequest(reply, "credentialsRef (environment variable name) is required for social accounts");
+    }
+    const account = await prisma.publishingAccount.create({
+      data: {
+        tenantId: context.tenantId,
+        siteId: parseOptionalString(body.siteId) ?? null,
+        platform: body.platform as (typeof ACCOUNT_PLATFORMS)[number],
+        displayName: body.displayName.trim(),
+        externalAccountId: parseOptionalString(body.externalAccountId),
+        credentialsRef: parseOptionalString(body.credentialsRef),
+        enabled: body.enabled ?? true,
+        configuration: body.configuration ? (body.configuration as Prisma.InputJsonObject) : Prisma.JsonNull,
+      },
+    });
+    return reply.code(201).send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
+  });
+
+  fastify.patch("/v2/publishing-accounts/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const accountId = (request.params as { id: string }).id;
+    if (!isUuid(accountId)) {
+      return badRequest(reply, "invalid account id");
+    }
+    const body = parseBody<{
+      displayName?: string;
+      externalAccountId?: string;
+      credentialsRef?: string;
+      enabled?: boolean;
+      status?: string;
+      configuration?: Record<string, unknown>;
+    }>(request);
+    if (body.status && !isOneOf(body.status, ACCOUNT_STATUSES)) {
+      return badRequest(reply, `status must be one of: ${ACCOUNT_STATUSES.join(", ")}`);
+    }
+    const existing = await prisma.publishingAccount.findFirst({ where: { id: accountId, tenantId: context.tenantId } });
+    if (!existing) {
+      return notFound(reply, "account not found");
+    }
+    const account = await prisma.publishingAccount.update({
+      where: { id: existing.id },
+      data: {
+        displayName: body.displayName?.trim() || undefined,
+        externalAccountId: parseOptionalString(body.externalAccountId) ?? undefined,
+        credentialsRef: body.credentialsRef === undefined ? undefined : parseOptionalString(body.credentialsRef),
+        enabled: body.enabled,
+        status: body.status as (typeof ACCOUNT_STATUSES)[number] | undefined,
+        configuration: body.configuration ? (body.configuration as Prisma.InputJsonObject) : undefined,
+      },
+    });
+    return reply.send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
+  });
+
+  fastify.delete("/v2/publishing-accounts/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const accountId = (request.params as { id: string }).id;
+    if (!isUuid(accountId)) {
+      return badRequest(reply, "invalid account id");
+    }
+    const existing = await prisma.publishingAccount.findFirst({ where: { id: accountId, tenantId: context.tenantId } });
+    if (!existing) {
+      return notFound(reply, "account not found");
+    }
+    await prisma.publishingAccount.delete({ where: { id: existing.id } });
+    return reply.send({ ok: true });
+  });
+
+  fastify.post("/v2/publishing-accounts/:id/verify", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const accountId = (request.params as { id: string }).id;
+    if (!isUuid(accountId)) {
+      return badRequest(reply, "invalid account id");
+    }
+    const account = await prisma.publishingAccount.findFirst({ where: { id: accountId, tenantId: context.tenantId } });
+    if (!account) {
+      return notFound(reply, "account not found");
+    }
+    if (account.platform === "website") {
+      return reply.send({ ok: true, message: "website_account_no_verification" });
+    }
+    const credentials = readCredentialsByRef(account.credentialsRef);
+    if (!credentials) {
+      return reply.send({ ok: false, message: "credentials_not_resolved" });
+    }
+    const { getSocialPublisher } = await import("./social-publishers");
+    const publisher = getSocialPublisher(account.platform);
+    const result = await publisher.validateCredentials(credentials);
+    await prisma.publishingAccount.update({
+      where: { id: account.id },
+      data: {
+        status: result.ok ? "active" : "error",
+        lastVerifiedAt: new Date(),
+      },
+    });
+    return reply.send(result);
+  });
+
+  // ──────────────────────────────────────────────────────────── Automation
+
+  fastify.get("/v2/automation", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    const policy = await getOrCreatePolicy(context.tenantId, siteId);
+    return reply.send(policy);
+  });
+
+  fastify.patch("/v2/automation", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<UpdatePolicyInput & { siteId?: string }>(request);
+    try {
+      const policy = await updatePolicy(
+        context.tenantId,
+        parseOptionalString(body.siteId) ?? null,
+        {
+          enabled: body.enabled,
+          timezone: body.timezone,
+          articlesPerDay: body.articlesPerDay,
+          maxArticlesPerDay: body.maxArticlesPerDay,
+          xPostsPerDay: body.xPostsPerDay,
+          instagramPostsPerDay: body.instagramPostsPerDay,
+          minimumMinutesBetweenArticles: body.minimumMinutesBetweenArticles,
+          activeDaysOfWeek: body.activeDaysOfWeek,
+          publishingWindows: body.publishingWindows,
+          autoGenerate: body.autoGenerate,
+          autoApprove: body.autoApprove,
+          autoSchedule: body.autoSchedule,
+          autoPublish: body.autoPublish,
+          minimumStoryScore: body.minimumStoryScore,
+          categories: body.categories,
+          excludedCategories: body.excludedCategories,
+          priorityTopics: body.priorityTopics,
+          imageRequired: body.imageRequired,
+          socialRequired: body.socialRequired,
+          maximumQueueSize: body.maximumQueueSize,
+          articlesPerHour: body.articlesPerHour,
+          socialPostsPerHour: body.socialPostsPerHour,
+          maximumDailySocial: body.maximumDailySocial,
+          socialTimingMinutesX: body.socialTimingMinutesX,
+          socialTimingMinutesInstagram: body.socialTimingMinutesInstagram,
+          sourceSelectionRules: body.sourceSelectionRules,
+        },
+        context.userId,
+      );
+      return reply.send(policy);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.get("/v2/automation/status", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    return reply.send(await getAutomationStatus(context.tenantId, siteId));
+  });
+
+  fastify.post("/v2/automation/pause", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{ siteId?: string; reason?: string }>(request);
+    const policy = await pauseAutomation(
+      context.tenantId,
+      parseOptionalString(body.siteId) ?? null,
+      parseOptionalString(body.reason) ?? "paused_manually",
+      context.userId,
+    );
+    return reply.send(policy);
+  });
+
+  fastify.post("/v2/automation/resume", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{ siteId?: string }>(request);
+    const policy = await resumeAutomation(context.tenantId, parseOptionalString(body.siteId) ?? null, context.userId);
+    return reply.send(policy);
+  });
+
+  // ──────────────────────────────────────────────────────────── Campaigns & briefs
+
+  fastify.get("/v2/campaigns", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const campaigns = await prisma.campaign.findMany({
+      where: { tenantId: context.tenantId },
+      orderBy: { createdAt: "desc" },
+      include: { _count: { select: { projects: true, publications: true } } },
+    });
+    return reply.send({ items: campaigns });
+  });
+
+  fastify.post("/v2/campaigns", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{ name?: string; description?: string; startAt?: string; endAt?: string; tags?: string[] }>(request);
+    if (!body.name?.trim()) {
+      return badRequest(reply, "name is required");
+    }
+    const campaign = await prisma.campaign.create({
+      data: {
+        tenantId: context.tenantId,
+        name: body.name.trim(),
+        description: parseOptionalString(body.description),
+        startAt: parseIsoDate(body.startAt),
+        endAt: parseIsoDate(body.endAt),
+        tags: body.tags && body.tags.length ? (body.tags as Prisma.InputJsonValue) : Prisma.JsonNull,
+      },
+    });
+    return reply.code(201).send(campaign);
+  });
+
+  fastify.delete("/v2/campaigns/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const campaignId = (request.params as { id: string }).id;
+    if (!isUuid(campaignId)) {
+      return badRequest(reply, "invalid campaign id");
+    }
+    const existing = await prisma.campaign.findFirst({ where: { id: campaignId, tenantId: context.tenantId } });
+    if (!existing) {
+      return notFound(reply, "campaign not found");
+    }
+    await prisma.campaign.delete({ where: { id: existing.id } });
+    return reply.send({ ok: true });
+  });
+
+  fastify.get("/v2/briefs", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const briefs = await prisma.editorialBrief.findMany({
+      where: { tenantId: context.tenantId },
+      orderBy: { createdAt: "desc" },
+    });
+    return reply.send({ items: briefs });
+  });
+
+  fastify.post("/v2/briefs", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{
+      name?: string;
+      topic?: string;
+      audience?: string;
+      tone?: string;
+      keywords?: string[];
+      seoIntent?: string;
+      channels?: string[];
+      imageStyle?: string;
+      publicationFrequency?: string;
+    }>(request);
+    if (!body.name?.trim()) {
+      return badRequest(reply, "name is required");
+    }
+    const brief = await prisma.editorialBrief.create({
+      data: {
+        tenantId: context.tenantId,
+        name: body.name.trim(),
+        topic: parseOptionalString(body.topic),
+        audience: parseOptionalString(body.audience),
+        tone: parseOptionalString(body.tone),
+        keywords: body.keywords && body.keywords.length ? (body.keywords as Prisma.InputJsonValue) : Prisma.JsonNull,
+        seoIntent: parseOptionalString(body.seoIntent),
+        channels: body.channels && body.channels.length ? (body.channels as Prisma.InputJsonValue) : Prisma.JsonNull,
+        imageStyle: parseOptionalString(body.imageStyle),
+        publicationFrequency: parseOptionalString(body.publicationFrequency),
+      },
+    });
+    return reply.code(201).send(brief);
+  });
+
+  fastify.delete("/v2/briefs/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+    const briefId = (request.params as { id: string }).id;
+    if (!isUuid(briefId)) {
+      return badRequest(reply, "invalid brief id");
+    }
+    const existing = await prisma.editorialBrief.findFirst({ where: { id: briefId, tenantId: context.tenantId } });
+    if (!existing) {
+      return notFound(reply, "brief not found");
+    }
+    await prisma.editorialBrief.delete({ where: { id: existing.id } });
+    return reply.send({ ok: true });
+  });
+
+  // ──────────────────────────────────────────────────────────── Audit
+
+  fastify.get("/v2/audit", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) {
+      return;
+    }
+    const query = request.query as {
+      page?: string;
+      pageSize?: string;
+      entityType?: string;
+      entityId?: string;
+      action?: string;
+    };
+    const page = parsePage(query.page, 1);
+    const pageSize = parsePageSize(query.pageSize, 50);
+    return reply.send(
+      await listAudit(context.tenantId, {
+        page,
+        pageSize,
+        entityType: query.entityType,
+        entityId: query.entityId,
+        action: query.action,
+      }),
+    );
+  });
+
+  // ──────────────────────────────────────────────────────────── Dashboard overview
+
+  fastify.get("/v2/overview", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const tenantId = context.tenantId;
+    const dayStart = new Date();
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+
+    const [
+      todayPlannedArticles,
+      todayPublishedArticles,
+      todayPlannedX,
+      todayPlannedIg,
+      inboxCandidates,
+      draftsCount,
+      reviewCount,
+      scheduledCount,
+      failedCount,
+      sources,
+      recentPublications,
+      automation,
+    ] = await Promise.all([
+      prisma.publication.count({
+        where: { tenantId, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+      }),
+      prisma.publication.count({
+        where: { tenantId, channel: "website", status: "published", publishedAt: { gte: dayStart, lt: dayEnd } },
+      }),
+      prisma.publication.count({
+        where: { tenantId, channel: "x", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+      }),
+      prisma.publication.count({
+        where: { tenantId, channel: "instagram", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+      }),
+      prisma.sourceItem.count({ where: { tenantId, processingStatus: "candidate" } }),
+      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["draft", "ai_generated"] } } }),
+      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["in_review", "qa_passed"] } } }),
+      prisma.publication.count({ where: { tenantId, status: { in: ["scheduled", "queued"] } } }),
+      prisma.publication.count({ where: { tenantId, status: "failed" } }),
+      prisma.contentSource.findMany({
+        where: { tenantId },
+        select: { id: true, name: true, type: true, enabled: true, lastSuccessAt: true, consecutiveFailures: true },
+      }),
+      prisma.publication.findMany({
+        where: { tenantId, status: { not: "deleted" } },
+        orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
+        take: 8,
+        include: {
+          project: { select: { id: true, title: true } },
+          site: { select: { id: true, name: true } },
+          account: { select: { id: true, displayName: true } },
+        },
+      }),
+      getAutomationStatus(tenantId, null),
+    ]);
+
+    return reply.send({
+      today: {
+        articlesPlanned: todayPlannedArticles,
+        articlesPublished: todayPublishedArticles,
+        xPosts: todayPlannedX,
+        instagramPosts: todayPlannedIg,
+      },
+      pipeline: {
+        inboxCandidates,
+        drafts: draftsCount,
+        review: reviewCount,
+        scheduled: scheduledCount,
+        failed: failedCount,
+      },
+      sources: {
+        total: sources.length,
+        enabled: sources.filter((source) => source.enabled).length,
+        degraded: sources.filter((source) => source.enabled && source.consecutiveFailures > 0).length,
+        failing: sources.filter((source) => source.enabled && source.consecutiveFailures >= 3).length,
+      },
+      automation: {
+        enabled: automation.enabled,
+        state: automation.state,
+        pausedReason: automation.pausedReason,
+        warnings: automation.warnings,
+        nextSlots: automation.nextSlots.slice(0, 5),
+      },
+      recentPublications: recentPublications.map((publication) => ({
+        id: publication.id,
+        channel: publication.channel,
+        status: publication.status,
+        scheduledFor: publication.scheduledFor,
+        publishedAt: publication.publishedAt,
+        title: publication.project.title,
+        destination:
+          publication.channel === "website"
+            ? publication.site?.name ?? "Website"
+            : publication.account?.displayName ?? publication.channel,
+        lastError: publication.lastError,
+      })),
+      failures: await prisma.publication.findMany({
+        where: { tenantId, status: "failed" },
+        orderBy: { updatedAt: "desc" },
+        take: 5,
+        select: {
+          id: true,
+          channel: true,
+          lastError: true,
+          failureClass: true,
+          updatedAt: true,
+          project: { select: { id: true, title: true } },
+        },
+      }),
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────── Worker health
+
+  fastify.get("/v2/health/workers", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    try {
+      const { Queue } = await import("bullmq");
+      const { getRedisConnectionOptions } = await import("../infrastructure/queue/redis");
+      const connection = getRedisConnectionOptions();
+
+      const entries = await Promise.all(
+        Object.values(QUEUE_NAMES).map(async (name) => {
+          const queue = new Queue(name, { connection });
+          try {
+            const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed");
+            return { queue: name, ...counts };
+          } finally {
+            await queue.close();
+          }
+        }),
+      );
+      return reply.send({ workers: entries });
+    } catch (error) {
+      return reply.code(503).send({ status: "degraded", message: error instanceof Error ? error.message : String(error) });
+    }
+  });
+}
+
+function readCredentialsByRef(credentialsRef: string | null | undefined): Record<string, unknown> | null {
+  if (!credentialsRef) {
+    return null;
+  }
+  const raw = getEnvValue(credentialsRef);
+  if (!raw) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function getEnvValue(name: string): string {
+  return process.env[name] ?? "";
+}

@@ -1,10 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { RouterLink } from '@angular/router';
+import { Subscription, timer } from 'rxjs';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
-import type { PublicationListItem, StudioProjectSummary } from '../models/studio.models';
-import { contentFilterOf, formatRelativeTime, stageLabel, stageTone } from '../utils/content-status';
+import type { StudioOverview, WorkerHealth } from '../models/studio.models';
 
 @Component({
   selector: 'app-overview-page',
@@ -15,68 +15,170 @@ import { contentFilterOf, formatRelativeTime, stageLabel, stageTone } from '../u
       <header class="au-page__header">
         <div>
           <h1 class="au-page__title">Good {{ greeting }}, {{ firstName }}</h1>
-          <p class="au-page__subtitle">What needs attention across your sites.</p>
+          <p class="au-page__subtitle">The operational state of your editorial pipeline.</p>
         </div>
         <a class="au-button au-button--primary" routerLink="/studio/content/new">+ New content</a>
       </header>
 
-      <div class="au-stat-row">
+      <div class="au-stat-row" *ngIf="overview">
         <article class="au-stat">
-          <strong>{{ needsAttention }}</strong>
-          <span>Needs attention</span>
+          <strong>{{ overview.today.articlesPlanned }}</strong>
+          <span>Articles planned today</span>
         </article>
         <article class="au-stat">
-          <strong>{{ readyCount }}</strong>
-          <span>Ready to publish</span>
+          <strong>{{ overview.today.articlesPublished }}</strong>
+          <span>Published today</span>
         </article>
         <article class="au-stat">
-          <strong>{{ publishedCount }}</strong>
-          <span>Published</span>
+          <strong>{{ overview.today.xPosts }}</strong>
+          <span>X posts</span>
+        </article>
+        <article class="au-stat">
+          <strong>{{ overview.today.instagramPosts }}</strong>
+          <span>Instagram posts</span>
         </article>
       </div>
 
-      <section class="au-surface">
+      <div class="au-grid au-grid--dash" *ngIf="overview">
+        <section class="au-surface au-surface--padded">
+          <header class="au-surface__header">
+            <h2 class="au-surface__title">Pipeline</h2>
+            <a class="au-link" routerLink="/studio/content">Content</a>
+          </header>
+          <a class="au-row" routerLink="/studio/inbox">
+            <span class="au-row__title">Inbox candidates</span>
+            <span class="au-tag au-tag--warning">{{ overview.pipeline.inboxCandidates }}</span>
+          </a>
+          <a class="au-row" routerLink="/studio/content">
+            <span class="au-row__title">Drafts</span>
+            <span class="au-tag">{{ overview.pipeline.drafts }}</span>
+          </a>
+          <a class="au-row" routerLink="/studio/content">
+            <span class="au-row__title">In review</span>
+            <span class="au-tag">{{ overview.pipeline.review }}</span>
+          </a>
+          <a class="au-row" routerLink="/studio/publications">
+            <span class="au-row__title">Scheduled</span>
+            <span class="au-tag au-tag--success">{{ overview.pipeline.scheduled }}</span>
+          </a>
+          <a class="au-row" routerLink="/studio/publications">
+            <span class="au-row__title">Failed</span>
+            <span class="au-tag au-tag--danger" *ngIf="overview.pipeline.failed > 0">{{ overview.pipeline.failed }}</span>
+            <span class="au-tag au-tag--muted" *ngIf="overview.pipeline.failed === 0">0</span>
+          </a>
+        </section>
+
+        <section class="au-surface au-surface--padded">
+          <header class="au-surface__header">
+            <h2 class="au-surface__title">Automation</h2>
+            <a class="au-link" routerLink="/studio/automation">Configure</a>
+          </header>
+          <div class="au-automation-state">
+            <span class="au-tag" [class.au-tag--success]="overview.automation.enabled" [class.au-tag--muted]="!overview.automation.enabled">
+              {{ overview.automation.enabled ? 'enabled' : 'disabled' }}
+            </span>
+            <span class="au-tag" [class.au-tag--danger]="overview.automation.state === 'paused'" [class.au-tag--success]="overview.automation.state === 'active'">
+              {{ overview.automation.state }}
+            </span>
+            <span class="au-overview__reason" *ngIf="overview.automation.pausedReason">{{ overview.automation.pausedReason }}</span>
+          </div>
+          <div class="au-overview__warnings" *ngIf="overview.automation.warnings.length > 0">
+            <p class="au-overview__warning" *ngFor="let warning of overview.automation.warnings">⚠ {{ warning }}</p>
+          </div>
+          <p class="au-auth__hint" *ngIf="overview.automation.nextSlots.length > 0">Next planned:</p>
+          <span class="au-tag au-tag--muted" *ngFor="let slot of overview.automation.nextSlots">{{ slot.channel }} · {{ slotLabel(slot.at) }}</span>
+        </section>
+
+        <section class="au-surface au-surface--padded">
+          <header class="au-surface__header">
+            <h2 class="au-surface__title">Sources</h2>
+            <a class="au-link" routerLink="/studio/sources">Manage</a>
+          </header>
+          <div class="au-row">
+            <span class="au-row__title">Healthy</span>
+            <span class="au-tag au-tag--success">{{ overview.sources.enabled - overview.sources.degraded - overview.sources.failing }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Degraded</span>
+            <span class="au-tag au-tag--warning">{{ overview.sources.degraded }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Failing</span>
+            <span class="au-tag au-tag--danger">{{ overview.sources.failing }}</span>
+          </div>
+          <div class="au-row">
+            <span class="au-row__title">Disabled</span>
+            <span class="au-tag au-tag--muted">{{ overview.sources.total - overview.sources.enabled }}</span>
+          </div>
+          <details class="au-advanced">
+            <summary class="au-link">Worker health</summary>
+            <div class="au-workers">
+              <div class="au-workers__row" *ngFor="let worker of workerHealth">
+                <span class="au-workers__name">{{ worker.queue }}</span>
+                <span class="au-tag au-tag--muted">waiting {{ worker.waiting }}</span>
+                <span class="au-tag au-tag--warning">active {{ worker.active }}</span>
+                <span class="au-tag" [class.au-tag--danger]="worker.failed > 0">failed {{ worker.failed }}</span>
+              </div>
+            </div>
+          </details>
+        </section>
+      </div>
+
+      <section class="au-surface" *ngIf="overview">
         <header class="au-surface__header">
-          <h2 class="au-surface__title">Recent content</h2>
-          <a class="au-link" routerLink="/studio/content">View all</a>
+          <h2 class="au-surface__title">Recent publications</h2>
+          <a class="au-link" routerLink="/studio/publications">View all</a>
         </header>
-        <div class="au-empty" *ngIf="recent.length === 0">No content yet. Create your first piece.</div>
-        <a class="au-row" *ngFor="let item of recent" [routerLink]="['/studio/content', item.id]">
+        <div class="au-empty" *ngIf="overview.recentPublications.length === 0">No publication activity yet.</div>
+        <a class="au-row" *ngFor="let item of overview.recentPublications" [routerLink]="['/studio/content', item.id]">
           <span class="au-row__title">{{ item.title }}</span>
-          <span class="au-tag">{{ item.site.name }}</span>
-          <span class="au-tag" [class.au-tag--success]="stageTone(item.reviewGate) === 'success'"
-            [class.au-tag--danger]="stageTone(item.reviewGate) === 'danger'">
-            {{ stageLabel(item.reviewGate) }}
-          </span>
-          <span class="au-row__meta">{{ formatRelativeTime(item.updatedAt) }}</span>
+          <span class="au-channel-badge" [ngClass]="'au-channel-badge--' + item.channel">{{ item.channel }}</span>
+          <span class="au-tag" [class.au-tag--success]="item.status === 'published'" [class.au-tag--danger]="item.status === 'failed'">{{ item.status }}</span>
+          <span class="au-row__meta">{{ item.destination }}</span>
         </a>
       </section>
 
-      <section class="au-surface">
+      <section class="au-surface au-surface--danger" *ngIf="overview && overview.failures.length > 0">
         <header class="au-surface__header">
-          <h2 class="au-surface__title">Recent activity</h2>
-          <a class="au-link" routerLink="/studio/publishing">Publishing</a>
+          <h2 class="au-surface__title">Failures needing attention</h2>
+          <a class="au-link" routerLink="/studio/publications">Open</a>
         </header>
-        <div class="au-empty" *ngIf="publications.length === 0">No publication activity yet.</div>
-        <div class="au-row" *ngFor="let item of publications">
-          <span class="au-row__title">{{ item.project?.title || 'Publication' }}</span>
-          <span class="au-tag">{{ item.site?.name }}</span>
-          <span class="au-tag">{{ item.status }}</span>
-          <span class="au-row__meta">{{ formatRelativeTime(item.createdAt) }}</span>
+        <div class="au-row" *ngFor="let failure of overview.failures">
+          <span class="au-row__title">{{ failure.project.title }}</span>
+          <span class="au-channel-badge" [ngClass]="'au-channel-badge--' + failure.channel">{{ failure.channel }}</span>
+          <span class="au-row__meta au-row__error">{{ failure.lastError }}</span>
         </div>
       </section>
     </section>
   `,
+  styles: [
+    `
+      .au-grid--dash { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1rem; }
+      .au-surface--padded { padding: 0.9rem 1.1rem; }
+      .au-surface--danger { border: 1px solid #fecaca; }
+      .au-automation-state { display: flex; gap: 0.4rem; align-items: center; margin-bottom: 0.5rem; }
+      .au-overview__reason { font-size: 0.8rem; color: var(--au-danger, #dc2626); }
+      .au-overview__warnings { margin: 0.4rem 0; }
+      .au-overview__warning { font-size: 0.78rem; color: #92400e; margin: 2px 0; }
+      .au-workers { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.5rem; }
+      .au-workers__row { display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; }
+      .au-workers__name { font-weight: 600; min-width: 130px; }
+      .au-row__error { color: var(--au-danger, #dc2626); max-width: 400px; }
+      .au-channel-badge { text-transform: uppercase; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; }
+      .au-channel-badge--website { background: #dbeafe; color: #1d4ed8; }
+      .au-channel-badge--x { background: #111; color: #fff; }
+      .au-channel-badge--instagram { background: #fdf2f8; color: #be185d; }
+      .au-auth__hint { font-size: 0.8rem; color: var(--au-muted, #6b7280); }
+    `,
+  ],
 })
-export class OverviewPageComponent implements OnInit {
+export class OverviewPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
 
-  recent: StudioProjectSummary[] = [];
-  publications: PublicationListItem[] = [];
-  needsAttention = 0;
-  readyCount = 0;
-  publishedCount = 0;
+  overview: StudioOverview | null = null;
+  workerHealth: Array<{ queue: string; waiting: number; active: number; delayed: number; failed: number; completed: number }> = [];
+  private refreshSubscription: Subscription | null = null;
 
   get greeting(): string {
     const hour = new Date().getHours();
@@ -97,36 +199,35 @@ export class OverviewPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.api.listProjects({ page: 1, pageSize: 100 }).subscribe({
-      next: (response) => {
-        const items = response.items;
-        this.recent = items.slice(0, 6);
-        this.readyCount = items.filter((item) => item.reviewGate.publishReady && item.reviewGate.stage !== 'published').length;
-        this.publishedCount = items.filter((item) => item.reviewGate.stage === 'published').length;
-        this.needsAttention = items.filter(
-          (item) =>
-            item.reviewGate.blockerCount > 0 ||
-            item.reviewGate.stage === 'publish_failed' ||
-            item.reviewGate.stage === 'qa_blocked',
-        ).length;
+    this.load();
+    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.load());
+  }
+
+  ngOnDestroy(): void {
+    this.refreshSubscription?.unsubscribe();
+  }
+
+  load(): void {
+    this.api.getOverview().subscribe({
+      next: (overview) => {
+        this.overview = overview;
       },
       error: () => {
-        this.recent = [];
+        this.overview = null;
       },
     });
-
-    this.api.listPublications(1, 6).subscribe({
-      next: (response) => {
-        this.publications = response.items;
+    this.api.getWorkerHealth().subscribe({
+      next: (health) => {
+        this.workerHealth = health.workers ?? [];
       },
       error: () => {
-        this.publications = [];
+        this.workerHealth = [];
       },
     });
   }
 
-  contentFilterOf = contentFilterOf;
-  stageLabel = stageLabel;
-  stageTone = stageTone;
-  formatRelativeTime = formatRelativeTime;
+  slotLabel(value: string): string {
+    return new Date(value).toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  }
 }
+

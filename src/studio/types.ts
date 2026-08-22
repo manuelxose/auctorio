@@ -408,6 +408,9 @@ export type ListProjectsInput = PaginationQuery & {
   siteId?: string;
   status?: ProjectStatus;
   goal?: ProjectGoal;
+  search?: string;
+  includeArchived?: boolean;
+  origin?: "manual" | "auto";
 };
 
 export type PublicationExecutionState = Pick<
@@ -500,12 +503,21 @@ export type StudioProjectSummary = Pick<
   | "brief"
   | "goal"
   | "status"
+  | "origin"
   | "primaryLanguage"
   | "createdAt"
   | "updatedAt"
 > & {
   site: Pick<Site, "id" | "key" | "name" | "type" | "locale" | "baseUrl">;
   versionCount: number;
+  socialCount: number;
+  publications: Array<{
+    id: string;
+    channel: string;
+    status: string;
+    scheduledFor: Date | null;
+    publishedAt: Date | null;
+  }>;
   reviewGate: ReviewGateSummary;
   latestVersion: VersionSummary | null;
   latestPublicationJob: PublicationExecutionState | null;
@@ -517,6 +529,17 @@ export type ProjectVersionDetail = VersionSummary & {
 
 export type StudioProjectDetailView = StudioProjectSummary & {
   metadata: ContentProject["metadata"];
+  origin: string;
+  deletedAt: Date | null;
+  deletionReason: string | null;
+  sourceItem: {
+    id: string;
+    title: string;
+    canonicalUrl: string | null;
+    source: { id: string; name: string };
+  } | null;
+  cluster: { id: string; headline: string | null; sourceCount: number } | null;
+  campaign: { id: string; name: string } | null;
   site: Pick<
     Site,
     | "id"
@@ -532,6 +555,43 @@ export type StudioProjectDetailView = StudioProjectSummary & {
   >;
   topic: { id: string; title: string | null } | null;
   latestAssetUrl: string | null;
+  socialContents: Array<{
+    id: string;
+    channel: string;
+    contentType: string;
+    body: string;
+    hashtags: unknown;
+    characterCount: number | null;
+    generationStatus: string;
+    editorialStatus: string;
+    threadPosition: number | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+  publications: Array<{
+    id: string;
+    channel: string;
+    status: string;
+    scheduledFor: Date | null;
+    publishedAt: Date | null;
+    externalId: string | null;
+    externalUrl: string | null;
+    lastError: string | null;
+    failureClass: string | null;
+    failureReason: string | null;
+    retryCount: number;
+    manualOverride: boolean;
+    account: { id: string; platform: string; displayName: string } | null;
+    site: { id: string; key: string; name: string } | null;
+    attempts: Array<{
+      id: string;
+      attemptNumber: number;
+      status: string;
+      error: string | null;
+      startedAt: Date | null;
+      finishedAt: Date | null;
+    }>;
+  }>;
   latestVersion: (VersionSummary & {
     bodyHtml: string | null;
     derivatives: Array<{

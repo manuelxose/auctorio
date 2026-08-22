@@ -9,6 +9,8 @@ const repository_1 = require("../../studio/repository");
 const publishers_1 = require("../../studio/publishers");
 const orchestration_1 = require("../../studio/orchestration");
 const env_1 = require("../../shared/utils/env");
+const prisma_1 = require("../db/prisma");
+const prisma = (0, prisma_1.getPrismaClient)();
 const defaultDependencies = {
     getPublicationJobById: repository_1.getPublicationJobById,
     updatePublicationJob: repository_1.updatePublicationJob,
@@ -78,11 +80,57 @@ async function processPublishingJob(publicationJobId, dependencies = defaultDepe
             : null,
         publishedAt: status === "canceled" ? null : new Date(),
     });
+    await syncDurablePublication(publication.id, status, result, externalId);
     if (status === "published") {
         await dependencies.markProjectPublished(publication.tenantId, publication.projectId, publication.versionId, "published");
         return;
     }
     await dependencies.clearProjectPublicationState(publication.tenantId, publication.projectId, publication.versionId);
+}
+async function syncDurablePublication(publicationJobId, jobStatus, result, externalId) {
+    const durable = await prisma.publication.findFirst({
+        where: { publicationJobId },
+    });
+    if (!durable) {
+        return;
+    }
+    if (jobStatus === "published") {
+        await prisma.publication.update({
+            where: { id: durable.id },
+            data: {
+                status: "published",
+                publishedAt: new Date(),
+                externalId: result.externalId ?? externalId ?? durable.externalId,
+                externalUrl: result.externalUrl ?? durable.externalUrl,
+                lastError: null,
+                failureReason: null,
+                failureClass: null,
+            },
+        });
+        return;
+    }
+    if (jobStatus === "canceled") {
+        const wasUnpublish = durable.metadata && typeof durable.metadata === "object"
+            ? durable.metadata.unpublishRequested === true
+            : false;
+        await prisma.publication.update({
+            where: { id: durable.id },
+            data: wasUnpublish
+                ? { status: "unpublished", publishedAt: null }
+                : { status: "canceled", lastError: null },
+        });
+        return;
+    }
+    if (jobStatus === "draft_synced") {
+        await prisma.publication.update({
+            where: { id: durable.id },
+            data: {
+                status: "ready",
+                externalId: result.externalId ?? externalId ?? durable.externalId,
+                externalUrl: result.externalUrl ?? durable.externalUrl,
+            },
+        });
+    }
 }
 async function runPublishingWorker() {
     const redisUrl = (0, env_1.getEnv)("REDIS_URL", "");
@@ -110,6 +158,16 @@ async function runPublishingWorker() {
             error: err.message,
         });
         await (0, repository_1.updateProjectStatus)(publication.tenantId, publication.projectId, "publish_failed");
+        await prisma.publication.updateMany({
+            where: { publicationJobId },
+            data: {
+                status: "failed",
+                lastError: err.message,
+                failureClass: "transient",
+                failureReason: "website_publish_failed",
+                nextRetryAt: new Date(Date.now() + 60_000),
+            },
+        });
     });
     console.log("[worker:publishing] started", { queue: queues_1.QUEUE_NAMES.publishing });
 }
