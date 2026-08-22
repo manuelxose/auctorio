@@ -47,10 +47,29 @@ async function createFactsFromSourceItem(
   }
 
   const chunkSize = 3500;
-  let created = 0;
+  const chunks: string[] = [];
   for (let offset = 0; offset < content.length && offset < chunkSize * 3; offset += chunkSize) {
     const chunk = content.slice(offset, offset + chunkSize).trim();
-    if (!chunk) {
+    if (chunk) {
+      chunks.push(chunk);
+    }
+  }
+  if (chunks.length === 0) {
+    return 0;
+  }
+
+  const hashes = chunks.map((chunk) => `${topicId}:${Buffer.from(chunk).toString("base64").slice(0, 100)}`);
+  const existing = await prisma.fact.findMany({
+    where: { tenantId, topicId, contentHash: { in: hashes } },
+    select: { contentHash: true },
+  });
+  const existingHashes = new Set(existing.map((fact) => fact.contentHash));
+
+  let created = 0;
+  for (let index = 0; index < chunks.length; index += 1) {
+    const chunk = chunks[index];
+    const contentHash = hashes[index];
+    if (existingHashes.has(contentHash)) {
       continue;
     }
     await prisma.fact.create({
@@ -60,7 +79,7 @@ async function createFactsFromSourceItem(
         sourceType: sourceTypeToFactSourceType(sourceType),
         sourceRef: item.canonicalUrl ?? undefined,
         content: chunk,
-        contentHash: `${topicId}:${Buffer.from(chunk).toString("base64").slice(0, 100)}`,
+        contentHash,
         metadata: metadata as Prisma.InputJsonObject,
       },
     });
