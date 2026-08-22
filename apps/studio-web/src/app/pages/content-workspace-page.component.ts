@@ -4,6 +4,9 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
+import { ConfirmService } from '../services/confirm.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
 import type {
   ProjectVersionDetail,
   PublishingAccount,
@@ -29,25 +32,23 @@ type ProjectPublication = {
 @Component({
   selector: 'app-content-workspace-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
   template: `
     <section class="au-page" *ngIf="project; else loadingState">
-      <a class="au-link" routerLink="/studio/content">← Content</a>
+      <a class="au-link au-mb-2" routerLink="/studio/content">
+        <app-icon name="chevron-left"></app-icon>
+        Back to content
+      </a>
 
       <header class="au-page__header">
         <div>
           <h1 class="au-page__title">{{ project.title }}</h1>
           <div class="au-page__tags">
-            <span class="au-tag">{{ project.site.name }}</span>
-            <span
-              class="au-tag"
-              [class.au-tag--success]="stageTone(project.reviewGate) === 'success'"
-              [class.au-tag--danger]="stageTone(project.reviewGate) === 'danger'"
-              [class.au-tag--warning]="stageTone(project.reviewGate) === 'warning'"
-            >
+            <span class="au-badge au-badge--neutral">{{ project.site.name }}</span>
+            <span class="au-badge" [class]="'au-badge--' + stageTone(project.reviewGate)">
               {{ stageLabel(project.reviewGate) }}
             </span>
-            <span class="au-tag" *ngIf="project.origin === 'auto'" title="Created by automation">🤖 auto</span>
+            <span class="au-badge au-badge--brand" *ngIf="project.origin === 'auto'" title="Created by automation">automatic</span>
           </div>
           <div class="au-readiness">
             <span class="au-readiness__item" [class.is-ready]="readiness.article">Article</span>
@@ -59,30 +60,39 @@ type ProjectPublication = {
           </div>
         </div>
         <div class="au-page__actions">
-          <button class="au-button au-button--ghost" type="button" (click)="refresh()">Refresh</button>
-          <button class="au-button au-button--secondary" type="button" *ngIf="canGenerate" (click)="generate()">
+          <button class="au-btn au-btn--ghost" type="button" (click)="refresh()">
+            <app-icon name="refresh"></app-icon>
+            Refresh
+          </button>
+          <button class="au-btn au-btn--secondary" type="button" *ngIf="canGenerate" (click)="generate()">
+            <app-icon name="sparkles"></app-icon>
             {{ project.versions.length > 0 ? 'Regenerate' : 'Generate article' }}
           </button>
-          <button class="au-button au-button--secondary" type="button" *ngIf="imageNeedsRetry" (click)="retryImage()">
+          <button class="au-btn au-btn--secondary" type="button" *ngIf="imageNeedsRetry" (click)="retryImage()">
+            <app-icon name="refresh"></app-icon>
             Retry image
           </button>
-          <button class="au-button au-button--secondary" type="button" *ngIf="canApprove" (click)="approve()">
+          <button class="au-btn au-btn--secondary" type="button" *ngIf="canApprove" (click)="approve()">
+            <app-icon name="circle-check"></app-icon>
             Approve
           </button>
-          <button class="au-button au-button--primary" type="button" *ngIf="canSyncDraft" (click)="syncDraft()">
-            Save to site as draft
-          </button>
-          <button class="au-button au-button--primary" type="button" *ngIf="canPublish" (click)="publish()">
+          <button class="au-btn au-btn--primary" type="button" *ngIf="canSyncDraft" (click)="syncDraft()">Save to site as draft</button>
+          <button class="au-btn au-btn--primary" type="button" *ngIf="canPublish" (click)="publish()">
+            <app-icon name="publications"></app-icon>
             {{ published ? 'Republish' : 'Publish' }}
           </button>
-          <button class="au-button au-button--danger" type="button" *ngIf="canUnpublish" (click)="unpublish()">
-            Unpublish
-          </button>
+          <button class="au-btn au-btn--danger" type="button" *ngIf="canUnpublish" (click)="unpublish()">Unpublish</button>
         </div>
       </header>
 
-      <p class="au-banner au-banner--error" *ngIf="error">{{ error }}</p>
-      <p class="au-banner au-banner--success" *ngIf="notice">{{ notice }}</p>
+      <div class="au-banner au-banner--error" *ngIf="error">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">{{ error }}</span>
+      </div>
+      <div class="au-banner au-banner--success" *ngIf="notice">
+        <app-icon name="circle-check"></app-icon>
+        <span class="au-banner__text">{{ notice }}</span>
+      </div>
 
       <div class="au-workspace">
         <div class="au-workspace__main">
@@ -99,10 +109,11 @@ type ProjectPublication = {
           </nav>
 
           <ng-container [ngSwitch]="activeTab">
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'content'">
+            <section class="au-panel au-panel--padded" *ngSwitchCase="'content'">
               <div class="au-empty" *ngIf="!project.latestVersion">
-                <p>The article is being generated. This takes a few seconds.</p>
-                <span class="au-spinner"></span>
+                <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
+                <p class="au-empty__title">Generating your article…</p>
+                <p class="au-empty__text">The workspace refreshes automatically when the first version is ready.</p>
               </div>
 
               <ng-container *ngIf="project.latestVersion">
@@ -112,99 +123,112 @@ type ProjectPublication = {
                 </label>
                 <label class="au-field">
                   <span class="au-field__label">Excerpt</span>
-                  <textarea class="au-input" rows="2" [(ngModel)]="draftExcerpt"></textarea>
+                  <textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea>
                 </label>
                 <label class="au-field">
                   <span class="au-field__label">Article</span>
-                  <textarea class="au-input au-input--editor" rows="18" [(ngModel)]="draftBody"></textarea>
+                  <textarea class="au-textarea au-input--editor" rows="18" [(ngModel)]="draftBody"></textarea>
                 </label>
                 <div class="au-form__actions">
-                  <button class="au-button au-button--secondary" type="button" [disabled]="saving" (click)="save()">
+                  <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
                     {{ saving ? 'Saving…' : 'Save' }}
                   </button>
                 </div>
               </ng-container>
 
-              <details class="au-advanced au-workspace__feedback">
-                <summary class="au-link">Ask the AI to improve this</summary>
-                <textarea class="au-input" rows="2" placeholder="e.g. Add a section about prices…" [(ngModel)]="feedback"></textarea>
-                <button class="au-button au-button--secondary" type="button" [disabled]="revising" (click)="revise()">
-                  {{ revising ? 'Revising…' : 'Revise with AI' }}
-                </button>
+              <details class="au-advanced au-mt-3">
+                <summary>Ask the AI to improve this</summary>
+                <textarea class="au-textarea au-mt-2" rows="2" placeholder="e.g. Add a section about prices…" [(ngModel)]="feedback"></textarea>
+                <div class="au-form__actions">
+                  <button class="au-btn au-btn--secondary" type="button" [disabled]="revising" (click)="revise()">
+                    <app-icon name="sparkles"></app-icon>
+                    {{ revising ? 'Revising…' : 'Revise with AI' }}
+                  </button>
+                </div>
               </details>
             </section>
 
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'media'">
-              <div class="au-media-grid">
+            <section class="au-panel au-panel--padded" *ngSwitchCase="'media'">
+              <div class="au-media-grid" *ngIf="project.latestVersion?.assetVariants?.length">
                 <article class="au-media-card" *ngFor="let variant of project.latestVersion?.assetVariants ?? []">
                   <img [src]="variant.publicUrl || ''" [alt]="variant.kind" loading="lazy" />
-                  <span class="au-tag">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</span>
+                  <div class="au-media-card__body">
+                    <span class="au-badge au-badge--neutral">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</span>
+                  </div>
                 </article>
               </div>
               <div class="au-empty" *ngIf="!(project.latestVersion?.assetVariants?.length)">
-                <p *ngIf="project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing'">
-                  Generating hero image… <span class="au-spinner"></span>
+                <span class="au-empty__icon"><app-icon name="media"></app-icon></span>
+                <p class="au-empty__title" *ngIf="project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing'">
+                  Generating hero image…
                 </p>
-                <p *ngIf="project.latestVersion?.image?.status === 'failed' || project.latestVersion?.image?.status === 'retryable'">
+                <p class="au-empty__title" *ngIf="project.latestVersion?.image?.status === 'failed' || project.latestVersion?.image?.status === 'retryable'">
                   {{ imageError }}
                 </p>
-                <p *ngIf="!project.latestVersion?.image">No hero image yet.</p>
+                <p class="au-empty__title" *ngIf="!project.latestVersion?.image">No hero image yet</p>
+                <p class="au-empty__text">A hero image improves article performance on social channels.</p>
               </div>
               <div class="au-form__actions">
-                <button class="au-button au-button--secondary" type="button" (click)="generateAsset()">
+                <button class="au-btn au-btn--secondary" type="button" (click)="generateAsset()">
+                  <app-icon name="media"></app-icon>
                   {{ project.latestVersion?.assetVariants?.length ? 'Generate new image' : 'Generate image' }}
                 </button>
               </div>
             </section>
 
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'seo'">
+            <section class="au-panel au-panel--padded" *ngSwitchCase="'seo'">
               <ng-container *ngIf="project.latestVersion">
                 <label class="au-field">
                   <span class="au-field__label">SEO title</span>
                   <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
-                  <span class="au-field__hint">{{ (draftSeoTitle || '').length }} / 65</span>
+                  <span class="au-field__hint">{{ (draftSeoTitle || '').length }} / 65 characters</span>
                 </label>
                 <label class="au-field">
                   <span class="au-field__label">SEO description</span>
-                  <textarea class="au-input" rows="3" [(ngModel)]="draftSeoDescription"></textarea>
-                  <span class="au-field__hint">{{ (draftSeoDescription || '').length }} / 165</span>
+                  <textarea class="au-textarea" rows="3" [(ngModel)]="draftSeoDescription"></textarea>
+                  <span class="au-field__hint">{{ (draftSeoDescription || '').length }} / 165 characters</span>
                 </label>
                 <div class="au-form__actions">
-                  <button class="au-button au-button--secondary" type="button" [disabled]="saving" (click)="save()">
+                  <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
                     {{ saving ? 'Saving…' : 'Save SEO' }}
                   </button>
                 </div>
               </ng-container>
             </section>
 
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'social'">
-              <div class="au-social-generate">
-                <p class="au-auth__hint">Generate platform-native copy from the current article version.</p>
-                <div class="au-social-generate__controls">
-                  <label class="au-check"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X post</label>
-                  <label class="au-check"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
-                  <label class="au-field au-field--inline">
+            <section class="au-panel au-panel--padded" *ngSwitchCase="'social'">
+              <div class="au-social-generate au-mb-3">
+                <p class="au-hint">Generate platform-native copy from the current article version.</p>
+                <div class="au-social-generate__controls au-mt-2">
+                  <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X post</label>
+                  <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
+                  <label class="au-inline au-muted">
                     <span>X thread length</span>
-                    <select class="au-input au-input--sm" [(ngModel)]="socialThreadLength">
+                    <select class="au-select au-filter-select" [(ngModel)]="socialThreadLength">
                       <option [ngValue]="1">single post</option>
                       <option [ngValue]="2">2 posts</option>
                       <option [ngValue]="3">3 posts</option>
                       <option [ngValue]="5">5 posts</option>
                     </select>
                   </label>
-                  <button class="au-button au-button--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()">
-                    {{ socialGenerating ? 'Generating…' : 'Generate social copy' }}
+                  <button class="au-btn au-btn--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()">
+                    <app-icon name="sparkles"></app-icon>
+                    {{ socialGenerating ? 'Generating social copy…' : 'Generate social copy' }}
                   </button>
                 </div>
               </div>
 
-              <div class="au-empty" *ngIf="social.length === 0">No social derivatives yet. Generate X and Instagram copy from this article.</div>
+              <div class="au-empty" *ngIf="social.length === 0">
+                <span class="au-empty__icon"><app-icon name="publications"></app-icon></span>
+                <p class="au-empty__title">No social derivatives yet</p>
+                <p class="au-empty__text">Generate X and Instagram copy from this article.</p>
+              </div>
 
               <article class="au-social-card" *ngFor="let piece of social">
                 <header class="au-social-card__header">
-                  <span class="au-channel-badge" [ngClass]="'au-channel-badge--' + piece.channel">{{ piece.channel }}</span>
-                  <span class="au-tag au-tag--muted">{{ piece.contentType }}</span>
-                  <span class="au-tag" [class.au-tag--success]="piece.editorialStatus === 'approved'" [class.au-tag--danger]="piece.editorialStatus === 'rejected'">
+                  <span class="au-channel" [class]="'au-channel--' + piece.channel">{{ piece.channel }}</span>
+                  <span class="au-badge au-badge--neutral">{{ piece.contentType }}</span>
+                  <span class="au-badge" [class.au-badge--success]="piece.editorialStatus === 'approved'" [class.au-badge--danger]="piece.editorialStatus === 'rejected'" [class.au-badge--warning]="piece.editorialStatus !== 'approved' && piece.editorialStatus !== 'rejected'">
                     {{ piece.generationStatus }} / {{ piece.editorialStatus }}
                   </span>
                   <span class="au-social-card__count" [class.is-over]="isOverLimit(piece)">
@@ -212,66 +236,93 @@ type ProjectPublication = {
                   </span>
                   <span class="au-social-card__meta" *ngIf="piece.threadPosition !== null">post {{ piece.threadPosition + 1 }}</span>
                 </header>
-                <textarea class="au-input au-input--social" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)"></textarea>
+                <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)"></textarea>
                 <div class="au-social-card__hashtags" *ngIf="piece.hashtags?.length">
-                  <span class="au-tag au-tag--muted" *ngFor="let tag of piece.hashtags">{{ tag }}</span>
+                  <span class="au-badge au-badge--neutral" *ngFor="let tag of piece.hashtags">{{ tag }}</span>
                 </div>
                 <footer class="au-social-card__actions">
-                  <button class="au-button au-button--ghost au-button--sm" type="button" (click)="regenerateSocialPiece(piece)">↻ Regenerate</button>
-                  <button class="au-button au-button--ghost au-button--sm" type="button" (click)="saveSocialPiece(piece)">Save</button>
-                  <button class="au-button au-button--ghost au-button--sm" type="button" (click)="approveSocial(piece)">Approve</button>
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="regenerateSocialPiece(piece)">
+                    <app-icon name="refresh"></app-icon>
+                    Regenerate
+                  </button>
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="saveSocialPiece(piece)">Save</button>
+                  <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="approveSocial(piece)">
+                    <app-icon name="circle-check"></app-icon>
+                    Approve
+                  </button>
                 </footer>
               </article>
             </section>
 
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'schedule'">
-              <p class="au-auth__hint">Schedule the article and its social posts. Times are in your site timezone.</p>
-              <table class="au-table au-table--schedule">
-                <thead>
-                  <tr><th>Channel</th><th>Destination</th><th>Status</th><th>When</th><th></th></tr>
-                </thead>
-                <tbody>
-                  <tr *ngFor="let publication of publications">
-                    <td><span class="au-channel-badge" [ngClass]="'au-channel-badge--' + publication.channel">{{ publication.channel }}</span></td>
-                    <td>{{ destinationLabel(publication) }}</td>
-                    <td><span class="au-tag" [ngClass]="statusClass(publication.status)">{{ publication.status }}</span>
-                      <span class="au-social-card__meta" *ngIf="publication.lastError">{{ publication.lastError }}</span>
-                    </td>
-                    <td>
-                      <input
-                        class="au-input au-input--sm"
-                        type="datetime-local"
-                        [ngModel]="toLocalInput(publication.scheduledFor)"
-                        (ngModelChange)="reschedule(publication, $event)"
-                      />
-                    </td>
-                    <td class="au-cell-actions">
-                      <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="publication.status === 'failed'" (click)="retryPublication(publication)">Retry</button>
-                      <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="publication.status === 'scheduled' || publication.status === 'ready' || publication.status === 'draft'" (click)="publishNow(publication)">Publish now</button>
-                      <button class="au-button au-button--ghost au-button--xs au-button--danger" type="button" *ngIf="publication.status === 'scheduled'" (click)="cancelPublication(publication)">Cancel</button>
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
+            <section class="au-panel" *ngSwitchCase="'schedule'">
+              <p class="au-hint au-panel-pad">Schedule the article and its social posts. Times are in your site timezone.</p>
+              <div class="au-table-wrap">
+                <table class="au-table">
+                  <thead>
+                    <tr><th>Channel</th><th>Destination</th><th>Status</th><th>When</th><th style="width: 220px"></th></tr>
+                  </thead>
+                  <tbody>
+                    <tr *ngFor="let publication of publications">
+                      <td><span class="au-channel" [class]="'au-channel--' + publication.channel">{{ publication.channel }}</span></td>
+                      <td>{{ destinationLabel(publication) }}</td>
+                      <td>
+                        <span class="au-badge" [class]="statusClass(publication.status)">{{ publication.status }}</span>
+                        <span class="au-table__sub" *ngIf="publication.lastError">{{ publication.lastError }}</span>
+                      </td>
+                      <td>
+                        <input
+                          class="au-input"
+                          type="datetime-local"
+                          [ngModel]="toLocalInput(publication.scheduledFor)"
+                          (ngModelChange)="reschedule(publication, $event)"
+                        />
+                      </td>
+                      <td>
+                        <div class="au-inline">
+                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="publication.status === 'failed'" (click)="retryPublication(publication)">
+                            <app-icon name="refresh"></app-icon>
+                            Retry
+                          </button>
+                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="publication.status === 'scheduled' || publication.status === 'ready' || publication.status === 'draft'" (click)="publishNow(publication)">
+                            Publish now
+                          </button>
+                          <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" *ngIf="publication.status === 'scheduled'" (click)="cancelPublication(publication)">
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
 
-              <div class="au-form__actions au-form__actions--schedule" *ngIf="publications.length === 0">
-                <label class="au-field">
-                  <span>Article on</span>
-                  <select class="au-input" [(ngModel)]="newArticleSiteId">
+              <div class="au-form__actions au-panel-pad au-mt-0" *ngIf="publications.length === 0">
+                <label class="au-field au-mb-0">
+                  <span class="au-field__label">Article on</span>
+                  <select class="au-select au-filter-select" [(ngModel)]="newArticleSiteId">
                     <option *ngFor="let site of scheduleSites" [ngValue]="site.id">{{ site.name }}</option>
                   </select>
                 </label>
-                <input class="au-input au-input--inline" type="datetime-local" [(ngModel)]="newScheduleTime" />
-                <button class="au-button au-button--secondary" type="button" (click)="scheduleWebsite()">Schedule article</button>
+                <input class="au-input" style="max-width: 220px" type="datetime-local" [(ngModel)]="newScheduleTime" />
+                <button class="au-btn au-btn--secondary" type="button" (click)="scheduleWebsite()">Schedule article</button>
               </div>
-              <div class="au-form__actions au-form__actions--schedule" *ngIf="publications.length > 0">
-                <button class="au-button au-button--secondary" type="button" *ngIf="!hasChannel('website')" (click)="scheduleWebsite()">+ Schedule article</button>
-                <button class="au-button au-button--secondary" type="button" *ngIf="!hasChannel('x')" (click)="scheduleSocial('x')">+ Schedule X</button>
-                <button class="au-button au-button--secondary" type="button" *ngIf="!hasChannel('instagram')" (click)="scheduleSocial('instagram')">+ Schedule Instagram</button>
+              <div class="au-form__actions au-panel-pad au-mt-0" *ngIf="publications.length > 0">
+                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('website')" (click)="scheduleWebsite()">
+                  <app-icon name="plus"></app-icon>
+                  Schedule article
+                </button>
+                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('x')" (click)="scheduleSocial('x')">
+                  <app-icon name="plus"></app-icon>
+                  Schedule X
+                </button>
+                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('instagram')" (click)="scheduleSocial('instagram')">
+                  <app-icon name="plus"></app-icon>
+                  Schedule Instagram
+                </button>
               </div>
             </section>
 
-            <section class="au-surface au-surface--padded" *ngSwitchCase="'history'">
+            <section class="au-panel au-panel--padded" *ngSwitchCase="'history'">
               <div class="au-history">
                 <button
                   class="au-history__item"
@@ -280,13 +331,13 @@ type ProjectPublication = {
                   [class.is-active]="version.id === selectedVersionId"
                   (click)="selectVersion(version)"
                 >
-                  <span class="au-tag">v{{ version.versionNumber }}</span>
+                  <span class="au-badge au-badge--neutral">v{{ version.versionNumber }}</span>
                   <span class="au-history__label">{{ version.title }}</span>
-                  <span class="au-tag">{{ version.status }}</span>
+                  <span class="au-badge" [class]="'au-badge--' + versionStatusTone(version.status)">{{ version.status }}</span>
                   <span class="au-row__meta">{{ version.approvedBy || version.updatedAt | date: 'short' }}</span>
                 </button>
               </div>
-              <p class="au-auth__hint" *ngIf="selectedVersionId">
+              <p class="au-hint au-mt-2" *ngIf="selectedVersionId">
                 Comparing v{{ project.latestVersion?.versionNumber }} with v{{ selectedVersion?.versionNumber }}. Select a version to inspect its content below.
               </p>
               <pre class="au-diff" *ngIf="selectedVersion">{{ selectedVersion.bodyHtml }}</pre>
@@ -295,35 +346,38 @@ type ProjectPublication = {
         </div>
 
         <aside class="au-workspace__rail">
-          <section class="au-surface au-surface--padded">
-            <h2 class="au-surface__title">Quality</h2>
+          <section class="au-panel au-panel--padded">
+            <h2 class="au-panel__title au-mb-2">Quality</h2>
             <div class="au-qa" *ngIf="project.latestVersion; else noVersion">
               <div class="au-qa__score">
                 <strong>{{ qaScore }}</strong><span>/ 100</span>
               </div>
               <ul class="au-qa__list">
                 <li *ngFor="let issue of project.reviewGate.issues" [class.is-blocking]="issue.severity === 'blocking'">
-                  <span class="au-qa__mark">{{ issue.severity === 'blocking' ? '✕' : '⚠' }}</span>
+                  <span class="au-qa__mark">
+                    <app-icon [name]="issue.severity === 'blocking' ? 'circle-x' : 'warning'"></app-icon>
+                  </span>
                   {{ issue.message }}
                 </li>
               </ul>
-              <p class="au-auth__hint" *ngIf="project.reviewGate.blockerCount > 0">
+              <p class="au-hint" *ngIf="project.reviewGate.blockerCount > 0">
                 {{ project.reviewGate.blockerCount }} issue{{ project.reviewGate.blockerCount === 1 ? '' : 's' }} must be fixed before publishing.
               </p>
-              <button class="au-button au-button--secondary au-button--block" type="button" *ngIf="canFixWithAi" (click)="fixWithAi()">
+              <button class="au-btn au-btn--secondary au-btn--block" type="button" *ngIf="canFixWithAi" (click)="fixWithAi()">
+                <app-icon name="sparkles"></app-icon>
                 Fix with AI
               </button>
             </div>
-            <ng-template #noVersion><p class="au-auth__hint">Quality checks run after generation.</p></ng-template>
+            <ng-template #noVersion><p class="au-hint">Quality checks run after generation.</p></ng-template>
           </section>
 
-          <section class="au-surface au-surface--padded">
-            <h2 class="au-surface__title">Publishing</h2>
-            <p class="au-auth__hint">
+          <section class="au-panel au-panel--padded">
+            <h2 class="au-panel__title au-mb-2">Publishing</h2>
+            <p class="au-hint">
               {{ project.site.name }} · {{ project.site.baseUrl || 'destination' }}
             </p>
-            <div class="au-pub" *ngIf="project.latestPublicationJob">
-              <span class="au-tag">{{ project.latestPublicationJob.status }}</span>
+            <div class="au-stack au-mt-2" *ngIf="project.latestPublicationJob">
+              <span class="au-badge" [class]="'au-badge--' + jobTone(project.latestPublicationJob.status)">{{ project.latestPublicationJob.status }}</span>
               <a
                 class="au-link"
                 *ngIf="project.latestPublicationJob.externalUrl"
@@ -331,10 +385,11 @@ type ProjectPublication = {
                 target="_blank"
                 rel="noopener"
               >
-                Open published page ↗
+                Open published page
+                <app-icon name="external"></app-icon>
               </a>
             </div>
-            <p class="au-auth__hint" *ngIf="!project.latestPublicationJob">Not published yet.</p>
+            <p class="au-hint" *ngIf="!project.latestPublicationJob">Not published yet.</p>
           </section>
         </aside>
       </div>
@@ -344,46 +399,13 @@ type ProjectPublication = {
       <div class="au-boot"><span class="au-spinner" aria-label="Loading"></span></div>
     </ng-template>
   `,
-  styles: [
-    `
-      .au-readiness { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-top: 0.5rem; }
-      .au-readiness__item {
-        font-size: 0.7rem; padding: 2px 8px; border-radius: 999px;
-        background: var(--au-surface-subtle, #f3f4f6); color: var(--au-muted, #6b7280);
-      }
-      .au-readiness__item.is-ready { background: #dcfce7; color: #15803d; }
-      .au-social-generate { margin-bottom: 1rem; }
-      .au-social-generate__controls { display: flex; gap: 0.8rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
-      .au-field--inline { flex-direction: row; align-items: center; gap: 0.4rem; }
-      .au-check { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; }
-      .au-social-card { border: 1px solid var(--au-border, #e5e7eb); border-radius: 8px; padding: 0.8rem; margin-bottom: 0.8rem; }
-      .au-social-card__header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
-      .au-social-card__count { margin-left: auto; font-size: 0.75rem; color: var(--au-muted, #6b7280); }
-      .au-social-card__count.is-over { color: var(--au-danger, #dc2626); font-weight: 700; }
-      .au-social-card__meta { font-size: 0.72rem; color: var(--au-muted, #6b7280); }
-      .au-input--social { font-size: 0.9rem; line-height: 1.5; }
-      .au-social-card__hashtags { display: flex; gap: 0.3rem; flex-wrap: wrap; margin-top: 0.4rem; }
-      .au-social-card__actions { display: flex; gap: 0.4rem; margin-top: 0.6rem; }
-      .au-button--sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
-      .au-button--xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-      .au-button--danger { color: var(--au-danger, #dc2626); }
-      .au-table--schedule { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-      .au-table--schedule th { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--au-border, #e5e7eb); color: var(--au-muted, #6b7280); }
-      .au-table--schedule td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); }
-      .au-form__actions--schedule { justify-content: flex-start; margin-top: 1rem; align-items: flex-end; }
-      .au-input--sm { padding: 0.3rem 0.5rem; font-size: 0.8rem; width: auto; }
-      .au-channel-badge { text-transform: uppercase; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; }
-      .au-channel-badge--website { background: #dbeafe; color: #1d4ed8; }
-      .au-channel-badge--x { background: #111; color: #fff; }
-      .au-channel-badge--instagram { background: #fdf2f8; color: #be185d; }
-      .au-cell-actions { white-space: nowrap; }
-    `,
-  ],
 })
 export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
   project: StudioProjectDetailView | null = null;
@@ -852,15 +874,51 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   statusClass(status: string): string {
     switch (status) {
       case 'published':
-        return 'au-tag--success';
+      case 'draft_synced':
+        return 'au-badge--success';
       case 'failed':
-        return 'au-tag--danger';
+      case 'canceled':
+        return 'au-badge--danger';
       case 'scheduled':
       case 'queued':
       case 'publishing':
-        return 'au-tag--warning';
+      case 'processing':
+        return 'au-badge--warning';
       default:
-        return 'au-tag--muted';
+        return 'au-badge--neutral';
+    }
+  }
+
+  versionStatusTone(status: string): 'success' | 'danger' | 'warning' | 'brand' | 'neutral' {
+    switch (status) {
+      case 'approved':
+      case 'published':
+        return 'success';
+      case 'qa_failed':
+      case 'archived':
+        return 'danger';
+      case 'in_review':
+      case 'qa_passed':
+        return 'warning';
+      case 'ai_generated':
+        return 'brand';
+      default:
+        return 'neutral';
+    }
+  }
+
+  jobTone(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
+    switch (status) {
+      case 'published':
+        return 'success';
+      case 'failed':
+      case 'canceled':
+        return 'danger';
+      case 'queued':
+      case 'processing':
+        return 'warning';
+      default:
+        return 'neutral';
     }
   }
 
@@ -890,11 +948,24 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   cancelPublication(publication: ProjectPublication): void {
-    if (!window.confirm(`Cancel this ${publication.channel} publication?`)) {
+    void this.confirmCancelPublication(publication);
+  }
+
+  private async confirmCancelPublication(publication: ProjectPublication): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Cancel this ${publication.channel} publication?`,
+      message: 'The scheduled publication is removed and will not run.',
+      confirmLabel: 'Cancel publication',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
     this.api.cancelPublication(publication.id).subscribe({
-      next: () => this.load(),
+      next: () => {
+        this.toast.success('Publication canceled.');
+        this.load();
+      },
       error: (err) => {
         this.error = this.describe(err);
       },

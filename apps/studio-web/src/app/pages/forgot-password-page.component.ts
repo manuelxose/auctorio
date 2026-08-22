@@ -30,7 +30,7 @@ import { StudioApiService } from '../services/studio-api.service';
             <input class="au-input" type="email" name="email" autocomplete="email" [(ngModel)]="email" required />
           </label>
           <p class="au-error" *ngIf="error">{{ error }}</p>
-          <button class="au-button au-button--primary au-button--block" type="submit" [disabled]="busy">
+          <button class="au-btn au-btn--primary au-btn--block" type="submit" [disabled]="busy">
             {{ busy ? 'Sending…' : 'Send reset link' }}
           </button>
         </form>

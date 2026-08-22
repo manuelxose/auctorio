@@ -5,155 +5,249 @@ import { RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
+import { ConfirmService } from '../services/confirm.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import type { PublicationChannel, PublicationState, StudioPublication, StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-publications-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, AppPopoverComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Publishing operations</p>
           <h1 class="au-page__title">Publications</h1>
           <p class="au-page__subtitle">Operational view of every article and social publication.</p>
         </div>
+        <div class="au-page__actions">
+          <a class="au-btn au-btn--secondary" routerLink="/studio/calendar">
+            <app-icon name="calendar"></app-icon>
+            Open calendar
+          </a>
+        </div>
       </header>
 
-      <div class="au-toolbar au-toolbar--wrap">
-        <select class="au-input au-input--inline" [(ngModel)]="filters.channel" (ngModelChange)="applyFilters()">
+      <div class="au-toolbar">
+        <div class="au-search">
+          <app-icon name="search"></app-icon>
+          <input
+            class="au-input au-input--search"
+            type="search"
+            placeholder="Search title, URL…"
+            [(ngModel)]="filters.search"
+            (keyup.enter)="applyFilters()"
+          />
+        </div>
+        <select class="au-select au-filter-select" [(ngModel)]="filters.channel" (ngModelChange)="applyFilters()" aria-label="Filter by channel">
           <option value="">All channels</option>
           <option value="website">Website</option>
           <option value="x">X</option>
           <option value="instagram">Instagram</option>
         </select>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()">
+        <select class="au-select au-filter-select" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()" aria-label="Filter by state">
           <option value="">All states</option>
           <option *ngFor="let state of states" [ngValue]="state">{{ state }}</option>
         </select>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.siteId" (ngModelChange)="applyFilters()">
+        <select class="au-select au-filter-select" [(ngModel)]="filters.siteId" (ngModelChange)="applyFilters()" aria-label="Filter by site">
           <option value="">All sites</option>
           <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
         </select>
-        <input
-          class="au-input au-input--search"
-          type="search"
-          placeholder="Search title, URL, source…"
-          [(ngModel)]="filters.search"
-          (keyup.enter)="applyFilters()"
-        />
-        <label class="au-check">
+        <label class="au-checkbox">
           <input type="checkbox" [(ngModel)]="filters.failed" (ngModelChange)="applyFilters()" />
           Failed only
         </label>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()">
+        <div class="au-toolbar__spacer"></div>
+        <select class="au-select au-filter-select" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()" aria-label="Sort publications">
           <option value="scheduled">Sort: scheduled</option>
           <option value="created">Sort: created</option>
           <option value="updated">Sort: updated</option>
         </select>
-        <select class="au-input au-input--inline" [(ngModel)]="filters.direction" (ngModelChange)="applyFilters()">
+        <select class="au-select au-filter-select" [(ngModel)]="filters.direction" (ngModelChange)="applyFilters()" aria-label="Sort direction">
           <option value="desc">Newest first</option>
           <option value="asc">Oldest first</option>
         </select>
-        <button class="au-button au-button--ghost" type="button" (click)="load()">Refresh</button>
+        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="load()" [disabled]="loading">
+          <app-icon name="refresh"></app-icon>
+          Refresh
+        </button>
       </div>
-      <div class="au-banner au-banner--error" *ngIf="error">{{ error }}</div>
+      <div class="au-banner au-banner--error" *ngIf="error">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">{{ error }}</span>
+      </div>
 
-      <section class="au-surface au-surface--table">
-        <div class="au-empty" *ngIf="items.length === 0">No publications match the current filters.</div>
-        <table class="au-table" *ngIf="items.length > 0">
-          <thead>
-            <tr>
-              <th></th>
-              <th>Publication</th>
-              <th>Project</th>
-              <th>Channel</th>
-              <th>Destination</th>
-              <th>Status</th>
-              <th>Scheduled</th>
-              <th>Published</th>
-              <th>Updated</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let item of items">
-              <td>
-                <img class="au-thumb" *ngIf="item.assetUrl" [src]="item.assetUrl" alt="" />
-              </td>
-              <td>
-                <div class="au-cell-title">{{ item.socialContent?.body?.slice(0, 80) || item.version?.title || item.project?.title || '—' }}</div>
-                <div class="au-cell-meta" *ngIf="item.externalUrl">
-                  <a [href]="item.externalUrl" target="_blank" rel="noopener">{{ item.externalUrl }}</a>
-                </div>
-                <div class="au-cell-meta au-cell-error" *ngIf="item.lastError">{{ item.lastError }}</div>
-              </td>
-              <td><a class="au-link" [routerLink]="['/studio/content', item.projectId]">{{ item.project?.title || '—' }}</a></td>
-              <td><span class="au-channel-badge" [ngClass]="'au-channel-badge--' + item.channel">{{ item.channel }}</span></td>
-              <td>{{ destination(item) }}</td>
-              <td><span class="au-tag" [ngClass]="statusClass(item.status)">{{ item.status }}</span></td>
-              <td class="au-cell-date">{{ dateLabel(item.scheduledFor) }}</td>
-              <td class="au-cell-date">{{ dateLabel(item.publishedAt) }}</td>
-              <td class="au-cell-date">{{ dateLabel(item.updatedAt) }}</td>
-              <td class="au-cell-actions">
-                <button class="au-button au-button--ghost au-button--xs" type="button" (click)="inspect(item)">Details</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'failed'" (click)="retry(item)">Retry</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'scheduled' || item.status === 'ready' || item.status === 'draft'" (click)="publishNow(item)">Publish now</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'scheduled'" (click)="cancel(item)">Cancel</button>
-                <button class="au-button au-button--ghost au-button--xs" type="button" *ngIf="item.status === 'published'" (click)="unpublish(item)">Unpublish</button>
-                <button class="au-button au-button--ghost au-button--xs au-button--danger" type="button" *ngIf="item.status !== 'deleted'" (click)="remove(item)">Delete</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+      <section class="au-panel">
+        @if (loading && items.length === 0) {
+          <div class="au-skeleton-row">
+            <div class="au-skeleton au-skeleton-avatar"></div>
+            <div class="au-skeleton au-skeleton-line"></div>
+            <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
+          </div>
+          <div class="au-skeleton-row">
+            <div class="au-skeleton au-skeleton-avatar"></div>
+            <div class="au-skeleton au-skeleton-line"></div>
+            <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
+          </div>
+          <div class="au-skeleton-row">
+            <div class="au-skeleton au-skeleton-avatar"></div>
+            <div class="au-skeleton au-skeleton-line"></div>
+            <div class="au-skeleton au-skeleton-line au-skeleton-line--sm"></div>
+          </div>
+        } @else if (items.length === 0) {
+          <app-empty-state
+            icon="publications"
+            title="No publications match the current filters"
+            text="Adjust the filters or schedule something from the content workspace."
+          >
+            <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/content">Open content</a>
+          </app-empty-state>
+        } @else {
+          <div class="au-table-wrap">
+            <table class="au-table">
+              <thead>
+                <tr>
+                  <th style="width: 40px"></th>
+                  <th>Publication</th>
+                  <th>Channel</th>
+                  <th>Destination</th>
+                  <th>Status</th>
+                  <th>Scheduled</th>
+                  <th>Published</th>
+                  <th>Updated</th>
+                  <th style="width: 44px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr *ngFor="let item of items">
+                  <td>
+                    <img class="au-table__thumb" *ngIf="item.assetUrl" [src]="item.assetUrl" alt="" loading="lazy" />
+                    <span class="au-table__thumb" *ngIf="!item.assetUrl"></span>
+                  </td>
+                  <td style="max-width: 340px">
+                    <span class="au-table__title au-truncate">{{ item.socialContent?.body?.slice(0, 80) || item.version?.title || item.project?.title || '—' }}</span>
+                    <a class="au-table__sub au-link" *ngIf="item.externalUrl" [href]="item.externalUrl" target="_blank" rel="noopener">
+                      {{ item.externalUrl }}
+                      <app-icon name="external"></app-icon>
+                    </a>
+                    <span class="au-table__sub" *ngIf="item.lastError">
+                      <span class="au-badge au-badge--danger">{{ item.lastError }}</span>
+                    </span>
+                  </td>
+                  <td><span class="au-channel" [class]="'au-channel--' + item.channel">{{ item.channel }}</span></td>
+                  <td class="au-nowrap">{{ destination(item) }}</td>
+                  <td><span class="au-badge" [class]="statusClass(item.status)">{{ item.status }}</span></td>
+                  <td class="au-nowrap au-muted">{{ dateLabel(item.scheduledFor) }}</td>
+                  <td class="au-nowrap au-muted">{{ dateLabel(item.publishedAt) }}</td>
+                  <td class="au-nowrap au-muted">{{ dateLabel(item.updatedAt) }}</td>
+                  <td>
+                    <button
+                      class="au-btn au-btn--ghost au-btn--icon au-btn--sm"
+                      type="button"
+                      #menuTrigger
+                      (click)="rowMenu.toggle(menuTrigger)"
+                      [attr.aria-label]="'Actions for ' + (item.version?.title || item.project?.title || 'publication')"
+                      aria-haspopup="menu"
+                    >
+                      <app-icon name="dots"></app-icon>
+                    </button>
+                    <app-popover #rowMenu>
+                      <div class="au-menu">
+                        <button class="au-menu__item" type="button" (click)="rowMenu.hide(); inspect(item)">
+                          <app-icon name="eye"></app-icon>
+                          Details
+                        </button>
+                        <a class="au-menu__item" [routerLink]="['/studio/content', item.projectId]" (click)="rowMenu.hide()">
+                          <app-icon name="content"></app-icon>
+                          Open content
+                        </a>
+                        <button class="au-menu__item" type="button" *ngIf="item.status === 'failed'" (click)="rowMenu.hide(); retry(item)">
+                          <app-icon name="refresh"></app-icon>
+                          Retry
+                        </button>
+                        <button class="au-menu__item" type="button" *ngIf="item.status === 'scheduled' || item.status === 'ready' || item.status === 'draft'" (click)="rowMenu.hide(); publishNow(item)">
+                          <app-icon name="play"></app-icon>
+                          Publish now
+                        </button>
+                        <button class="au-menu__item" type="button" *ngIf="item.status === 'scheduled'" (click)="rowMenu.hide(); cancel(item)">
+                          <app-icon name="close"></app-icon>
+                          Cancel
+                        </button>
+                        <button class="au-menu__item" type="button" *ngIf="item.status === 'published'" (click)="rowMenu.hide(); unpublish(item)">
+                          <app-icon name="arrow-down"></app-icon>
+                          Unpublish
+                        </button>
+                        <div class="au-menu__sep"></div>
+                        <button class="au-menu__item is-danger" type="button" *ngIf="item.status !== 'deleted'" (click)="rowMenu.hide(); remove(item)">
+                          <app-icon name="trash"></app-icon>
+                          Delete record
+                        </button>
+                      </div>
+                    </app-popover>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
-        <div class="au-pagination" *ngIf="totalPages > 1">
-          <button class="au-button au-button--ghost" type="button" [disabled]="page <= 1" (click)="goPage(page - 1)">‹ Prev</button>
-          <span>Page {{ page }} of {{ totalPages }} ({{ total }} items)</span>
-          <button class="au-button au-button--ghost" type="button" [disabled]="page >= totalPages" (click)="goPage(page + 1)">Next ›</button>
-        </div>
+          @if (totalPages > 1) {
+            <div class="au-pager">
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page <= 1" (click)="goPage(page - 1)">Previous</button>
+              <span>Page {{ page }} of {{ totalPages }} · {{ total }} publications</span>
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page >= totalPages" (click)="goPage(page + 1)">Next</button>
+            </div>
+          }
+        }
       </section>
 
-      <aside class="au-publication-detail" *ngIf="selected" aria-label="Publication details">
-        <div class="au-publication-detail__head"><div><p class="au-eyebrow">Operational record</p><h2>{{ selected.project?.title || 'Publication' }}</h2></div><button class="au-button au-button--ghost au-button--sm" type="button" (click)="selected = null" aria-label="Close publication details">Close</button></div>
-        <dl class="au-kv"><dt>Channel</dt><dd>{{ selected.channel }}</dd><dt>Destination</dt><dd>{{ destination(selected) }}</dd><dt>Status</dt><dd><span class="au-tag" [ngClass]="statusClass(selected.status)">{{ selected.status }}</span></dd><dt>Attempts</dt><dd>{{ selected.attempts?.length || 0 }}</dd><dt>Failure</dt><dd>{{ selected.lastError || 'No failure recorded' }}</dd></dl>
-        <form class="au-form" *ngIf="canEdit(selected)" (ngSubmit)="saveSchedule()"><label class="au-field"><span class="au-field__label">Scheduled time</span><input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="scheduleDraft" required /></label><button class="au-button au-button--primary" type="submit" [disabled]="saving">{{ saving ? 'Saving...' : 'Save schedule' }}</button></form>
-        <div class="au-publication-attempts" *ngIf="selected.attempts?.length"><h3>Attempt history</h3><div class="au-row" *ngFor="let attempt of selected.attempts"><span class="au-row__title">Attempt {{ attempt.attemptNumber }}</span><span class="au-tag">{{ attempt.status }}</span><span class="au-row__meta">{{ dateLabel(attempt.startedAt) }}</span></div></div>
+      <aside class="au-panel" *ngIf="selected" aria-label="Publication details">
+        <div class="au-panel__header">
+          <div>
+            <h2 class="au-panel__title">{{ selected.project?.title || 'Publication' }}</h2>
+            <p class="au-panel__subtitle">Operational record</p>
+          </div>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="selected = null" aria-label="Close publication details">
+            <app-icon name="close"></app-icon>
+            Close
+          </button>
+        </div>
+        <div class="au-panel--padded">
+          <dl class="au-kv">
+            <dt>Channel</dt><dd>{{ selected.channel }}</dd>
+            <dt>Destination</dt><dd>{{ destination(selected) }}</dd>
+            <dt>Status</dt><dd><span class="au-badge" [class]="statusClass(selected.status)">{{ selected.status }}</span></dd>
+            <dt>Attempts</dt><dd>{{ selected.attempts?.length || 0 }}</dd>
+            <dt>Failure</dt><dd class="au-muted">{{ selected.lastError || 'No failure recorded' }}</dd>
+          </dl>
+          <form class="au-mt-3" *ngIf="canEdit(selected)" (ngSubmit)="saveSchedule()">
+            <label class="au-field">
+              <span class="au-field__label">Scheduled time</span>
+              <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="scheduleDraft" required />
+            </label>
+            <button class="au-btn au-btn--primary au-btn--sm" type="submit" [disabled]="saving">{{ saving ? 'Saving…' : 'Save schedule' }}</button>
+          </form>
+          <ng-container *ngIf="selected.attempts?.length">
+            <h3 class="au-panel__title au-mt-3 au-mb-2">Attempt history</h3>
+            <div class="au-row" *ngFor="let attempt of selected.attempts">
+              <span class="au-row__title">Attempt {{ attempt.attemptNumber }}</span>
+              <span class="au-badge" [class]="statusClass(attempt.status)">{{ attempt.status }}</span>
+              <span class="au-row__meta">{{ dateLabel(attempt.startedAt) }}</span>
+            </div>
+          </ng-container>
+        </div>
       </aside>
     </section>
   `,
-  styles: [
-    `
-      .au-toolbar--wrap { flex-wrap: wrap; }
-      .au-check { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.85rem; }
-      .au-surface--table { overflow-x: auto; }
-      .au-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-      .au-table th { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--au-border, #e5e7eb); color: var(--au-muted, #6b7280); font-weight: 600; white-space: nowrap; }
-      .au-table td { padding: 0.55rem 0.6rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); vertical-align: top; }
-      .au-thumb { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; }
-      .au-cell-title { font-weight: 600; max-width: 320px; }
-      .au-cell-meta { font-size: 0.72rem; color: var(--au-muted, #6b7280); max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
-      .au-cell-error { color: var(--au-danger, #dc2626); }
-      .au-cell-date { white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 0.75rem; color: var(--au-muted, #6b7280); }
-      .au-cell-actions { white-space: nowrap; }
-      .au-button--xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-      .au-button--danger { color: var(--au-danger, #dc2626); }
-      .au-pagination { display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem 0.6rem; font-size: 0.85rem; }
-      .au-channel-badge { text-transform: uppercase; font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; }
-      .au-channel-badge--website { background: #dbeafe; color: #1d4ed8; }
-      .au-channel-badge--x { background: #111; color: #fff; }
-      .au-channel-badge--instagram { background: #fdf2f8; color: #be185d; }
-      .au-publication-detail { margin-top: 1rem; padding: 1rem; border: 1px solid var(--au-border, #e5e7eb); border-radius: 12px; background: var(--au-surface, #fff); }
-      .au-publication-detail__head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
-      .au-publication-detail h2 { margin: 0; font-size: 1.1rem; }
-      .au-publication-detail h3 { margin: 1rem 0 0.4rem; font-size: 0.9rem; }
-      .au-publication-attempts .au-row { padding: 0.5rem 0; }
-    `,
-  ],
 })
 export class PublicationsPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   states: PublicationState[] = ['draft', 'ready', 'scheduled', 'queued', 'publishing', 'published', 'failed', 'canceled', 'deleted', 'unpublished'];
   items: StudioPublication[] = [];
@@ -164,6 +258,7 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   selected: StudioPublication | null = null;
   scheduleDraft = '';
   saving = false;
+  loading = false;
   error = '';
   filters = {
     channel: '' as '' | PublicationChannel,
@@ -205,6 +300,9 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   load(silent = false): void {
+    if (!silent) {
+      this.loading = true;
+    }
     this.api
       .listPublicationsV2(this.page, this.pageSize, {
         channel: this.filters.channel || undefined,
@@ -219,8 +317,10 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
         next: (response) => {
           this.items = response.items;
           this.total = response.total;
+          this.loading = false;
         },
         error: () => {
+          this.loading = false;
           if (!silent) {
             this.items = [];
             this.total = 0;
@@ -251,18 +351,17 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   statusClass(status: string): string {
     switch (status) {
       case 'published':
-        return 'au-tag--success';
+      case 'draft_synced':
+        return 'au-badge--success';
       case 'failed':
-        return 'au-tag--danger';
+        return 'au-badge--danger';
       case 'scheduled':
       case 'queued':
       case 'publishing':
-        return 'au-tag--warning';
-      case 'unpublished':
-      case 'canceled':
-        return 'au-tag--muted';
+      case 'processing':
+        return 'au-badge--warning';
       default:
-        return '';
+        return 'au-badge--neutral';
     }
   }
 
@@ -271,40 +370,95 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   retry(item: StudioPublication): void {
-    this.api.retryPublication(item.id).subscribe(() => this.load(true));
+    this.api.retryPublication(item.id).subscribe({
+      next: () => {
+        this.toast.success('Retry queued.');
+        this.load(true);
+      },
+      error: () => this.toast.error('The publication could not be retried.'),
+    });
   }
 
   publishNow(item: StudioPublication): void {
-    this.api.publishNow(item.id).subscribe(() => this.load(true));
+    this.api.publishNow(item.id).subscribe({
+      next: () => {
+        this.toast.success('Publishing started.');
+        this.load(true);
+      },
+      error: () => this.toast.error('The publication could not be started.'),
+    });
   }
 
   cancel(item: StudioPublication): void {
-    if (!window.confirm(`Cancel this scheduled ${item.channel} publication?`)) {
+    void this.confirmCancel(item);
+  }
+
+  private async confirmCancel(item: StudioPublication): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Cancel this scheduled ${item.channel} publication?`,
+      message: 'The scheduled publication is removed and will not run.',
+      confirmLabel: 'Cancel publication',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
-    this.api.cancelPublication(item.id).subscribe(() => this.load(true));
+    this.api.cancelPublication(item.id).subscribe({
+      next: () => {
+        this.toast.success('Publication canceled.');
+        this.load(true);
+      },
+      error: () => this.toast.error('The publication could not be canceled.'),
+    });
   }
 
   unpublish(item: StudioPublication): void {
+    void this.confirmUnpublish(item);
+  }
+
+  private async confirmUnpublish(item: StudioPublication): Promise<void> {
     const destination = this.destination(item);
-    if (
-      !window.confirm(
-        `Unpublish from ${destination}?\n\nThis ${item.channel === 'website' ? 'removes the remote article' : 'deletes the remote post'} on ${destination}. This cannot be undone automatically.`,
-      )
-    ) {
+    const confirmed = await this.confirm.confirm({
+      title: `Unpublish from ${destination}?`,
+      message: `${item.channel === 'website' ? 'The remote article is removed' : 'The remote post is deleted'} on ${destination}. This cannot be undone automatically.`,
+      confirmLabel: 'Unpublish',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
-    this.api.unpublishPublication(item.id).subscribe(() => this.load(true));
+    this.api.unpublishPublication(item.id).subscribe({
+      next: () => {
+        this.toast.success('Unpublish started.');
+        this.load(true);
+      },
+      error: () => this.toast.error('The publication could not be unpublished.'),
+    });
   }
 
   remove(item: StudioPublication): void {
+    void this.confirmRemove(item);
+  }
+
+  private async confirmRemove(item: StudioPublication): Promise<void> {
     const publishedExternally = item.status === 'published' && Boolean(item.externalId);
-    const message = publishedExternally
-      ? `This publication is live on ${this.destination(item)}.\n\nDeleting here only removes the local record. Unpublish first to remove it externally.`
-      : `Delete this ${item.channel} publication record?`;
-    if (!window.confirm(message)) {
+    const confirmed = await this.confirm.confirm({
+      title: publishedExternally ? 'Delete the local record?' : `Delete this ${item.channel} publication record?`,
+      message: publishedExternally
+        ? `This publication is live on ${this.destination(item)}. Deleting here only removes the local record — unpublish first to remove it externally.`
+        : 'Only the local publication record is removed.',
+      confirmLabel: 'Delete record',
+      danger: true,
+    });
+    if (!confirmed) {
       return;
     }
-    this.api.deletePublication(item.id).subscribe(() => this.load(true));
+    this.api.deletePublication(item.id).subscribe({
+      next: () => {
+        this.toast.success('Publication record deleted.');
+        this.load(true);
+      },
+      error: () => this.toast.error('The publication record could not be deleted.'),
+    });
   }
 }

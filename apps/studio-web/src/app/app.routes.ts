@@ -114,7 +114,6 @@ export const routes: Routes = [
       { path: 'review', redirectTo: 'content', pathMatch: 'prefix' },
       { path: 'publishing/scheduled', redirectTo: 'calendar', pathMatch: 'prefix' },
       { path: 'integrations', redirectTo: 'sources', pathMatch: 'prefix' },
-      { path: 'automation', redirectTo: 'publishing', pathMatch: 'prefix' },
       { path: 'analytics', redirectTo: 'overview', pathMatch: 'prefix' },
     ],
   },

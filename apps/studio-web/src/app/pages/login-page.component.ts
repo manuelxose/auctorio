@@ -13,6 +13,8 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
 import { StudioApiService } from '../services/studio-api.service';
+import { ThemeService } from '../services/theme.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
 
 const DEFAULT_RETURN_TO = '/studio/overview';
 
@@ -37,10 +39,18 @@ type GoogleAccounts = {
 @Component({
   selector: 'app-login-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
   template: `
     <main class="au-auth">
       <div class="au-auth__card">
+        <button
+          class="au-btn au-btn--ghost au-btn--icon au-btn--sm au-auth__theme"
+          type="button"
+          (click)="theme.cycle()"
+          [attr.aria-label]="'Switch appearance. Current: ' + theme.preference()"
+        >
+          <app-icon [name]="themeIcon"></app-icon>
+        </button>
         <a class="au-brand" routerLink="/" aria-label="Auctorio">
           <span class="au-brand__mark">AU</span>
           <span class="au-brand__name">Auctorio</span>
@@ -80,7 +90,7 @@ type GoogleAccounts = {
 
           <p class="au-error" *ngIf="error">{{ error }}</p>
 
-          <button class="au-button au-button--primary au-button--block" type="submit" [disabled]="busy">
+          <button class="au-btn au-btn--primary au-btn--block" type="submit" [disabled]="busy">
             {{ busy ? 'Signing in…' : 'Sign in' }}
           </button>
         </form>
@@ -108,6 +118,12 @@ export class LoginPageComponent implements AfterViewInit {
   private readonly platformId = inject(PLATFORM_ID);
   private readonly zone = inject(NgZone);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
+  protected readonly theme = inject(ThemeService);
+
+  get themeIcon(): string {
+    const preference = this.theme.preference();
+    return preference === 'light' ? 'sun' : preference === 'dark' ? 'moon' : 'monitor';
+  }
 
   email = '';
   password = '';

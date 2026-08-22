@@ -4,36 +4,44 @@ import { FormsModule } from '@angular/forms';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
+import { ConfirmService } from '../services/confirm.service';
+import { ToastService } from '../services/toast.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingWindow, StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-automation-page',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
+          <p class="au-page__eyebrow">Autonomous operations</p>
           <h1 class="au-page__title">Automation</h1>
           <p class="au-page__subtitle">Configure autonomous discovery, generation and multi-channel publishing.</p>
         </div>
-        <button
-          class="au-button"
-          [class.au-button--danger]="policy?.state === 'active'"
-          [class.au-button--primary]="policy?.state !== 'active'"
-          type="button"
-          (click)="togglePause()"
-          [disabled]="!policy"
-        >
-          {{ policy?.state === 'paused' ? '▶ Resume automation' : '⏸ Pause automation' }}
-        </button>
+        <div class="au-page__actions">
+          <button
+            class="au-btn"
+            [class.au-btn--danger]="policy?.state === 'active'"
+            [class.au-btn--primary]="policy?.state !== 'active'"
+            type="button"
+            (click)="togglePause()"
+            [disabled]="!policy"
+          >
+            <app-icon [name]="policy?.state === 'paused' ? 'play' : 'pause'"></app-icon>
+            {{ policy?.state === 'paused' ? 'Resume automation' : 'Pause automation' }}
+          </button>
+        </div>
       </header>
 
-      <section class="au-status" *ngIf="status">
-        <span class="au-tag" [class.au-tag--success]="status.enabled" [class.au-tag--muted]="!status.enabled">
+      <div class="au-status" *ngIf="status">
+        <span class="au-badge" [class.au-badge--success]="status.enabled" [class.au-badge--neutral]="!status.enabled">
           {{ status.enabled ? 'Enabled' : 'Disabled' }}
         </span>
-        <span class="au-tag" [class.au-tag--danger]="status.state === 'paused'" [class.au-tag--success]="status.state === 'active'">
+        <span class="au-badge" [class.au-badge--danger]="status.state === 'paused'" [class.au-badge--success]="status.state === 'active'" [class.au-badge--warning]="status.state !== 'paused' && status.state !== 'active'">
           {{ status.state }}
         </span>
         <span class="au-status__reason" *ngIf="status.pausedReason">{{ status.pausedReason }}</span>
@@ -41,193 +49,165 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
           Today: {{ status.today.articlesPlanned }}/{{ status.limits.articlesPerDay }} articles ·
           {{ status.today.xPlanned }} X · {{ status.today.instagramPlanned }} Instagram
         </span>
-      </section>
+      </div>
 
-      <div class="au-notice au-notice--warning" *ngFor="let warning of status?.warnings ?? []">{{ warning }}</div>
+      <div class="au-banner au-banner--warning" *ngFor="let warning of status?.warnings ?? []">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">{{ warning }}</span>
+      </div>
 
-      <section class="au-surface au-surface--form" *ngIf="policy">
-        <h3 class="au-form__title">General</h3>
-        <div class="au-form-grid au-form-grid--3">
-          <label class="au-field"><span>Site</span>
-            <select class="au-input" [(ngModel)]="selectedSiteId" (ngModelChange)="load()">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="policy">
+        <h2 class="au-panel__title">General</h2>
+        <p class="au-panel__subtitle au-mb-3">Where the policy applies and its basic settings.</p>
+        <div class="au-field-grid">
+          <label class="au-field">
+            <span class="au-field__label">Site</span>
+            <select class="au-select" [(ngModel)]="selectedSiteId" (ngModelChange)="load()">
               <option [ngValue]="null">All sites</option>
               <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
             </select>
           </label>
-          <label class="au-field"><span>Timezone</span>
+          <label class="au-field">
+            <span class="au-field__label">Timezone</span>
             <input class="au-input" type="text" [(ngModel)]="policy.timezone" placeholder="Europe/Madrid" />
           </label>
-          <label class="au-check au-field">
-            <span>Enabled</span>
+          <label class="au-checkbox au-mt-4">
             <input type="checkbox" [(ngModel)]="policy.enabled" />
+            Automation enabled
           </label>
+        </div>
+      </section>
+
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="policy">
+        <h2 class="au-panel__title">Behavior</h2>
+        <p class="au-panel__subtitle au-mb-3">Each mode explains exactly what may happen without you.</p>
+        <div class="au-automation-modes" role="radiogroup" aria-label="Automation mode">
+          <button class="au-mode" [class.is-active]="mode === 'manual'" role="radio" [attr.aria-checked]="mode === 'manual'" type="button" (click)="setMode('manual')">
+            <strong>Manual</strong>
+            <span>AI assists. You approve and publish.</span>
+          </button>
+          <button class="au-mode" [class.is-active]="mode === 'approval'" role="radio" [attr.aria-checked]="mode === 'approval'" type="button" (click)="setMode('approval')">
+            <strong>Approval required</strong>
+            <span>AI drafts and schedules after human approval.</span>
+          </button>
+          <button class="au-mode au-mode--warning" [class.is-active]="mode === 'automatic'" role="radio" [attr.aria-checked]="mode === 'automatic'" type="button" (click)="setMode('automatic')">
+            <strong>Automatic</strong>
+            <span>AI may publish within the limits below.</span>
+          </button>
+        </div>
+        <div class="au-banner au-banner--warning" *ngIf="mode === 'automatic'">
+          <app-icon name="warning"></app-icon>
+          <span class="au-banner__text">Automatic publishing will publish without further approval. Review destinations, windows, and daily limits before saving.</span>
         </div>
 
-        <h3 class="au-form__title au-form__title--spaced">Daily volume</h3>
-        <div class="au-form-grid au-form-grid--3">
-          <label class="au-field"><span>Articles / day</span>
-            <input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.articlesPerDay" />
-          </label>
-          <label class="au-field"><span>Max articles / day (safety)</span>
-            <input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.maxArticlesPerDay" />
-          </label>
-          <label class="au-field"><span>Min minutes between articles</span>
-            <input class="au-input" type="number" min="15" [(ngModel)]="policy.minimumMinutesBetweenArticles" />
-          </label>
-          <label class="au-field"><span>X posts / day</span>
-            <input class="au-input" type="number" min="0" max="50" [(ngModel)]="policy.xPostsPerDay" />
-          </label>
-          <label class="au-field"><span>Instagram posts / day</span>
-            <input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.instagramPostsPerDay" />
-          </label>
-          <label class="au-field"><span>Max daily social posts (safety)</span>
-            <input class="au-input" type="number" min="0" [(ngModel)]="policy.maximumDailySocial" />
-          </label>
-          <label class="au-field"><span>X timing after article (min)</span>
-            <input class="au-input" type="number" min="0" [(ngModel)]="policy.socialTimingMinutesX" />
-          </label>
-          <label class="au-field"><span>Instagram timing after article (min)</span>
-            <input class="au-input" type="number" min="0" [(ngModel)]="policy.socialTimingMinutesInstagram" />
-          </label>
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Daily volume</h3>
+        <div class="au-field-grid">
+          <label class="au-field"><span class="au-field__label">Articles / day</span><input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.articlesPerDay" /></label>
+          <label class="au-field"><span class="au-field__label">Max articles / day (safety)</span><input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.maxArticlesPerDay" /></label>
+          <label class="au-field"><span class="au-field__label">Min minutes between articles</span><input class="au-input" type="number" min="15" [(ngModel)]="policy.minimumMinutesBetweenArticles" /></label>
+          <label class="au-field"><span class="au-field__label">X posts / day</span><input class="au-input" type="number" min="0" max="50" [(ngModel)]="policy.xPostsPerDay" /></label>
+          <label class="au-field"><span class="au-field__label">Instagram posts / day</span><input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.instagramPostsPerDay" /></label>
+          <label class="au-field"><span class="au-field__label">Max daily social posts (safety)</span><input class="au-input" type="number" min="0" [(ngModel)]="policy.maximumDailySocial" /></label>
+          <label class="au-field"><span class="au-field__label">X timing after article (min)</span><input class="au-input" type="number" min="0" [(ngModel)]="policy.socialTimingMinutesX" /></label>
+          <label class="au-field"><span class="au-field__label">Instagram timing after article (min)</span><input class="au-input" type="number" min="0" [(ngModel)]="policy.socialTimingMinutesInstagram" /></label>
         </div>
 
-        <h3 class="au-form__title au-form__title--spaced">Pipeline flags</h3>
-        <div class="au-automation-modes" role="group" aria-label="Automation mode">
-          <button class="au-mode" [class.is-active]="mode === 'manual'" type="button" (click)="setMode('manual')"><strong>Manual</strong><span>AI assists. You approve and publish.</span></button>
-          <button class="au-mode" [class.is-active]="mode === 'approval'" type="button" (click)="setMode('approval')"><strong>Approval required</strong><span>AI drafts and schedules after human approval.</span></button>
-          <button class="au-mode au-mode--warning" [class.is-active]="mode === 'automatic'" type="button" (click)="setMode('automatic')"><strong>Automatic</strong><span>AI may publish within these limits.</span></button>
-        </div>
-        <div class="au-banner au-banner--warning" *ngIf="mode === 'automatic'">Automatic publishing is enabled for this site. Review destinations, windows, and daily limits before saving.</div>
-        <div class="au-form-grid au-form-grid--3">
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoGenerate" /> Auto-generate articles</label>
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoApprove" /> Auto-approve when QA passes</label>
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoSchedule" /> Auto-schedule</label>
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.autoPublish" /> Auto-publish when due</label>
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.imageRequired" /> Require image</label>
-          <label class="au-check au-field"><input type="checkbox" [(ngModel)]="policy.socialRequired" /> Require social derivatives</label>
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Pipeline flags</h3>
+        <div class="au-field-grid">
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoGenerate" /> Auto-generate articles</label>
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoApprove" /> Auto-approve when QA passes</label>
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoSchedule" /> Auto-schedule</label>
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoPublish" /> Auto-publish when due</label>
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.imageRequired" /> Require image</label>
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.socialRequired" /> Require social derivatives</label>
         </div>
 
-        <h3 class="au-form__title au-form__title--spaced">Candidate selection</h3>
-        <div class="au-form-grid au-form-grid--3">
-          <label class="au-field"><span>Minimum story score</span>
-            <input class="au-input" type="number" min="0" max="1" step="0.05" [(ngModel)]="policy.minimumStoryScore" />
-          </label>
-          <label class="au-field"><span>Categories (include, comma separated)</span>
-            <input class="au-input" type="text" [ngModel]="categoriesText" (ngModelChange)="categoriesText = $event" />
-          </label>
-          <label class="au-field"><span>Excluded categories</span>
-            <input class="au-input" type="text" [ngModel]="excludedCategoriesText" (ngModelChange)="excludedCategoriesText = $event" />
-          </label>
-          <label class="au-field au-field--wide"><span>Priority topics (comma separated)</span>
-            <input class="au-input" type="text" [ngModel]="priorityTopicsText" (ngModelChange)="priorityTopicsText = $event" />
-          </label>
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Candidate selection</h3>
+        <div class="au-field-grid">
+          <label class="au-field"><span class="au-field__label">Minimum story score</span><input class="au-input" type="number" min="0" max="1" step="0.05" [(ngModel)]="policy.minimumStoryScore" /></label>
+          <label class="au-field"><span class="au-field__label">Categories (include, comma separated)</span><input class="au-input" type="text" [ngModel]="categoriesText" (ngModelChange)="categoriesText = $event" /></label>
+          <label class="au-field"><span class="au-field__label">Excluded categories</span><input class="au-input" type="text" [ngModel]="excludedCategoriesText" (ngModelChange)="excludedCategoriesText = $event" /></label>
+          <label class="au-field"><span class="au-field__label">Priority topics (comma separated)</span><input class="au-input" type="text" [ngModel]="priorityTopicsText" (ngModelChange)="priorityTopicsText = $event" /></label>
         </div>
 
-        <h3 class="au-form__title au-form__title--spaced">Publishing windows</h3>
-        <p class="au-hint">Each channel publishes inside its window on the configured days (0=Sun … 6=Sat).</p>
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Publishing windows</h3>
+        <p class="au-hint au-mb-2">Each channel publishes inside its window on the configured days (0=Sun … 6=Sat).</p>
         <div class="au-window-row" *ngFor="let window of policy.publishingWindows ?? []; let i = index">
-          <select class="au-input au-input--inline" [(ngModel)]="window.channel">
+          <select class="au-select au-filter-select" [(ngModel)]="window.channel" aria-label="Window channel">
             <option value="website">website</option>
             <option value="x">x</option>
             <option value="instagram">instagram</option>
           </select>
-          <input class="au-input au-input--inline" type="text" [(ngModel)]="window.from" placeholder="08:00" />
-          <span>→</span>
-          <input class="au-input au-input--inline" type="text" [(ngModel)]="window.to" placeholder="20:00" />
-          <label class="au-window-days">
+          <input class="au-input" style="max-width: 90px" type="text" [(ngModel)]="window.from" placeholder="08:00" aria-label="From" />
+          <span class="au-muted">→</span>
+          <input class="au-input" style="max-width: 90px" type="text" [(ngModel)]="window.to" placeholder="20:00" aria-label="To" />
+          <label class="au-window-days" title="Toggle active days">
             <input
               type="checkbox"
               *ngFor="let day of [0,1,2,3,4,5,6]"
               [checked]="window.days.includes(day)"
               (change)="toggleDay(window, day)"
+              [attr.aria-label]="'Day ' + day"
             />
             <span class="au-window-days__labels">Sun-Sat</span>
           </label>
-          <button class="au-button au-button--ghost au-button--xs au-button--danger" type="button" (click)="removeWindow(i)">Remove</button>
+          <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="removeWindow(i)">Remove</button>
         </div>
-        <button class="au-button au-button--ghost au-button--sm" type="button" (click)="addWindow()">+ Add window</button>
+        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="addWindow()">
+          <app-icon name="plus"></app-icon>
+          Add window
+        </button>
 
-        <h3 class="au-form__title au-form__title--spaced">Safety limits</h3>
-        <div class="au-form-grid au-form-grid--3">
-          <label class="au-field"><span>Max pending queue</span>
-            <input class="au-input" type="number" min="1" [(ngModel)]="policy.maximumQueueSize" />
-          </label>
-          <label class="au-field"><span>Articles / hour</span>
-            <input class="au-input" type="number" min="1" [(ngModel)]="policy.articlesPerHour" />
-          </label>
-          <label class="au-field"><span>Social posts / hour</span>
-            <input class="au-input" type="number" min="1" [(ngModel)]="policy.socialPostsPerHour" />
-          </label>
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Safety limits</h3>
+        <div class="au-field-grid">
+          <label class="au-field"><span class="au-field__label">Max pending queue</span><input class="au-input" type="number" min="1" [(ngModel)]="policy.maximumQueueSize" /></label>
+          <label class="au-field"><span class="au-field__label">Articles / hour</span><input class="au-input" type="number" min="1" [(ngModel)]="policy.articlesPerHour" /></label>
+          <label class="au-field"><span class="au-field__label">Social posts / hour</span><input class="au-input" type="number" min="1" [(ngModel)]="policy.socialPostsPerHour" /></label>
         </div>
 
-        <div class="au-form-actions">
-          <button class="au-button au-button--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save automation policy' }}</button>
+        <div class="au-form__actions">
+          <button class="au-btn au-btn--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save automation policy' }}</button>
         </div>
       </section>
 
-      <section class="au-surface au-surface--form" *ngIf="nextSlots.length > 0">
-        <h3 class="au-form__title">Next planned slots</h3>
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="nextSlots.length > 0">
+        <h2 class="au-panel__title">Next planned slots</h2>
+        <p class="au-panel__subtitle au-mb-2">Computed from the current policy and limits.</p>
         <div class="au-slots">
-          <span class="au-tag" *ngFor="let slot of nextSlots">{{ slot.channel }} · {{ dateLabel(slot.at) }}</span>
+          <span class="au-badge au-badge--neutral" *ngFor="let slot of nextSlots">{{ slot.channel }} · {{ dateLabel(slot.at) }}</span>
         </div>
       </section>
 
-      <section class="au-surface au-surface--form">
-        <h3 class="au-form__title">Social accounts</h3>
-        <div class="au-empty" *ngIf="accounts.length === 0">No social accounts connected.</div>
+      <section class="au-panel au-panel--padded">
+        <h2 class="au-panel__title">Social accounts</h2>
+        <p class="au-panel__subtitle au-mb-2">Accounts used by automation for X and Instagram publishing.</p>
+        <app-empty-state
+          *ngIf="accounts.length === 0"
+          icon="connections"
+          title="No social accounts connected"
+          text="Connect an X or Instagram account to enable social automation."
+        ></app-empty-state>
         <div class="au-row" *ngFor="let account of accounts">
+          <span class="au-platform-icon" style="width: 26px; height: 26px; flex-basis: 26px; font-size: 9px">{{ account.platform === 'x' ? 'X' : 'IG' }}</span>
           <span class="au-row__title">{{ account.displayName }}</span>
-          <span class="au-tag">{{ account.platform }}</span>
-          <span class="au-tag" [class.au-tag--success]="account.status === 'active'" [class.au-tag--danger]="account.status === 'error'">{{ account.status }}</span>
+          <span class="au-badge au-badge--outline">{{ account.platform }}</span>
+          <span class="au-badge" [class.au-badge--success]="account.status === 'active'" [class.au-badge--danger]="account.status === 'error'" [class.au-badge--warning]="account.status !== 'active' && account.status !== 'error'">{{ account.status }}</span>
           <span class="au-row__meta">credentials: {{ account.hasCredentials ? 'configured' : 'missing' }}</span>
-          <button class="au-button au-button--ghost au-button--xs" type="button" (click)="verify(account)">Verify</button>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="verify(account)">
+            <app-icon name="circle-check"></app-icon>
+            Verify
+          </button>
         </div>
-        <p class="au-hint">Credentials are environment-variable references kept server-side and never exposed to the browser.</p>
+        <p class="au-hint au-mt-2">Credentials are environment-variable references kept server-side and never exposed to the browser.</p>
       </section>
-
-      <div class="au-notice" *ngIf="feedback">{{ feedback }}</div>
     </section>
   `,
-  styles: [
-    `
-      .au-status { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; padding: 0.7rem 0.9rem; background: var(--au-surface, #fff); border: 1px solid var(--au-border, #e5e7eb); border-radius: 8px; margin-bottom: 1rem; }
-      .au-status__reason { font-size: 0.85rem; color: var(--au-danger, #dc2626); }
-      .au-status__counts { margin-left: auto; font-size: 0.85rem; color: var(--au-muted, #6b7280); }
-      .au-notice { padding: 0.6rem 0.9rem; border-radius: 8px; background: var(--au-surface-subtle, #f9fafb); font-size: 0.85rem; margin-bottom: 0.8rem; }
-      .au-notice--warning { background: #fffbeb; color: #92400e; }
-      .au-surface--form { padding: 1rem 1.25rem; margin-bottom: 1rem; }
-      .au-form__title { margin: 0 0 0.9rem; }
-      .au-form__title--spaced { margin-top: 1.4rem; border-top: 1px solid var(--au-border-subtle, #f3f4f6); padding-top: 1rem; }
-      .au-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.8rem; }
-      .au-form-grid--3 { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
-      .au-field { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.8rem; color: var(--au-muted, #6b7280); }
-      .au-field--wide { grid-column: span 2; }
-      .au-check { flex-direction: row; align-items: center; }
-      .au-hint { color: var(--au-muted, #6b7280); font-size: 0.8rem; }
-      .au-form-actions { display: flex; gap: 0.5rem; margin-top: 1rem; justify-content: flex-end; }
-      .au-window-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; }
-      .au-window-days { display: inline-flex; gap: 4px; align-items: center; }
-      .au-window-days__labels { font-size: 0.7rem; color: var(--au-muted, #6b7280); }
-      .au-button--xs { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
-      .au-button--sm { padding: 0.3rem 0.7rem; font-size: 0.8rem; }
-      .au-button--danger { color: var(--au-danger, #dc2626); }
-      .au-slots { display: flex; gap: 0.4rem; flex-wrap: wrap; }
-      .au-automation-modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; margin: 0 0 1rem; }
-      .au-mode { display: flex; flex-direction: column; align-items: flex-start; gap: 0.25rem; padding: 0.8rem; border: 1px solid var(--au-border, #e5e7eb); border-radius: 8px; background: transparent; color: var(--au-text, #111827); text-align: left; cursor: pointer; }
-      .au-mode span { color: var(--au-muted, #6b7280); font-size: 0.75rem; }
-      .au-mode.is-active { border-color: var(--au-accent, #2563eb); box-shadow: 0 0 0 2px var(--au-accent-soft, #dbeafe); }
-      .au-mode--warning.is-active { border-color: var(--au-warning, #d97706); }
-      .au-banner--warning { background: #fffbeb; color: #92400e; padding: 0.65rem 0.8rem; border-radius: 8px; margin-bottom: 0.8rem; font-size: 0.8rem; }
-      @media (max-width: 720px) { .au-automation-modes { grid-template-columns: 1fr; } }
-      .au-row { display: flex; align-items: center; gap: 0.6rem; padding: 0.6rem 0.2rem; border-bottom: 1px solid var(--au-border-subtle, #f3f4f6); }
-      .au-row__title { font-weight: 600; min-width: 160px; }
-      .au-row__meta { font-size: 0.78rem; color: var(--au-muted, #6b7280); }
-    `,
-  ],
 })
 export class AutomationPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly confirm = inject(ConfirmService);
+  private readonly toast = inject(ToastService);
 
   policy: AutomationPolicy | null = null;
   status: AutomationStatus | null = null;
@@ -320,8 +300,7 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
     }
     this.saving = true;
     this.api
-      .updateAutomationPolicy({
-        siteId: this.selectedSiteId ?? null,
+      .updateAutomationPolicy({        siteId: this.selectedSiteId ?? null,
         enabled: this.policy.enabled,
         timezone: this.policy.timezone,
         articlesPerDay: this.policy.articlesPerDay,
@@ -350,7 +329,7 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.saving = false;
-          this.feedback = 'Automation policy saved.';
+          this.toast.success('Automation policy saved.');
           this.loadStatus();
         },
         error: (error) => {
@@ -361,9 +340,21 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   }
 
   togglePause(): void {
+    void this.confirmTogglePause();
+  }
+
+  private async confirmTogglePause(): Promise<void> {
     const target = this.policy?.state === 'paused' ? 'resume' : 'pause';
-    if (target === 'pause' && !window.confirm('Pause automation?\n\nNo new automatic publications will be created or scheduled. Active jobs are not interrupted.')) {
-      return;
+    if (target === 'pause') {
+      const confirmed = await this.confirm.confirm({
+        title: 'Pause automation?',
+        message: 'No new automatic publications will be created or scheduled. Active jobs are not interrupted.',
+        confirmLabel: 'Pause automation',
+        danger: true,
+      });
+      if (!confirmed) {
+        return;
+      }
     }
     const request = target === 'pause'
       ? this.api.pauseAutomation('paused_manually', this.selectedSiteId ?? undefined)
@@ -371,7 +362,7 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
     request.subscribe({
       next: (policy) => {
         this.policy = policy;
-        this.feedback = target === 'pause' ? 'Automation paused.' : 'Automation resumed.';
+        this.toast.success(target === 'pause' ? 'Automation paused.' : 'Automation resumed.');
         this.loadStatus();
       },
       error: (error) => {
@@ -399,7 +390,11 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   verify(account: PublishingAccount): void {
     this.api.verifyPublishingAccount(account.id).subscribe({
       next: (result) => {
-        this.feedback = result.ok ? `✓ ${result.message}` : `✗ ${result.message}`;
+        if (result.ok) {
+          this.toast.success(result.message || 'Account verified.');
+        } else {
+          this.toast.error(result.message || 'Verification failed.');
+        }
         this.load();
       },
       error: (error) => {

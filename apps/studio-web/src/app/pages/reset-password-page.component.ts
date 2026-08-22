@@ -28,7 +28,7 @@ import { StudioApiService } from '../services/studio-api.service';
             <input class="au-input" type="password" name="password" autocomplete="new-password" [(ngModel)]="password" required minlength="10" />
           </label>
           <p class="au-error" *ngIf="error">{{ error }}</p>
-          <button class="au-button au-button--primary au-button--block" type="submit" [disabled]="busy">
+          <button class="au-btn au-btn--primary au-btn--block" type="submit" [disabled]="busy">
             {{ busy ? 'Saving…' : 'Save password' }}
           </button>
         </form>
