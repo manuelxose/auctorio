@@ -35,6 +35,19 @@ function extensionFromContentType(contentType) {
     }
     return ".png";
 }
+function isImageModerationRejection(error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return /status=451|prohibited or sensitive content|sensitive content|content policy/i.test(message);
+}
+function buildModerationFallbackPrompt(siteName) {
+    const brand = siteName.trim() || "una redacción digital";
+    return [
+        `Ilustración editorial genérica y neutral para ${brand}.`,
+        "Escritorio de redacción moderno con pantallas, periódicos y titulares abstractos e ilegibles.",
+        "Sin personas reales, sin políticos, sin símbolos institucionales, sin texto legible.",
+        "Estilo limpio, profesional, colores discretos, composición horizontal.",
+    ].join(" ");
+}
 async function runImageWorker() {
     const redisUrl = (0, env_1.getEnv)("REDIS_URL", "");
     if (!redisUrl) {
@@ -79,10 +92,24 @@ async function runImageWorker() {
             options: data.options ?? {},
         });
         const size = typeof data.options?.size === "string" ? data.options.size : undefined;
-        const result = await provider.generate({
-            prompt: prompt.userPrompt,
-            size,
-        });
+        let usedPrompt = prompt.userPrompt;
+        let result;
+        try {
+            result = await provider.generate({
+                prompt: usedPrompt,
+                size,
+            });
+        }
+        catch (error) {
+            if (!isImageModerationRejection(error)) {
+                throw error;
+            }
+            usedPrompt = buildModerationFallbackPrompt(typeof data.options?.site_name === "string" ? data.options.site_name : "");
+            result = await provider.generate({
+                prompt: usedPrompt,
+                size,
+            });
+        }
         const extension = extensionFromContentType(result.contentType);
         const stored = await (0, local_storage_1.saveImageAsset)({
             tenantId: data.tenantId,
@@ -107,7 +134,7 @@ async function runImageWorker() {
                 status: "done",
                 provider: result.provider,
                 model: result.model,
-                prompt: prompt.userPrompt,
+                prompt: usedPrompt,
                 promptPresetVersionId: prompt.promptPresetVersionId,
                 storagePath: stored.relativePath,
                 width,
@@ -143,7 +170,7 @@ async function runImageWorker() {
                 jobId: data.jobId,
                 provider: result.provider,
                 model: result.model,
-                prompt: prompt.userPrompt,
+                prompt: usedPrompt,
                 promptPresetVersionId: prompt.promptPresetVersionId,
                 response: JSON.stringify({
                     storage_path: stored.relativePath,
@@ -182,6 +209,15 @@ async function runImageWorker() {
                     error: err.message,
                 },
             });
+            if (!retryable && data.tenantId) {
+                // QA must not be blocked by a permanently failed hero image.
+                try {
+                    await (0, orchestration_1.syncImageResultToStudio)(data.tenantId, data.contentImageId);
+                }
+                catch (qaError) {
+                    console.warn("[worker:image] qa-after-failure skipped", qaError instanceof Error ? qaError.message : String(qaError));
+                }
+            }
         }
     });
     console.log("[worker:image] started", { queue: queues_1.QUEUE_NAMES.image });
