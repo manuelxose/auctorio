@@ -71,6 +71,7 @@ enum ProjectGoal {
   faq
   newsletter
   social_pack
+  news_article
 }
 
 enum ProjectStatus {
@@ -183,6 +184,106 @@ enum StudioPromptVersionStatus {
   deprecated
 }
 
+enum ContentSourceType {
+  rss
+  atom
+  html
+  sitemap
+  api
+  manual
+}
+
+enum SourceItemStatus {
+  discovered
+  fetched
+  parsed
+  duplicate
+  rejected
+  candidate
+  selected
+  processed
+  failed
+}
+
+enum StoryClusterStatus {
+  open
+  selected
+  covered
+  rejected
+  archived
+}
+
+enum SocialChannel {
+  x
+  instagram
+}
+
+enum SocialContentType {
+  x_post
+  x_thread
+  instagram_caption
+  instagram_story
+  social_post
+}
+
+enum SocialGenerationStatus {
+  queued
+  processing
+  done
+  failed
+}
+
+enum SocialEditorialStatus {
+  draft
+  approved
+  rejected
+}
+
+enum PublishingAccountPlatform {
+  website
+  x
+  instagram
+}
+
+enum PublishingAccountStatus {
+  pending
+  active
+  error
+  disabled
+}
+
+enum PublicationChannel {
+  website
+  x
+  instagram
+}
+
+enum PublicationState {
+  draft
+  ready
+  scheduled
+  queued
+  publishing
+  published
+  failed
+  canceled
+  deleted
+  unpublished
+}
+
+enum PublicationAttemptStatus {
+  queued
+  running
+  succeeded
+  failed
+}
+
+enum AutomationState {
+  active
+  paused
+  degraded
+}
+
 model Tenant {
   id         String       @id @default(uuid()) @db.Uuid
   name       String       @unique
@@ -214,6 +315,17 @@ model Tenant {
   studioLaunchTickets StudioLaunchTicket[]
   studioPromptPresets StudioPromptPreset[]
   studioPromptAssignments StudioPromptAssignment[]
+  contentSources ContentSource[]
+  sourceItems SourceItem[]
+  storyClusters StoryCluster[]
+  socialContents SocialContent[]
+  publishingAccounts PublishingAccount[]
+  publications Publication[]
+  publicationAttempts PublicationAttempt[]
+  automationPolicies AutomationPolicy[]
+  campaigns Campaign[]
+  editorialBriefs EditorialBrief[]
+  auditLogs AuditLog[]
 
   @@map("tenants")
 }
@@ -386,6 +498,10 @@ model Site {
   assetVariants   AssetVariant[]
   promptPresets   StudioPromptPreset[]
   promptAssignments StudioPromptAssignment[]
+  contentSources  ContentSource[]
+  publishingAccounts PublishingAccount[]
+  automationPolicies AutomationPolicy[]
+  publications    Publication[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -403,18 +519,35 @@ model ContentProject {
   status          ProjectStatus @default(draft)
   primaryLanguage String        @default("es") @map("primary_language")
   metadata        Json?
+  sourceItemId    String?       @db.Uuid @map("source_item_id")
+  clusterId       String?       @db.Uuid @map("cluster_id")
+  campaignId      String?       @db.Uuid @map("campaign_id")
+  briefId         String?       @db.Uuid @map("brief_id")
+  origin          String        @default("manual")
+  deletedAt       DateTime?     @map("deleted_at")
+  deletedBy       String?       @map("deleted_by")
+  deletedByStudioUserId String? @db.Uuid @map("deleted_by_studio_user_id")
+  deletionReason  String?       @map("deletion_reason")
   createdAt       DateTime      @default(now()) @map("created_at")
   updatedAt       DateTime      @updatedAt @map("updated_at")
 
   tenant          Tenant            @relation(fields: [tenantId], references: [id])
   site            Site              @relation(fields: [siteId], references: [id])
   topic           Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  sourceItem      SourceItem?       @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  cluster         StoryCluster?     @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  campaign        Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  editorialBrief  EditorialBrief?   @relation(fields: [briefId], references: [id], onDelete: SetNull)
   versions        ContentVersion[]
   derivatives     ContentDerivative[]
   publicationJobs PublicationJob[]
+  socialContents  SocialContent[]
+  publications    Publication[]
 
   @@index([tenantId, siteId, status])
   @@index([tenantId, topicId])
+  @@index([tenantId, deletedAt])
+  @@index([tenantId, sourceItemId])
   @@map("content_projects")
 }
 
@@ -446,6 +579,8 @@ model ContentVersion {
   contentImage   ContentImage?      @relation(fields: [contentImageId], references: [id], onDelete: SetNull)
   derivatives    ContentDerivative[]
   publicationJobs PublicationJob[]
+  publications   Publication[]
+  socialContents SocialContent[]
   approvedByStudioUser StudioUser? @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, versionNumber])
@@ -614,6 +749,7 @@ model StudioUser {
   createdPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionCreatedBy")
   approvedPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionApprovedBy")
   createdPromptAssignments StudioPromptAssignment[] @relation("StudioPromptAssignmentCreatedBy")
+  auditLogs AuditLog[] @relation("AuditLogActor")
 
   @@unique([tenantId, email])
   @@index([accountId])
@@ -777,6 +913,7 @@ model StudioPromptVersion {
   contentTexts ContentText[] @relation("ContentTextPromptVersion")
   contentImages ContentImage[] @relation("ContentImagePromptVersion")
   aiAudits AiAudit[] @relation("AiAuditPromptVersion")
+  socialContents SocialContent[] @relation("SocialContentPromptVersion")
 
   @@unique([presetId, versionNumber])
   @@index([status])
@@ -804,4 +941,330 @@ model StudioPromptAssignment {
   @@unique([tenantId, surface, assignmentKey])
   @@index([tenantId, siteId, surface])
   @@map("studio_prompt_assignments")
+}
+
+model ContentSource {
+  id                     String            @id @default(uuid()) @db.Uuid
+  tenantId               String            @db.Uuid @map("tenant_id")
+  siteId                 String?           @db.Uuid @map("site_id")
+  name                   String
+  type                   ContentSourceType
+  url                    String?
+  enabled                Boolean           @default(true)
+  priority               Int               @default(0)
+  trustScore             Float             @default(0.5) @map("trust_score")
+  language               String            @default("es")
+  country                String?
+  categories             Json?
+  tags                   Json?
+  refreshIntervalMinutes Int               @default(30) @map("refresh_interval_minutes")
+  lastFetchedAt          DateTime?         @map("last_fetched_at")
+  lastSuccessAt          DateTime?         @map("last_success_at")
+  consecutiveFailures    Int               @default(0) @map("consecutive_failures")
+  configuration          Json?
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  items  SourceItem[]
+
+  @@index([tenantId, enabled, lastFetchedAt])
+  @@unique([tenantId, name])
+  @@map("content_sources")
+}
+
+model SourceItem {
+  id               String           @id @default(uuid()) @db.Uuid
+  tenantId         String           @db.Uuid @map("tenant_id")
+  sourceId         String           @db.Uuid @map("source_id")
+  clusterId        String?          @db.Uuid @map("cluster_id")
+  externalId       String           @map("external_id")
+  canonicalUrl     String?          @map("canonical_url")
+  sourceUrl        String?          @map("source_url")
+  title            String
+  description      String?          @db.Text
+  rawText          String?          @db.Text @map("raw_text")
+  cleanedText      String?          @db.Text @map("cleaned_text")
+  author           String?
+  publishedAt      DateTime?        @map("published_at")
+  discoveredAt     DateTime         @default(now()) @map("discovered_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+  sourceImageUrls  Json?            @map("source_image_urls")
+  language         String?
+  categories       Json?
+  entities         Json?
+  contentHash      String           @map("content_hash")
+  semanticHash     String?          @map("semantic_hash")
+  metadata         Json?
+  processingStatus SourceItemStatus @default(discovered) @map("processing_status")
+  score            Float?
+  scoreExplanation Json?            @map("score_explanation")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source   ContentSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  cluster  StoryCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  projects ContentProject[]
+
+  @@unique([tenantId, sourceId, externalId])
+  @@unique([tenantId, contentHash])
+  @@index([tenantId, processingStatus, discoveredAt])
+  @@index([tenantId, clusterId])
+  @@map("source_items")
+}
+
+model StoryCluster {
+  id           String            @id @default(uuid()) @db.Uuid
+  tenantId     String            @db.Uuid @map("tenant_id")
+  primaryTopic String?           @map("primary_topic")
+  headline     String?
+  summary      String?           @db.Text
+  firstSeenAt  DateTime          @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime          @default(now()) @map("last_seen_at")
+  score        Float?
+  status       StoryClusterStatus @default(open)
+  sourceCount  Int               @default(0) @map("source_count")
+  metadata     Json?
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  items    SourceItem[]
+  projects ContentProject[]
+
+  @@index([tenantId, status, lastSeenAt])
+  @@map("story_clusters")
+}
+
+model SocialContent {
+  id                    String                 @id @default(uuid()) @db.Uuid
+  tenantId              String                 @db.Uuid @map("tenant_id")
+  projectId             String                 @db.Uuid @map("project_id")
+  versionId             String                 @db.Uuid @map("version_id")
+  channel               SocialChannel
+  contentType           SocialContentType      @map("content_type")
+  body                  String                 @db.Text
+  title                 String?
+  hashtags              Json?
+  mentions              Json?
+  mediaAssetIds         Json?                  @map("media_asset_ids")
+  characterCount        Int?                   @map("character_count")
+  generationStatus      SocialGenerationStatus @default(queued) @map("generation_status")
+  editorialStatus       SocialEditorialStatus  @default(draft) @map("editorial_status")
+  threadPosition        Int?                   @map("thread_position")
+  metadata              Json?
+  promptPresetVersionId String?                @db.Uuid @map("prompt_preset_version_id")
+  createdAt             DateTime               @default(now()) @map("created_at")
+  updatedAt             DateTime               @updatedAt @map("updated_at")
+
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project            ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version            ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  promptPresetVersion StudioPromptVersion? @relation("SocialContentPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
+  publications       Publication[]
+
+  @@index([tenantId, projectId, channel])
+  @@index([tenantId, versionId, channel])
+  @@map("social_content")
+}
+
+model PublishingAccount {
+  id                String                  @id @default(uuid()) @db.Uuid
+  tenantId          String                  @db.Uuid @map("tenant_id")
+  siteId            String?                 @db.Uuid @map("site_id")
+  platform          PublishingAccountPlatform
+  displayName       String                  @map("display_name")
+  externalAccountId String?                 @map("external_account_id")
+  credentialsRef    String?                 @map("credentials_ref")
+  enabled           Boolean                 @default(true)
+  status            PublishingAccountStatus @default(pending)
+  configuration     Json?
+  lastVerifiedAt    DateTime?               @map("last_verified_at")
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site         Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  publications Publication[]
+
+  @@index([tenantId, platform, status])
+  @@map("publishing_accounts")
+}
+
+model Publication {
+  id              String           @id @default(uuid()) @db.Uuid
+  tenantId        String           @db.Uuid @map("tenant_id")
+  projectId       String           @db.Uuid @map("project_id")
+  versionId       String           @db.Uuid @map("version_id")
+  channel         PublicationChannel
+  accountId       String?          @db.Uuid @map("account_id")
+  siteId          String?          @db.Uuid @map("site_id")
+  socialContentId String?          @db.Uuid @map("social_content_id")
+  campaignId      String?          @db.Uuid @map("campaign_id")
+  publicationJobId String?         @map("publication_job_id")
+  status          PublicationState @default(draft)
+  scheduledFor    DateTime?        @map("scheduled_for")
+  publishedAt     DateTime?        @map("published_at")
+  externalId      String?          @map("external_id")
+  externalUrl     String?          @map("external_url")
+  currentAttempt  Int              @default(0) @map("current_attempt")
+  retryCount      Int              @default(0) @map("retry_count")
+  nextRetryAt     DateTime?        @map("next_retry_at")
+  lastError       String?          @db.Text @map("last_error")
+  failureClass    String?          @map("failure_class")
+  failureReason   String?          @map("failure_reason")
+  manualOverride  Boolean          @default(false) @map("manual_override")
+  scheduleLocked  Boolean          @default(false) @map("schedule_locked")
+  idempotencyKey  String?          @map("idempotency_key")
+  metadata        Json?
+  createdAt       DateTime         @default(now()) @map("created_at")
+  updatedAt       DateTime         @updatedAt @map("updated_at")
+
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project       ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version       ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  account       PublishingAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  site          Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  socialContent SocialContent?      @relation(fields: [socialContentId], references: [id], onDelete: SetNull)
+  campaign      Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  attempts      PublicationAttempt[]
+
+  @@index([tenantId, status, scheduledFor])
+  @@index([tenantId, projectId, channel])
+  @@index([tenantId, channel, status])
+  @@unique([tenantId, idempotencyKey])
+  @@map("publications")
+}
+
+model PublicationAttempt {
+  id              String                  @id @default(uuid()) @db.Uuid
+  tenantId        String                  @db.Uuid @map("tenant_id")
+  publicationId   String                  @db.Uuid @map("publication_id")
+  attemptNumber   Int                     @map("attempt_number")
+  status          PublicationAttemptStatus @default(queued)
+  startedAt       DateTime?               @map("started_at")
+  finishedAt      DateTime?               @map("finished_at")
+  externalId      String?                 @map("external_id")
+  externalUrl     String?                 @map("external_url")
+  requestPayload  Json?                   @map("request_payload")
+  responsePayload Json?                   @map("response_payload")
+  error           String?                 @db.Text
+  errorClass      String?                 @map("error_class")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, publicationId, attemptNumber])
+  @@map("publication_attempts")
+}
+
+model AutomationPolicy {
+  id                           String          @id @default(uuid()) @db.Uuid
+  tenantId                     String          @db.Uuid @map("tenant_id")
+  siteId                       String?         @db.Uuid @map("site_id")
+  enabled                      Boolean         @default(false)
+  state                        AutomationState @default(active)
+  pausedReason                 String?         @map("paused_reason")
+  timezone                     String          @default("Europe/Madrid")
+  articlesPerDay               Int             @default(3) @map("articles_per_day")
+  maxArticlesPerDay            Int             @default(6) @map("max_articles_per_day")
+  xPostsPerDay                 Int             @default(5) @map("x_posts_per_day")
+  instagramPostsPerDay         Int             @default(2) @map("instagram_posts_per_day")
+  minimumMinutesBetweenArticles Int            @default(120) @map("minimum_minutes_between_articles")
+  activeDaysOfWeek             Json?           @map("active_days_of_week")
+  publishingWindows            Json?           @map("publishing_windows")
+  autoGenerate                 Boolean         @default(false) @map("auto_generate")
+  autoApprove                  Boolean         @default(false) @map("auto_approve")
+  autoSchedule                 Boolean         @default(false) @map("auto_schedule")
+  autoPublish                  Boolean         @default(false) @map("auto_publish")
+  minimumStoryScore            Float           @default(0.5) @map("minimum_story_score")
+  categories                   Json?
+  excludedCategories           Json?           @map("excluded_categories")
+  priorityTopics               Json?           @map("priority_topics")
+  imageRequired                Boolean         @default(true) @map("image_required")
+  socialRequired               Boolean         @default(true) @map("social_required")
+  maximumQueueSize             Int             @default(20) @map("maximum_queue_size")
+  articlesPerHour              Int             @default(2) @map("articles_per_hour")
+  socialPostsPerHour           Int             @default(6) @map("social_posts_per_hour")
+  maximumDailySocial           Int             @default(12) @map("maximum_daily_social")
+  socialTimingMinutesX         Int             @default(5) @map("social_timing_minutes_x")
+  socialTimingMinutesInstagram Int             @default(60) @map("social_timing_minutes_instagram")
+  sourceSelectionRules         Json?           @map("source_selection_rules")
+  updatedByStudioUserId        String?         @db.Uuid @map("updated_by_studio_user_id")
+  createdAt                    DateTime        @default(now()) @map("created_at")
+  updatedAt                    DateTime        @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, siteId])
+  @@map("automation_policies")
+}
+
+model Campaign {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid @map("tenant_id")
+  name        String
+  description String?
+  startAt     DateTime? @map("start_at")
+  endAt       DateTime? @map("end_at")
+  tags        Json?
+  status      String   @default("active")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects     ContentProject[]
+  publications Publication[]
+
+  @@index([tenantId, status])
+  @@map("campaigns")
+}
+
+model EditorialBrief {
+  id                   String   @id @default(uuid()) @db.Uuid
+  tenantId             String   @db.Uuid @map("tenant_id")
+  name                 String
+  topic                String?
+  audience             String?
+  tone                 String?
+  structure            Json?
+  keywords             Json?
+  seoIntent            String?  @map("seo_intent")
+  channels             Json?
+  imageStyle           String?  @map("image_style")
+  sourceRestrictions   Json?    @map("source_restrictions")
+  publicationFrequency String?  @map("publication_frequency")
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects ContentProject[]
+
+  @@index([tenantId, active])
+  @@map("editorial_briefs")
+}
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @db.Uuid @map("tenant_id")
+  actorType   String   @map("actor_type")
+  actorUserId String?  @db.Uuid @map("actor_user_id")
+  action      String
+  entityType  String?  @map("entity_type")
+  entityId    String?  @db.Uuid @map("entity_id")
+  metadata    Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actorUser StudioUser? @relation("AuditLogActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, entityType, entityId])
+  @@map("audit_logs")
 }

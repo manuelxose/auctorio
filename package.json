@@ -17,7 +17,11 @@
     "start:worker:text": "ts-node scripts/start-worker-text.ts",
     "start:worker:image": "ts-node scripts/start-worker-image.ts",
     "start:worker:scraping": "ts-node scripts/start-worker-scraping.ts",
-    "start:worker:publishing": "ts-node scripts/start-worker-publishing.ts"
+    "start:worker:publishing": "ts-node scripts/start-worker-publishing.ts",
+    "start:worker:discovery": "ts-node scripts/start-worker-discovery.ts",
+    "start:worker:scheduler": "ts-node scripts/start-worker-scheduler.ts",
+    "start:worker:automation": "ts-node scripts/start-worker-automation.ts",
+    "start:worker:social": "ts-node scripts/start-worker-social.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

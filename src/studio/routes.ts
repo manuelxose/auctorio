@@ -1,14 +1,11 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import crypto from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { ProjectGoal, ProjectStatus, PublicationStatus, SiteType } from "@prisma/client";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import { tenantRepository } from "../infrastructure/db/repositories";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
-import { sha256 } from "../shared/utils/hash";
 import { getEnv } from "../shared/utils/env";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import {
@@ -70,6 +67,8 @@ import {
   retryImageGeneration,
   startProjectGeneration,
 } from "./orchestration";
+import { archiveProject } from "./projects";
+import { linkDurableWebsitePublication } from "./publication";
 import { runVersionQa } from "./qa";
 import { getStudioGoogleClientId } from "./google";
 import {
@@ -81,14 +80,8 @@ import {
   listStudioPromptPresets,
   updateStudioPromptVersion,
 } from "./prompts";
-import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
-import {
-  buildStudioProxySignature,
-  hasStudioPermission,
-  isStudioProxySignatureFresh,
-  STUDIO_PERMISSIONS,
-  type StudioPermission,
-} from "./security";
+import { isHeroImageReady } from "./review";
+import { hasStudioPermission, type StudioPermission } from "./security";
 import type {
   AssignStudioPromptInput,
   CreateProjectInput,
@@ -97,18 +90,50 @@ import type {
   CreateStudioPromptPresetInput,
   CreateStudioPromptVersionInput,
   CreateStudioRoleInput,
-  PublicationExecutionState,
   PublicationPayload,
   PublicationTargetStatus,
-  StudioProjectDetailView,
   UpdateStudioIdentityProviderInput,
   UpdateProjectInput,
   UpdateStudioPromptVersionInput,
   UpdateStudioRoleInput,
   UpdateStudioUserInput,
   UpdateSiteInput,
-  VersionSummary,
 } from "./types";
+import {
+  badRequest,
+  conflict,
+  errorBody,
+  isOneOf,
+  isUuid,
+  notFound,
+  parseBody,
+  parseJsonObjectField,
+  parseOptionalString,
+  parsePage,
+  parsePageSize,
+  parsePermissionList,
+  readSingleHeader,
+  requireInternalSecret,
+  requireStudioContext,
+  requireStudioPermission,
+  STUDIO_TENANT_HEADER,
+  STUDIO_USER_HEADER,
+  STUDIO_SESSION_HEADER,
+  STUDIO_PERMISSIONS_HEADER,
+  STUDIO_SIGNATURE_HEADER,
+  STUDIO_TIMESTAMP_HEADER,
+} from "./http-utils";
+import {
+  buildProjectReviewGate,
+  mapPublicationState,
+  mapQaState,
+  toProjectDetail,
+  toVersionSummary,
+  type ProjectRecord,
+  type ProjectVersionRecord,
+  type PublicationRecord,
+} from "./views";
+import { registerEditorialRoutes } from "./routes-editorial";
 
 const SITE_TYPES: SiteType[] = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS: ProjectGoal[] = [
@@ -118,6 +143,7 @@ const PROJECT_GOALS: ProjectGoal[] = [
   "faq",
   "newsletter",
   "social_pack",
+  "news_article",
 ];
 const PROJECT_STATUSES: ProjectStatus[] = [
   "draft",
@@ -150,44 +176,7 @@ const STUDIO_PROMPT_SCOPES = ["global", "site"] as const;
 const STUDIO_PROMPT_VERSION_STATUSES = ["draft", "approved", "deprecated"] as const;
 const STUDIO_PROVISIONING_MODES = ["invite_only"] as const;
 
-type ProjectRecord = NonNullable<Awaited<ReturnType<typeof getProjectById>>>;
-type ProjectVersionRecord = ProjectRecord["versions"][number];
-type PublicationRecord = NonNullable<Awaited<ReturnType<typeof getPublicationJobById>>>;
-type StudioRequestContext = {
-  tenantId: string;
-  userId: string | null;
-  sessionId: string | null;
-  permissions: string[];
-  authMode: "api_key" | "oidc";
-};
-
 const prisma = getPrismaClient();
-
-const INTERNAL_SECRET_HEADER = "x-studio-internal-secret";
-const STUDIO_TENANT_HEADER = "x-studio-tenant-id";
-const STUDIO_USER_HEADER = "x-studio-user-id";
-const STUDIO_SESSION_HEADER = "x-studio-session-id";
-const STUDIO_PERMISSIONS_HEADER = "x-studio-permissions";
-const STUDIO_SIGNATURE_HEADER = "x-studio-signature";
-const STUDIO_TIMESTAMP_HEADER = "x-studio-timestamp";
-
-function errorBody(reply: FastifyReply, code: string, message: string) {
-  return {
-    error: {
-      code,
-      message,
-      requestId: reply.request.id ?? null,
-    },
-  };
-}
-
-function badRequest(reply: FastifyReply, message: string) {
-  return reply.code(400).send(errorBody(reply, "bad_request", message));
-}
-
-function notFound(reply: FastifyReply, message: string) {
-  return reply.code(404).send(errorBody(reply, "not_found", message));
-}
 
 function authErrorReply(reply: FastifyReply, status: number, message: string) {
   return reply.code(status).send(errorBody(reply, "auth_error", message));
@@ -229,236 +218,6 @@ function getAuthErrorStatus(message: string): number {
   }
 
   return 500;
-}
-
-function parseBody<T>(request: FastifyRequest): T {
-  return (request.body ?? {}) as T;
-}
-
-function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-async function requireTenant(request: FastifyRequest, reply: FastifyReply): Promise<string | null> {
-  if (request.tenantId) {
-    return request.tenantId;
-  }
-
-  const authHeader = request.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
-    reply.code(401).send({ error: "unauthorized", message: "Missing API key" });
-    return null;
-  }
-
-  const token = authHeader.slice("Bearer ".length).trim();
-  if (!token) {
-    reply.code(401).send({ error: "unauthorized", message: "Invalid API key" });
-    return null;
-  }
-
-  const tenant = await tenantRepository.findByApiKeyHash(sha256(token));
-  if (!tenant || tenant.status !== "active") {
-    reply.code(401).send({ error: "unauthorized", message: "Invalid API key" });
-    return null;
-  }
-
-  request.tenantId = tenant.id;
-  return tenant.id;
-}
-
-function readSingleHeader(
-  request: FastifyRequest,
-  name: string,
-): string | null {
-  const value = request.headers[name];
-  if (Array.isArray(value)) {
-    return value[0] ?? null;
-  }
-  return typeof value === "string" ? value : null;
-}
-
-function getInternalSharedSecret(): string {
-  return getEnv("STUDIO_PROXY_SHARED_SECRET", "studio-proxy-dev-secret-change-me");
-}
-
-function requireInternalSecret(request: FastifyRequest, reply: FastifyReply): boolean {
-  const secret = readSingleHeader(request, INTERNAL_SECRET_HEADER);
-  if (!secret || secret !== getInternalSharedSecret()) {
-    reply.code(401).send({ error: "unauthorized", message: "Invalid studio internal secret" });
-    return false;
-  }
-  return true;
-}
-
-function readSignedStudioContext(request: FastifyRequest): StudioRequestContext | null {
-  const tenantId = readSingleHeader(request, STUDIO_TENANT_HEADER)?.trim() || "";
-  const userId = readSingleHeader(request, STUDIO_USER_HEADER)?.trim() || "";
-  const sessionId = readSingleHeader(request, STUDIO_SESSION_HEADER)?.trim() || "";
-  const permissionsValue = readSingleHeader(request, STUDIO_PERMISSIONS_HEADER)?.trim() || "";
-  const timestamp = readSingleHeader(request, STUDIO_TIMESTAMP_HEADER)?.trim() || "";
-  const signature = readSingleHeader(request, STUDIO_SIGNATURE_HEADER)?.trim() || "";
-
-  if (!tenantId || !userId || !sessionId || !timestamp || !signature) {
-    return null;
-  }
-  if (!isStudioProxySignatureFresh(timestamp)) {
-    return null;
-  }
-
-  const permissions = permissionsValue
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-  const expected = buildStudioProxySignature({
-    tenantId,
-    userId,
-    sessionId,
-    permissions,
-    timestamp,
-    method: request.method,
-    url: request.url,
-  });
-
-  const providedBuffer = Buffer.from(signature);
-  const expectedBuffer = Buffer.from(expected);
-  if (providedBuffer.length !== expectedBuffer.length) {
-    return null;
-  }
-  if (!crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
-    return null;
-  }
-
-  request.tenantId = tenantId;
-  request.studioUserId = userId;
-  request.studioSessionId = sessionId;
-  request.studioPermissions = permissions;
-  request.studioAuthMode = "oidc";
-
-  return {
-    tenantId,
-    userId,
-    sessionId,
-    permissions,
-    authMode: "oidc",
-  };
-}
-
-async function requireStudioContext(
-  request: FastifyRequest,
-  reply: FastifyReply,
-): Promise<StudioRequestContext | null> {
-  const signed = readSignedStudioContext(request);
-  if (signed) {
-    return signed;
-  }
-
-  const tenantId = await requireTenant(request, reply);
-  if (!tenantId) {
-    return null;
-  }
-
-  request.studioAuthMode = "api_key";
-  request.studioPermissions = [...STUDIO_PERMISSIONS];
-
-  return {
-    tenantId,
-    userId: null,
-    sessionId: null,
-    permissions: [...STUDIO_PERMISSIONS],
-    authMode: "api_key",
-  };
-}
-
-async function requireStudioPermission(
-  request: FastifyRequest,
-  reply: FastifyReply,
-  permission: StudioPermission,
-): Promise<StudioRequestContext | null> {
-  const context = await requireStudioContext(request, reply);
-  if (!context) {
-    return null;
-  }
-
-  if (!hasStudioPermission(context.permissions, permission)) {
-    reply.code(403).send({ error: "forbidden", message: `Missing permission: ${permission}` });
-    return null;
-  }
-
-  return context;
-}
-
-function parsePage(value: unknown, fallback = 1): number {
-  const parsed = Number.parseInt(String(value ?? fallback), 10);
-  if (Number.isNaN(parsed) || parsed < 1) {
-    return fallback;
-  }
-  return parsed;
-}
-
-function parsePageSize(value: unknown, fallback = 20, max = 100): number {
-  const parsed = Number.parseInt(String(value ?? fallback), 10);
-  if (Number.isNaN(parsed) || parsed < 1) {
-    return fallback;
-  }
-  return Math.min(parsed, max);
-}
-
-function parseJsonObjectField(
-  value: unknown,
-  fieldName: string,
-): Record<string, unknown> | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null || value === "") {
-    return null;
-  }
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value) as unknown;
-      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-        return parsed as Record<string, unknown>;
-      }
-    } catch (error) {
-      throw new Error(`${fieldName} must be valid JSON (${String(error)})`);
-    }
-    throw new Error(`${fieldName} must be a JSON object`);
-  }
-  if (typeof value === "object" && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  throw new Error(`${fieldName} must be a JSON object`);
-}
-
-function isOneOf<T extends string>(value: string, allowed: readonly T[]): value is T {
-  return allowed.includes(value as T);
-}
-
-function parseOptionalString(value: unknown): string | null | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  if (value === null) {
-    return null;
-  }
-  const normalized = String(value).trim();
-  return normalized || null;
-}
-
-function parsePermissionList(value: unknown): StudioPermission[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  const permissions = value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
-
-  if (!permissions.every((permission) => hasStudioPermission(STUDIO_PERMISSIONS, permission))) {
-    throw new Error(`permissions must be one of: ${STUDIO_PERMISSIONS.join(", ")}`);
-  }
-
-  return Array.from(new Set(permissions)) as StudioPermission[];
 }
 
 function parsePublicationTargetStatus(value: unknown): PublicationTargetStatus | null {
@@ -565,214 +324,9 @@ async function serveAsset(request: FastifyRequest, reply: FastifyReply) {
   }
 }
 
-function mapQaState(
-  status: ProjectVersionRecord["status"],
-): VersionSummary["qaState"] {
-  switch (status) {
-    case "qa_failed":
-      return "failed";
-    case "qa_passed":
-      return "passed";
-    case "approved":
-      return "approved";
-    case "published":
-      return "published";
-    default:
-      return "not_ready";
-  }
-}
-
-function mapPublicationState(
-  publication: Pick<
-    PublicationRecord,
-    | "id"
-    | "status"
-    | "action"
-    | "externalId"
-    | "externalUrl"
-    | "error"
-    | "createdAt"
-    | "updatedAt"
-    | "publishedAt"
-    | "requestPayload"
-  >,
-): PublicationExecutionState {
-  const requestPayload =
-    publication.requestPayload && typeof publication.requestPayload === "object"
-      ? (publication.requestPayload as Record<string, unknown>)
-      : null;
-
-  return {
-    id: publication.id,
-    status: publication.status,
-    action: publication.action,
-    targetStatus: parsePublicationTargetStatus(requestPayload?.targetStatus),
-    externalId: publication.externalId,
-    externalUrl: publication.externalUrl,
-    error: publication.error,
-    createdAt: publication.createdAt,
-    updatedAt: publication.updatedAt,
-    publishedAt: publication.publishedAt,
-  };
-}
-
-function readPromptFields(version: ProjectVersionRecord) {
-  const promptPresetVersion =
-    version.contentText?.promptPresetVersion ?? version.contentImage?.promptPresetVersion ?? null;
-
-  return {
-    promptPresetVersionId: promptPresetVersion?.id ?? null,
-    promptVersionLabel: promptPresetVersion
-      ? `v${promptPresetVersion.versionNumber}`
-      : version.contentText?.promptVersion ?? null,
-    promptPresetName: promptPresetVersion?.preset.name ?? null,
-    promptPresetKey: promptPresetVersion?.preset.key ?? null,
-  };
-}
-
-async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionSummary> {
-  return {
-    id: version.id,
-    versionNumber: version.versionNumber,
-    status: version.status,
-    title: version.title,
-    excerpt: version.excerpt,
-    seoTitle: version.seoTitle,
-    seoDescription: version.seoDescription,
-    feedback: version.feedback,
-    createdAt: version.createdAt,
-    updatedAt: version.updatedAt,
-    approvedAt: version.approvedAt,
-    approvedBy: version.approvedBy,
-    publishedAt: version.publishedAt,
-    qaState: mapQaState(version.status),
-    hasAsset: isHeroImageReady(version.contentImage),
-    assetUrl: await buildAssetPublicUrl(version.contentImage?.storagePath),
-    image: version.contentImage
-      ? {
-          id: version.contentImage.id,
-          status: version.contentImage.status,
-          error: version.contentImage.error,
-        }
-      : null,
-    ...readPromptFields(version),
-    wordCount: countWordsFromHtml(version.bodyHtml),
-    qaFailureCount: countQaFailures(version.qaReport),
-    qaWarningCount: countQaWarnings(version.qaReport),
-    derivativeCount: version.derivatives.length,
-    latestPublicationJob: version.publicationJobs[0]
-      ? mapPublicationState(version.publicationJobs[0] as PublicationRecord)
-      : null,
-    qaReport: version.qaReport,
-  };
-}
-
-function buildProjectReviewGate(project: ProjectRecord) {
-  const latestVersionRecord = project.versions[0] ?? null;
-  const latestImage = latestVersionRecord?.contentImage ?? null;
-  const heroReady = isHeroImageReady(latestImage);
-
-  return buildReviewGate({
-    projectStatus: project.status,
-    versionCount: project.versions.length,
-    latestVersion: latestVersionRecord
-      ? {
-          status: latestVersionRecord.status,
-          title: latestVersionRecord.title,
-          excerpt: latestVersionRecord.excerpt,
-          seoTitle: latestVersionRecord.seoTitle,
-          seoDescription: latestVersionRecord.seoDescription,
-          feedback: latestVersionRecord.feedback,
-          bodyHtml: latestVersionRecord.bodyHtml,
-          qaReport: latestVersionRecord.qaReport,
-          hasAsset: heroReady,
-        }
-      : null,
-  });
-}
-
-async function toProjectDetail(project: ProjectRecord): Promise<StudioProjectDetailView> {
-  const latestVersionRecord = project.versions[0] ?? null;
-  const latestVersion = latestVersionRecord ? await toVersionSummary(latestVersionRecord) : null;
-  const latestAssetUrl = await buildAssetPublicUrl(latestVersionRecord?.contentImage?.storagePath);
-  const versions = await Promise.all(
-    project.versions.map(async (version) => ({
-      ...(await toVersionSummary(version)),
-      bodyHtml: version.bodyHtml,
-    })),
-  );
-
-  return {
-    id: project.id,
-    siteId: project.siteId,
-    title: project.title,
-    brief: project.brief,
-    goal: project.goal,
-    status: project.status,
-    primaryLanguage: project.primaryLanguage,
-    createdAt: project.createdAt,
-    updatedAt: project.updatedAt,
-    versionCount: project.versions.length,
-    reviewGate: buildProjectReviewGate(project),
-    metadata: project.metadata,
-    site: {
-      id: project.site.id,
-      key: project.site.key,
-      name: project.site.name,
-      type: project.site.type,
-      locale: project.site.locale,
-      baseUrl: project.site.baseUrl,
-      brandVoice: project.site.brandVoice,
-      seoRules: project.site.seoRules,
-      taxonomyMap: project.site.taxonomyMap,
-      publishingCredentialsRef: project.site.publishingCredentialsRef,
-    },
-    topic: project.topic
-      ? {
-          id: project.topic.id,
-          title: project.topic.title,
-        }
-      : null,
-    latestVersion: latestVersionRecord && latestVersion
-      ? {
-          ...latestVersion,
-          bodyHtml: latestVersionRecord.bodyHtml,
-          derivatives: latestVersionRecord.derivatives.map((derivative) => ({
-            id: derivative.id,
-            type: derivative.type,
-            title: derivative.title,
-            body: derivative.body,
-            status: derivative.status,
-            createdAt: derivative.createdAt,
-            updatedAt: derivative.updatedAt,
-          })),
-          assetVariants: await Promise.all(
-            (latestVersionRecord.contentImage?.assetVariants ?? []).map(async (variant) => ({
-              id: variant.id,
-              kind: variant.kind,
-              storagePath: variant.storagePath,
-              mimeType: variant.mimeType,
-              width: variant.width,
-              height: variant.height,
-              createdAt: variant.createdAt,
-              updatedAt: variant.updatedAt,
-              publicUrl: await buildAssetPublicUrl(variant.storagePath),
-            })),
-          ),
-        }
-      : null,
-    latestAssetUrl,
-    versions,
-    latestPublicationJob: project.publicationJobs[0]
-      ? mapPublicationState(project.publicationJobs[0] as PublicationRecord)
-      : null,
-    publicationJobs: project.publicationJobs.map((publication) =>
-      mapPublicationState(publication as PublicationRecord),
-    ),
-  };
-}
-
 export function registerStudioRoutes(fastify: FastifyInstance) {
+  registerEditorialRoutes(fastify);
+
   fastify.get("/health/live", async () => ({ status: "ok" }));
 
   fastify.get("/health/ready", async (_request, reply) => {
@@ -1331,6 +885,9 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       goal?: string;
       page?: string;
       pageSize?: string;
+      search?: string;
+      origin?: string;
+      archived?: string;
     };
     const page = parsePage(query.page, 1);
     const pageSize = parsePageSize(query.pageSize, 20);
@@ -1344,6 +901,9 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (query.goal && !isOneOf(query.goal, PROJECT_GOALS)) {
       return badRequest(reply, `goal must be one of: ${PROJECT_GOALS.join(", ")}`);
     }
+    if (query.origin && !isOneOf(query.origin, ["manual", "auto"] as const)) {
+      return badRequest(reply, "origin must be one of: manual, auto");
+    }
 
     const projects = await listProjects(context.tenantId, {
       siteId: query.siteId,
@@ -1351,6 +911,9 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       goal: query.goal as ProjectGoal | undefined,
       page,
       pageSize,
+      search: parseOptionalString(query.search) ?? undefined,
+      origin: query.origin as "manual" | "auto" | undefined,
+      includeArchived: query.archived === "true",
     });
 
     const items = await Promise.all(
@@ -1724,12 +1287,90 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     await updateProjectStatus(context.tenantId, project.id, "publish_queued");
     await queuePublication(publication.id);
 
+    if (action === "publish" || action === "update") {
+      await linkDurableWebsitePublication(
+        context.tenantId,
+        project.site.id,
+        project.id,
+        latestVersion.id,
+        publication.id,
+      );
+    }
+
     return reply.code(202).send({
       publication_id: publication.id,
       project_id: project.id,
       version_id: latestVersion.id,
       status: "queued",
     });
+  });
+
+  fastify.delete("/v2/projects/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+    const body = parseBody<{ reason?: string; mode?: "archive" | "unpublish_delete" }>(request);
+    const mode = body.mode ?? "archive";
+
+    try {
+      const result = await archiveProject(
+        context.tenantId,
+        projectId,
+        {
+          reason: parseOptionalString(body.reason),
+          mode,
+          actorUserId: context.userId,
+        },
+      );
+      return reply.send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "project_not_found") {
+        return notFound(reply, message);
+      }
+      if (message === "project_has_scheduled_publications") {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
+    }
+  });
+
+  fastify.post("/v2/projects/:id/restore", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) {
+      return;
+    }
+
+    const projectId = (request.params as { id: string }).id;
+    if (!isUuid(projectId)) {
+      return badRequest(reply, "invalid project id");
+    }
+
+    const project = await getProjectById(context.tenantId, projectId);
+    if (!project) {
+      return notFound(reply, "project not found");
+    }
+    if (!project.deletedAt) {
+      return conflict(reply, "project is not archived");
+    }
+
+    await prisma.contentProject.update({
+      where: { id: project.id },
+      data: {
+        deletedAt: null,
+        deletedBy: null,
+        deletedByStudioUserId: null,
+        deletionReason: null,
+      },
+    });
+
+    return reply.send({ ok: true });
   });
 
   fastify.post("/v2/content-images/:id/retry", async (request, reply) => {
@@ -1898,7 +1539,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.get("/v2/publications", async (request, reply) => {
+  fastify.get("/v2/publication-jobs", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
       return;
@@ -1960,7 +1601,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     });
   });
 
-  fastify.get("/v2/publications/:id", async (request, reply) => {
+  fastify.get("/v2/publication-jobs/:id", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
       return;

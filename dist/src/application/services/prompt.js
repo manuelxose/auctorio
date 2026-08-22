@@ -30,10 +30,29 @@ function buildTextPrompt(input) {
     const metadata = input.options?.metadata && typeof input.options.metadata === "object"
         ? JSON.stringify(input.options.metadata)
         : undefined;
-    const systemPrompt = input.type === "seo"
-        ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}`
-        : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.`;
+    const systemPrompt = goal === "news_article"
+        ? `You are a senior newsroom editor and original writer. Respond in ${languageLabel}.
+Strict rules:
+- Preserve factual accuracy: never fabricate facts, quotes, statistics or names.
+- Only use facts present in the provided source material.
+- Distinguish confirmed facts from speculation or opinion explicitly.
+- Never paraphrase the sources sentence by sentence. Write an ORIGINAL article with your own structure and wording.
+- Preserve names, places, dates and factual events accurately.
+- Synthesize multiple sources when available.
+- Write a reader-oriented introduction that explains why the story matters.
+- Use proper H2 headings.
+- Follow the site tone and SEO rules when provided.`
+        : input.type === "seo"
+            ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}`
+            : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.`;
     const facts = input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)";
+    const newsInstructions = goal === "news_article"
+        ? [
+            "Originality requirement: do not reuse the source sentence structure or phrasing. The article must read as an original piece, not a rewrite.",
+            "Grounding requirement: every factual claim must come from the provided facts. If a fact is attributed to a source, keep the attribution.",
+            "Structure: engaging headline, lead paragraph answering who/what/when/where, context section, detail sections with H2 headings, closing outlook. Do not invent a closing quote.",
+        ]
+        : [];
     const promptLines = [
         `Topic: ${input.topicTitle}`,
         input.topicDescription ? `Description: ${input.topicDescription}` : null,
@@ -48,10 +67,13 @@ function buildTextPrompt(input) {
         metadata ? `Structured metadata JSON: ${metadata}` : null,
         revisionFeedback ? `Revision feedback: ${revisionFeedback}` : null,
         destinationGuidance ? `Editorial guidance: ${destinationGuidance}` : null,
+        ...newsInstructions,
         input.type === "instagram" && hashtags ? "Include relevant hashtags." : null,
-        input.type === "seo"
-            ? "Write production-ready editorial content with a clear title, a compelling introduction, H2 sections, actionable detail, and a strong ending. Return clean HTML or clearly structured markdown."
-            : "Write a concise caption suited for Instagram.",
+        goal === "news_article"
+            ? "Write the original news article now. Return clean HTML or clearly structured markdown."
+            : input.type === "seo"
+                ? "Write production-ready editorial content with a clear title, a compelling introduction, H2 sections, actionable detail, and a strong ending. Return clean HTML or clearly structured markdown."
+                : "Write a concise caption suited for Instagram.",
     ].filter(Boolean);
     return {
         systemPrompt,

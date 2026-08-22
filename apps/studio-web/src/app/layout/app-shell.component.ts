@@ -122,9 +122,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   readonly primaryNav: NavItem[] = [
     { label: 'Overview', path: '/studio/overview' },
+    { label: 'Calendar', path: '/studio/calendar' },
     { label: 'Content', path: '/studio/content' },
+    { label: 'Publications', path: '/studio/publications' },
+    { label: 'Inbox', path: '/studio/inbox' },
+    { label: 'Sources', path: '/studio/sources' },
+    { label: 'Automation', path: '/studio/automation' },
     { label: 'Media', path: '/studio/media' },
-    { label: 'Publishing', path: '/studio/publishing' },
   ];
 
   private subscription: Subscription | null = null;
@@ -174,12 +178,20 @@ export class AppShellComponent implements OnInit, OnDestroy {
     switch (path) {
       case '/studio/overview':
         return 'M3 10.5 12 3l9 7.5V21h-6v-6H9v6H3Z';
+      case '/studio/calendar':
+        return 'M4 5h16a1 1 0 0 1 1 1v14H3V6a1 1 0 0 1 1-1Z M3 9h18 M8 3v4 M16 3v4 M7 13h3 M14 13h3 M7 17h3 M14 17h3';
       case '/studio/content':
         return 'M7 3h7l4 4v14H7Z M14 3v5h5 M10 12h5 M10 16h5';
+      case '/studio/publications':
+        return 'M3 11 21 3l-8 18-2.5-7.5Z M3 21h18';
+      case '/studio/inbox':
+        return 'M3 7a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z M3 7l9 6 9-6';
+      case '/studio/sources':
+        return 'M12 3a9 9 0 1 0 9 9 M12 3a9 9 0 0 1 9 9 M12 3v18 M3 12h18';
+      case '/studio/automation':
+        return 'M12 3v3 M12 18v3 M3 12h3 M18 12h3 M5.6 5.6l2.1 2.1 M16.3 16.3l2.1 2.1 M18.4 5.6l-2.1 2.1 M7.7 16.3l-2.1 2.1';
       case '/studio/media':
         return 'M3 5h18v14H3Z M3 16l5-5 4 4 3-3 6 6 M8.5 9.5a1 1 0 1 0 0-.01';
-      case '/studio/publishing':
-        return 'M3 11 21 3l-8 18-2.5-7.5Z';
       default:
         return 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Z';
     }

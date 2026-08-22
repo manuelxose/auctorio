@@ -1,5 +1,66 @@
 # Arquitectura Tecnica del Backend de Generacion de Contenido con IA (SEO e Instagram)
 
+> Actualizado 2026-08: plataforma editorial autonoma (sources, inbox, social, publicaciones durables, automatizacion).
+
+## 0. Dominio editorial (nuevo)
+
+Workflow: SOURCE → DISCOVERY → SOURCE ITEM → STORY CLUSTER → CONTENT PROJECT → ARTICLE VERSION
+→ MEDIA → SOCIAL DERIVATIVES → REVIEW → SCHEDULE → CHANNEL PUBLICATIONS → PUBLISHED → UPDATE/UNPUBLISH.
+
+Modelos clave (PostgreSQL/Prisma):
+- `content_sources` (rss/atom/html/sitemap/api/manual) con adapters (`SourceAdapter`).
+- `source_items` con dedupe por (source_id + external_id) y content_hash; estados discovered→candidate→selected→processed.
+- `story_clusters` agrupa items sobre el mismo evento (similaridad de titulos, ventana de 48h).
+- `social_content` (x_post, x_thread, instagram_caption, instagram_story) con validacion por plataforma.
+- `publishing_accounts` con `credentials_ref` (variables de entorno server-side; nunca en el navegador).
+- `publications` (intencion durable: channel, status, scheduled_for, external_id, retry) + `publication_attempts` (historial de intentos).
+- `automation_policies` (volumenes/dia, ventanas, flags auto*, limites de seguridad, estado active/paused).
+- `campaigns`, `editorial_briefs`, `audit_logs`.
+
+## 0.1 Estados y transiciones (publicaciones)
+
+```
+draft → ready → scheduled → queued → publishing → published
+                                  ↘ failed → (retry) → queued
+scheduled → canceled
+published → unpublished
+```
+Transiciones invalidas rechazadas en `src/studio/publication.ts` (`canTransition`).
+
+## 0.2 Workers y colas
+
+| Worker | Cola | Responsabilidad |
+|--------|------|-----------------|
+| discovery | loop | refrescar fuentes vencidas, dedupe, clustering, scoring |
+| automation | loop | planificador editorial: candidatos→proyectos→QA→social→slots |
+| scheduler | loop | reclamar publicaciones vencidas (`FOR UPDATE SKIP LOCKED`) y encolar |
+| scraping | queue_scraping | extraer hechos (v1) |
+| text | queue_text | generar articulos (incluye news_article grounding) |
+| image | queue_image | hero + variantes (og, social_square, …) |
+| publishing | queue_publishing | publicar websites (guiatv/tecnoria/talkaris/webhook) |
+| social | queue_social | generar copia social y publicar/despublicar X e Instagram |
+
+## 0.3 Idempotencia y reintentos
+
+- Keys deterministicas: publications por (project+version+channel+account+time), website jobs por (site+project+version+action).
+- Reintentos: `classifyPublicationError` (transient: timeout/429/5xx; permanent: 401/403/credenciales),
+  backoff exponencial con cap, `PUBLICATION_MAX_RETRIES`, estado `failed` con `next_retry_at` inspeccionable y reintentable.
+- Dry-run: `PUBLISH_DRY_RUN` cubre websites, X e Instagram; IDs simulados `dryrun-*`, sin contenido publico real.
+
+## 0.4 Seguridad
+
+- SSRF: `validateScrapeUrl` (protocolos, IPs privadas, link-local, metadata, allowlist).
+- HTML sanitizado antes de almacenar y servir.
+- Credenciales sociales por referencia a variables de entorno; la API solo expone `hasCredentials`.
+- Autorizacion backend por permisos del Studio; Angular solo oculta acciones.
+
+## 0.5 Automatizacion
+
+`AutomationPolicy` por tenant/site: articulos/dia, X/dia, Instagram/dia, ventanas por canal,
+dias activos, timing social relativo al articulo, flags autoGenerate/autoApprove/autoSchedule/autoPublish
+independientes, limites duros (hora/dia/cola) y kill switch (`state=paused`) que detiene nuevas
+publicaciones automaticas sin interrumpir trabajos activos.
+
 ## 1. Objetivos y alcance
 - Generar contenido SEO y publicaciones para Instagram usando IA.
 - Ingesta de datos flexible: scraping y entrada manual.

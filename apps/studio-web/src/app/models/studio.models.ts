@@ -5,7 +5,8 @@ export type ProjectGoal =
   | 'comparison'
   | 'faq'
   | 'newsletter'
-  | 'social_pack';
+  | 'social_pack'
+  | 'news_article';
 export type ProjectStatus =
   | 'draft'
   | 'ai_generated'
@@ -233,6 +234,7 @@ export type StudioProjectSummary = {
   brief: string;
   goal: ProjectGoal;
   status: ProjectStatus;
+  origin: string;
   primaryLanguage: string;
   createdAt: string;
   updatedAt: string;
@@ -245,6 +247,14 @@ export type StudioProjectSummary = {
     baseUrl: string | null;
   };
   versionCount: number;
+  socialCount: number;
+  publications: Array<{
+    id: string;
+    channel: PublicationChannel;
+    status: PublicationState;
+    scheduledFor: string | null;
+    publishedAt: string | null;
+  }>;
   reviewGate: ReviewGateSummary;
   latestVersion: VersionSummary | null;
   latestPublicationJob: PublicationExecutionState | null;
@@ -256,6 +266,11 @@ export type ProjectVersionDetail = VersionSummary & {
 
 export type StudioProjectDetailView = StudioProjectSummary & {
   metadata: JsonRecord;
+  origin: string;
+  deletedAt: string | null;
+  deletionReason: string | null;
+  sourceItem: { id: string; title: string; canonicalUrl: string | null; source: { id: string; name: string } } | null;
+  cluster: { id: string; headline: string | null; sourceCount: number } | null;
   site: {
     id: string;
     key: string;
@@ -270,6 +285,31 @@ export type StudioProjectDetailView = StudioProjectSummary & {
   };
   topic: { id: string; title: string | null } | null;
   latestAssetUrl: string | null;
+  socialContents: StudioSocialContent[];
+  publications: Array<{
+    id: string;
+    channel: PublicationChannel;
+    status: PublicationState;
+    scheduledFor: string | null;
+    publishedAt: string | null;
+    externalId: string | null;
+    externalUrl: string | null;
+    lastError: string | null;
+    failureClass: string | null;
+    failureReason: string | null;
+    retryCount: number;
+    manualOverride: boolean;
+    account: { id: string; platform: string; displayName: string } | null;
+    site: { id: string; key: string; name: string } | null;
+    attempts: Array<{
+      id: string;
+      attemptNumber: number;
+      status: string;
+      error: string | null;
+      startedAt: string | null;
+      finishedAt: string | null;
+    }>;
+  }>;
   latestVersion: (VersionSummary & {
     bodyHtml: string | null;
     derivatives: Array<{
@@ -355,6 +395,9 @@ export type ListProjectsFilters = {
   goal?: ProjectGoal;
   page?: number;
   pageSize?: number;
+  search?: string;
+  origin?: 'manual' | 'auto';
+  archived?: boolean;
 };
 
 export type PublishProjectPayload = {
@@ -497,4 +540,309 @@ export type StudioPromptPresetDetail = StudioPromptPresetSummary & {
     variables: Record<string, string>;
     source: 'manual' | 'site' | 'global' | 'fallback';
   } | null;
+};
+
+// ─── Editorial platform models ────────────────────────────────────────────
+
+export type SourceType = 'rss' | 'atom' | 'html' | 'sitemap' | 'api' | 'manual';
+
+export type StudioSource = {
+  id: string;
+  siteId: string | null;
+  name: string;
+  type: SourceType;
+  url: string | null;
+  enabled: boolean;
+  priority: number;
+  trustScore: number;
+  language: string;
+  country: string | null;
+  categories: string[] | null;
+  tags: string[] | null;
+  refreshIntervalMinutes: number;
+  lastFetchedAt: string | null;
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  configuration: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  discoveredCount: number;
+  site: { id: string; name: string; key: string } | null;
+};
+
+export type SourceItemStatus =
+  | 'discovered'
+  | 'fetched'
+  | 'parsed'
+  | 'duplicate'
+  | 'rejected'
+  | 'candidate'
+  | 'selected'
+  | 'processed'
+  | 'failed';
+
+export type StudioSourceItem = {
+  id: string;
+  sourceId: string;
+  clusterId: string | null;
+  externalId: string;
+  canonicalUrl: string | null;
+  sourceUrl: string | null;
+  title: string;
+  description: string | null;
+  author: string | null;
+  publishedAt: string | null;
+  discoveredAt: string;
+  sourceImageUrls: string[] | null;
+  language: string | null;
+  categories: string[] | null;
+  processingStatus: SourceItemStatus;
+  score: number | null;
+  scoreExplanation: Array<{ signal: string; points: number; detail: string }> | null;
+  source: { id: string; name: string; type: SourceType; trustScore: number };
+  cluster: { id: string; headline: string | null; sourceCount: number } | null;
+  projects: Array<{ id: string; title: string; status: ProjectStatus }>;
+  projectCount: number;
+};
+
+export type StudioStoryCluster = {
+  id: string;
+  primaryTopic: string | null;
+  headline: string | null;
+  summary: string | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  score: number | null;
+  status: string;
+  sourceCount: number;
+  itemCount: number;
+  projectCount: number;
+  items: Array<{ id: string; title: string; source: { name: string }; discoveredAt: string }>;
+};
+
+export type SocialChannel = 'x' | 'instagram';
+export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post';
+
+export type StudioSocialContent = {
+  id: string;
+  projectId: string;
+  versionId: string;
+  channel: SocialChannel;
+  contentType: SocialContentType;
+  body: string;
+  title: string | null;
+  hashtags: string[] | null;
+  mentions: string[] | null;
+  mediaAssetIds: string[] | null;
+  characterCount: number | null;
+  generationStatus: 'queued' | 'processing' | 'done' | 'failed';
+  editorialStatus: 'draft' | 'approved' | 'rejected';
+  threadPosition: number | null;
+  metadata: JsonRecord;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublicationChannel = 'website' | 'x' | 'instagram';
+export type PublicationState =
+  | 'draft'
+  | 'ready'
+  | 'scheduled'
+  | 'queued'
+  | 'publishing'
+  | 'published'
+  | 'failed'
+  | 'canceled'
+  | 'deleted'
+  | 'unpublished';
+
+export type StudioPublication = {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  versionId: string;
+  channel: PublicationChannel;
+  accountId: string | null;
+  siteId: string | null;
+  socialContentId: string | null;
+  status: PublicationState;
+  scheduledFor: string | null;
+  publishedAt: string | null;
+  externalId: string | null;
+  externalUrl: string | null;
+  currentAttempt: number;
+  retryCount: number;
+  lastError: string | null;
+  failureClass: string | null;
+  failureReason: string | null;
+  manualOverride: boolean;
+  createdAt: string;
+  updatedAt: string;
+  assetUrl?: string | null;
+  project?: { id: string; title: string; status: ProjectStatus };
+  version?: {
+    id: string;
+    versionNumber: number;
+    status: VersionStatus;
+    title: string | null;
+    contentImage: { storagePath: string | null } | null;
+  };
+  account: { id: string; platform: string; displayName: string } | null;
+  site: { id: string; key: string; name: string; type: SiteType } | null;
+  socialContent: { id: string; contentType: SocialContentType; channel: string; body: string; characterCount: number | null } | null;
+  attempts?: Array<{
+    id: string;
+    attemptNumber: number;
+    status: string;
+    error: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+  }>;
+};
+
+export type CalendarEvent = {
+  id: string;
+  projectId: string;
+  channel: PublicationChannel;
+  status: PublicationState;
+  scheduledFor: string | null;
+  publishedAt: string | null;
+  externalUrl: string | null;
+  title: string;
+  projectTitle: string;
+  destination: string;
+  site: { id: string; key: string; name: string; type: SiteType } | null;
+  account: { id: string; platform: string; displayName: string } | null;
+  thumbnail: string | null;
+  automated: boolean;
+  lastError: string | null;
+  failureClass: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type PublishingAccount = {
+  id: string;
+  platform: 'website' | 'x' | 'instagram';
+  displayName: string;
+  externalAccountId: string | null;
+  enabled: boolean;
+  status: 'pending' | 'active' | 'error' | 'disabled';
+  lastVerifiedAt: string | null;
+  hasCredentials: boolean;
+  site: { id: string; name: string; key: string } | null;
+};
+
+export type PublishingWindow = { channel: string; days: number[]; from: string; to: string };
+
+export type AutomationPolicy = {
+  id: string;
+  tenantId: string;
+  siteId: string | null;
+  enabled: boolean;
+  state: 'active' | 'paused' | 'degraded';
+  pausedReason: string | null;
+  timezone: string;
+  articlesPerDay: number;
+  maxArticlesPerDay: number;
+  xPostsPerDay: number;
+  instagramPostsPerDay: number;
+  minimumMinutesBetweenArticles: number;
+  activeDaysOfWeek: number[] | null;
+  publishingWindows: PublishingWindow[] | null;
+  autoGenerate: boolean;
+  autoApprove: boolean;
+  autoSchedule: boolean;
+  autoPublish: boolean;
+  minimumStoryScore: number;
+  categories: string[] | null;
+  excludedCategories: string[] | null;
+  priorityTopics: string[] | null;
+  imageRequired: boolean;
+  socialRequired: boolean;
+  maximumQueueSize: number;
+  articlesPerHour: number;
+  socialPostsPerHour: number;
+  maximumDailySocial: number;
+  socialTimingMinutesX: number;
+  socialTimingMinutesInstagram: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AutomationStatus = {
+  policyId: string;
+  enabled: boolean;
+  state: string;
+  pausedReason: string | null;
+  timezone: string;
+  today: {
+    date: string;
+    articlesPlanned: number;
+    articlesPublished: number;
+    xPlanned: number;
+    instagramPlanned: number;
+  };
+  limits: {
+    articlesPerDay: number;
+    xPostsPerDay: number;
+    instagramPostsPerDay: number;
+    maximumDailySocial: number;
+    maximumQueueSize: number;
+  };
+  nextSlots: Array<{ channel: string; at: string }>;
+  warnings: string[];
+};
+
+export type StudioOverview = {
+  today: {
+    articlesPlanned: number;
+    articlesPublished: number;
+    xPosts: number;
+    instagramPosts: number;
+  };
+  pipeline: {
+    inboxCandidates: number;
+    drafts: number;
+    review: number;
+    scheduled: number;
+    failed: number;
+  };
+  sources: { total: number; enabled: number; degraded: number; failing: number };
+  automation: {
+    enabled: boolean;
+    state: string;
+    pausedReason: string | null;
+    warnings: string[];
+    nextSlots: Array<{ channel: string; at: string }>;
+  };
+  recentPublications: Array<{
+    id: string;
+    channel: PublicationChannel;
+    status: PublicationState;
+    scheduledFor: string | null;
+    publishedAt: string | null;
+    title: string;
+    destination: string;
+    lastError: string | null;
+  }>;
+  failures: Array<{
+    id: string;
+    channel: PublicationChannel;
+    lastError: string | null;
+    failureClass: string | null;
+    updatedAt: string;
+    project: { id: string; title: string };
+  }>;
+};
+
+export type WorkerHealth = {
+  workers: Array<{
+    queue: string;
+    waiting: number;
+    active: number;
+    delayed: number;
+    failed: number;
+    completed: number;
+  }>;
 };

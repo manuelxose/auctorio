@@ -50,7 +50,7 @@ export async function scrapeSource(input: ScrapeInput): Promise<ScrapeItem[]> {
   return [];
 }
 
-async function fetchUrl(url: URL, options: { accept: string }) {
+export async function fetchUrl(url: URL, options: { accept: string; headers?: Record<string, string> }) {
   const timeoutMs = getNumberEnv("SCRAPE_TIMEOUT_MS", 10000);
   const userAgent = getEnv("SCRAPE_USER_AGENT", "auctorio-bot");
   const controller = new AbortController();
@@ -61,6 +61,7 @@ async function fetchUrl(url: URL, options: { accept: string }) {
       headers: {
         accept: options.accept,
         "user-agent": userAgent,
+        ...(options.headers ?? {}),
       },
       signal: controller.signal,
     });
@@ -310,7 +311,7 @@ function limitChars(input: string): string {
   return input.slice(0, maxChars);
 }
 
-async function validateScrapeUrl(url: URL) {
+export async function validateScrapeUrl(url: URL) {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("invalid_protocol");
   }

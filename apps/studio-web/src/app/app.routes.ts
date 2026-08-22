@@ -49,6 +49,31 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Content', title: 'Article' } },
       },
       {
+        path: 'calendar',
+        loadComponent: () => import('./pages/calendar-page.component').then((m) => m.CalendarPageComponent),
+        data: { studioMeta: { section: 'Calendar', title: 'Calendar' } },
+      },
+      {
+        path: 'publications',
+        loadComponent: () => import('./pages/publications-page.component').then((m) => m.PublicationsPageComponent),
+        data: { studioMeta: { section: 'Publications', title: 'Publications' } },
+      },
+      {
+        path: 'inbox',
+        loadComponent: () => import('./pages/inbox-page.component').then((m) => m.InboxPageComponent),
+        data: { studioMeta: { section: 'Inbox', title: 'Inbox' } },
+      },
+      {
+        path: 'sources',
+        loadComponent: () => import('./pages/sources-page.component').then((m) => m.SourcesPageComponent),
+        data: { studioMeta: { section: 'Sources', title: 'Sources' } },
+      },
+      {
+        path: 'automation',
+        loadComponent: () => import('./pages/automation-page.component').then((m) => m.AutomationPageComponent),
+        data: { studioMeta: { section: 'Automation', title: 'Automation' } },
+      },
+      {
         path: 'media',
         loadComponent: () => import('./pages/media-page.component').then((m) => m.MediaPageComponent),
         data: { studioMeta: { section: 'Media', title: 'Media' } },
@@ -77,8 +102,8 @@ export const routes: Routes = [
       { path: 'ai', redirectTo: 'content', pathMatch: 'prefix' },
       { path: 'assets', redirectTo: 'media', pathMatch: 'prefix' },
       { path: 'review', redirectTo: 'content', pathMatch: 'prefix' },
-      { path: 'publishing/scheduled', redirectTo: 'publishing', pathMatch: 'prefix' },
-      { path: 'integrations', redirectTo: 'settings/sites', pathMatch: 'prefix' },
+      { path: 'publishing/scheduled', redirectTo: 'calendar', pathMatch: 'prefix' },
+      { path: 'integrations', redirectTo: 'sources', pathMatch: 'prefix' },
       { path: 'automation', redirectTo: 'publishing', pathMatch: 'prefix' },
       { path: 'analytics', redirectTo: 'overview', pathMatch: 'prefix' },
     ],

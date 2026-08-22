@@ -498,10 +498,10 @@ paths:
         '401':
           $ref: '#/components/responses/Unauthorized'
 
-  /v2/publications:
+  /v2/publication-jobs:
     get:
       tags: [studio]
-      summary: List publication jobs
+      summary: List website publication execution jobs (attempts)
       parameters:
         - $ref: '#/components/parameters/Page'
         - $ref: '#/components/parameters/PageSize'
@@ -576,6 +576,442 @@ paths:
                 $ref: '#/components/schemas/StudioSession'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /v2/sources:
+    get:
+      tags: [sources]
+      summary: List content sources
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: type, in: query, schema: { type: string, enum: [rss, atom, html, sitemap, api, manual] } }
+        - { name: enabled, in: query, schema: { type: boolean } }
+      responses:
+        '200': { description: Paginated sources }
+    post:
+      tags: [sources]
+      summary: Create a content source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, type]
+              properties:
+                name: { type: string }
+                type: { type: string, enum: [rss, atom, html, sitemap, api, manual] }
+                url: { type: string }
+                siteId: { type: string, format: uuid }
+                priority: { type: integer }
+                trustScore: { type: number }
+                refreshIntervalMinutes: { type: integer }
+                categories: { type: array, items: { type: string } }
+                configuration: { type: object }
+      responses:
+        '201': { description: Created source }
+  /v2/sources/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [sources]
+      summary: Get a source
+      responses: { '200': { description: Source } }
+    patch:
+      tags: [sources]
+      summary: Update a source
+      responses: { '200': { description: Updated source } }
+    delete:
+      tags: [sources]
+      summary: Delete a source
+      responses: { '200': { description: Deleted } }
+  /v2/sources/{id}/test:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [sources]
+      summary: Test a source fetch
+      responses: { '200': { description: Fetch result } }
+  /v2/sources/{id}/fetch:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [sources]
+      summary: Fetch a source now
+      responses:
+        '200':
+          description: Fetch summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fetched: { type: integer }
+                  created: { type: integer }
+                  duplicates: { type: integer }
+                  failed: { type: boolean }
+                  error: { type: string, nullable: true }
+
+  /v2/source-items:
+    get:
+      tags: [inbox]
+      summary: List discovered source items (wire/inbox)
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: sourceId, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: minScore, in: query, schema: { type: number } }
+        - { name: sort, in: query, schema: { type: string, enum: [discovered, score] } }
+        - { name: direction, in: query, schema: { type: string, enum: [asc, desc] } }
+      responses: { '200': { description: Paginated source items } }
+  /v2/source-items/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [inbox]
+      summary: Get source item detail including cluster and projects
+      responses: { '200': { description: Source item detail } }
+  /v2/source-items/{id}/select:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [inbox]
+      summary: Mark a source item as selected
+      responses: { '200': { description: Updated item } }
+  /v2/source-items/{id}/reject:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [inbox]
+      summary: Reject/ignore a source item
+      responses: { '200': { description: Updated item } }
+  /v2/source-items/{id}/create-project:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [inbox]
+      summary: Rewrite a source item as a news article project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [siteId]
+              properties:
+                siteId: { type: string, format: uuid }
+                goal: { type: string, enum: [news_article, article] }
+                allowUpdateExisting: { type: boolean }
+      responses:
+        '201': { description: Project created (or updated) }
+        '409': { description: Story already covered }
+
+  /v2/story-clusters:
+    get:
+      tags: [inbox]
+      summary: List story clusters
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string } }
+      responses: { '200': { description: Paginated clusters } }
+  /v2/story-clusters/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [inbox]
+      summary: Update cluster status
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [open, selected, covered, rejected, archived] }
+      responses: { '200': { description: Updated cluster } }
+
+  /v2/publications:
+    get:
+      tags: [publications]
+      summary: List durable publications with filters and pagination
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: channel, in: query, schema: { type: string, enum: [website, x, instagram] } }
+        - { name: status, in: query, schema: { type: string, enum: [draft, ready, scheduled, queued, publishing, published, failed, canceled, deleted, unpublished] } }
+        - { name: projectId, in: query, schema: { type: string, format: uuid } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: search, in: query, schema: { type: string } }
+        - { name: dateFrom, in: query, schema: { type: string } }
+        - { name: dateTo, in: query, schema: { type: string } }
+        - { name: sort, in: query, schema: { type: string, enum: [scheduled, created, updated] } }
+        - { name: direction, in: query, schema: { type: string, enum: [asc, desc] } }
+        - { name: failed, in: query, schema: { type: boolean } }
+      responses: { '200': { description: Paginated publications } }
+    post:
+      tags: [publications]
+      summary: Create a publication (article or social)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [projectId, channel]
+              properties:
+                projectId: { type: string, format: uuid }
+                versionId: { type: string, format: uuid }
+                channel: { type: string, enum: [website, x, instagram] }
+                accountId: { type: string, format: uuid }
+                siteId: { type: string, format: uuid }
+                socialContentId: { type: string, format: uuid }
+                scheduledFor: { type: string, format: date-time }
+      responses: { '201': { description: Created publication } }
+  /v2/publications/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [publications]
+      summary: Get publication with attempt history
+      responses: { '200': { description: Publication detail } }
+    patch:
+      tags: [publications]
+      summary: Update schedule or account
+      responses: { '200': { description: Updated publication } }
+    delete:
+      tags: [publications]
+      summary: Delete publication record
+      responses: { '200': { description: Deleted publication } }
+  /v2/publications/{id}/schedule:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Schedule publication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { scheduledFor: { type: string, format: date-time } } }
+      responses: { '200': { description: Scheduled } }
+  /v2/publications/{id}/reschedule:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Reschedule publication
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, properties: { scheduledFor: { type: string, format: date-time } } }
+      responses: { '200': { description: Rescheduled } }
+  /v2/publications/{id}/publish-now:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Publish now
+      responses: { '200': { description: Queued } }
+  /v2/publications/{id}/cancel:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Cancel scheduled publication
+      responses: { '200': { description: Canceled } }
+  /v2/publications/{id}/retry:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Retry failed publication
+      responses: { '200': { description: Requeued } }
+  /v2/publications/{id}/unpublish:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [publications]
+      summary: Unpublish/delete externally
+      responses: { '200': { description: Queued } }
+
+  /v2/calendar:
+    get:
+      tags: [calendar]
+      summary: Calendar events (publications) in a date range
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: channel, in: query, schema: { type: string, enum: [website, x, instagram] } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Calendar events } }
+
+  /v2/projects/{id}/social:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      tags: [social]
+      summary: List social derivatives for a project
+      responses: { '200': { description: Social content list } }
+  /v2/projects/{id}/social/generate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [social]
+      summary: Generate social derivatives (X/Instagram)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channels: { type: array, items: { type: string, enum: [x, instagram] } }
+                threadLength: { type: integer }
+      responses: { '202': { description: Generation queued } }
+  /v2/social/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      tags: [social]
+      summary: Edit social content
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                body: { type: string }
+                hashtags: { type: array, items: { type: string } }
+                editorialStatus: { type: string, enum: [draft, approved, rejected] }
+      responses: { '200': { description: Updated social content } }
+  /v2/social/{id}/regenerate:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [social]
+      summary: Regenerate a social piece
+      responses: { '202': { description: Queued } }
+
+  /v2/publishing-accounts:
+    get:
+      tags: [accounts]
+      summary: List publishing accounts (credentials never exposed)
+      parameters:
+        - { name: platform, in: query, schema: { type: string, enum: [website, x, instagram] } }
+      responses: { '200': { description: Account list } }
+    post:
+      tags: [accounts]
+      summary: Create a publishing account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [platform, displayName]
+              properties:
+                platform: { type: string, enum: [website, x, instagram] }
+                displayName: { type: string }
+                externalAccountId: { type: string }
+                credentialsRef: { type: string, description: Environment variable name holding the credentials JSON }
+      responses: { '201': { description: Created account } }
+  /v2/publishing-accounts/{id}/verify:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      tags: [accounts]
+      summary: Verify platform credentials server-side
+      responses: { '200': { description: Verification result } }
+
+  /v2/automation:
+    get:
+      tags: [automation]
+      summary: Get automation policy
+      parameters: [ { name: siteId, in: query, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: Policy } }
+    patch:
+      tags: [automation]
+      summary: Update automation policy (volumes, windows, flags, limits)
+      responses: { '200': { description: Updated policy } }
+  /v2/automation/status:
+    get:
+      tags: [automation]
+      summary: Automation operational status (today counts, next slots, warnings)
+      parameters: [ { name: siteId, in: query, schema: { type: string, format: uuid } } ]
+      responses: { '200': { description: Status } }
+  /v2/automation/pause:
+    post:
+      tags: [automation]
+      summary: Pause automation (kill switch)
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { reason: { type: string }, siteId: { type: string, format: uuid } } }
+      responses: { '200': { description: Paused } }
+  /v2/automation/resume:
+    post:
+      tags: [automation]
+      summary: Resume automation
+      responses: { '200': { description: Resumed } }
+
+  /v2/overview:
+    get:
+      tags: [dashboard]
+      summary: Operational dashboard data
+      responses: { '200': { description: Overview } }
+  /v2/audit:
+    get:
+      tags: [audit]
+      summary: Audit log
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: entityType, in: query, schema: { type: string } }
+        - { name: entityId, in: query, schema: { type: string, format: uuid } }
+      responses: { '200': { description: Audit entries } }
+  /v2/health/workers:
+    get:
+      tags: [operations]
+      summary: Worker queue health
+      responses: { '200': { description: Queue counts } }
+
+  /v2/campaigns:
+    get:
+      tags: [editorial]
+      summary: List campaigns
+      responses: { '200': { description: Campaigns } }
+    post:
+      tags: [editorial]
+      summary: Create campaign
+      requestBody:
+        content:
+          application/json:
+            schema: { type: object, properties: { name: { type: string }, description: { type: string }, startAt: { type: string }, endAt: { type: string }, tags: { type: array, items: { type: string } } } }
+      responses: { '201': { description: Created campaign } }
+  /v2/briefs:
+    get:
+      tags: [editorial]
+      summary: List editorial briefs
+      responses: { '200': { description: Briefs } }
+    post:
+      tags: [editorial]
+      summary: Create editorial brief
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                topic: { type: string }
+                audience: { type: string }
+                tone: { type: string }
+                keywords: { type: array, items: { type: string } }
+      responses: { '201': { description: Created brief } }
 
 components:
   securitySchemes:
@@ -1273,6 +1709,133 @@ components:
           type: integer
         total:
           type: integer
+
+    Source:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        type: { type: string, enum: [rss, atom, html, sitemap, api, manual] }
+        url: { type: string, nullable: true }
+        enabled: { type: boolean }
+        priority: { type: integer }
+        trustScore: { type: number }
+        refreshIntervalMinutes: { type: integer }
+        lastFetchedAt: { type: string, nullable: true }
+        lastSuccessAt: { type: string, nullable: true }
+        consecutiveFailures: { type: integer }
+        discoveredCount: { type: integer }
+
+    SourceItem:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        sourceId: { type: string, format: uuid }
+        clusterId: { type: string, format: uuid, nullable: true }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        canonicalUrl: { type: string, nullable: true }
+        publishedAt: { type: string, nullable: true }
+        discoveredAt: { type: string }
+        processingStatus: { type: string, enum: [discovered, fetched, parsed, duplicate, rejected, candidate, selected, processed, failed] }
+        score: { type: number, nullable: true }
+        scoreExplanation:
+          type: array
+          items:
+            type: object
+            properties:
+              signal: { type: string }
+              points: { type: number }
+              detail: { type: string }
+        source: { type: object, properties: { name: { type: string }, type: { type: string }, trustScore: { type: number } } }
+        cluster: { type: object, nullable: true, properties: { id: { type: string }, headline: { type: string, nullable: true }, sourceCount: { type: integer } } }
+
+    Publication:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        channel: { type: string, enum: [website, x, instagram] }
+        status: { type: string, enum: [draft, ready, scheduled, queued, publishing, published, failed, canceled, deleted, unpublished] }
+        scheduledFor: { type: string, format: date-time, nullable: true }
+        publishedAt: { type: string, format: date-time, nullable: true }
+        externalId: { type: string, nullable: true }
+        externalUrl: { type: string, nullable: true }
+        retryCount: { type: integer }
+        lastError: { type: string, nullable: true }
+        failureClass: { type: string, nullable: true }
+        attempts:
+          type: array
+          items:
+            type: object
+            properties:
+              attemptNumber: { type: integer }
+              status: { type: string }
+              error: { type: string, nullable: true }
+
+    CalendarEvent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        channel: { type: string, enum: [website, x, instagram] }
+        status: { type: string }
+        scheduledFor: { type: string, nullable: true }
+        title: { type: string }
+        destination: { type: string }
+        automated: { type: boolean }
+
+    SocialContent:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        projectId: { type: string, format: uuid }
+        versionId: { type: string, format: uuid }
+        channel: { type: string, enum: [x, instagram] }
+        contentType: { type: string, enum: [x_post, x_thread, instagram_caption, instagram_story, social_post] }
+        body: { type: string }
+        hashtags: { type: array, items: { type: string } }
+        characterCount: { type: integer, nullable: true }
+        generationStatus: { type: string, enum: [queued, processing, done, failed] }
+        editorialStatus: { type: string, enum: [draft, approved, rejected] }
+
+    AutomationPolicy:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        siteId: { type: string, format: uuid, nullable: true }
+        enabled: { type: boolean }
+        state: { type: string, enum: [active, paused, degraded] }
+        timezone: { type: string }
+        articlesPerDay: { type: integer }
+        maxArticlesPerDay: { type: integer }
+        xPostsPerDay: { type: integer }
+        instagramPostsPerDay: { type: integer }
+        autoGenerate: { type: boolean }
+        autoApprove: { type: boolean }
+        autoSchedule: { type: boolean }
+        autoPublish: { type: boolean }
+        publishingWindows:
+          type: array
+          items:
+            type: object
+            properties:
+              channel: { type: string }
+              days: { type: array, items: { type: integer } }
+              from: { type: string }
+              to: { type: string }
+
+    PublishingAccount:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        platform: { type: string, enum: [website, x, instagram] }
+        displayName: { type: string }
+        externalAccountId: { type: string, nullable: true }
+        enabled: { type: boolean }
+        status: { type: string, enum: [pending, active, error, disabled] }
+        hasCredentials: { type: boolean }
 
     ErrorResponse:
       type: object

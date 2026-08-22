@@ -3,26 +3,42 @@ import { inject, Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import type {
+  AutomationPolicy,
+  AutomationStatus,
+  CalendarEvent,
   CreateProjectPayload,
   CreateSitePayload,
   ListProjectsFilters,
   PaginatedResponse,
-  PublishProjectPayload,
+  PublicationChannel,
   PublicationListItem,
+  ProjectGoal,
   ProjectStatus,
+  PublishProjectPayload,
+  PublishingAccount,
+  PublishingWindow,
+  SourceItemStatus,
+  SourceType,
   StudioAuthProviders,
   StudioInvitationSummary,
   StudioMediaItem,
+  StudioOverview,
   StudioProjectDetailView,
   StudioProjectSummary,
+  StudioPublication,
   StudioRoleSummary,
   StudioSession,
   StudioSite,
   StudioSiteDetail,
   StudioSiteSummary,
+  StudioSocialContent,
+  StudioSource,
+  StudioSourceItem,
+  StudioStoryCluster,
   StudioUserSummary,
   UpdateProjectPayload,
   UpdateSitePayload,
+  WorkerHealth,
 } from '../models/studio.models';
 
 @Injectable({ providedIn: 'root' })
@@ -124,6 +140,15 @@ export class StudioApiService {
     }
     if (filters.goal) {
       params = params.set('goal', filters.goal);
+    }
+    if (filters.search) {
+      params = params.set('search', filters.search);
+    }
+    if (filters.origin) {
+      params = params.set('origin', filters.origin);
+    }
+    if (filters.archived) {
+      params = params.set('archived', 'true');
     }
 
     return this.http.get<PaginatedResponse<StudioProjectSummary>>(
@@ -276,5 +301,336 @@ export class StudioApiService {
 
   listRoles(): Observable<StudioRoleSummary[]> {
     return this.http.get<StudioRoleSummary[]>(`${this.apiBase}/backend/v2/roles`);
+  }
+
+  // ─── Editorial platform: sources ──────────────────────────────────────
+
+  listSources(page = 1, pageSize = 50, filters: { type?: SourceType; enabled?: boolean } = {}): Observable<PaginatedResponse<StudioSource>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.type) {
+      params = params.set('type', filters.type);
+    }
+    if (filters.enabled !== undefined) {
+      params = params.set('enabled', filters.enabled);
+    }
+    return this.http.get<PaginatedResponse<StudioSource>>(`${this.apiBase}/backend/v2/sources`, { params });
+  }
+
+  createSource(payload: {
+    name: string;
+    type: SourceType;
+    url?: string;
+    siteId?: string;
+    priority?: number;
+    trustScore?: number;
+    language?: string;
+    categories?: string[];
+    tags?: string[];
+    refreshIntervalMinutes?: number;
+  }): Observable<StudioSource> {
+    return this.http.post<StudioSource>(`${this.apiBase}/backend/v2/sources`, payload);
+  }
+
+  updateSource(sourceId: string, payload: Record<string, unknown>): Observable<StudioSource> {
+    return this.http.patch<StudioSource>(`${this.apiBase}/backend/v2/sources/${sourceId}`, payload);
+  }
+
+  deleteSource(sourceId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/sources/${sourceId}`);
+  }
+
+  testSource(sourceId: string): Observable<{ ok: boolean; itemCount?: number; message?: string }> {
+    return this.http.post<{ ok: boolean; itemCount?: number; message?: string }>(
+      `${this.apiBase}/backend/v2/sources/${sourceId}/test`,
+      {},
+    );
+  }
+
+  fetchSource(sourceId: string): Observable<{ fetched: number; created: number; duplicates: number; failed: boolean; error: string | null }> {
+    return this.http.post<{ fetched: number; created: number; duplicates: number; failed: boolean; error: string | null }>(
+      `${this.apiBase}/backend/v2/sources/${sourceId}/fetch`,
+      {},
+    );
+  }
+
+  // ─── Editorial platform: inbox ─────────────────────────────────────────
+
+  listSourceItems(
+    page = 1,
+    pageSize = 20,
+    filters: {
+      sourceId?: string;
+      status?: SourceItemStatus;
+      search?: string;
+      minScore?: number;
+      sort?: 'discovered' | 'score';
+      direction?: 'asc' | 'desc';
+    } = {},
+  ): Observable<PaginatedResponse<StudioSourceItem>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.sourceId) {
+      params = params.set('sourceId', filters.sourceId);
+    }
+    if (filters.status) {
+      params = params.set('status', filters.status);
+    }
+    if (filters.search) {
+      params = params.set('search', filters.search);
+    }
+    if (filters.minScore !== undefined) {
+      params = params.set('minScore', filters.minScore);
+    }
+    if (filters.sort) {
+      params = params.set('sort', filters.sort);
+    }
+    if (filters.direction) {
+      params = params.set('direction', filters.direction);
+    }
+    return this.http.get<PaginatedResponse<StudioSourceItem>>(`${this.apiBase}/backend/v2/source-items`, { params });
+  }
+
+  getSourceItem(itemId: string): Observable<StudioSourceItem & {
+    cluster: (StudioStoryCluster & { items: StudioSourceItem[] }) | null;
+    cleanedText: string | null;
+  }> {
+    return this.http.get<StudioSourceItem & {
+      cluster: (StudioStoryCluster & { items: StudioSourceItem[] }) | null;
+      cleanedText: string | null;
+    }>(`${this.apiBase}/backend/v2/source-items/${itemId}`);
+  }
+
+  setSourceItemStatus(itemId: string, status: SourceItemStatus): Observable<StudioSourceItem> {
+    return this.http.post<StudioSourceItem>(`${this.apiBase}/backend/v2/source-items/${itemId}/${status === 'selected' ? 'select' : status === 'rejected' ? 'reject' : 'select'}`, {});
+  }
+
+  createProjectFromSourceItem(payload: {
+    siteId: string;
+    sourceItemId?: string;
+    goal?: 'news_article' | 'article';
+    allowUpdateExisting?: boolean;
+  }): Observable<{ kind: string; projectId: string; coveredByProjectId?: string }> {
+    const itemId = payload.sourceItemId;
+    return this.http.post<{ kind: string; projectId: string; coveredByProjectId?: string }>(
+      `${this.apiBase}/backend/v2/source-items/${itemId}/create-project`,
+      { siteId: payload.siteId, goal: payload.goal, allowUpdateExisting: payload.allowUpdateExisting },
+    );
+  }
+
+  listStoryClusters(page = 1, pageSize = 20, status?: string): Observable<PaginatedResponse<StudioStoryCluster>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (status) {
+      params = params.set('status', status);
+    }
+    return this.http.get<PaginatedResponse<StudioStoryCluster>>(`${this.apiBase}/backend/v2/story-clusters`, { params });
+  }
+
+  // ─── Editorial platform: publications & calendar ──────────────────────
+
+  listPublicationsV2(
+    page = 1,
+    pageSize = 20,
+    filters: {
+      channel?: PublicationChannel;
+      status?: string;
+      projectId?: string;
+      siteId?: string;
+      search?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: 'scheduled' | 'created' | 'updated';
+      direction?: 'asc' | 'desc';
+      failed?: boolean;
+    } = {},
+  ): Observable<PaginatedResponse<StudioPublication>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.channel) {
+      params = params.set('channel', filters.channel);
+    }
+    if (filters.status) {
+      params = params.set('status', filters.status);
+    }
+    if (filters.projectId) {
+      params = params.set('projectId', filters.projectId);
+    }
+    if (filters.siteId) {
+      params = params.set('siteId', filters.siteId);
+    }
+    if (filters.search) {
+      params = params.set('search', filters.search);
+    }
+    if (filters.dateFrom) {
+      params = params.set('dateFrom', filters.dateFrom);
+    }
+    if (filters.dateTo) {
+      params = params.set('dateTo', filters.dateTo);
+    }
+    if (filters.sort) {
+      params = params.set('sort', filters.sort);
+    }
+    if (filters.direction) {
+      params = params.set('direction', filters.direction);
+    }
+    if (filters.failed) {
+      params = params.set('failed', 'true');
+    }
+    return this.http.get<PaginatedResponse<StudioPublication>>(`${this.apiBase}/backend/v2/publications`, { params });
+  }
+
+  getPublication(publicationId: string): Observable<StudioPublication> {
+    return this.http.get<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}`);
+  }
+
+  createPublication(payload: {
+    projectId: string;
+    versionId?: string;
+    channel: PublicationChannel;
+    accountId?: string;
+    siteId?: string;
+    socialContentId?: string;
+    scheduledFor?: string;
+  }): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications`, payload);
+  }
+
+  reschedulePublication(publicationId: string, scheduledFor: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/reschedule`, { scheduledFor });
+  }
+
+  cancelPublication(publicationId: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/cancel`, {});
+  }
+
+  retryPublication(publicationId: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/retry`, {});
+  }
+
+  publishNow(publicationId: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/publish-now`, {});
+  }
+
+  deletePublication(publicationId: string): Observable<StudioPublication> {
+    return this.http.delete<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}`);
+  }
+
+  unpublishPublication(publicationId: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/unpublish`, {});
+  }
+
+  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[] }> {
+    let params = new HttpParams().set('from', from).set('to', to);
+    if (channel) {
+      params = params.set('channel', channel);
+    }
+    if (siteId) {
+      params = params.set('siteId', siteId);
+    }
+    return this.http.get<{ items: CalendarEvent[] }>(`${this.apiBase}/backend/v2/calendar`, { params });
+  }
+
+  // ─── Editorial platform: social ───────────────────────────────────────
+
+  listSocial(projectId: string, channel?: 'x' | 'instagram'): Observable<{ items: StudioSocialContent[] }> {
+    let params = new HttpParams();
+    if (channel) {
+      params = params.set('channel', channel);
+    }
+    return this.http.get<{ items: StudioSocialContent[] }>(`${this.apiBase}/backend/v2/projects/${projectId}/social`, { params });
+  }
+
+  generateSocial(projectId: string, payload: { channels: Array<'x' | 'instagram'>; threadLength?: number; versionId?: string }): Observable<{ job_id: string }> {
+    return this.http.post<{ job_id: string }>(`${this.apiBase}/backend/v2/projects/${projectId}/social/generate`, payload);
+  }
+
+  updateSocial(socialId: string, payload: {
+    body?: string;
+    hashtags?: string[];
+    editorialStatus?: 'draft' | 'approved' | 'rejected';
+    mediaAssetIds?: string[];
+  }): Observable<StudioSocialContent> {
+    return this.http.patch<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${socialId}`, payload);
+  }
+
+  regenerateSocial(socialId: string): Observable<{ job_id: string }> {
+    return this.http.post<{ job_id: string }>(`${this.apiBase}/backend/v2/social/${socialId}/regenerate`, {});
+  }
+
+  // ─── Editorial platform: accounts & automation ────────────────────────
+
+  listPublishingAccounts(platform?: string): Observable<{ items: PublishingAccount[] }> {
+    let params = new HttpParams();
+    if (platform) {
+      params = params.set('platform', platform);
+    }
+    return this.http.get<{ items: PublishingAccount[] }>(`${this.apiBase}/backend/v2/publishing-accounts`, { params });
+  }
+
+  createPublishingAccount(payload: {
+    platform: 'x' | 'instagram';
+    displayName: string;
+    credentialsRef?: string;
+    externalAccountId?: string;
+    siteId?: string;
+  }): Observable<PublishingAccount> {
+    return this.http.post<PublishingAccount>(`${this.apiBase}/backend/v2/publishing-accounts`, payload);
+  }
+
+  updatePublishingAccount(accountId: string, payload: Record<string, unknown>): Observable<PublishingAccount> {
+    return this.http.patch<PublishingAccount>(`${this.apiBase}/backend/v2/publishing-accounts/${accountId}`, payload);
+  }
+
+  deletePublishingAccount(accountId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/publishing-accounts/${accountId}`);
+  }
+
+  verifyPublishingAccount(accountId: string): Observable<{ ok: boolean; message: string }> {
+    return this.http.post<{ ok: boolean; message: string }>(`${this.apiBase}/backend/v2/publishing-accounts/${accountId}/verify`, {});
+  }
+
+  getAutomationPolicy(siteId?: string): Observable<AutomationPolicy> {
+    let params = new HttpParams();
+    if (siteId) {
+      params = params.set('siteId', siteId);
+    }
+    return this.http.get<AutomationPolicy>(`${this.apiBase}/backend/v2/automation`, { params });
+  }
+
+  updateAutomationPolicy(payload: Record<string, unknown>): Observable<AutomationPolicy> {
+    return this.http.patch<AutomationPolicy>(`${this.apiBase}/backend/v2/automation`, payload);
+  }
+
+  getAutomationStatus(siteId?: string): Observable<AutomationStatus> {
+    let params = new HttpParams();
+    if (siteId) {
+      params = params.set('siteId', siteId);
+    }
+    return this.http.get<AutomationStatus>(`${this.apiBase}/backend/v2/automation/status`, { params });
+  }
+
+  pauseAutomation(reason: string, siteId?: string): Observable<AutomationPolicy> {
+    return this.http.post<AutomationPolicy>(`${this.apiBase}/backend/v2/automation/pause`, { reason, siteId });
+  }
+
+  resumeAutomation(siteId?: string): Observable<AutomationPolicy> {
+    return this.http.post<AutomationPolicy>(`${this.apiBase}/backend/v2/automation/resume`, { siteId });
+  }
+
+  // ─── Editorial platform: overview & audit ─────────────────────────────
+
+  getOverview(): Observable<StudioOverview> {
+    return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`);
+  }
+
+  getWorkerHealth(): Observable<WorkerHealth> {
+    return this.http.get<WorkerHealth>(`${this.apiBase}/backend/v2/health/workers`);
+  }
+
+  deleteProject(projectId: string, payload: { reason?: string; mode?: 'archive' | 'unpublish_delete' }): Observable<{ archived: boolean }> {
+    return this.http.delete<{ archived: boolean }>(`${this.apiBase}/backend/v2/projects/${projectId}`, {
+      body: payload,
+    });
+  }
+
+  restoreProject(projectId: string): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.apiBase}/backend/v2/projects/${projectId}/restore`, {});
   }
 }
