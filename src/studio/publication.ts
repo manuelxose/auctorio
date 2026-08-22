@@ -47,6 +47,9 @@ export function canTransition(from: PublicationState, to: PublicationState): boo
 }
 
 export function transitionPublication(from: PublicationState, to: PublicationState): PublicationState {
+  if (from === to) {
+    return to;
+  }
   if (!canTransition(from, to)) {
     throw new Error(`invalid_publication_transition ${from} -> ${to}`);
   }
