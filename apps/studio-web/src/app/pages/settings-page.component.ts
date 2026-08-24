@@ -7,9 +7,9 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { AiUsageRow, StudioRoleSummary, StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
+import type { AiUsageRow, DiscoverySettingsResponse, StudioRoleSummary, StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
 
-type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai';
+type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai' | 'discovery';
 
 @Component({
   selector: 'app-settings-page',
@@ -46,6 +46,10 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai';
           <button class="au-btn au-btn--ghost" [class.is-active]="section === 'ai'" type="button" (click)="setSection('ai')">
             <app-icon name="sparkles"></app-icon>
             AI
+          </button>
+          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'discovery'" type="button" (click)="setSection('discovery')">
+            <app-icon name="sources"></app-icon>
+            Web discovery
           </button>
         </nav>
 
@@ -139,6 +143,101 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai';
             </div>
           </div>
         </section>
+
+        <section class="au-panel au-panel--padded" *ngIf="section === 'discovery'">
+          <h2 class="au-panel__title">Web discovery</h2>
+          <p class="au-panel__subtitle au-mb-3">
+            AI understands the editorial niche, searches the live web and feeds useful stories into the Inbox.
+          </p>
+
+          <div class="au-banner" *ngIf="discovery && !discovery.provider.configured">
+            <app-icon name="warning"></app-icon>
+            <span class="au-banner__text">Web search needs a provider key server-side ({{ discovery.provider.provider }}). Discovery stays paused until it is configured.</span>
+          </div>
+
+          <app-empty-state *ngIf="!discovery" icon="sources" title="Discovery settings unavailable" text="Could not load discovery configuration."></app-empty-state>
+
+          <form *ngIf="discovery" (ngSubmit)="saveDiscovery()">
+            <label class="au-field au-switch-row">
+              <span class="au-field__label">AI source discovery</span>
+              <input type="checkbox" [(ngModel)]="discoveryForm.enabled" name="discoveryEnabled" />
+            </label>
+
+            <div class="au-field-grid">
+              <label class="au-field">
+                <span class="au-field__label">Mode</span>
+                <select class="au-select" [(ngModel)]="discoveryForm.mode" name="discoveryMode">
+                  <option value="manual">Manual</option>
+                  <option value="recommend">Recommend</option>
+                  <option value="automatic">Automatic</option>
+                </select>
+                <span class="au-field__hint">Automatic registers high-confidence sources without approval.</span>
+              </label>
+              <label class="au-field">
+                <span class="au-field__label">Frequency (minutes)</span>
+                <input class="au-input" type="number" min="5" [(ngModel)]="discoveryForm.frequencyMinutes" name="discoveryFrequency" />
+              </label>
+              <label class="au-field">
+                <span class="au-field__label">Maximum searches/day</span>
+                <input class="au-input" type="number" min="1" [(ngModel)]="discoveryForm.maxSearchesPerDay" name="maxSearches" />
+              </label>
+              <label class="au-field">
+                <span class="au-field__label">Maximum pages scraped/day</span>
+                <input class="au-input" type="number" min="1" [(ngModel)]="discoveryForm.maxScrapesPerDay" name="maxScrapes" />
+              </label>
+              <label class="au-field">
+                <span class="au-field__label">Maximum daily cost (USD)</span>
+                <input class="au-input" type="number" min="0" step="0.5" [(ngModel)]="discoveryForm.maxDiscoveryCostPerDay" name="maxCost" />
+              </label>
+            </div>
+
+            <div class="au-field-grid">
+              <label class="au-field">
+                <span class="au-field__label">Languages</span>
+                <input class="au-input" type="text" [(ngModel)]="discoveryForm.languagesText" name="languages" placeholder="es, en" />
+              </label>
+              <label class="au-field">
+                <span class="au-field__label">Regions</span>
+                <input class="au-input" type="text" [(ngModel)]="discoveryForm.regionsText" name="regions" placeholder="Spain, Europe, Global" />
+              </label>
+            </div>
+
+            <h3 class="au-panel__title au-mt-2 au-mb-2">Quality</h3>
+            <div class="au-field-grid">
+              <label class="au-field au-switch-row">
+                <span class="au-field__label">Prefer primary sources</span>
+                <input type="checkbox" [(ngModel)]="discoveryForm.preferPrimarySources" name="preferPrimary" />
+              </label>
+              <label class="au-field au-switch-row">
+                <span class="au-field__label">Require 2 sources when possible</span>
+                <input type="checkbox" [(ngModel)]="discoveryForm.requireTwoSources" name="requireTwo" />
+              </label>
+              <label class="au-field au-switch-row">
+                <span class="au-field__label">Avoid low-authority domains</span>
+                <input type="checkbox" [(ngModel)]="discoveryForm.avoidLowAuthority" name="avoidLow" />
+              </label>
+              <label class="au-field au-switch-row">
+                <span class="au-field__label">Detect developing stories</span>
+                <input type="checkbox" [(ngModel)]="discoveryForm.detectDevelopingStories" name="developing" />
+              </label>
+              <label class="au-field au-switch-row">
+                <span class="au-field__label">Auto-enable accepted sources</span>
+                <input type="checkbox" [(ngModel)]="discoveryForm.autoEnableSources" name="autoEnable" />
+              </label>
+            </div>
+
+            <p class="au-muted" *ngIf="discovery">
+              Today: {{ discovery.usageToday.searches }} searches · {{ discovery.usageToday.scrapes }} pages · {{ discoveryCostLabel() }}
+            </p>
+
+            <div class="au-form__actions">
+              <button class="au-btn au-btn--primary" type="submit" [disabled]="savingDiscovery">{{ savingDiscovery ? 'Saving…' : 'Save discovery settings' }}</button>
+              <button class="au-btn au-btn--secondary" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery">
+                {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
+              </button>
+            </div>
+          </form>
+        </section>
       </div>
     </section>
   `,
@@ -159,6 +258,24 @@ export class SettingsPageComponent implements OnInit {
   inviting = false;
   error = '';
   notice = '';
+  discovery: DiscoverySettingsResponse | null = null;
+  discoveryForm = {
+    enabled: true,
+    mode: 'recommend' as 'manual' | 'recommend' | 'automatic',
+    frequencyMinutes: 30,
+    languagesText: 'es, en',
+    regionsText: '',
+    maxSearchesPerDay: 100,
+    maxScrapesPerDay: 250,
+    maxDiscoveryCostPerDay: 5,
+    preferPrimarySources: true,
+    requireTwoSources: true,
+    avoidLowAuthority: true,
+    detectDevelopingStories: true,
+    autoEnableSources: false,
+  };
+  savingDiscovery = false;
+  runningDiscovery = false;
 
   get user() {
     return this.appContext.user();
@@ -177,7 +294,7 @@ export class SettingsPageComponent implements OnInit {
 
   ngOnInit(): void {
     const sectionParam = String(this.route.snapshot.paramMap.get('section') || 'profile');
-    if (['profile', 'sites', 'team', 'roles', 'ai'].includes(sectionParam)) {
+    if (['profile', 'sites', 'team', 'roles', 'ai', 'discovery'].includes(sectionParam)) {
       this.section = sectionParam as SettingsSection;
     }
     this.load();
@@ -216,6 +333,77 @@ export class SettingsPageComponent implements OnInit {
         this.usageRows = [];
       },
     });
+    this.api.getDiscoverySettings().subscribe({
+      next: (response) => {
+        this.discovery = response;
+        const config = response.config;
+        this.discoveryForm = {
+          enabled: config.enabled,
+          mode: config.mode,
+          frequencyMinutes: config.frequencyMinutes,
+          languagesText: (config.languages ?? ['es', 'en']).join(', '),
+          regionsText: (config.regions ?? []).join(', '),
+          maxSearchesPerDay: config.maxSearchesPerDay,
+          maxScrapesPerDay: config.maxScrapesPerDay,
+          maxDiscoveryCostPerDay: config.maxDiscoveryCostPerDay,
+          preferPrimarySources: config.preferPrimarySources,
+          requireTwoSources: config.requireTwoSources,
+          avoidLowAuthority: config.avoidLowAuthority,
+          detectDevelopingStories: config.detectDevelopingStories,
+          autoEnableSources: config.autoEnableSources,
+        };
+      },
+      error: () => {
+        this.discovery = null;
+      },
+    });
+  }
+
+  saveDiscovery(): void {
+    this.savingDiscovery = true;
+    this.error = '';
+    this.api
+      .updateDiscoverySettings({
+        enabled: this.discoveryForm.enabled,
+        mode: this.discoveryForm.mode,
+        frequencyMinutes: Number(this.discoveryForm.frequencyMinutes),
+        languages: this.discoveryForm.languagesText.split(',').map((item) => item.trim()).filter(Boolean),
+        regions: this.discoveryForm.regionsText.split(',').map((item) => item.trim()).filter(Boolean),
+        maxSearchesPerDay: Number(this.discoveryForm.maxSearchesPerDay),
+        maxScrapesPerDay: Number(this.discoveryForm.maxScrapesPerDay),
+        maxDiscoveryCostPerDay: Number(this.discoveryForm.maxDiscoveryCostPerDay),
+        preferPrimarySources: this.discoveryForm.preferPrimarySources,
+        requireTwoSources: this.discoveryForm.requireTwoSources,
+        avoidLowAuthority: this.discoveryForm.avoidLowAuthority,
+        detectDevelopingStories: this.discoveryForm.detectDevelopingStories,
+        autoEnableSources: this.discoveryForm.autoEnableSources,
+      })
+      .subscribe({
+        next: () => {
+          this.savingDiscovery = false;
+          this.toast.success('Discovery settings saved.');
+        },
+        error: (err) => {
+          this.savingDiscovery = false;
+          const body = (err as { error?: { message?: string } })?.error;
+          this.error = body?.message ? String(body.message) : 'Could not save discovery settings.';
+        },
+      });
+  }
+
+  runDiscovery(): void {
+    this.runningDiscovery = true;
+    this.api.runDiscoveryNow().subscribe({
+      next: () => {
+        this.runningDiscovery = false;
+        this.toast.success('AI discovery started.');
+      },
+      error: (err) => {
+        this.runningDiscovery = false;
+        const body = (err as { error?: { message?: string } })?.error;
+        this.error = body?.message ? String(body.message) : 'Discovery could not be started.';
+      },
+    });
   }
 
   setSection(section: SettingsSection): void {
@@ -245,6 +433,11 @@ export class SettingsPageComponent implements OnInit {
 
   costLabel(row: AiUsageRow): string {
     return `$${row.costUsd.toFixed(4)}`;
+  }
+
+  discoveryCostLabel(): string {
+    const cost = this.discovery?.usageToday?.estimatedCostUsd ?? 0;
+    return `$${Number(cost).toFixed(3)}`;
   }
 
   invite(): void {

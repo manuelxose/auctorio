@@ -2289,6 +2289,12 @@ html[data-theme='dark'] .au-channel--x { background: #1f2937; color: #f3f4f6; }
   margin-top: 2px;
 }
 
+.au-section-title {
+  font-size: var(--au-fs-h3);
+  font-weight: 600;
+  margin: var(--au-s4) 0 var(--au-s2);
+}
+
 .au-page__actions {
   display: flex;
   gap: var(--au-s2);

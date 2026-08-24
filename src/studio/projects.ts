@@ -137,8 +137,8 @@ async function enqueueUnpublishForWebsite(
     return;
   }
   const idempotencyKey = `unpublish:${tenantId}:${publication.siteId}:${publication.projectId}:${publication.versionId}`;
-  const existing = await prisma.publicationJob.findUnique({
-    where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
+  const existing = await prisma.publicationJob.findFirst({
+    where: { tenantId, idempotencyKey },
   });
   if (existing && ["queued", "processing", "failed"].includes(existing.status)) {
     await queuePublication(existing.id);

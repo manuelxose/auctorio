@@ -1,13 +1,16 @@
 import { Worker } from "bullmq";
-import { getEnv } from "../../shared/utils/env";
+import { getEnv, getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
 import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
 import { runSocialGenerationJob, type SocialGenerationJobData } from "../../studio/social";
 import { failAttempt, startAttempt, succeedAttempt } from "../../studio/publication";
-import { readSocialCredentials, getSocialPublisher } from "../../studio/social-publishers";
+import { buildDryRunResult, dryRunGate, getSocialPublisher, readSocialCredentials } from "../../studio/social-publishers";
 import { socialAssetUrlForVersion } from "../../studio/social";
 import { writeAudit } from "../../studio/audit";
+import { structuredEvent } from "../../shared/utils/logger";
+import { getSocialIntegrationProvider, type SocialPublishInput } from "../../studio/social-provider";
+import { resolveAccountCredentials, runConnectionHealthCheck } from "../../studio/social-connections";
 
 const prisma = getPrismaClient();
 
@@ -27,30 +30,8 @@ type SocialUnpublishJobData = {
 
 type SocialJobData = SocialGenerateJobData | SocialPublishJobData | SocialUnpublishJobData;
 
-async function processPublish(data: SocialPublishJobData) {
-  const publication = await prisma.publication.findUnique({
-    where: { id: data.publicationId },
-    include: {
-      account: true,
-      socialContent: true,
-      project: { select: { id: true, title: true } },
-      version: { include: { contentImage: { include: { assetVariants: true } } } },
-    },
-  });
-  if (!publication || !publication.account || publication.account.platform === "website") {
-    throw new Error("publication_or_account_not_found");
-  }
-
-  await startAttempt(publication.tenantId, data.attemptId);
-
-  const credentials = readSocialCredentials(publication.account.credentialsRef);
-  if (!credentials) {
-    throw new Error(`missing_publishing_credentials for ${publication.account.platform} account ${publication.account.id}`);
-  }
-
-  const publisher = getSocialPublisher(publication.account.platform as "x" | "instagram");
+async function buildPublishInput(publication: Awaited<ReturnType<typeof loadPublication>>): Promise<SocialPublishInput> {
   const imageUrl = await socialAssetUrlForVersion(publication.versionId, publication.tenantId);
-
   const thread = await prisma.socialContent.findMany({
     where: { tenantId: publication.tenantId, versionId: publication.versionId, channel: "x", contentType: "x_thread" },
     orderBy: { threadPosition: "asc" },
@@ -68,17 +49,91 @@ async function processPublish(data: SocialPublishJobData) {
         ? "story"
         : "photo";
 
-  const payload = {
+  return {
     text,
-    imageUrls: imageUrl ? [imageUrl] : [],
-    mediaType: mediaType as "text" | "photo" | "carousel" | "story",
-    thread:
-      thread.length > 0
-        ? thread.map((entry) => ({ body: entry.body }))
-        : undefined,
+    mediaUrls: imageUrl ? [imageUrl] : [],
+    mediaType,
+    thread: thread.length > 0 ? thread.map((entry) => ({ body: entry.body })) : undefined,
   };
+}
 
-  const result = await publisher.publish(payload, credentials);
+type LoadedPublication = {
+  id: string;
+  tenantId: string;
+  versionId: string;
+  channel: string;
+  externalId: string | null;
+  account: {
+    id: string;
+    platform: "x" | "instagram" | "website";
+    credentialsRef: string | null;
+    provider: string;
+    providerProfileId: string | null;
+    providerAccountId: string | null;
+    credentialsCiphertext: string | null;
+  };
+  socialContent: { body: string; contentType: string } | null;
+};
+
+async function loadPublication(publicationId: string): Promise<LoadedPublication> {
+  const publication = await prisma.publication.findUnique({
+    where: { id: publicationId },
+    include: { account: true, socialContent: true },
+  });
+  if (!publication || !publication.account || publication.account.platform === "website") {
+    throw new Error("publication_or_account_not_found");
+  }
+  return publication as unknown as LoadedPublication;
+}
+
+async function processPublish(data: SocialPublishJobData) {
+  const publication = await loadPublication(data.publicationId);
+  const account = publication.account;
+
+  await startAttempt(publication.tenantId, data.attemptId);
+
+  let result;
+  if (account.provider && account.provider !== "legacy") {
+    const provider = getSocialIntegrationProvider(account.provider);
+    const credentials = resolveAccountCredentials(account as never);
+    const dryRun = dryRunGate(Boolean(credentials));
+    if (dryRun.enabled || !credentials) {
+      const payload = await buildPublishInput(publication);
+      result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
+    } else {
+      const payload = await buildPublishInput(publication);
+      const validation = provider.validateContent(payload, account.platform as "x" | "instagram");
+      if (!validation.valid) {
+        throw new Error(`platform_content_invalid: ${validation.errors.join("; ")}`);
+      }
+      result = await provider.publish(payload, credentials, account);
+    }
+  } else {
+    const credentials = readSocialCredentials(account.credentialsRef);
+    const dryRun = dryRunGate(Boolean(credentials));
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+    const payload = await buildPublishInput(publication);
+    if (dryRun.enabled || !credentials) {
+      result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
+    } else {
+      const legacyPayload = {
+        text: payload.text,
+        imageUrls: payload.mediaUrls,
+        mediaType: payload.mediaType,
+        thread: payload.thread,
+      };
+      result = await publisher.publish(legacyPayload, credentials);
+    }
+  }
+
+  structuredEvent("social.publish.completed", {
+    tenantId: publication.tenantId,
+    publicationId: publication.id,
+    platform: account.platform,
+    provider: account.provider,
+    externalId: result.externalId,
+    dryRun: result.dryRun,
+  });
 
   await succeedAttempt(publication.tenantId, data.attemptId, {
     externalId: result.externalId,
@@ -88,27 +143,37 @@ async function processPublish(data: SocialPublishJobData) {
 }
 
 async function processUnpublish(data: SocialUnpublishJobData) {
-  const publication = await prisma.publication.findUnique({
-    where: { id: data.publicationId },
-    include: { account: true },
-  });
-  if (!publication || !publication.account || !publication.externalId) {
+  const publication = await loadPublication(data.publicationId);
+  const account = publication.account;
+  if (!publication.externalId) {
     throw new Error("publication_or_external_id_not_found");
   }
 
   await startAttempt(publication.tenantId, data.attemptId);
 
-  const credentials = readSocialCredentials(publication.account.credentialsRef);
-  if (!credentials) {
-    throw new Error(`missing_publishing_credentials for ${publication.account.platform}`);
+  let result;
+  if (account.provider && account.provider !== "legacy") {
+    const provider = getSocialIntegrationProvider(account.provider);
+    const credentials = resolveAccountCredentials(account as never);
+    const dryRun = dryRunGate(Boolean(credentials));
+    if (dryRun.enabled || !credentials) {
+      result = buildDryRunResult(account.platform, `delete:${publication.externalId}`);
+    } else {
+      result = await provider.deletePublication(publication.externalId, credentials, account);
+    }
+  } else {
+    const credentials = readSocialCredentials(account.credentialsRef);
+    const dryRun = dryRunGate(Boolean(credentials));
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+    if (!publisher.capabilities.delete && !publisher.capabilities.unpublish) {
+      throw new Error(`${account.platform}_unpublish_not_supported`);
+    }
+    if (dryRun.enabled || !credentials) {
+      result = buildDryRunResult(account.platform, `delete:${publication.externalId}`);
+    } else {
+      result = await publisher.delete(publication.externalId, credentials);
+    }
   }
-
-  const publisher = getSocialPublisher(publication.account.platform as "x" | "instagram");
-  if (!publisher.capabilities.delete && !publisher.capabilities.unpublish) {
-    throw new Error(`${publication.account.platform}_unpublish_not_supported`);
-  }
-
-  const result = await publisher.delete(publication.externalId, credentials);
 
   await succeedAttempt(publication.tenantId, data.attemptId, {
     externalId: null,
@@ -164,10 +229,32 @@ export async function runSocialWorker() {
       if (attempt) {
         await failAttempt(attempt.tenantId, data.attemptId, err);
       }
+      structuredEvent("social.publish.failed", { attemptId: data.attemptId, error: err.message }, "error");
     }
   });
 
+  // Periodic social connection health checks so broken tokens surface in the
+  // UI before a scheduled publication fails.
+  let healthRunning = false;
+  const runHealthCheck = async () => {
+    if (healthRunning) {
+      return;
+    }
+    healthRunning = true;
+    try {
+      await runConnectionHealthCheck();
+    } catch (error) {
+      structuredEvent("social.connection.health.error", { error: error instanceof Error ? error.message : String(error) }, "error");
+    } finally {
+      healthRunning = false;
+    }
+  };
+  const healthIntervalMs = Math.max(60_000, getNumberEnv("SOCIAL_CONNECTION_HEALTH_MS", 6 * 3_600_000));
+  const healthTimer = setInterval(() => void runHealthCheck(), healthIntervalMs);
+  setTimeout(() => void runHealthCheck(), 30_000);
+
   const shutdown = async () => {
+    clearInterval(healthTimer);
     await worker.close();
     await prisma.$disconnect();
     process.exit(0);
@@ -175,5 +262,5 @@ export async function runSocialWorker() {
   process.on("SIGTERM", () => void shutdown());
   process.on("SIGINT", () => void shutdown());
 
-  console.log("[worker:social] started", { queue: QUEUE_NAMES.social });
+  console.log("[worker:social] started", { queue: QUEUE_NAMES.social, healthIntervalMs });
 }

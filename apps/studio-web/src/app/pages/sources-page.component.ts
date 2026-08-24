@@ -9,7 +9,7 @@ import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { SourceType, StudioSite, StudioSource } from '../models/studio.models';
+import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType, StudioSite, StudioSource } from '../models/studio.models';
 
 @Component({
   selector: 'app-sources-page',
@@ -21,7 +21,7 @@ import type { SourceType, StudioSite, StudioSource } from '../models/studio.mode
         <div>
           <p class="au-page__eyebrow">Content acquisition</p>
           <h1 class="au-page__title">Sources</h1>
-          <p class="au-page__subtitle">RSS, Atom, pages, sitemaps and APIs that feed the editorial pipeline.</p>
+          <p class="au-page__subtitle">Feeds, AI-discovered sources and web monitoring that feed the editorial pipeline.</p>
         </div>
         <div class="au-page__actions">
           <button class="au-btn au-btn--primary" type="button" (click)="showForm = !showForm">
@@ -31,7 +31,141 @@ import type { SourceType, StudioSite, StudioSource } from '../models/studio.mode
         </div>
       </header>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="showForm">
+      <nav class="au-tabs au-mb-3" aria-label="Source sections">
+        <button class="au-tab" type="button" [class.is-active]="view === 'active'" (click)="setView('active')">Active sources</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">
+          AI recommendations
+          <span class="au-badge au-badge--sm" *ngIf="recommendations.length > 0">{{ recommendations.length }}</span>
+        </button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'discovered'" (click)="setView('discovered')">Recently discovered</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'blocked'" (click)="setView('blocked')">Blocked sources</button>
+      </nav>
+
+      <!-- AI recommendations -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'recommendations'">
+        <h2 class="au-panel__title">AI recommendations</h2>
+        <p class="au-panel__subtitle au-mb-3">Domains the discovery engine found repeatedly with high relevance. Add them as permanent sources or dismiss them.</p>
+        <app-empty-state
+          *ngIf="recommendations.length === 0"
+          icon="sources"
+          title="No recommendations yet"
+          text="When AI web discovery finds recurring high-quality domains they appear here."
+        ></app-empty-state>
+        <div class="au-connection-grid" *ngIf="recommendations.length > 0">
+          <article class="au-connection-card" *ngFor="let recommendation of recommendations">
+            <div class="au-connection-card__head">
+              <div class="au-flex-1">
+                <h2>{{ recommendation.domain }}</h2>
+                <p>Discovered in {{ recommendation.searchesCount }} relevant searches · score {{ recommendation.score }}</p>
+              </div>
+              <span class="au-badge" [class.au-badge--success]="recommendation.score >= 85" [class.au-badge--warning]="recommendation.score >= 50 && recommendation.score < 85" [class.au-badge--neutral]="recommendation.score < 50">
+                {{ recommendation.score >= 85 ? 'High quality' : recommendation.score >= 50 ? 'Specialist' : 'Discovery only' }}
+              </span>
+            </div>
+            <p class="au-muted au-mb-2" *ngIf="recommendation.reasonSummary">{{ recommendation.reasonSummary }}</p>
+            <div class="au-inline">
+              <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="acceptRecommendation(recommendation)" [disabled]="busyRecommendation === recommendation.id">
+                <app-icon name="plus"></app-icon>
+                Add source
+              </button>
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="dismissRecommendation(recommendation)" [disabled]="busyRecommendation === recommendation.id">
+                Dismiss
+              </button>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Recently discovered -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'discovered'">
+        <h2 class="au-panel__title">Recently discovered</h2>
+        <p class="au-panel__subtitle au-mb-3">Domains found by AI web discovery. Block low-quality or off-topic domains from being scraped.</p>
+        <app-empty-state
+          *ngIf="domains.length === 0"
+          icon="sources"
+          title="Nothing discovered yet"
+          text="Enable AI source discovery in Settings and run it to start finding sources on the live web."
+        >
+          <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery">
+            {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
+          </button>
+        </app-empty-state>
+        <div class="au-table-wrap" *ngIf="domains.length > 0">
+          <table class="au-table">
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Discoveries</th>
+                <th>Quality</th>
+                <th>Last seen</th>
+                <th style="width: 120px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let domain of domains">
+                <td><span class="au-table__title">{{ domain.domain }}</span></td>
+                <td>{{ domain.discoveryCount }}</td>
+                <td>
+                  <span class="au-badge" [class.au-badge--success]="(domain.qualityScore ?? 0) >= 70" [class.au-badge--warning]="(domain.qualityScore ?? 0) >= 40 && (domain.qualityScore ?? 0) < 70" [class.au-badge--neutral]="(domain.qualityScore ?? 0) < 40">
+                    {{ domain.qualityScore ?? '—' }}{{ domain.tier ? ' · ' + domain.tier : '' }}
+                  </span>
+                </td>
+                <td class="au-nowrap au-muted">{{ dateLabel(domain.lastSeenAt) }}</td>
+                <td>
+                  <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="blockDomain(domain.domain)" *ngIf="!domain.blocked">
+                    Block
+                  </button>
+                  <span class="au-badge au-badge--danger" *ngIf="domain.blocked">blocked</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="au-inline" *ngIf="domains.length > 0">
+          <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery">
+            <app-icon name="sparkles"></app-icon>
+            {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
+          </button>
+        </div>
+      </section>
+
+      <!-- Blocked -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'blocked'">
+        <h2 class="au-panel__title">Blocked sources</h2>
+        <p class="au-panel__subtitle au-mb-3">These domains are excluded from AI discovery and scraping.</p>
+        <app-empty-state
+          *ngIf="blockedDomains.length === 0"
+          icon="sources"
+          title="No blocked domains"
+          text="Block a domain from the Recently discovered section to keep it out of the pipeline."
+        ></app-empty-state>
+        <div class="au-table-wrap" *ngIf="blockedDomains.length > 0">
+          <table class="au-table">
+            <thead>
+              <tr>
+                <th>Domain</th>
+                <th>Reason</th>
+                <th>Blocked on</th>
+                <th style="width: 120px"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let entry of blockedDomains">
+                <td><span class="au-table__title">{{ entry.domain }}</span></td>
+                <td class="au-muted">{{ entry.reason || '—' }}</td>
+                <td class="au-nowrap au-muted">{{ dateLabel(entry.createdAt) }}</td>
+                <td>
+                  <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="unblockDomain(entry.domain)">
+                    Unblock
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="showForm && view === 'active'">
         <h2 class="au-panel__title">{{ editingId ? 'Edit source' : 'New source' }}</h2>
         <p class="au-panel__subtitle au-mb-3">Sources provide input. They are separate from publishing connections.</p>
         <div class="au-field-grid">
@@ -83,7 +217,7 @@ import type { SourceType, StudioSite, StudioSource } from '../models/studio.mode
         </div>
       </section>
 
-      <section class="au-panel">
+      <section class="au-panel" *ngIf="view === 'active'">
         <app-empty-state
           *ngIf="sources.length === 0"
           icon="sources"
@@ -185,6 +319,12 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   editingId: string | null = null;
   fetching: Record<string, boolean> = {};
   feedback = '';
+  view: 'active' | 'recommendations' | 'discovered' | 'blocked' = 'active';
+  recommendations: SourceRecommendation[] = [];
+  domains: DiscoveredDomain[] = [];
+  blockedDomains: BlockedDomain[] = [];
+  busyRecommendation = '';
+  runningDiscovery = false;
   form = {
     name: '',
     type: 'rss' as SourceType,
@@ -201,7 +341,107 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.sites = this.appContext.sites();
     this.load();
+    this.loadRecommendations();
+    this.loadDiscovered();
+    this.loadBlocked();
     this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.load(true));
+  }
+
+  setView(view: 'active' | 'recommendations' | 'discovered' | 'blocked'): void {
+    this.view = view;
+    if (view === 'recommendations') this.loadRecommendations();
+    if (view === 'discovered') this.loadDiscovered();
+    if (view === 'blocked') this.loadBlocked();
+  }
+
+  loadRecommendations(): void {
+    this.api.listSourceRecommendations(1, 50, 'open').subscribe({
+      next: (response) => { this.recommendations = response.items; },
+      error: () => { this.recommendations = []; },
+    });
+  }
+
+  loadDiscovered(): void {
+    this.api.listDiscoveredDomains(1, 50).subscribe({
+      next: (response) => { this.domains = response.items; },
+      error: () => { this.domains = []; },
+    });
+  }
+
+  loadBlocked(): void {
+    this.api.listBlockedDomains().subscribe({
+      next: (response) => { this.blockedDomains = response.items; },
+      error: () => { this.blockedDomains = []; },
+    });
+  }
+
+  acceptRecommendation(recommendation: SourceRecommendation): void {
+    this.busyRecommendation = recommendation.id;
+    this.api.acceptSourceRecommendation(recommendation.id).subscribe({
+      next: () => {
+        this.busyRecommendation = '';
+        this.toast.success(`${recommendation.domain} added as a source.`);
+        this.loadRecommendations();
+        this.load();
+      },
+      error: (error) => {
+        this.busyRecommendation = '';
+        this.feedback = String(error?.error?.message ?? 'Could not add the source.');
+      },
+    });
+  }
+
+  dismissRecommendation(recommendation: SourceRecommendation): void {
+    this.busyRecommendation = recommendation.id;
+    this.api.dismissSourceRecommendation(recommendation.id).subscribe({
+      next: () => {
+        this.busyRecommendation = '';
+        this.toast.success('Recommendation dismissed.');
+        this.loadRecommendations();
+      },
+      error: () => { this.busyRecommendation = ''; },
+    });
+  }
+
+  blockDomain(domain: string): void {
+    this.api.blockDiscoveredDomain(domain).subscribe({
+      next: () => {
+        this.toast.success(`${domain} blocked from discovery.`);
+        this.loadDiscovered();
+        this.loadBlocked();
+      },
+      error: (error) => {
+        this.feedback = String(error?.error?.message ?? 'Could not block the domain.');
+      },
+    });
+  }
+
+  unblockDomain(domain: string): void {
+    this.api.unblockDiscoveredDomain(domain).subscribe({
+      next: () => {
+        this.toast.success(`${domain} unblocked.`);
+        this.loadBlocked();
+        this.loadDiscovered();
+      },
+      error: (error) => {
+        this.feedback = String(error?.error?.message ?? 'Could not unblock the domain.');
+      },
+    });
+  }
+
+  runDiscovery(): void {
+    this.runningDiscovery = true;
+    this.api.runDiscoveryNow().subscribe({
+      next: () => {
+        this.runningDiscovery = false;
+        this.toast.success('AI discovery started. Results appear shortly.');
+        setTimeout(() => this.loadDiscovered(), 4000);
+      },
+      error: (error) => {
+        this.runningDiscovery = false;
+        this.feedback = String(error?.error?.message ?? 'Discovery could not be started.');
+      },
+    });
   }
 
   ngOnDestroy(): void {
