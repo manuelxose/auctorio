@@ -211,6 +211,9 @@ enum StoryClusterStatus {
   covered
   rejected
   archived
+  developing
+  updated
+  superseded
 }
 
 enum SocialChannel {
@@ -315,68 +318,77 @@ model Tenant {
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
-  topics       Topic[]
-  facts        Fact[]
-  contentText  ContentText[]
-  contentImage ContentImage[]
-  jobs         Job[]
-  aiAudit      AiAudit[]
-  sites        Site[]
-  contentProjects    ContentProject[]
-  contentVersions    ContentVersion[]
-  contentDerivatives ContentDerivative[]
-  publicationJobs    PublicationJob[]
-  assetVariants      AssetVariant[]
-  studioIdentityProvider StudioIdentityProvider?
-  studioAccountsLastWorkspace StudioAccount[] @relation("StudioAccountLastWorkspace")
-  studioUsers        StudioUser[]
-  studioRoles        StudioRole[]
-  studioInvitations  StudioInvitation[]
-  studioUserSessions StudioUserSession[]
-  studioLaunchTickets StudioLaunchTicket[]
-  studioPromptPresets StudioPromptPreset[]
-  studioPromptAssignments StudioPromptAssignment[]
-  contentSources ContentSource[]
-  sourceItems SourceItem[]
-  storyClusters StoryCluster[]
-  socialContents SocialContent[]
-  publishingAccounts PublishingAccount[]
-  publications Publication[]
-  publicationAttempts PublicationAttempt[]
-  automationPolicies AutomationPolicy[]
-  campaigns Campaign[]
-  editorialBriefs EditorialBrief[]
-  auditLogs AuditLog[]
-  editorialPlans EditorialPlan[]
-  editorialPlanItems EditorialPlanItem[]
+  topics                      Topic[]
+  facts                       Fact[]
+  contentText                 ContentText[]
+  contentImage                ContentImage[]
+  jobs                        Job[]
+  aiAudit                     AiAudit[]
+  sites                       Site[]
+  contentProjects             ContentProject[]
+  contentVersions             ContentVersion[]
+  contentDerivatives          ContentDerivative[]
+  publicationJobs             PublicationJob[]
+  assetVariants               AssetVariant[]
+  studioIdentityProvider      StudioIdentityProvider?
+  studioAccountsLastWorkspace StudioAccount[]           @relation("StudioAccountLastWorkspace")
+  studioUsers                 StudioUser[]
+  studioRoles                 StudioRole[]
+  studioInvitations           StudioInvitation[]
+  studioUserSessions          StudioUserSession[]
+  studioLaunchTickets         StudioLaunchTicket[]
+  studioPromptPresets         StudioPromptPreset[]
+  studioPromptAssignments     StudioPromptAssignment[]
+  contentSources              ContentSource[]
+  sourceItems                 SourceItem[]
+  storyClusters               StoryCluster[]
+  socialContents              SocialContent[]
+  publishingAccounts          PublishingAccount[]
+  publications                Publication[]
+  publicationAttempts         PublicationAttempt[]
+  automationPolicies          AutomationPolicy[]
+  campaigns                   Campaign[]
+  editorialBriefs             EditorialBrief[]
+  auditLogs                   AuditLog[]
+  editorialPlans              EditorialPlan[]
+  editorialPlanItems          EditorialPlanItem[]
+  socialConnectionSessions    SocialConnectionSession[]
+  webDiscoveryQueries         WebDiscoveryQuery[]
+  discoveredDomains           DiscoveredDomain[]
+  sourceQualityProfiles       SourceQualityProfile[]
+  sourceRecommendations       SourceRecommendation[]
+  webRetrievals               WebRetrieval[]
+  webUsageRecords             WebUsageRecord[]
+  discoveryConfigs            DiscoveryConfig[]
+  blockedDomains              BlockedDomain[]
 
   @@map("tenants")
 }
 
 model Topic {
   id          String      @id @default(uuid()) @db.Uuid
-  tenantId    String      @db.Uuid @map("tenant_id")
+  tenantId    String      @map("tenant_id") @db.Uuid
   title       String
   description String?
   status      TopicStatus @default(active)
   createdAt   DateTime    @default(now()) @map("created_at")
   updatedAt   DateTime    @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  facts  Fact[]
-  texts  ContentText[]
-  images ContentImage[]
+  tenant   Tenant           @relation(fields: [tenantId], references: [id])
+  facts    Fact[]
+  texts    ContentText[]
+  images   ContentImage[]
   projects ContentProject[]
 
-  @@index([tenantId, status])
   @@unique([tenantId, title])
+  @@index([tenantId, status])
   @@map("topics")
 }
 
 model Fact {
   id          String         @id @default(uuid()) @db.Uuid
-  tenantId    String         @db.Uuid @map("tenant_id")
-  topicId     String         @db.Uuid @map("topic_id")
+  tenantId    String         @map("tenant_id") @db.Uuid
+  topicId     String         @map("topic_id") @db.Uuid
   sourceType  FactSourceType @map("source_type")
   sourceRef   String?        @map("source_ref")
   content     String         @db.Text
@@ -387,112 +399,112 @@ model Fact {
   tenant Tenant @relation(fields: [tenantId], references: [id])
   topic  Topic  @relation(fields: [topicId], references: [id])
 
-  @@index([tenantId, topicId])
   @@unique([tenantId, topicId, contentHash])
+  @@index([tenantId, topicId])
   @@map("facts")
 }
 
 model ContentText {
-  id           String           @id @default(uuid()) @db.Uuid
-  tenantId     String           @db.Uuid @map("tenant_id")
-  topicId      String           @db.Uuid @map("topic_id")
-  type         ContentTextType
-  language     LanguageCode
-  status       ContentStatus    @default(queued)
-  provider     String?
-  model        String?
-  prompt       String?          @db.Text
-  output       String?          @db.Text
-  promptVersion String?         @map("prompt_version")
-  tokensInput  Int?             @map("tokens_input")
-  tokensOutput Int?             @map("tokens_output")
-  costUsd      Decimal?         @map("cost_usd") @db.Decimal(12, 6)
-  error        String?          @db.Text
-  dedupeHash   String?          @map("dedupe_hash")
-  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
+  id                    String          @id @default(uuid()) @db.Uuid
+  tenantId              String          @map("tenant_id") @db.Uuid
+  topicId               String          @map("topic_id") @db.Uuid
+  type                  ContentTextType
+  language              LanguageCode
+  status                ContentStatus   @default(queued)
+  provider              String?
+  model                 String?
+  prompt                String?         @db.Text
+  output                String?         @db.Text
+  promptVersion         String?         @map("prompt_version")
+  tokensInput           Int?            @map("tokens_input")
+  tokensOutput          Int?            @map("tokens_output")
+  costUsd               Decimal?        @map("cost_usd") @db.Decimal(12, 6)
+  error                 String?         @db.Text
+  dedupeHash            String?         @map("dedupe_hash")
+  promptPresetVersionId String?         @map("prompt_preset_version_id") @db.Uuid
+  createdAt             DateTime        @default(now()) @map("created_at")
+  updatedAt             DateTime        @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  topic  Topic  @relation(fields: [topicId], references: [id])
-  images ContentImage[]
-  versions ContentVersion[]
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  topic               Topic                @relation(fields: [topicId], references: [id])
+  images              ContentImage[]
+  versions            ContentVersion[]
   promptPresetVersion StudioPromptVersion? @relation("ContentTextPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, dedupeHash])
   @@index([tenantId, topicId, status])
   @@index([tenantId, promptPresetVersionId])
-  @@unique([tenantId, dedupeHash])
   @@map("content_text")
 }
 
 model ContentImage {
-  id          String        @id @default(uuid()) @db.Uuid
-  tenantId    String        @db.Uuid @map("tenant_id")
-  topicId     String        @db.Uuid @map("topic_id")
-  textId      String?       @db.Uuid @map("text_id")
-  status      ContentStatus @default(queued)
-  provider    String?
-  model       String?
-  prompt      String?       @db.Text
-  storagePath String?       @map("storage_path")
-  width       Int?
-  height      Int?
-  costUsd     Decimal?      @map("cost_usd") @db.Decimal(12, 6)
-  error       String?       @db.Text
-  dedupeHash  String?       @map("dedupe_hash")
-  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  id                    String        @id @default(uuid()) @db.Uuid
+  tenantId              String        @map("tenant_id") @db.Uuid
+  topicId               String        @map("topic_id") @db.Uuid
+  textId                String?       @map("text_id") @db.Uuid
+  status                ContentStatus @default(queued)
+  provider              String?
+  model                 String?
+  prompt                String?       @db.Text
+  storagePath           String?       @map("storage_path")
+  width                 Int?
+  height                Int?
+  costUsd               Decimal?      @map("cost_usd") @db.Decimal(12, 6)
+  error                 String?       @db.Text
+  dedupeHash            String?       @map("dedupe_hash")
+  promptPresetVersionId String?       @map("prompt_preset_version_id") @db.Uuid
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
 
-  tenant Tenant       @relation(fields: [tenantId], references: [id])
-  topic  Topic        @relation(fields: [topicId], references: [id])
-  text   ContentText? @relation(fields: [textId], references: [id], onDelete: SetNull)
-  versions ContentVersion[]
-  assetVariants AssetVariant[]
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  topic               Topic                @relation(fields: [topicId], references: [id])
+  text                ContentText?         @relation(fields: [textId], references: [id], onDelete: SetNull)
+  versions            ContentVersion[]
+  assetVariants       AssetVariant[]
   promptPresetVersion StudioPromptVersion? @relation("ContentImagePromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, dedupeHash])
   @@index([tenantId, topicId, status])
   @@index([tenantId, textId])
   @@index([tenantId, promptPresetVersionId])
-  @@unique([tenantId, dedupeHash])
   @@map("content_image")
 }
 
 model Job {
   id             String    @id @default(uuid()) @db.Uuid
-  tenantId       String    @db.Uuid @map("tenant_id")
+  tenantId       String    @map("tenant_id") @db.Uuid
   type           JobType
   status         JobStatus @default(queued)
   idempotencyKey String?   @map("idempotency_key")
   attempts       Int       @default(0)
-  lastError      String?   @db.Text @map("last_error")
+  lastError      String?   @map("last_error") @db.Text
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
   startedAt      DateTime? @map("started_at")
   finishedAt     DateTime? @map("finished_at")
 
-  tenant  Tenant   @relation(fields: [tenantId], references: [id])
+  tenant  Tenant    @relation(fields: [tenantId], references: [id])
   aiAudit AiAudit[]
 
-  @@index([tenantId, status, type])
   @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, status, type])
   @@map("jobs")
 }
 
 model AiAudit {
-  id        String   @id @default(uuid()) @db.Uuid
-  tenantId  String   @db.Uuid @map("tenant_id")
-  jobId     String   @db.Uuid @map("job_id")
-  provider  String
-  model     String
-  prompt    String   @db.Text
-  response  String?  @db.Text
-  usageJson Json?    @map("usage_json")
-  promptPresetVersionId String? @db.Uuid @map("prompt_preset_version_id")
-  createdAt DateTime @default(now()) @map("created_at")
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @map("tenant_id") @db.Uuid
+  jobId                 String   @map("job_id") @db.Uuid
+  provider              String
+  model                 String
+  prompt                String   @db.Text
+  response              String?  @db.Text
+  usageJson             Json?    @map("usage_json")
+  promptPresetVersionId String?  @map("prompt_preset_version_id") @db.Uuid
+  createdAt             DateTime @default(now()) @map("created_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id])
-  job    Job    @relation(fields: [jobId], references: [id])
+  tenant              Tenant               @relation(fields: [tenantId], references: [id])
+  job                 Job                  @relation(fields: [jobId], references: [id])
   promptPresetVersion StudioPromptVersion? @relation("AiAuditPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, jobId])
@@ -501,31 +513,31 @@ model AiAudit {
 }
 
 model Site {
-  id                     String   @id @default(uuid()) @db.Uuid
-  tenantId               String   @db.Uuid @map("tenant_id")
-  key                    String
-  name                   String
-  type                   SiteType
-  locale                 String   @default("es-ES")
-  baseUrl                String?  @map("base_url")
-  brandVoice             Json?    @map("brand_voice")
-  seoRules               Json?    @map("seo_rules")
-  taxonomyMap            Json?    @map("taxonomy_map")
-  publishingCredentialsRef String? @map("publishing_credentials_ref")
-  createdAt              DateTime @default(now()) @map("created_at")
-  updatedAt              DateTime @updatedAt @map("updated_at")
+  id                       String   @id @default(uuid()) @db.Uuid
+  tenantId                 String   @map("tenant_id") @db.Uuid
+  key                      String
+  name                     String
+  type                     SiteType
+  locale                   String   @default("es-ES")
+  baseUrl                  String?  @map("base_url")
+  brandVoice               Json?    @map("brand_voice")
+  seoRules                 Json?    @map("seo_rules")
+  taxonomyMap              Json?    @map("taxonomy_map")
+  publishingCredentialsRef String?  @map("publishing_credentials_ref")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
 
-  tenant          Tenant            @relation(fields: [tenantId], references: [id])
-  projects        ContentProject[]
-  publicationJobs PublicationJob[]
-  assetVariants   AssetVariant[]
-  promptPresets   StudioPromptPreset[]
-  promptAssignments StudioPromptAssignment[]
-  contentSources  ContentSource[]
+  tenant             Tenant                   @relation(fields: [tenantId], references: [id])
+  projects           ContentProject[]
+  publicationJobs    PublicationJob[]
+  assetVariants      AssetVariant[]
+  promptPresets      StudioPromptPreset[]
+  promptAssignments  StudioPromptAssignment[]
+  contentSources     ContentSource[]
   publishingAccounts PublishingAccount[]
   automationPolicies AutomationPolicy[]
-  publications    Publication[]
-  editorialPlans EditorialPlan[]
+  publications       Publication[]
+  editorialPlans     EditorialPlan[]
   editorialPlanItems EditorialPlanItem[]
 
   @@unique([tenantId, key])
@@ -534,40 +546,40 @@ model Site {
 }
 
 model ContentProject {
-  id              String        @id @default(uuid()) @db.Uuid
-  tenantId        String        @db.Uuid @map("tenant_id")
-  siteId          String        @db.Uuid @map("site_id")
-  topicId         String?       @db.Uuid @map("topic_id")
-  title           String
-  brief           String        @db.Text
-  goal            ProjectGoal   @default(article)
-  status          ProjectStatus @default(draft)
-  primaryLanguage String        @default("es") @map("primary_language")
-  metadata        Json?
-  sourceItemId    String?       @db.Uuid @map("source_item_id")
-  clusterId       String?       @db.Uuid @map("cluster_id")
-  campaignId      String?       @db.Uuid @map("campaign_id")
-  briefId         String?       @db.Uuid @map("brief_id")
-  origin          String        @default("manual")
-  deletedAt       DateTime?     @map("deleted_at")
-  deletedBy       String?       @map("deleted_by")
-  deletedByStudioUserId String? @db.Uuid @map("deleted_by_studio_user_id")
-  deletionReason  String?       @map("deletion_reason")
-  createdAt       DateTime      @default(now()) @map("created_at")
-  updatedAt       DateTime      @updatedAt @map("updated_at")
+  id                    String        @id @default(uuid()) @db.Uuid
+  tenantId              String        @map("tenant_id") @db.Uuid
+  siteId                String        @map("site_id") @db.Uuid
+  topicId               String?       @map("topic_id") @db.Uuid
+  title                 String
+  brief                 String        @db.Text
+  goal                  ProjectGoal   @default(article)
+  status                ProjectStatus @default(draft)
+  primaryLanguage       String        @default("es") @map("primary_language")
+  metadata              Json?
+  sourceItemId          String?       @map("source_item_id") @db.Uuid
+  clusterId             String?       @map("cluster_id") @db.Uuid
+  campaignId            String?       @map("campaign_id") @db.Uuid
+  briefId               String?       @map("brief_id") @db.Uuid
+  origin                String        @default("manual")
+  deletedAt             DateTime?     @map("deleted_at")
+  deletedBy             String?       @map("deleted_by")
+  deletedByStudioUserId String?       @map("deleted_by_studio_user_id") @db.Uuid
+  deletionReason        String?       @map("deletion_reason")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
 
-  tenant          Tenant            @relation(fields: [tenantId], references: [id])
-  site            Site              @relation(fields: [siteId], references: [id])
-  topic           Topic?            @relation(fields: [topicId], references: [id], onDelete: SetNull)
-  sourceItem      SourceItem?       @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
-  cluster         StoryCluster?     @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-  campaign        Campaign?         @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  editorialBrief  EditorialBrief?   @relation(fields: [briefId], references: [id], onDelete: SetNull)
-  versions        ContentVersion[]
-  derivatives     ContentDerivative[]
-  publicationJobs PublicationJob[]
-  socialContents  SocialContent[]
-  publications    Publication[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id])
+  site               Site                @relation(fields: [siteId], references: [id])
+  topic              Topic?              @relation(fields: [topicId], references: [id], onDelete: SetNull)
+  sourceItem         SourceItem?         @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  cluster            StoryCluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  campaign           Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  editorialBrief     EditorialBrief?     @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  versions           ContentVersion[]
+  derivatives        ContentDerivative[]
+  publicationJobs    PublicationJob[]
+  socialContents     SocialContent[]
+  publications       Publication[]
   editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, siteId, status])
@@ -578,36 +590,36 @@ model ContentProject {
 }
 
 model ContentVersion {
-  id             String        @id @default(uuid()) @db.Uuid
-  tenantId       String        @db.Uuid @map("tenant_id")
-  projectId      String        @db.Uuid @map("project_id")
-  contentTextId  String?       @db.Uuid @map("content_text_id")
-  contentImageId String?       @db.Uuid @map("content_image_id")
-  versionNumber  Int           @map("version_number")
-  status         VersionStatus @default(draft)
-  title          String?
-  excerpt        String?       @db.Text
-  bodyHtml       String?       @db.Text @map("body_html")
-  seoTitle       String?       @map("seo_title")
-  seoDescription String?       @db.Text @map("seo_description")
-  qaReport       Json?         @map("qa_report")
-  feedback       String?       @db.Text
-  approvedAt     DateTime?     @map("approved_at")
-  approvedBy     String?       @map("approved_by")
-  approvedByStudioUserId String? @db.Uuid @map("approved_by_studio_user_id")
-  publishedAt    DateTime?     @map("published_at")
-  createdAt      DateTime      @default(now()) @map("created_at")
-  updatedAt      DateTime      @updatedAt @map("updated_at")
+  id                     String        @id @default(uuid()) @db.Uuid
+  tenantId               String        @map("tenant_id") @db.Uuid
+  projectId              String        @map("project_id") @db.Uuid
+  contentTextId          String?       @map("content_text_id") @db.Uuid
+  contentImageId         String?       @map("content_image_id") @db.Uuid
+  versionNumber          Int           @map("version_number")
+  status                 VersionStatus @default(draft)
+  title                  String?
+  excerpt                String?       @db.Text
+  bodyHtml               String?       @map("body_html") @db.Text
+  seoTitle               String?       @map("seo_title")
+  seoDescription         String?       @map("seo_description") @db.Text
+  qaReport               Json?         @map("qa_report")
+  feedback               String?       @db.Text
+  approvedAt             DateTime?     @map("approved_at")
+  approvedBy             String?       @map("approved_by")
+  approvedByStudioUserId String?       @map("approved_by_studio_user_id") @db.Uuid
+  publishedAt            DateTime?     @map("published_at")
+  createdAt              DateTime      @default(now()) @map("created_at")
+  updatedAt              DateTime      @updatedAt @map("updated_at")
 
-  tenant         Tenant             @relation(fields: [tenantId], references: [id])
-  project        ContentProject     @relation(fields: [projectId], references: [id])
-  contentText    ContentText?       @relation(fields: [contentTextId], references: [id], onDelete: SetNull)
-  contentImage   ContentImage?      @relation(fields: [contentImageId], references: [id], onDelete: SetNull)
-  derivatives    ContentDerivative[]
-  publicationJobs PublicationJob[]
-  publications   Publication[]
-  socialContents SocialContent[]
-  approvedByStudioUser StudioUser? @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
+  tenant               Tenant              @relation(fields: [tenantId], references: [id])
+  project              ContentProject      @relation(fields: [projectId], references: [id])
+  contentText          ContentText?        @relation(fields: [contentTextId], references: [id], onDelete: SetNull)
+  contentImage         ContentImage?       @relation(fields: [contentImageId], references: [id], onDelete: SetNull)
+  derivatives          ContentDerivative[]
+  publicationJobs      PublicationJob[]
+  publications         Publication[]
+  socialContents       SocialContent[]
+  approvedByStudioUser StudioUser?         @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, versionNumber])
   @@index([tenantId, projectId, status])
@@ -618,91 +630,93 @@ model ContentVersion {
 }
 
 model ContentDerivative {
-  id         String         @id @default(uuid()) @db.Uuid
-  tenantId   String         @db.Uuid @map("tenant_id")
-  projectId  String         @db.Uuid @map("project_id")
-  versionId  String         @db.Uuid @map("version_id")
-  type       DerivativeType
-  title      String?
-  body       String         @db.Text
-  status     String         @default("done")
-  createdAt  DateTime       @default(now()) @map("created_at")
-  updatedAt  DateTime       @updatedAt @map("updated_at")
+  id        String         @id @default(uuid()) @db.Uuid
+  tenantId  String         @map("tenant_id") @db.Uuid
+  projectId String         @map("project_id") @db.Uuid
+  versionId String         @map("version_id") @db.Uuid
+  type      DerivativeType
+  title     String?
+  body      String         @db.Text
+  status    String         @default("done")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
 
-  tenant     Tenant         @relation(fields: [tenantId], references: [id])
-  project    ContentProject @relation(fields: [projectId], references: [id])
-  version    ContentVersion @relation(fields: [versionId], references: [id])
+  tenant  Tenant         @relation(fields: [tenantId], references: [id])
+  project ContentProject @relation(fields: [projectId], references: [id])
+  version ContentVersion @relation(fields: [versionId], references: [id])
 
   @@index([tenantId, projectId, versionId])
   @@map("content_derivatives")
 }
 
 model PublicationJob {
-  id             String            @id @default(uuid()) @db.Uuid
-  tenantId       String            @db.Uuid @map("tenant_id")
-  siteId         String            @db.Uuid @map("site_id")
-  projectId      String            @db.Uuid @map("project_id")
-  versionId      String            @db.Uuid @map("version_id")
-  status         PublicationStatus @default(queued)
-  action         PublicationAction @default(publish)
-  idempotencyKey String?           @map("idempotency_key")
-  externalId     String?           @map("external_id")
-  externalUrl    String?           @map("external_url")
-  requestPayload Json?             @map("request_payload")
-  responsePayload Json?            @map("response_payload")
-  error          String?           @db.Text
-  requestedByStudioUserId String?  @db.Uuid @map("requested_by_studio_user_id")
-  publishedAt    DateTime?         @map("published_at")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @updatedAt @map("updated_at")
+  id                      String            @id @default(uuid()) @db.Uuid
+  tenantId                String            @map("tenant_id") @db.Uuid
+  siteId                  String            @map("site_id") @db.Uuid
+  projectId               String            @map("project_id") @db.Uuid
+  versionId               String            @map("version_id") @db.Uuid
+  status                  PublicationStatus @default(queued)
+  action                  PublicationAction @default(publish)
+  idempotencyKey          String?           @map("idempotency_key")
+  externalId              String?           @map("external_id")
+  externalUrl             String?           @map("external_url")
+  requestPayload          Json?             @map("request_payload")
+  responsePayload         Json?             @map("response_payload")
+  error                   String?           @db.Text
+  requestedByStudioUserId String?           @map("requested_by_studio_user_id") @db.Uuid
+  publishedAt             DateTime?         @map("published_at")
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
-  tenant         Tenant            @relation(fields: [tenantId], references: [id])
-  site           Site              @relation(fields: [siteId], references: [id])
-  project        ContentProject    @relation(fields: [projectId], references: [id])
-  version        ContentVersion    @relation(fields: [versionId], references: [id])
-  requestedByStudioUser StudioUser? @relation("StudioUserRequestedPublications", fields: [requestedByStudioUserId], references: [id], onDelete: SetNull)
+  tenant                Tenant         @relation(fields: [tenantId], references: [id])
+  site                  Site           @relation(fields: [siteId], references: [id])
+  project               ContentProject @relation(fields: [projectId], references: [id])
+  version               ContentVersion @relation(fields: [versionId], references: [id])
+  requestedByStudioUser StudioUser?    @relation("StudioUserRequestedPublications", fields: [requestedByStudioUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, siteId, status])
   @@index([tenantId, projectId, versionId])
   @@index([tenantId, requestedByStudioUserId])
-  @@unique([tenantId, idempotencyKey])
+  // Uniqueness on (tenantId, idempotencyKey) is a partial unique index
+  // created manually in migration 20260824000000_social_connections_and_web_discovery
+  // (WHERE idempotency_key IS NOT NULL) — Prisma cannot model partial indexes.
   @@map("publication_jobs")
 }
 
 model AssetVariant {
-  id             String      @id @default(uuid()) @db.Uuid
-  tenantId       String      @db.Uuid @map("tenant_id")
-  siteId         String?     @db.Uuid @map("site_id")
-  contentImageId String      @db.Uuid @map("content_image_id")
-  kind           AssetKind   @default(original)
-  storagePath    String      @map("storage_path")
-  mimeType       String      @map("mime_type")
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  siteId         String?   @map("site_id") @db.Uuid
+  contentImageId String    @map("content_image_id") @db.Uuid
+  kind           AssetKind @default(original)
+  storagePath    String    @map("storage_path")
+  mimeType       String    @map("mime_type")
   width          Int?
   height         Int?
-  createdAt      DateTime    @default(now()) @map("created_at")
-  updatedAt      DateTime    @updatedAt @map("updated_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  tenant         Tenant      @relation(fields: [tenantId], references: [id])
-  site           Site?       @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  contentImage   ContentImage @relation(fields: [contentImageId], references: [id], onDelete: Cascade)
+  tenant       Tenant       @relation(fields: [tenantId], references: [id])
+  site         Site?        @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  contentImage ContentImage @relation(fields: [contentImageId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, contentImageId, kind])
   @@map("asset_variants")
 }
 
 model StudioIdentityProvider {
-  id                    String                   @id @default(uuid()) @db.Uuid
-  tenantId              String                   @unique @db.Uuid @map("tenant_id")
-  type                  StudioIdentityProviderType @default(oidc)
-  enabled               Boolean                  @default(false)
-  issuer                String
-  clientId              String                   @map("client_id")
-  clientSecretCiphertext String?                 @map("client_secret_ciphertext")
-  scopes                String                   @default("openid profile email")
-  claimMappings         Json?                    @map("claim_mappings")
-  provisioningMode      StudioProvisioningMode   @default(invite_only) @map("provisioning_mode")
-  createdAt             DateTime                 @default(now()) @map("created_at")
-  updatedAt             DateTime                 @updatedAt @map("updated_at")
+  id                     String                     @id @default(uuid()) @db.Uuid
+  tenantId               String                     @unique @map("tenant_id") @db.Uuid
+  type                   StudioIdentityProviderType @default(oidc)
+  enabled                Boolean                    @default(false)
+  issuer                 String
+  clientId               String                     @map("client_id")
+  clientSecretCiphertext String?                    @map("client_secret_ciphertext")
+  scopes                 String                     @default("openid profile email")
+  claimMappings          Json?                      @map("claim_mappings")
+  provisioningMode       StudioProvisioningMode     @default(invite_only) @map("provisioning_mode")
+  createdAt              DateTime                   @default(now()) @map("created_at")
+  updatedAt              DateTime                   @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -710,17 +724,17 @@ model StudioIdentityProvider {
 }
 
 model StudioAccount {
-  id              String             @id @default(uuid()) @db.Uuid
-  email           String             @unique
-  passwordHash    String?            @map("password_hash")
-  googleSubject   String?            @unique @map("google_subject")
-  emailVerifiedAt DateTime?          @map("email_verified_at")
-  lastWorkspaceId String?            @db.Uuid @map("last_workspace_id")
-  displayName     String?            @map("display_name")
-  avatarUrl       String?            @map("avatar_url")
+  id              String              @id @default(uuid()) @db.Uuid
+  email           String              @unique
+  passwordHash    String?             @map("password_hash")
+  googleSubject   String?             @unique @map("google_subject")
+  emailVerifiedAt DateTime?           @map("email_verified_at")
+  lastWorkspaceId String?             @map("last_workspace_id") @db.Uuid
+  displayName     String?             @map("display_name")
+  avatarUrl       String?             @map("avatar_url")
   status          StudioAccountStatus @default(invited)
-  createdAt       DateTime           @default(now()) @map("created_at")
-  updatedAt       DateTime           @updatedAt @map("updated_at")
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
 
   lastWorkspace Tenant?              @relation("StudioAccountLastWorkspace", fields: [lastWorkspaceId], references: [id], onDelete: SetNull)
   users         StudioUser[]
@@ -731,14 +745,14 @@ model StudioAccount {
 }
 
 model StudioAccountToken {
-  id         String                @id @default(uuid()) @db.Uuid
-  accountId  String                @db.Uuid @map("account_id")
+  id         String                 @id @default(uuid()) @db.Uuid
+  accountId  String                 @map("account_id") @db.Uuid
   kind       StudioAccountTokenKind
-  tokenHash  String                @unique @map("token_hash")
-  expiresAt  DateTime              @map("expires_at")
-  consumedAt DateTime?             @map("consumed_at")
-  createdAt  DateTime              @default(now()) @map("created_at")
-  updatedAt  DateTime              @updatedAt @map("updated_at")
+  tokenHash  String                 @unique @map("token_hash")
+  expiresAt  DateTime               @map("expires_at")
+  consumedAt DateTime?              @map("consumed_at")
+  createdAt  DateTime               @default(now()) @map("created_at")
+  updatedAt  DateTime               @updatedAt @map("updated_at")
 
   account StudioAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
@@ -748,35 +762,35 @@ model StudioAccountToken {
 }
 
 model StudioUser {
-  id           String           @id @default(uuid()) @db.Uuid
-  tenantId     String           @db.Uuid @map("tenant_id")
-  accountId    String           @db.Uuid @map("account_id")
-  email        String
-  displayName  String           @map("display_name")
-  avatarUrl    String?          @map("avatar_url")
-  status       StudioUserStatus @default(invited)
-  oidcSubject  String?          @map("oidc_subject")
-  oidcIssuer   String?          @map("oidc_issuer")
-  lastLoginAt  DateTime?        @map("last_login_at")
-  createdAt    DateTime         @default(now()) @map("created_at")
-  updatedAt    DateTime         @updatedAt @map("updated_at")
+  id          String           @id @default(uuid()) @db.Uuid
+  tenantId    String           @map("tenant_id") @db.Uuid
+  accountId   String           @map("account_id") @db.Uuid
+  email       String
+  displayName String           @map("display_name")
+  avatarUrl   String?          @map("avatar_url")
+  status      StudioUserStatus @default(invited)
+  oidcSubject String?          @map("oidc_subject")
+  oidcIssuer  String?          @map("oidc_issuer")
+  lastLoginAt DateTime?        @map("last_login_at")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  account StudioAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  roles StudioUserRole[]
-  sessions StudioUserSession[]
-  invitations StudioInvitation[] @relation("StudioInvitationUser")
-  createdInvitations StudioInvitation[] @relation("StudioInvitationCreator")
-  launchTickets StudioLaunchTicket[]
-  approvedVersions ContentVersion[] @relation("StudioUserApprovedVersions")
-  requestedPublications PublicationJob[] @relation("StudioUserRequestedPublications")
-  createdPromptPresets StudioPromptPreset[] @relation("StudioPromptPresetCreatedBy")
-  updatedPromptPresets StudioPromptPreset[] @relation("StudioPromptPresetUpdatedBy")
-  createdPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionCreatedBy")
-  approvedPromptVersions StudioPromptVersion[] @relation("StudioPromptVersionApprovedBy")
+  tenant                   Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account                  StudioAccount            @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  roles                    StudioUserRole[]
+  sessions                 StudioUserSession[]
+  invitations              StudioInvitation[]       @relation("StudioInvitationUser")
+  createdInvitations       StudioInvitation[]       @relation("StudioInvitationCreator")
+  launchTickets            StudioLaunchTicket[]
+  approvedVersions         ContentVersion[]         @relation("StudioUserApprovedVersions")
+  requestedPublications    PublicationJob[]         @relation("StudioUserRequestedPublications")
+  createdPromptPresets     StudioPromptPreset[]     @relation("StudioPromptPresetCreatedBy")
+  updatedPromptPresets     StudioPromptPreset[]     @relation("StudioPromptPresetUpdatedBy")
+  createdPromptVersions    StudioPromptVersion[]    @relation("StudioPromptVersionCreatedBy")
+  approvedPromptVersions   StudioPromptVersion[]    @relation("StudioPromptVersionApprovedBy")
   createdPromptAssignments StudioPromptAssignment[] @relation("StudioPromptAssignmentCreatedBy")
-  auditLogs AuditLog[] @relation("AuditLogActor")
-  editorialPlanItems EditorialPlanItem[] @relation("EditorialPlanItemAssignee")
+  auditLogs                AuditLog[]               @relation("AuditLogActor")
+  editorialPlanItems       EditorialPlanItem[]      @relation("EditorialPlanItemAssignee")
 
   @@unique([tenantId, email])
   @@index([accountId])
@@ -787,7 +801,7 @@ model StudioUser {
 
 model StudioRole {
   id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid @map("tenant_id")
+  tenantId    String   @map("tenant_id") @db.Uuid
   key         String
   name        String
   description String?
@@ -795,9 +809,9 @@ model StudioRole {
   createdAt   DateTime @default(now()) @map("created_at")
   updatedAt   DateTime @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   permissions StudioRolePermission[]
-  users StudioUserRole[]
+  users       StudioUserRole[]
 
   @@unique([tenantId, key])
   @@map("studio_roles")
@@ -805,7 +819,7 @@ model StudioRole {
 
 model StudioRolePermission {
   id         String   @id @default(uuid()) @db.Uuid
-  roleId     String   @db.Uuid @map("role_id")
+  roleId     String   @map("role_id") @db.Uuid
   permission String
   createdAt  DateTime @default(now()) @map("created_at")
 
@@ -817,8 +831,8 @@ model StudioRolePermission {
 
 model StudioUserRole {
   id           String   @id @default(uuid()) @db.Uuid
-  studioUserId String   @db.Uuid @map("studio_user_id")
-  studioRoleId String   @db.Uuid @map("studio_role_id")
+  studioUserId String   @map("studio_user_id") @db.Uuid
+  studioRoleId String   @map("studio_role_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
 
   user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
@@ -831,19 +845,19 @@ model StudioUserRole {
 
 model StudioInvitation {
   id              String                 @id @default(uuid()) @db.Uuid
-  tenantId        String                 @db.Uuid @map("tenant_id")
-  studioUserId    String?                @db.Uuid @map("studio_user_id")
+  tenantId        String                 @map("tenant_id") @db.Uuid
+  studioUserId    String?                @map("studio_user_id") @db.Uuid
   email           String
   displayName     String?                @map("display_name")
   status          StudioInvitationStatus @default(pending)
   tokenHash       String?                @unique @map("token_hash")
-  createdByUserId String?                @db.Uuid @map("created_by_user_id")
+  createdByUserId String?                @map("created_by_user_id") @db.Uuid
   acceptedAt      DateTime?              @map("accepted_at")
   createdAt       DateTime               @default(now()) @map("created_at")
   updatedAt       DateTime               @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user StudioUser? @relation("StudioInvitationUser", fields: [studioUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user          StudioUser? @relation("StudioInvitationUser", fields: [studioUserId], references: [id], onDelete: SetNull)
   createdByUser StudioUser? @relation("StudioInvitationCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, email, status])
@@ -851,41 +865,41 @@ model StudioInvitation {
 }
 
 model StudioUserSession {
-  id           String   @id @default(uuid()) @db.Uuid
-  tenantId     String   @db.Uuid @map("tenant_id")
-  studioUserId String   @db.Uuid @map("studio_user_id")
+  id           String                @id @default(uuid()) @db.Uuid
+  tenantId     String                @map("tenant_id") @db.Uuid
+  studioUserId String                @map("studio_user_id") @db.Uuid
   authMode     StudioSessionAuthMode @default(oidc) @map("auth_mode")
-  tokenHash    String   @unique @map("token_hash")
-  expiresAt    DateTime @map("expires_at")
-  lastSeenAt   DateTime? @map("last_seen_at")
-  revokedAt    DateTime? @map("revoked_at")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  tokenHash    String                @unique @map("token_hash")
+  expiresAt    DateTime              @map("expires_at")
+  lastSeenAt   DateTime?             @map("last_seen_at")
+  revokedAt    DateTime?             @map("revoked_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, studioUserId, revokedAt])
   @@map("studio_user_sessions")
 }
 
 model StudioLaunchTicket {
-  id                   String   @id @default(uuid()) @db.Uuid
-  tenantId             String   @db.Uuid @map("tenant_id")
-  studioUserId         String   @db.Uuid @map("studio_user_id")
-  tokenHash            String   @unique @map("token_hash")
-  jti                  String   @unique
-  requestedEmail       String   @map("requested_email")
-  requestedDisplayName String?  @map("requested_display_name")
-  sourceApp            String   @map("source_app")
-  returnTo             String   @map("return_to")
-  expiresAt            DateTime @map("expires_at")
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  studioUserId         String    @map("studio_user_id") @db.Uuid
+  tokenHash            String    @unique @map("token_hash")
+  jti                  String    @unique
+  requestedEmail       String    @map("requested_email")
+  requestedDisplayName String?   @map("requested_display_name")
+  sourceApp            String    @map("source_app")
+  returnTo             String    @map("return_to")
+  expiresAt            DateTime  @map("expires_at")
   consumedAt           DateTime? @map("consumed_at")
-  createdAt            DateTime @default(now()) @map("created_at")
-  updatedAt            DateTime @updatedAt @map("updated_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   StudioUser @relation(fields: [studioUserId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, studioUserId, consumedAt])
   @@index([expiresAt])
@@ -893,25 +907,25 @@ model StudioLaunchTicket {
 }
 
 model StudioPromptPreset {
-  id              String            @id @default(uuid()) @db.Uuid
-  tenantId        String            @db.Uuid @map("tenant_id")
-  siteId          String?           @db.Uuid @map("site_id")
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  siteId          String?             @map("site_id") @db.Uuid
   key             String
   name            String
   surface         StudioPromptSurface
-  scope           StudioPromptScope @default(global)
+  scope           StudioPromptScope   @default(global)
   description     String?
-  createdByUserId String?           @db.Uuid @map("created_by_user_id")
-  updatedByUserId String?           @db.Uuid @map("updated_by_user_id")
-  createdAt       DateTime          @default(now()) @map("created_at")
-  updatedAt       DateTime          @updatedAt @map("updated_at")
+  createdByUserId String?             @map("created_by_user_id") @db.Uuid
+  updatedByUserId String?             @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  createdByUser StudioUser? @relation("StudioPromptPresetCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  updatedByUser StudioUser? @relation("StudioPromptPresetUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
-  versions StudioPromptVersion[]
-  assignments StudioPromptAssignment[]
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site?                    @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  createdByUser StudioUser?              @relation("StudioPromptPresetCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  updatedByUser StudioUser?              @relation("StudioPromptPresetUpdatedBy", fields: [updatedByUserId], references: [id], onDelete: SetNull)
+  versions      StudioPromptVersion[]
+  assignments   StudioPromptAssignment[]
 
   @@unique([tenantId, key])
   @@index([tenantId, surface, scope, siteId])
@@ -919,28 +933,28 @@ model StudioPromptPreset {
 }
 
 model StudioPromptVersion {
-  id               String                   @id @default(uuid()) @db.Uuid
-  presetId         String                   @db.Uuid @map("preset_id")
-  versionNumber    Int                      @map("version_number")
+  id               String                    @id @default(uuid()) @db.Uuid
+  presetId         String                    @map("preset_id") @db.Uuid
+  versionNumber    Int                       @map("version_number")
   status           StudioPromptVersionStatus @default(draft)
-  systemTemplate   String?                  @db.Text @map("system_template")
-  userTemplate     String                   @db.Text @map("user_template")
-  variablesJson    Json?                    @map("variables_json")
-  notes            String?                  @db.Text
-  createdByUserId  String?                  @db.Uuid @map("created_by_user_id")
-  approvedByUserId String?                  @db.Uuid @map("approved_by_user_id")
-  approvedAt       DateTime?                @map("approved_at")
-  createdAt        DateTime                 @default(now()) @map("created_at")
-  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  systemTemplate   String?                   @map("system_template") @db.Text
+  userTemplate     String                    @map("user_template") @db.Text
+  variablesJson    Json?                     @map("variables_json")
+  notes            String?                   @db.Text
+  createdByUserId  String?                   @map("created_by_user_id") @db.Uuid
+  approvedByUserId String?                   @map("approved_by_user_id") @db.Uuid
+  approvedAt       DateTime?                 @map("approved_at")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
 
-  preset StudioPromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
-  createdByUser StudioUser? @relation("StudioPromptVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  approvedByUser StudioUser? @relation("StudioPromptVersionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
-  assignments StudioPromptAssignment[]
-  contentTexts ContentText[] @relation("ContentTextPromptVersion")
-  contentImages ContentImage[] @relation("ContentImagePromptVersion")
-  aiAudits AiAudit[] @relation("AiAuditPromptVersion")
-  socialContents SocialContent[] @relation("SocialContentPromptVersion")
+  preset         StudioPromptPreset       @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  createdByUser  StudioUser?              @relation("StudioPromptVersionCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  approvedByUser StudioUser?              @relation("StudioPromptVersionApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
+  assignments    StudioPromptAssignment[]
+  contentTexts   ContentText[]            @relation("ContentTextPromptVersion")
+  contentImages  ContentImage[]           @relation("ContentImagePromptVersion")
+  aiAudits       AiAudit[]                @relation("AiAuditPromptVersion")
+  socialContents SocialContent[]          @relation("SocialContentPromptVersion")
 
   @@unique([presetId, versionNumber])
   @@index([status])
@@ -949,21 +963,21 @@ model StudioPromptVersion {
 
 model StudioPromptAssignment {
   id              String              @id @default(uuid()) @db.Uuid
-  tenantId        String              @db.Uuid @map("tenant_id")
-  siteId          String?             @db.Uuid @map("site_id")
+  tenantId        String              @map("tenant_id") @db.Uuid
+  siteId          String?             @map("site_id") @db.Uuid
   surface         StudioPromptSurface
   assignmentKey   String              @map("assignment_key")
-  presetId        String              @db.Uuid @map("preset_id")
-  versionId       String              @db.Uuid @map("version_id")
-  createdByUserId String?             @db.Uuid @map("created_by_user_id")
+  presetId        String              @map("preset_id") @db.Uuid
+  versionId       String              @map("version_id") @db.Uuid
+  createdByUserId String?             @map("created_by_user_id") @db.Uuid
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  preset StudioPromptPreset @relation(fields: [presetId], references: [id], onDelete: Cascade)
-  version StudioPromptVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  createdByUser StudioUser? @relation("StudioPromptAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  preset        StudioPromptPreset  @relation(fields: [presetId], references: [id], onDelete: Cascade)
+  version       StudioPromptVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  createdByUser StudioUser?         @relation("StudioPromptAssignmentCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, surface, assignmentKey])
   @@index([tenantId, siteId, surface])
@@ -972,8 +986,8 @@ model StudioPromptAssignment {
 
 model ContentSource {
   id                     String            @id @default(uuid()) @db.Uuid
-  tenantId               String            @db.Uuid @map("tenant_id")
-  siteId                 String?           @db.Uuid @map("site_id")
+  tenantId               String            @map("tenant_id") @db.Uuid
+  siteId                 String?           @map("site_id") @db.Uuid
   name                   String
   type                   ContentSourceType
   url                    String?
@@ -988,31 +1002,34 @@ model ContentSource {
   lastFetchedAt          DateTime?         @map("last_fetched_at")
   lastSuccessAt          DateTime?         @map("last_success_at")
   consecutiveFailures    Int               @default(0) @map("consecutive_failures")
+  qualityScore           Float?            @map("quality_score")
+  qualityTier            String?           @map("quality_tier")
+  lastDiscoveryAt        DateTime?         @map("last_discovery_at")
   configuration          Json?
   createdAt              DateTime          @default(now()) @map("created_at")
   updatedAt              DateTime          @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?        @relation(fields: [siteId], references: [id], onDelete: SetNull)
   items  SourceItem[]
 
-  @@index([tenantId, enabled, lastFetchedAt])
   @@unique([tenantId, name])
+  @@index([tenantId, enabled, lastFetchedAt])
   @@map("content_sources")
 }
 
 model SourceItem {
   id               String           @id @default(uuid()) @db.Uuid
-  tenantId         String           @db.Uuid @map("tenant_id")
-  sourceId         String           @db.Uuid @map("source_id")
-  clusterId        String?          @db.Uuid @map("cluster_id")
+  tenantId         String           @map("tenant_id") @db.Uuid
+  sourceId         String           @map("source_id") @db.Uuid
+  clusterId        String?          @map("cluster_id") @db.Uuid
   externalId       String           @map("external_id")
   canonicalUrl     String?          @map("canonical_url")
   sourceUrl        String?          @map("source_url")
   title            String
   description      String?          @db.Text
-  rawText          String?          @db.Text @map("raw_text")
-  cleanedText      String?          @db.Text @map("cleaned_text")
+  rawText          String?          @map("raw_text") @db.Text
+  cleanedText      String?          @map("cleaned_text") @db.Text
   author           String?
   publishedAt      DateTime?        @map("published_at")
   discoveredAt     DateTime         @default(now()) @map("discovered_at")
@@ -1029,11 +1046,12 @@ model SourceItem {
   scoreExplanation Json?            @map("score_explanation")
   createdAt        DateTime         @default(now()) @map("created_at")
 
-  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  source   ContentSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
-  cluster  StoryCluster? @relation(fields: [clusterId], references: [id], onDelete: SetNull)
-  projects ContentProject[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source             ContentSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  cluster            StoryCluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  projects           ContentProject[]
   editorialPlanItems EditorialPlanItem[]
+  webRetrievals      WebRetrieval[]
 
   @@unique([tenantId, sourceId, externalId])
   @@unique([tenantId, contentHash])
@@ -1043,21 +1061,23 @@ model SourceItem {
 }
 
 model StoryCluster {
-  id           String            @id @default(uuid()) @db.Uuid
-  tenantId     String            @db.Uuid @map("tenant_id")
-  primaryTopic String?           @map("primary_topic")
+  id           String             @id @default(uuid()) @db.Uuid
+  tenantId     String             @map("tenant_id") @db.Uuid
+  primaryTopic String?            @map("primary_topic")
   headline     String?
-  summary      String?           @db.Text
-  firstSeenAt  DateTime          @default(now()) @map("first_seen_at")
-  lastSeenAt   DateTime          @default(now()) @map("last_seen_at")
+  summary      String?            @db.Text
+  firstSeenAt  DateTime           @default(now()) @map("first_seen_at")
+  lastSeenAt   DateTime           @default(now()) @map("last_seen_at")
   score        Float?
   status       StoryClusterStatus @default(open)
-  sourceCount  Int               @default(0) @map("source_count")
+  sourceCount  Int                @default(0) @map("source_count")
+  updateCount  Int                @default(0) @map("update_count")
+  lastUpdateAt DateTime?          @map("last_update_at")
   metadata     Json?
-  createdAt    DateTime          @default(now()) @map("created_at")
-  updatedAt    DateTime          @updatedAt @map("updated_at")
+  createdAt    DateTime           @default(now()) @map("created_at")
+  updatedAt    DateTime           @updatedAt @map("updated_at")
 
-  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   items    SourceItem[]
   projects ContentProject[]
 
@@ -1067,9 +1087,9 @@ model StoryCluster {
 
 model SocialContent {
   id                    String                 @id @default(uuid()) @db.Uuid
-  tenantId              String                 @db.Uuid @map("tenant_id")
-  projectId             String                 @db.Uuid @map("project_id")
-  versionId             String                 @db.Uuid @map("version_id")
+  tenantId              String                 @map("tenant_id") @db.Uuid
+  projectId             String                 @map("project_id") @db.Uuid
+  versionId             String                 @map("version_id") @db.Uuid
   channel               SocialChannel
   contentType           SocialContentType      @map("content_type")
   body                  String                 @db.Text
@@ -1082,15 +1102,15 @@ model SocialContent {
   editorialStatus       SocialEditorialStatus  @default(draft) @map("editorial_status")
   threadPosition        Int?                   @map("thread_position")
   metadata              Json?
-  promptPresetVersionId String?                @db.Uuid @map("prompt_preset_version_id")
+  promptPresetVersionId String?                @map("prompt_preset_version_id") @db.Uuid
   createdAt             DateTime               @default(now()) @map("created_at")
   updatedAt             DateTime               @updatedAt @map("updated_at")
 
-  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  project            ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  version            ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  tenant              Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project             ContentProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version             ContentVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
   promptPresetVersion StudioPromptVersion? @relation("SocialContentPromptVersion", fields: [promptPresetVersionId], references: [id], onDelete: SetNull)
-  publications       Publication[]
+  publications        Publication[]
 
   @@index([tenantId, projectId, channel])
   @@index([tenantId, versionId, channel])
@@ -1098,133 +1118,146 @@ model SocialContent {
 }
 
 model PublishingAccount {
-  id                String                  @id @default(uuid()) @db.Uuid
-  tenantId          String                  @db.Uuid @map("tenant_id")
-  siteId            String?                 @db.Uuid @map("site_id")
-  platform          PublishingAccountPlatform
-  displayName       String                  @map("display_name")
-  externalAccountId String?                 @map("external_account_id")
-  credentialsRef    String?                 @map("credentials_ref")
-  enabled           Boolean                 @default(true)
-  status            PublishingAccountStatus @default(pending)
-  configuration     Json?
-  lastVerifiedAt    DateTime?               @map("last_verified_at")
-  createdAt         DateTime                @default(now()) @map("created_at")
-  updatedAt         DateTime                @updatedAt @map("updated_at")
+  id                    String                    @id @default(uuid()) @db.Uuid
+  tenantId              String                    @map("tenant_id") @db.Uuid
+  siteId                String?                   @map("site_id") @db.Uuid
+  platform              PublishingAccountPlatform
+  displayName           String                    @map("display_name")
+  externalAccountId     String?                   @map("external_account_id")
+  credentialsRef        String?                   @map("credentials_ref")
+  provider              String                    @default("legacy") @map("provider")
+  providerProfileId     String?                   @map("provider_profile_id")
+  providerAccountId     String?                   @map("provider_account_id")
+  username              String?
+  avatarUrl             String?                   @map("avatar_url")
+  credentialsCiphertext String?                   @map("credentials_ciphertext") @db.Text
+  connectionStatus      String?                   @map("connection_status")
+  connectionMetadata    Json?                     @map("connection_metadata")
+  connectedAt           DateTime?                 @map("connected_at")
+  lastError             String?                   @map("last_error") @db.Text
+  enabled               Boolean                   @default(true)
+  status                PublishingAccountStatus   @default(pending)
+  configuration         Json?
+  lastVerifiedAt        DateTime?                 @map("last_verified_at")
+  createdAt             DateTime                  @default(now()) @map("created_at")
+  updatedAt             DateTime                  @updatedAt @map("updated_at")
 
-  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site         Site?         @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  publications Publication[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site               Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  publications       Publication[]
   editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, platform, status])
+  @@index([tenantId, provider])
   @@map("publishing_accounts")
 }
 
 model Publication {
-  id              String           @id @default(uuid()) @db.Uuid
-  tenantId        String           @db.Uuid @map("tenant_id")
-  projectId       String           @db.Uuid @map("project_id")
-  versionId       String           @db.Uuid @map("version_id")
-  channel         PublicationChannel
-  accountId       String?          @db.Uuid @map("account_id")
-  siteId          String?          @db.Uuid @map("site_id")
-  socialContentId String?          @db.Uuid @map("social_content_id")
-  campaignId      String?          @db.Uuid @map("campaign_id")
-  publicationJobId String?         @map("publication_job_id")
-  status          PublicationState @default(draft)
-  scheduledFor    DateTime?        @map("scheduled_for")
-  publishedAt     DateTime?        @map("published_at")
-  externalId      String?          @map("external_id")
-  externalUrl     String?          @map("external_url")
-  currentAttempt  Int              @default(0) @map("current_attempt")
-  retryCount      Int              @default(0) @map("retry_count")
-  nextRetryAt     DateTime?        @map("next_retry_at")
-  lastError       String?          @db.Text @map("last_error")
-  failureClass    String?          @map("failure_class")
-  failureReason   String?          @map("failure_reason")
-  manualOverride  Boolean          @default(false) @map("manual_override")
-  scheduleLocked  Boolean          @default(false) @map("schedule_locked")
-  idempotencyKey  String?          @map("idempotency_key")
-  metadata        Json?
-  createdAt       DateTime         @default(now()) @map("created_at")
-  updatedAt       DateTime         @updatedAt @map("updated_at")
+  id               String             @id @default(uuid()) @db.Uuid
+  tenantId         String             @map("tenant_id") @db.Uuid
+  projectId        String             @map("project_id") @db.Uuid
+  versionId        String             @map("version_id") @db.Uuid
+  channel          PublicationChannel
+  accountId        String?            @map("account_id") @db.Uuid
+  siteId           String?            @map("site_id") @db.Uuid
+  socialContentId  String?            @map("social_content_id") @db.Uuid
+  campaignId       String?            @map("campaign_id") @db.Uuid
+  publicationJobId String?            @map("publication_job_id")
+  status           PublicationState   @default(draft)
+  scheduledFor     DateTime?          @map("scheduled_for")
+  publishedAt      DateTime?          @map("published_at")
+  externalId       String?            @map("external_id")
+  externalUrl      String?            @map("external_url")
+  currentAttempt   Int                @default(0) @map("current_attempt")
+  retryCount       Int                @default(0) @map("retry_count")
+  nextRetryAt      DateTime?          @map("next_retry_at")
+  lastError        String?            @map("last_error") @db.Text
+  failureClass     String?            @map("failure_class")
+  failureReason    String?            @map("failure_reason")
+  manualOverride   Boolean            @default(false) @map("manual_override")
+  scheduleLocked   Boolean            @default(false) @map("schedule_locked")
+  idempotencyKey   String?            @map("idempotency_key")
+  metadata         Json?
+  createdAt        DateTime           @default(now()) @map("created_at")
+  updatedAt        DateTime           @updatedAt @map("updated_at")
 
-  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  project       ContentProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  version       ContentVersion      @relation(fields: [versionId], references: [id], onDelete: Cascade)
-  account       PublishingAccount?  @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  site          Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  socialContent SocialContent?      @relation(fields: [socialContentId], references: [id], onDelete: SetNull)
-  campaign      Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project       ContentProject       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version       ContentVersion       @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  account       PublishingAccount?   @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  site          Site?                @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  socialContent SocialContent?       @relation(fields: [socialContentId], references: [id], onDelete: SetNull)
+  campaign      Campaign?            @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   attempts      PublicationAttempt[]
 
   @@index([tenantId, status, scheduledFor])
   @@index([tenantId, projectId, channel])
   @@index([tenantId, channel, status])
-  @@unique([tenantId, idempotencyKey])
+  // Uniqueness on (tenantId, idempotencyKey) is a partial unique index
+  // created manually in migration 20260824000000_social_connections_and_web_discovery
+  // (WHERE idempotency_key IS NOT NULL) — Prisma cannot model partial indexes.
   @@map("publications")
 }
 
 model PublicationAttempt {
-  id              String                  @id @default(uuid()) @db.Uuid
-  tenantId        String                  @db.Uuid @map("tenant_id")
-  publicationId   String                  @db.Uuid @map("publication_id")
-  attemptNumber   Int                     @map("attempt_number")
+  id              String                   @id @default(uuid()) @db.Uuid
+  tenantId        String                   @map("tenant_id") @db.Uuid
+  publicationId   String                   @map("publication_id") @db.Uuid
+  attemptNumber   Int                      @map("attempt_number")
   status          PublicationAttemptStatus @default(queued)
-  startedAt       DateTime?               @map("started_at")
-  finishedAt      DateTime?               @map("finished_at")
-  externalId      String?                 @map("external_id")
-  externalUrl     String?                 @map("external_url")
-  requestPayload  Json?                   @map("request_payload")
-  responsePayload Json?                   @map("response_payload")
-  error           String?                 @db.Text
-  errorClass      String?                 @map("error_class")
-  createdAt       DateTime                @default(now()) @map("created_at")
-  updatedAt       DateTime                @updatedAt @map("updated_at")
+  startedAt       DateTime?                @map("started_at")
+  finishedAt      DateTime?                @map("finished_at")
+  externalId      String?                  @map("external_id")
+  externalUrl     String?                  @map("external_url")
+  requestPayload  Json?                    @map("request_payload")
+  responsePayload Json?                    @map("response_payload")
+  error           String?                  @db.Text
+  errorClass      String?                  @map("error_class")
+  createdAt       DateTime                 @default(now()) @map("created_at")
+  updatedAt       DateTime                 @updatedAt @map("updated_at")
 
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   publication Publication @relation(fields: [publicationId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, publicationId, attemptNumber])
+  @@index([tenantId, publicationId, attemptNumber], map: "publication_attempts_tenant_id_publication_id_attempt_number_id")
   @@map("publication_attempts")
 }
 
 model AutomationPolicy {
-  id                           String          @id @default(uuid()) @db.Uuid
-  tenantId                     String          @db.Uuid @map("tenant_id")
-  siteId                       String?         @db.Uuid @map("site_id")
-  enabled                      Boolean         @default(false)
-  state                        AutomationState @default(active)
-  pausedReason                 String?         @map("paused_reason")
-  timezone                     String          @default("Europe/Madrid")
-  articlesPerDay               Int             @default(3) @map("articles_per_day")
-  maxArticlesPerDay            Int             @default(6) @map("max_articles_per_day")
-  xPostsPerDay                 Int             @default(5) @map("x_posts_per_day")
-  instagramPostsPerDay         Int             @default(2) @map("instagram_posts_per_day")
-  minimumMinutesBetweenArticles Int            @default(120) @map("minimum_minutes_between_articles")
-  activeDaysOfWeek             Json?           @map("active_days_of_week")
-  publishingWindows            Json?           @map("publishing_windows")
-  autoGenerate                 Boolean         @default(false) @map("auto_generate")
-  autoApprove                  Boolean         @default(false) @map("auto_approve")
-  autoSchedule                 Boolean         @default(false) @map("auto_schedule")
-  autoPublish                  Boolean         @default(false) @map("auto_publish")
-  minimumStoryScore            Float           @default(0.5) @map("minimum_story_score")
-  categories                   Json?
-  excludedCategories           Json?           @map("excluded_categories")
-  priorityTopics               Json?           @map("priority_topics")
-  imageRequired                Boolean         @default(true) @map("image_required")
-  socialRequired               Boolean         @default(true) @map("social_required")
-  maximumQueueSize             Int             @default(20) @map("maximum_queue_size")
-  articlesPerHour              Int             @default(2) @map("articles_per_hour")
-  socialPostsPerHour           Int             @default(6) @map("social_posts_per_hour")
-  maximumDailySocial           Int             @default(12) @map("maximum_daily_social")
-  socialTimingMinutesX         Int             @default(5) @map("social_timing_minutes_x")
-  socialTimingMinutesInstagram Int             @default(60) @map("social_timing_minutes_instagram")
-  sourceSelectionRules         Json?           @map("source_selection_rules")
-  updatedByStudioUserId        String?         @db.Uuid @map("updated_by_studio_user_id")
-  createdAt                    DateTime        @default(now()) @map("created_at")
-  updatedAt                    DateTime        @updatedAt @map("updated_at")
+  id                            String          @id @default(uuid()) @db.Uuid
+  tenantId                      String          @map("tenant_id") @db.Uuid
+  siteId                        String?         @map("site_id") @db.Uuid
+  enabled                       Boolean         @default(false)
+  state                         AutomationState @default(active)
+  pausedReason                  String?         @map("paused_reason")
+  timezone                      String          @default("Europe/Madrid")
+  articlesPerDay                Int             @default(3) @map("articles_per_day")
+  maxArticlesPerDay             Int             @default(6) @map("max_articles_per_day")
+  xPostsPerDay                  Int             @default(5) @map("x_posts_per_day")
+  instagramPostsPerDay          Int             @default(2) @map("instagram_posts_per_day")
+  minimumMinutesBetweenArticles Int             @default(120) @map("minimum_minutes_between_articles")
+  activeDaysOfWeek              Json?           @map("active_days_of_week")
+  publishingWindows             Json?           @map("publishing_windows")
+  autoGenerate                  Boolean         @default(false) @map("auto_generate")
+  autoApprove                   Boolean         @default(false) @map("auto_approve")
+  autoSchedule                  Boolean         @default(false) @map("auto_schedule")
+  autoPublish                   Boolean         @default(false) @map("auto_publish")
+  minimumStoryScore             Float           @default(0.5) @map("minimum_story_score")
+  categories                    Json?
+  excludedCategories            Json?           @map("excluded_categories")
+  priorityTopics                Json?           @map("priority_topics")
+  imageRequired                 Boolean         @default(true) @map("image_required")
+  socialRequired                Boolean         @default(true) @map("social_required")
+  maximumQueueSize              Int             @default(20) @map("maximum_queue_size")
+  articlesPerHour               Int             @default(2) @map("articles_per_hour")
+  socialPostsPerHour            Int             @default(6) @map("social_posts_per_hour")
+  maximumDailySocial            Int             @default(12) @map("maximum_daily_social")
+  socialTimingMinutesX          Int             @default(5) @map("social_timing_minutes_x")
+  socialTimingMinutesInstagram  Int             @default(60) @map("social_timing_minutes_instagram")
+  sourceSelectionRules          Json?           @map("source_selection_rules")
+  updatedByStudioUserId         String?         @map("updated_by_studio_user_id") @db.Uuid
+  createdAt                     DateTime        @default(now()) @map("created_at")
+  updatedAt                     DateTime        @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
@@ -1234,21 +1267,21 @@ model AutomationPolicy {
 }
 
 model Campaign {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid @map("tenant_id")
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
   name        String
   description String?
   startAt     DateTime? @map("start_at")
   endAt       DateTime? @map("end_at")
   tags        Json?
-  status      String   @default("active")
+  status      String    @default("active")
   metadata    Json?
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
 
-  tenant       Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  projects     ContentProject[]
-  publications Publication[]
+  tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects           ContentProject[]
+  publications       Publication[]
   editorialPlanItems EditorialPlanItem[]
 
   @@index([tenantId, status])
@@ -1257,7 +1290,7 @@ model Campaign {
 
 model EditorialBrief {
   id                   String   @id @default(uuid()) @db.Uuid
-  tenantId             String   @db.Uuid @map("tenant_id")
+  tenantId             String   @map("tenant_id") @db.Uuid
   name                 String
   topic                String?
   audience             String?
@@ -1273,8 +1306,8 @@ model EditorialBrief {
   createdAt            DateTime @default(now()) @map("created_at")
   updatedAt            DateTime @updatedAt @map("updated_at")
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  projects ContentProject[]
+  tenant         Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  projects       ContentProject[]
   editorialPlans EditorialPlan[]
 
   @@index([tenantId, active])
@@ -1282,32 +1315,32 @@ model EditorialBrief {
 }
 
 model EditorialPlan {
-  id                String             @id @default(uuid()) @db.Uuid
-  tenantId          String             @db.Uuid @map("tenant_id")
-  siteId            String?            @db.Uuid @map("site_id")
-  briefId           String?            @db.Uuid @map("brief_id")
-  name              String
-  status            EditorialPlanStatus @default(draft)
-  dateFrom          DateTime           @map("date_from")
-  dateTo            DateTime           @map("date_to")
-  objective         String?
-  channels         Json?
-  accountIds       Json?               @map("account_ids")
-  frequency        String?
-  timezone         String              @default("Europe/Madrid")
-  configuration    Json?
-  provider         String?
-  model            String?
-  promptVersion    String?              @map("prompt_version")
-  generatedOutput  Json?                @map("generated_output")
-  error            String?              @db.Text
-  createdAt        DateTime             @default(now()) @map("created_at")
-  updatedAt        DateTime             @updatedAt @map("updated_at")
+  id              String              @id @default(uuid()) @db.Uuid
+  tenantId        String              @map("tenant_id") @db.Uuid
+  siteId          String?             @map("site_id") @db.Uuid
+  briefId         String?             @map("brief_id") @db.Uuid
+  name            String
+  status          EditorialPlanStatus @default(draft)
+  dateFrom        DateTime            @map("date_from")
+  dateTo          DateTime            @map("date_to")
+  objective       String?
+  channels        Json?
+  accountIds      Json?               @map("account_ids")
+  frequency       String?
+  timezone        String              @default("Europe/Madrid")
+  configuration   Json?
+  provider        String?
+  model           String?
+  promptVersion   String?             @map("prompt_version")
+  generatedOutput Json?               @map("generated_output")
+  error           String?             @db.Text
+  createdAt       DateTime            @default(now()) @map("created_at")
+  updatedAt       DateTime            @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  brief EditorialBrief? @relation(fields: [briefId], references: [id], onDelete: SetNull)
-  items EditorialPlanItem[]
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  brief  EditorialBrief?     @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  items  EditorialPlanItem[]
 
   @@index([tenantId, status, dateFrom, dateTo])
   @@index([tenantId, siteId, createdAt])
@@ -1315,53 +1348,53 @@ model EditorialPlan {
 }
 
 model EditorialPlanItem {
-  id                    String                  @id @default(uuid()) @db.Uuid
-  tenantId              String                  @db.Uuid @map("tenant_id")
-  planId                String                  @db.Uuid @map("plan_id")
-  siteId                String?                 @db.Uuid @map("site_id")
-  accountId             String?                 @db.Uuid @map("account_id")
-  campaignId            String?                 @db.Uuid @map("campaign_id")
-  sourceItemId          String?                 @db.Uuid @map("source_item_id")
-  projectId             String?                 @db.Uuid @map("project_id")
-  assignedUserId        String?                 @db.Uuid @map("assigned_user_id")
-  scheduledFor          DateTime?               @map("scheduled_for")
-  title                 String
-  workingTitle          String?                 @map("working_title")
-  topic                 String?
-  channel               PublicationChannel
-  newsOrEvergreen       String?                 @map("news_or_evergreen")
-  objective             String?
-  audience              String?
-  searchIntent          String?                 @map("search_intent")
-  primaryKeyword        String?                 @map("primary_keyword")
-  secondaryKeywords     Json?                   @map("secondary_keywords")
-  relatedEntities       Json?                   @map("related_entities")
-  suggestedSlug         String?                 @map("suggested_slug")
-  seoTitle              String?                 @map("seo_title")
-  metaDescription       String?                 @map("meta_description")
-  socialHook            String?                 @map("social_hook")
-  cta                   String?
-  suggestedHashtags     Json?                   @map("suggested_hashtags")
-  imageConcept          String?                 @map("image_concept")
-  imageRequirements     String?                 @map("image_requirements")
-  priority              Int                     @default(0)
-  status                EditorialPlanItemStatus @default(proposed)
-  contentGenerationStatus String                @default("pending") @map("content_generation_status")
-  approvalStatus        String                @default("pending") @map("approval_status")
-  publicationStatus     String?               @map("publication_status")
-  notes                 String?                 @db.Text
-  metadata              Json?
-  createdAt             DateTime                @default(now()) @map("created_at")
-  updatedAt             DateTime                @updatedAt @map("updated_at")
+  id                      String                  @id @default(uuid()) @db.Uuid
+  tenantId                String                  @map("tenant_id") @db.Uuid
+  planId                  String                  @map("plan_id") @db.Uuid
+  siteId                  String?                 @map("site_id") @db.Uuid
+  accountId               String?                 @map("account_id") @db.Uuid
+  campaignId              String?                 @map("campaign_id") @db.Uuid
+  sourceItemId            String?                 @map("source_item_id") @db.Uuid
+  projectId               String?                 @map("project_id") @db.Uuid
+  assignedUserId          String?                 @map("assigned_user_id") @db.Uuid
+  scheduledFor            DateTime?               @map("scheduled_for")
+  title                   String
+  workingTitle            String?                 @map("working_title")
+  topic                   String?
+  channel                 PublicationChannel
+  newsOrEvergreen         String?                 @map("news_or_evergreen")
+  objective               String?
+  audience                String?
+  searchIntent            String?                 @map("search_intent")
+  primaryKeyword          String?                 @map("primary_keyword")
+  secondaryKeywords       Json?                   @map("secondary_keywords")
+  relatedEntities         Json?                   @map("related_entities")
+  suggestedSlug           String?                 @map("suggested_slug")
+  seoTitle                String?                 @map("seo_title")
+  metaDescription         String?                 @map("meta_description")
+  socialHook              String?                 @map("social_hook")
+  cta                     String?
+  suggestedHashtags       Json?                   @map("suggested_hashtags")
+  imageConcept            String?                 @map("image_concept")
+  imageRequirements       String?                 @map("image_requirements")
+  priority                Int                     @default(0)
+  status                  EditorialPlanItemStatus @default(proposed)
+  contentGenerationStatus String                  @default("pending") @map("content_generation_status")
+  approvalStatus          String                  @default("pending") @map("approval_status")
+  publicationStatus       String?                 @map("publication_status")
+  notes                   String?                 @db.Text
+  metadata                Json?
+  createdAt               DateTime                @default(now()) @map("created_at")
+  updatedAt               DateTime                @updatedAt @map("updated_at")
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  plan EditorialPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
-  site Site? @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  account PublishingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
-  sourceItem SourceItem? @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
-  project ContentProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
-  assignedUser StudioUser? @relation("EditorialPlanItemAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan         EditorialPlan      @relation(fields: [planId], references: [id], onDelete: Cascade)
+  site         Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  account      PublishingAccount? @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  campaign     Campaign?          @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  sourceItem   SourceItem?        @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+  project      ContentProject?    @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  assignedUser StudioUser?        @relation("EditorialPlanItemAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, planId, status])
   @@index([tenantId, channel, scheduledFor])
@@ -1372,12 +1405,12 @@ model EditorialPlanItem {
 
 model AuditLog {
   id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid @map("tenant_id")
+  tenantId    String   @map("tenant_id") @db.Uuid
   actorType   String   @map("actor_type")
-  actorUserId String?  @db.Uuid @map("actor_user_id")
+  actorUserId String?  @map("actor_user_id") @db.Uuid
   action      String
   entityType  String?  @map("entity_type")
-  entityId    String?  @db.Uuid @map("entity_id")
+  entityId    String?  @map("entity_id") @db.Uuid
   metadata    Json?
   createdAt   DateTime @default(now()) @map("created_at")
 
@@ -1387,4 +1420,211 @@ model AuditLog {
   @@index([tenantId, createdAt])
   @@index([tenantId, entityType, entityId])
   @@map("audit_logs")
+}
+
+// ────────────────────────────────────────────────────────────── Social connections
+
+model SocialConnectionSession {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  studioUserId  String?   @map("studio_user_id") @db.Uuid
+  siteId        String?   @map("site_id") @db.Uuid
+  platform      String
+  provider      String
+  stateHash     String    @unique @map("state_hash")
+  redirectUri   String?   @map("redirect_uri")
+  providerLink  String?   @map("provider_link") @db.Text
+  providerToken String?   @map("provider_token")
+  metadata      Json?
+  expiresAt     DateTime  @map("expires_at")
+  consumedAt    DateTime? @map("consumed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, platform, consumedAt])
+  @@index([expiresAt])
+  @@map("social_connection_sessions")
+}
+
+// ────────────────────────────────────────────────────────────── Web discovery
+
+model WebDiscoveryQuery {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  siteId           String?   @map("site_id") @db.Uuid
+  trigger          String    @default("scheduled") @map("trigger")
+  status           String    @default("planned")
+  category         String?
+  queryText        String    @map("query_text")
+  freshnessHours   Int       @default(24) @map("freshness_hours")
+  language         String?
+  country          String?
+  entities         Json?
+  topics           Json?
+  preferredDomains Json?     @map("preferred_domains")
+  excludedDomains  Json?     @map("excluded_domains")
+  reasoningSummary String?   @map("reasoning_summary") @db.Text
+  provider         String?
+  resultsJson      Json?     @map("results_json")
+  error            String?   @db.Text
+  executedAt       DateTime? @map("executed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, siteId, createdAt])
+  @@map("web_discovery_queries")
+}
+
+model DiscoveredDomain {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  domain         String
+  firstSeenAt    DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt     DateTime @default(now()) @map("last_seen_at")
+  discoveryCount Int      @default(0) @map("discovery_count")
+  blocked        Boolean  @default(false)
+  qualityScore   Float?   @map("quality_score")
+  tier           String?
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, domain])
+  @@index([tenantId, blocked, qualityScore])
+  @@map("discovered_domains")
+}
+
+model SourceQualityProfile {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  sourceId       String?  @map("source_id") @db.Uuid
+  domain         String
+  dimensionsJson Json?    @map("dimensions_json")
+  score          Float
+  tier           String
+  evaluatedAt    DateTime @default(now()) @map("evaluated_at")
+  evidence       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, sourceId])
+  @@index([tenantId, domain, evaluatedAt])
+  @@map("source_quality_profiles")
+}
+
+model SourceRecommendation {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  domain        String
+  sourceId      String?  @map("source_id") @db.Uuid
+  status        String   @default("open")
+  score         Float
+  searchesCount Int      @default(0) @map("searches_count")
+  reasonSummary String?  @map("reason_summary") @db.Text
+  lastSeenAt    DateTime @default(now()) @map("last_seen_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, domain])
+  @@index([tenantId, status, score])
+  @@map("source_recommendations")
+}
+
+model WebRetrieval {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  sourceItemId String?   @map("source_item_id") @db.Uuid
+  sourceId     String?   @map("source_id") @db.Uuid
+  url          String
+  contentHash  String    @map("content_hash")
+  status       String    @default("pending")
+  title        String?
+  publisher    String?
+  publishedAt  DateTime? @map("published_at")
+  articleText  String?   @map("article_text") @db.Text
+  entities     Json?
+  claims       Json?
+  provider     String?
+  tokensIn     Int       @default(0) @map("tokens_in")
+  tokensOut    Int       @default(0) @map("tokens_out")
+  retrievedAt  DateTime  @default(now()) @map("retrieved_at")
+  error        String?   @db.Text
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceItem SourceItem? @relation(fields: [sourceItemId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, sourceItemId])
+  @@index([tenantId, sourceId])
+  @@index([tenantId, contentHash])
+  @@map("web_retrievals")
+}
+
+model WebUsageRecord {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  siteId           String?  @map("site_id") @db.Uuid
+  provider         String
+  operation        String
+  queries          Int      @default(0)
+  urlsScraped      Int      @default(0) @map("urls_scraped")
+  tokensIn         Int      @default(0) @map("tokens_in")
+  tokensOut        Int      @default(0) @map("tokens_out")
+  estimatedCostUsd Decimal? @default(0) @map("estimated_cost_usd") @db.Decimal(12, 6)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, provider, operation, createdAt])
+  @@map("web_usage_records")
+}
+
+model DiscoveryConfig {
+  id                      String   @id @default(uuid()) @db.Uuid
+  tenantId                String   @map("tenant_id") @db.Uuid
+  siteId                  String?  @map("site_id") @db.Uuid
+  enabled                 Boolean  @default(true)
+  mode                    String   @default("recommend")
+  frequencyMinutes        Int      @default(30) @map("frequency_minutes")
+  languages               Json?
+  regions                 Json?
+  maxSearchesPerDay       Int      @default(100) @map("max_searches_per_day")
+  maxScrapesPerDay        Int      @default(250) @map("max_scrapes_per_day")
+  maxDiscoveryCostPerDay  Decimal? @default(5) @map("max_discovery_cost_per_day") @db.Decimal(12, 6)
+  preferPrimarySources    Boolean  @default(true) @map("prefer_primary_sources")
+  requireTwoSources       Boolean  @default(true) @map("require_two_sources")
+  avoidLowAuthority       Boolean  @default(true) @map("avoid_low_authority")
+  detectDevelopingStories Boolean  @default(true) @map("detect_developing_stories")
+  autoEnableSources       Boolean  @default(false) @map("auto_enable_sources")
+  minRecommendationScore  Float    @default(0.6) @map("min_recommendation_score")
+  updatedByStudioUserId   String?  @map("updated_by_studio_user_id") @db.Uuid
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, siteId])
+  @@map("discovery_configs")
+}
+
+model BlockedDomain {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  domain    String
+  reason    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, domain])
+  @@map("blocked_domains")
 }
