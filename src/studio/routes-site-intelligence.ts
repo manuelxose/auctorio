@@ -16,6 +16,7 @@ import {
   listIndexedPages,
   refreshSiteIntelligence,
 } from "./site-intelligence";
+import { suggestInternalLinks } from "./internal-linking";
 
 async function loadSiteForParams(request: FastifyRequest, reply: FastifyReply, tenantId: string) {
   const siteId = (request.params as { siteId: string }).siteId;
@@ -86,5 +87,22 @@ export function registerSiteIntelligenceRoutes(fastify: FastifyInstance) {
         pageSize: parsePageSize(query.pageSize, 25),
       }),
     );
+  });
+
+  // Internal link suggestions from the real indexed inventory.
+  fastify.get("/v2/site-intelligence/:siteId/internal-links", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    const query = request.query as { keyword?: string; topic?: string; q?: string; excludeUrl?: string; limit?: string };
+    const suggestions = await suggestInternalLinks(context.tenantId, siteId, {
+      keyword: parseOptionalString(query.keyword),
+      topic: parseOptionalString(query.topic),
+      query: parseOptionalString(query.q),
+      excludeUrl: parseOptionalString(query.excludeUrl),
+      limit: query.limit ? Number.parseInt(query.limit, 10) : undefined,
+    });
+    return reply.send({ items: suggestions });
   });
 }

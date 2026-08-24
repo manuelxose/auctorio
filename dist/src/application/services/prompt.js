@@ -30,6 +30,106 @@ function buildTextPrompt(input) {
     const metadata = input.options?.metadata && typeof input.options.metadata === "object"
         ? JSON.stringify(input.options.metadata)
         : undefined;
+    // ── Approved SEO brief fields (EditorialPlanGenerationSchemaV2)
+    const brief = input.options?.metadata && typeof input.options.metadata === "object"
+        ? input.options.metadata
+        : {};
+    const briefIntent = typeof brief.primaryIntent === "string" ? brief.primaryIntent : undefined;
+    const briefContentType = typeof brief.contentType === "string" ? brief.contentType : undefined;
+    const briefWordMin = typeof brief.recommendedWordCountMin === "number" ? brief.recommendedWordCountMin : undefined;
+    const briefWordMax = typeof brief.recommendedWordCountMax === "number" ? brief.recommendedWordCountMax : undefined;
+    const briefOutline = Array.isArray(brief.outline)
+        ? brief.outline
+            .map((entry) => (entry && typeof entry === "object" ? String(entry.heading ?? "").trim() : ""))
+            .filter(Boolean)
+        : [];
+    const briefInternalLinks = Array.isArray(brief.suggestedInternalLinks)
+        ? brief.suggestedInternalLinks.filter((entry) => typeof entry === "string")
+        : [];
+    const briefFaqs = Array.isArray(brief.faqCandidates)
+        ? brief.faqCandidates
+            .filter((entry) => entry && typeof entry === "object")
+            .map((entry) => entry)
+            .filter((entry) => typeof entry.question === "string" && typeof entry.answer === "string")
+        : [];
+    const briefQuestions = Array.isArray(brief.questionsToAnswer)
+        ? brief.questionsToAnswer.filter((entry) => typeof entry === "string")
+        : [];
+    const briefSchemaTypes = Array.isArray(brief.schemaTypes)
+        ? brief.schemaTypes.filter((entry) => typeof entry === "string")
+        : [];
+    const briefTargetQuery = typeof brief.targetQuery === "string" ? brief.targetQuery : undefined;
+    const briefPrimaryKeyword = typeof brief.primaryKeyword === "string" ? brief.primaryKeyword : undefined;
+    const briefSemanticKeywords = Array.isArray(brief.semanticKeywords)
+        ? brief.semanticKeywords.filter((entry) => typeof entry === "string")
+        : [];
+    const briefFreshness = typeof brief.freshnessRequirement === "string" ? brief.freshnessRequirement : undefined;
+    const INTENT_GUIDANCE = {
+        informational: "Search intent: informational. Answer the reader's question thoroughly and practically; educate first, then guide.",
+        "commercial-investigation": "Search intent: commercial investigation. Compare options objectively, cover pricing, catalog and pros/cons, and help the reader decide.",
+        transactional: "Search intent: transactional. Guide the reader toward a concrete decision or action (subscribe, watch, buy) with clear steps.",
+        comparison: "Search intent: comparison. Use structured comparisons and a summary table when useful; be fair to all options.",
+        "where-to-watch": "Search intent: where-to-watch. Tell the reader exactly where and how to watch (platforms, channels, schedules) using only evidence present in the provided facts.",
+        "sports-live": "Search intent: sports live query. Lead with the match facts available in the sources: date, time, channel and how to watch.",
+        news: "Search intent: news/freshness. News writing: lead with what happened, keep facts strictly grounded in the provided sources.",
+        "entertainment-discovery": "Search intent: entertainment discovery. Help the reader discover what to watch next with concrete recommendations.",
+        navigational: "Search intent: navigational. Point the reader to the destination resource clearly, then add useful context.",
+        mixed: "Search intent: mixed. Cover the informational need first, then add comparison and next-step guidance.",
+    };
+    const intentGuidance = briefIntent ? INTENT_GUIDANCE[briefIntent] : undefined;
+    const FORMAT_GUIDANCE = {
+        guide: "Content format: comprehensive guide. Deep but scannable structure with clear H2 sections.",
+        ranking: "Content format: ranking. Numbered ranking with clear criteria and per-item justification.",
+        comparison: "Content format: comparison. Side-by-side analysis; use a table when it helps.",
+        analysis: "Content format: analysis. Interpret facts, do not invent them; separate fact from opinion.",
+        "where-to-watch": "Content format: where-to-watch. Practical availability section per platform/channel.",
+        schedule: "Content format: TV schedule article. Organized by time/channel using the provided schedule facts.",
+        news: "Content format: news article. Inverted pyramid; facts only from the provided sources.",
+        "match-preview": "Content format: match preview. Teams, context, time, channel and what to expect.",
+        "match-report": "Content format: match report. What happened, key moments, result; grounded in sources.",
+        "evergreen-pillar": "Content format: evergreen pillar. Authoritative reference that stays useful for months.",
+        "streaming-recommendation": "Content format: streaming recommendation. Concrete picks with reasons, grouped by taste.",
+    };
+    const formatGuidance = briefContentType ? FORMAT_GUIDANCE[briefContentType] : undefined;
+    const briefInstructions = [];
+    if (intentGuidance) {
+        briefInstructions.push(intentGuidance);
+    }
+    if (formatGuidance) {
+        briefInstructions.push(formatGuidance);
+    }
+    if (briefWordMin && briefWordMax) {
+        briefInstructions.push(`Length target: ${briefWordMin}-${briefWordMax} words. Depth and usefulness first; never pad with filler.`);
+    }
+    if (briefTargetQuery) {
+        briefInstructions.push(`Target search query: "${briefTargetQuery}". Cover it naturally without keyword stuffing.`);
+    }
+    if (briefPrimaryKeyword) {
+        briefInstructions.push(`Primary keyword: "${briefPrimaryKeyword}". Use it in the title, the introduction and one heading.`);
+    }
+    if (briefSemanticKeywords.length > 0) {
+        briefInstructions.push(`Semantic terms to cover naturally: ${briefSemanticKeywords.join(", ")}.`);
+    }
+    if (briefOutline.length > 0) {
+        briefInstructions.push(`Suggested structure (H2 sections): ${briefOutline.join(" → ")}.`);
+    }
+    if (briefQuestions.length > 0) {
+        briefInstructions.push(`Questions the article must answer: ${briefQuestions.join(" | ")}.`);
+    }
+    if (briefInternalLinks.length > 0) {
+        briefInstructions.push(`Internal links (verified destination URLs — use ONLY these, with natural anchors): ${briefInternalLinks.join(", ")}.`);
+    }
+    if (briefFaqs.length > 0) {
+        briefInstructions.push(`End with an FAQ section using these question/answer pairs: ${briefFaqs.map((faq) => `Q: ${faq.question}`).join(" | ")}.`);
+    }
+    if (briefSchemaTypes.length > 0) {
+        briefInstructions.push(`Recommended structured data: ${briefSchemaTypes.join(", ")}. Mark up the corresponding semantic blocks.`);
+    }
+    if (briefFreshness) {
+        briefInstructions.push(`Freshness requirement: ${briefFreshness}. ${briefFreshness === "high" ? "Use only current facts from the provided sources; do not invent schedules, prices or availability." : "Keep evergreen statements general unless a source supports specifics."}`);
+    }
+    briefInstructions.push("Formatting requirements: semantic HTML only (h2/h3, strong for genuinely important concepts, ul/ol, tables when useful). " +
+        "Short paragraphs. No keyword stuffing. No invented statistics, quotes or prices. No generic AI filler phrases.");
     const systemPrompt = goal === "news_article"
         ? `You are a senior newsroom editor and original writer. Respond in ${languageLabel}.
 Strict rules:
@@ -67,6 +167,7 @@ Strict rules:
         metadata ? `Structured metadata JSON: ${metadata}` : null,
         revisionFeedback ? `Revision feedback: ${revisionFeedback}` : null,
         destinationGuidance ? `Editorial guidance: ${destinationGuidance}` : null,
+        ...briefInstructions,
         ...newsInstructions,
         input.type === "instagram" && hashtags ? "Include relevant hashtags." : null,
         goal === "news_article"

@@ -1325,13 +1325,25 @@ function registerStudioRoutes(fastify) {
             const latestVersion = project?.versions[0] ?? null;
             let qaReport = null;
             if (latestVersion && latestVersion.id === version.id) {
-                qaReport = (0, qa_1.runVersionQa)({
+                const projectMetadata = (project?.metadata ?? {});
+                const readNum = (key) => {
+                    const value = projectMetadata[key];
+                    return typeof value === "number" && Number.isFinite(value) ? value : null;
+                };
+                qaReport = (0, qa_1.runVersionQaV2)({
                     title: version.title,
                     excerpt: version.excerpt,
                     bodyHtml: version.bodyHtml,
                     seoTitle: version.seoTitle,
                     seoDescription: version.seoDescription,
-                }, (0, review_1.isHeroImageReady)(latestVersion.contentImage));
+                }, {
+                    imageReady: (0, review_1.isHeroImageReady)(latestVersion.contentImage),
+                    metadata: projectMetadata,
+                    siteType: project?.site?.type ?? null,
+                    recommendedWordCountMin: readNum("recommendedWordCountMin"),
+                    recommendedWordCountMax: readNum("recommendedWordCountMax"),
+                    cannibalizationRisk: typeof projectMetadata.cannibalizationRisk === "string" ? projectMetadata.cannibalizationRisk : null,
+                });
                 await (0, repository_1.updateVersionQa)(version.id, qaReport.passed ? "qa_passed" : "qa_failed", qaReport);
                 await (0, repository_1.updateProjectStatus)(context.tenantId, version.projectId, qaReport.passed ? "in_review" : "qa_failed");
             }

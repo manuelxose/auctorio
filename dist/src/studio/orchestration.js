@@ -17,6 +17,19 @@ const env_1 = require("../shared/utils/env");
 const repository_1 = require("./repository");
 const qa_1 = require("./qa");
 const prisma = (0, prisma_1.getPrismaClient)();
+function asRecord(value) {
+    return value && typeof value === "object" ? value : {};
+}
+function readNumber(value, key) {
+    const record = asRecord(value);
+    const entry = record[key];
+    return typeof entry === "number" && Number.isFinite(entry) ? entry : null;
+}
+function readString(value, key) {
+    const record = asRecord(value);
+    const entry = record[key];
+    return typeof entry === "string" && entry.trim() ? entry.trim() : null;
+}
 function stripHtml(value) {
     return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -192,15 +205,20 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     if (!version) {
         return;
     }
-    const qaReport = (0, qa_1.runVersionQa)({
+    const qaReport = (0, qa_1.runVersionQaV2)({
         title: version.title,
         excerpt: version.excerpt,
         bodyHtml: version.bodyHtml,
         seoTitle: version.seoTitle,
         seoDescription: version.seoDescription,
-    }, image.status === "done" &&
-        Boolean(image.storagePath) &&
-        image.assetVariants.some((variant) => variant.kind === "hero"));
+    }, {
+        imageReady: image.status === "done" && Boolean(image.storagePath) && image.assetVariants.some((variant) => variant.kind === "hero"),
+        metadata: asRecord(version.project.metadata),
+        siteType: version.project.site?.type ?? null,
+        recommendedWordCountMin: readNumber(version.project.metadata, "recommendedWordCountMin"),
+        recommendedWordCountMax: readNumber(version.project.metadata, "recommendedWordCountMax"),
+        cannibalizationRisk: readString(version.project.metadata, "cannibalizationRisk"),
+    });
     await (0, repository_1.updateVersionQa)(version.id, qaReport.passed ? "qa_passed" : "qa_failed", qaReport);
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, qaReport.passed ? "in_review" : "qa_failed");
 }

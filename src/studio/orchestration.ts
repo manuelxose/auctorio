@@ -5,10 +5,26 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
 import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
-import { runVersionQa } from "./qa";
+import { runVersionQaV2 } from "./qa";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
 const prisma = getPrismaClient();
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+}
+
+function readNumber(value: unknown, key: string): number | null {
+  const record = asRecord(value);
+  const entry = record[key];
+  return typeof entry === "number" && Number.isFinite(entry) ? entry : null;
+}
+
+function readString(value: unknown, key: string): string | null {
+  const record = asRecord(value);
+  const entry = record[key];
+  return typeof entry === "string" && entry.trim() ? entry.trim() : null;
+}
 
 function stripHtml(value: string): string {
   return value.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
@@ -250,7 +266,7 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
     return;
   }
 
-  const qaReport = runVersionQa(
+  const qaReport = runVersionQaV2(
     {
       title: version.title,
       excerpt: version.excerpt,
@@ -258,9 +274,14 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
       seoTitle: version.seoTitle,
       seoDescription: version.seoDescription,
     },
-    image.status === "done" &&
-      Boolean(image.storagePath) &&
-      image.assetVariants.some((variant) => variant.kind === "hero"),
+    {
+      imageReady: image.status === "done" && Boolean(image.storagePath) && image.assetVariants.some((variant) => variant.kind === "hero"),
+      metadata: asRecord(version.project.metadata),
+      siteType: version.project.site?.type ?? null,
+      recommendedWordCountMin: readNumber(version.project.metadata, "recommendedWordCountMin"),
+      recommendedWordCountMax: readNumber(version.project.metadata, "recommendedWordCountMax"),
+      cannibalizationRisk: readString(version.project.metadata, "cannibalizationRisk"),
+    },
   );
 
   await updateVersionQa(
