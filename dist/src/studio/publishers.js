@@ -481,7 +481,7 @@ class TecnoriaPublisher {
         const url = externalId ? `${siteBaseUrl}/api/v1/blog/${externalId}` : `${siteBaseUrl}/api/v1/blog`;
         const response = await (0, http_1.fetchWithTimeout)(url, {
             method,
-            headers: await this.getAuthHeaders(context.site),
+            headers: await this.getAuthHeaders(context.site, "application/json"),
             body: payload,
             timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
             retries: 1,
