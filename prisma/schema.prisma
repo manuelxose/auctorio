@@ -318,49 +318,57 @@ model Tenant {
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
-  topics                      Topic[]
-  facts                       Fact[]
-  contentText                 ContentText[]
-  contentImage                ContentImage[]
-  jobs                        Job[]
-  aiAudit                     AiAudit[]
-  sites                       Site[]
-  contentProjects             ContentProject[]
-  contentVersions             ContentVersion[]
-  contentDerivatives          ContentDerivative[]
-  publicationJobs             PublicationJob[]
-  assetVariants               AssetVariant[]
-  studioIdentityProvider      StudioIdentityProvider?
-  studioAccountsLastWorkspace StudioAccount[]           @relation("StudioAccountLastWorkspace")
-  studioUsers                 StudioUser[]
-  studioRoles                 StudioRole[]
-  studioInvitations           StudioInvitation[]
-  studioUserSessions          StudioUserSession[]
-  studioLaunchTickets         StudioLaunchTicket[]
-  studioPromptPresets         StudioPromptPreset[]
-  studioPromptAssignments     StudioPromptAssignment[]
-  contentSources              ContentSource[]
-  sourceItems                 SourceItem[]
-  storyClusters               StoryCluster[]
-  socialContents              SocialContent[]
-  publishingAccounts          PublishingAccount[]
-  publications                Publication[]
-  publicationAttempts         PublicationAttempt[]
-  automationPolicies          AutomationPolicy[]
-  campaigns                   Campaign[]
-  editorialBriefs             EditorialBrief[]
-  auditLogs                   AuditLog[]
-  editorialPlans              EditorialPlan[]
-  editorialPlanItems          EditorialPlanItem[]
-  socialConnectionSessions    SocialConnectionSession[]
-  webDiscoveryQueries         WebDiscoveryQuery[]
-  discoveredDomains           DiscoveredDomain[]
-  sourceQualityProfiles       SourceQualityProfile[]
-  sourceRecommendations       SourceRecommendation[]
-  webRetrievals               WebRetrieval[]
-  webUsageRecords             WebUsageRecord[]
-  discoveryConfigs            DiscoveryConfig[]
-  blockedDomains              BlockedDomain[]
+  topics                         Topic[]
+  facts                          Fact[]
+  contentText                    ContentText[]
+  contentImage                   ContentImage[]
+  jobs                           Job[]
+  aiAudit                        AiAudit[]
+  sites                          Site[]
+  contentProjects                ContentProject[]
+  contentVersions                ContentVersion[]
+  contentDerivatives             ContentDerivative[]
+  publicationJobs                PublicationJob[]
+  assetVariants                  AssetVariant[]
+  studioIdentityProvider         StudioIdentityProvider?
+  studioAccountsLastWorkspace    StudioAccount[]                  @relation("StudioAccountLastWorkspace")
+  studioUsers                    StudioUser[]
+  studioRoles                    StudioRole[]
+  studioInvitations              StudioInvitation[]
+  studioUserSessions             StudioUserSession[]
+  studioLaunchTickets            StudioLaunchTicket[]
+  studioPromptPresets            StudioPromptPreset[]
+  studioPromptAssignments        StudioPromptAssignment[]
+  contentSources                 ContentSource[]
+  sourceItems                    SourceItem[]
+  storyClusters                  StoryCluster[]
+  socialContents                 SocialContent[]
+  publishingAccounts             PublishingAccount[]
+  publications                   Publication[]
+  publicationAttempts            PublicationAttempt[]
+  automationPolicies             AutomationPolicy[]
+  campaigns                      Campaign[]
+  editorialBriefs                EditorialBrief[]
+  auditLogs                      AuditLog[]
+  editorialPlans                 EditorialPlan[]
+  editorialPlanItems             EditorialPlanItem[]
+  socialConnectionSessions       SocialConnectionSession[]
+  webDiscoveryQueries            WebDiscoveryQuery[]
+  discoveredDomains              DiscoveredDomain[]
+  sourceQualityProfiles          SourceQualityProfile[]
+  sourceRecommendations          SourceRecommendation[]
+  webRetrievals                  WebRetrieval[]
+  webUsageRecords                WebUsageRecord[]
+  discoveryConfigs               DiscoveryConfig[]
+  blockedDomains                 BlockedDomain[]
+  SiteSitemap                    SiteSitemap[]
+  SiteIndexedPage                SiteIndexedPage[]
+  SiteTopicCluster               SiteTopicCluster[]
+  SiteEntity                     SiteEntity[]
+  SiteInternalLink               SiteInternalLink[]
+  SiteIntelligenceProfile        SiteIntelligenceProfile[]
+  SearchTarget                   SearchTarget[]
+  EditorialPlanGenerationAttempt EditorialPlanGenerationAttempt[]
 
   @@map("tenants")
 }
@@ -527,18 +535,25 @@ model Site {
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
-  tenant             Tenant                   @relation(fields: [tenantId], references: [id])
-  projects           ContentProject[]
-  publicationJobs    PublicationJob[]
-  assetVariants      AssetVariant[]
-  promptPresets      StudioPromptPreset[]
-  promptAssignments  StudioPromptAssignment[]
-  contentSources     ContentSource[]
-  publishingAccounts PublishingAccount[]
-  automationPolicies AutomationPolicy[]
-  publications       Publication[]
-  editorialPlans     EditorialPlan[]
-  editorialPlanItems EditorialPlanItem[]
+  tenant              Tenant                   @relation(fields: [tenantId], references: [id])
+  projects            ContentProject[]
+  publicationJobs     PublicationJob[]
+  assetVariants       AssetVariant[]
+  promptPresets       StudioPromptPreset[]
+  promptAssignments   StudioPromptAssignment[]
+  contentSources      ContentSource[]
+  publishingAccounts  PublishingAccount[]
+  automationPolicies  AutomationPolicy[]
+  publications        Publication[]
+  editorialPlans      EditorialPlan[]
+  editorialPlanItems  EditorialPlanItem[]
+  sitemaps            SiteSitemap[]
+  indexedPages        SiteIndexedPage[]
+  topicClusters       SiteTopicCluster[]
+  entities            SiteEntity[]
+  intelligenceProfile SiteIntelligenceProfile?
+  searchTargets       SearchTarget[]
+  SiteInternalLink    SiteInternalLink[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -1333,14 +1348,21 @@ model EditorialPlan {
   model           String?
   promptVersion   String?             @map("prompt_version")
   generatedOutput Json?               @map("generated_output")
+  strategyMode    String?             @map("strategy_mode")
+  primaryIntent   String?             @map("primary_intent")
+  contentFormats  Json?               @map("content_formats")
+  topicStrategy   Json?               @map("topic_strategy")
+  relevanceThreshold Float?           @map("relevance_threshold")
+  siteIntelligenceVersion Int?        @map("site_intelligence_version")
   error           String?             @db.Text
   createdAt       DateTime            @default(now()) @map("created_at")
   updatedAt       DateTime            @updatedAt @map("updated_at")
 
-  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site   Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  brief  EditorialBrief?     @relation(fields: [briefId], references: [id], onDelete: SetNull)
-  items  EditorialPlanItem[]
+  tenant             Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site               Site?                            @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  brief              EditorialBrief?                  @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  items              EditorialPlanItem[]
+  generationAttempts EditorialPlanGenerationAttempt[]
 
   @@index([tenantId, status, dateFrom, dateTo])
   @@index([tenantId, siteId, createdAt])
@@ -1378,6 +1400,34 @@ model EditorialPlanItem {
   imageConcept            String?                 @map("image_concept")
   imageRequirements       String?                 @map("image_requirements")
   priority                Int                     @default(0)
+  contentType             String?                 @map("content_type")
+  primaryIntent           String?                 @map("primary_intent")
+  secondaryIntents        Json?                   @map("secondary_intents")
+  funnelStage             String?                 @map("funnel_stage")
+  targetQuery             String?                 @map("target_query")
+  semanticKeywords        Json?                   @map("semantic_keywords")
+  questionsToAnswer       Json?                   @map("questions_to_answer")
+  topicCluster            String?                 @map("topic_cluster")
+  pillarPage              String?                 @map("pillar_page")
+  finalSuggestedTitle     String?                 @map("final_suggested_title")
+  angle                   String?
+  editorialObjective      String?                 @map("editorial_objective")
+  competitorAngle         String?                 @map("competitor_angle")
+  suggestedInternalLinks  Json?                   @map("suggested_internal_links")
+  suggestedExternalEvidenceTypes Json?            @map("suggested_external_evidence_types")
+  faqCandidates           Json?                   @map("faq_candidates")
+  schemaTypes             Json?                   @map("schema_types")
+  outline                 Json?
+  recommendedWordCountMin Int?                    @map("recommended_word_count_min")
+  recommendedWordCountMax Int?                    @map("recommended_word_count_max")
+  difficultyEstimate      Int?                    @map("difficulty_estimate")
+  opportunityScore        Float?                  @map("opportunity_score")
+  relevanceScore          Float?                  @map("relevance_score")
+  cannibalizationRisk     String?                 @map("cannibalization_risk")
+  confidence              Float?
+  rationale               String?                 @db.Text
+  sourceEvidence          Json?                   @map("source_evidence")
+  freshnessRequirement    String?                 @map("freshness_requirement")
   status                  EditorialPlanItemStatus @default(proposed)
   contentGenerationStatus String                  @default("pending") @map("content_generation_status")
   approvalStatus          String                  @default("pending") @map("approval_status")
@@ -1400,7 +1450,223 @@ model EditorialPlanItem {
   @@index([tenantId, channel, scheduledFor])
   @@index([tenantId, siteId, scheduledFor])
   @@index([tenantId, projectId])
+  @@index([tenantId, siteId, targetQuery])
+  @@index([tenantId, relevanceScore])
   @@map("editorial_plan_items")
+}
+
+// ────────────────────────────────────────────────────────────── Site intelligence
+
+model SiteSitemap {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  siteId         String    @map("site_id") @db.Uuid
+  url            String
+  kind           String    @default("discovered")
+  status         String    @default("discovered")
+  lastFetchedAt  DateTime? @map("last_fetched_at")
+  lastStatusCode Int?      @map("last_status_code")
+  urlCount       Int?      @map("url_count")
+  error          String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant       Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site         Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  indexedPages SiteIndexedPage[]
+
+  @@unique([siteId, url])
+  @@index([tenantId, siteId])
+  @@map("site_sitemaps")
+}
+
+model SiteIndexedPage {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  sitemapId       String?   @map("sitemap_id") @db.Uuid
+  url             String
+  canonicalUrl    String?   @map("canonical_url")
+  title           String?
+  metaTitle       String?   @map("meta_title")
+  metaDescription String?   @map("meta_description")
+  h1              String?
+  headings        Json?
+  content         String?   @db.Text
+  wordCount       Int?      @map("word_count")
+  publishedAt     DateTime? @map("published_at")
+  modifiedAt      DateTime? @map("modified_at")
+  author          String?
+  categories      Json?
+  tags            Json?
+  images          Json?
+  structuredData  Json?     @map("structured_data")
+  ogMetadata      Json?     @map("og_metadata")
+  language        String?
+  contentType     String?   @map("content_type")
+  crawlState      String    @default("discovered") @map("crawl_state")
+  contentHash     String?   @map("content_hash")
+  firstIndexedAt  DateTime? @map("first_indexed_at")
+  lastIndexedAt   DateTime? @map("last_indexed_at")
+  error           String?
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sitemap       SiteSitemap?       @relation(fields: [sitemapId], references: [id], onDelete: SetNull)
+  internalLinks SiteInternalLink[]
+
+  @@unique([siteId, url])
+  @@index([tenantId, siteId])
+  @@index([siteId, crawlState])
+  @@map("site_indexed_pages")
+}
+
+model SiteTopicCluster {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  name           String
+  slug           String
+  pagesCount     Int      @default(0) @map("pages_count")
+  authorityScore Float    @default(0) @map("authority_score")
+  gapScore       Float    @default(0) @map("gap_score")
+  keywords       Json?
+  sampleUrls     Json?    @map("sample_urls")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, slug])
+  @@index([siteId])
+  @@map("site_topic_clusters")
+}
+
+model SiteEntity {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  siteId     String    @map("site_id") @db.Uuid
+  name       String
+  type       String    @default("other")
+  mentions   Int       @default(0)
+  lastSeenAt DateTime? @map("last_seen_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, name, type])
+  @@index([siteId])
+  @@map("site_entities")
+}
+
+model SiteInternalLink {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  sourcePageId String   @map("source_page_id") @db.Uuid
+  targetUrl    String   @map("target_url")
+  anchorText   String?  @map("anchor_text")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site       Site            @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  sourcePage SiteIndexedPage @relation(fields: [sourcePageId], references: [id], onDelete: Cascade)
+
+  @@unique([sourcePageId, targetUrl])
+  @@index([siteId, targetUrl])
+  @@map("site_internal_links")
+}
+
+model SiteIntelligenceProfile {
+  id                      String    @id @default(uuid()) @db.Uuid
+  tenantId                String    @map("tenant_id") @db.Uuid
+  siteId                  String    @map("site_id") @db.Uuid
+  version                 Int       @default(1)
+  indexedAt               DateTime? @map("indexed_at")
+  sourceCount             Int       @default(0) @map("source_count")
+  pageCount               Int       @default(0) @map("page_count")
+  detectedSiteType        String?   @map("detected_site_type")
+  detectedLanguage        String?   @map("detected_language")
+  detectedAudience        String?   @map("detected_audience")
+  brandSummary            String?   @map("brand_summary")
+  mainTopics              Json?     @map("main_topics")
+  excludedTopics          Json?     @map("excluded_topics")
+  categories              Json?
+  entities                Json?
+  contentTypes            Json?     @map("content_types")
+  topicClusters           Json?     @map("topic_clusters")
+  existingContentPatterns Json?     @map("existing_content_patterns")
+  editorialTone           String?   @map("editorial_tone")
+  formattingPatterns      Json?     @map("formatting_patterns")
+  commonArticleLength     Int?      @map("common_article_length")
+  internalLinkTargets     Json?     @map("internal_link_targets")
+  commercialTopics        Json?     @map("commercial_topics")
+  evergreenTopics         Json?     @map("evergreen_topics")
+  newsTopics              Json?     @map("news_topics")
+  sportsTopics            Json?     @map("sports_topics")
+  topicalAuthorityMap     Json?     @map("topical_authority_map")
+  discoveredSitemaps      Json?     @map("discovered_sitemaps")
+  crawlHealth             Json?     @map("crawl_health")
+  confidence              Float?
+  warnings                Json?
+  createdAt               DateTime  @default(now()) @map("created_at")
+  updatedAt               DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@map("site_intelligence_profiles")
+}
+
+model SearchTarget {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  siteId    String   @map("site_id") @db.Uuid
+  query     String
+  keyword   String?
+  intent    String?
+  status    String   @default("active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, query])
+  @@index([tenantId, siteId])
+  @@map("search_targets")
+}
+
+model EditorialPlanGenerationAttempt {
+  id               String   @id @default(uuid()) @db.Uuid
+  tenantId         String   @map("tenant_id") @db.Uuid
+  planId           String   @map("plan_id") @db.Uuid
+  siteId           String?  @map("site_id") @db.Uuid
+  provider         String?
+  model            String?
+  attempt          Int      @default(1)
+  status           String   @default("started")
+  finishReason     String?  @map("finish_reason")
+  tokenUsage       Json?    @map("token_usage")
+  schemaValidation Json?    @map("schema_validation")
+  normalizedError  String?  @map("normalized_error")
+  repairAttempted  Boolean  @default(false) @map("repair_attempted")
+  retryAttempted   Boolean  @default(false) @map("retry_attempted")
+  durationMs       Int?     @map("duration_ms")
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  plan   EditorialPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([planId])
+  @@index([tenantId, createdAt])
+  @@map("editorial_plan_generation_attempts")
 }
 
 model AuditLog {

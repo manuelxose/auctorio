@@ -70,6 +70,7 @@ import {
   setEditorialPlanItemStatus,
   updateEditorialPlanItem,
 } from "./editorial-plan";
+import { CONTENT_FORMATS, SEARCH_INTENTS, STRATEGY_MODES } from "./editorial-plan-schema";
 
 const prisma = getPrismaClient();
 
@@ -1315,6 +1316,18 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       audience?: string;
       topics?: string[];
       excludedTopics?: string[];
+      strategyMode?: string;
+      primaryIntent?: string;
+      contentFormats?: string[];
+      market?: string;
+      campaignName?: string;
+      existingCluster?: string;
+      newCluster?: boolean;
+      freeAiDiscovery?: boolean;
+      seasonalEvents?: string[];
+      brandsOrEntities?: string[];
+      keywordSeeds?: string[];
+      allowWithoutIntelligence?: boolean;
     }>(request);
     const dateFrom = parseIsoDate(body.dateFrom);
     const dateTo = parseIsoDate(body.dateTo);
@@ -1343,10 +1356,42 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         topics: body.topics ?? [],
         excludedTopics: body.excludedTopics ?? [],
         userId: context.userId,
+        allowWithoutIntelligence: body.allowWithoutIntelligence === true,
+        strategy: {
+          mode: (parseOptionalString(body.strategyMode) ?? "balanced") as (typeof STRATEGY_MODES)[number],
+          primaryIntent: parseOptionalString(body.primaryIntent) as (typeof SEARCH_INTENTS)[number] | null,
+          contentFormats: (body.contentFormats ?? []).filter((format): format is (typeof CONTENT_FORMATS)[number] => isOneOf(format, CONTENT_FORMATS)),
+          market: parseOptionalString(body.market),
+          campaignName: parseOptionalString(body.campaignName),
+          language: parseOptionalString(body.language) ?? "es",
+          audience: parseOptionalString(body.audience),
+          objective: parseOptionalString(body.objective),
+          priorityTopics: body.topics ?? [],
+          excludedTopics: body.excludedTopics ?? [],
+          existingCluster: parseOptionalString(body.existingCluster),
+          newCluster: body.newCluster === true,
+          freeAiDiscovery: body.freeAiDiscovery === true,
+          seasonalEvents: body.seasonalEvents ?? [],
+          brandsOrEntities: body.brandsOrEntities ?? [],
+          keywordSeeds: body.keywordSeeds ?? [],
+        },
       });
       return reply.code(201).send(plan);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID") {
+        return badRequest(
+          reply,
+          "The AI returned an invalid planning response. Auctorio retried automatically but could not build a valid plan.",
+        );
+      }
+      if (message === "site_intelligence_required") {
+        return badRequest(reply, "Site intelligence is missing. Index the website before planning (or allowWithoutIntelligence for degraded mode).");
+      }
+      if (message === "EDITORIAL_PLAN_NO_RELEVANT_ITEMS") {
+        return badRequest(reply, "The AI could not propose topics relevant to the selected website. Review the site profile and topic priorities.");
+      }
+      return badRequest(reply, message);
     }
   });
 
@@ -1356,18 +1401,45 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const itemId = (request.params as { id: string }).id;
     if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
     const body = parseBody<Record<string, unknown>>(request);
+    const stringOrNull = (value: unknown) => (typeof value === "string" || value === null ? value : undefined);
+    const stringArrayOrNull = (value: unknown) => (Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : value === null ? null : undefined);
     const updated = await updateEditorialPlanItem(context.tenantId, itemId, {
       title: typeof body.title === "string" ? body.title : undefined,
-      workingTitle: typeof body.workingTitle === "string" || body.workingTitle === null ? body.workingTitle : undefined,
-      topic: typeof body.topic === "string" || body.topic === null ? body.topic : undefined,
+      workingTitle: stringOrNull(body.workingTitle),
+      topic: stringOrNull(body.topic),
       scheduledFor: body.scheduledFor === null ? null : parseIsoDate(body.scheduledFor),
-      primaryKeyword: typeof body.primaryKeyword === "string" || body.primaryKeyword === null ? body.primaryKeyword : undefined,
-      seoTitle: typeof body.seoTitle === "string" || body.seoTitle === null ? body.seoTitle : undefined,
-      metaDescription: typeof body.metaDescription === "string" || body.metaDescription === null ? body.metaDescription : undefined,
-      socialHook: typeof body.socialHook === "string" || body.socialHook === null ? body.socialHook : undefined,
-      imageConcept: typeof body.imageConcept === "string" || body.imageConcept === null ? body.imageConcept : undefined,
+      primaryKeyword: stringOrNull(body.primaryKeyword),
+      seoTitle: stringOrNull(body.seoTitle),
+      metaDescription: stringOrNull(body.metaDescription),
+      socialHook: stringOrNull(body.socialHook),
+      imageConcept: stringOrNull(body.imageConcept),
+      imageRequirements: stringOrNull(body.imageRequirements),
       priority: typeof body.priority === "number" ? body.priority : undefined,
-      notes: typeof body.notes === "string" || body.notes === null ? body.notes : undefined,
+      notes: stringOrNull(body.notes),
+      contentType: stringOrNull(body.contentType),
+      primaryIntent: stringOrNull(body.primaryIntent),
+      secondaryIntents: stringArrayOrNull(body.secondaryIntents),
+      funnelStage: stringOrNull(body.funnelStage),
+      targetQuery: stringOrNull(body.targetQuery),
+      semanticKeywords: stringArrayOrNull(body.semanticKeywords),
+      questionsToAnswer: stringArrayOrNull(body.questionsToAnswer),
+      topicCluster: stringOrNull(body.topicCluster),
+      pillarPage: stringOrNull(body.pillarPage),
+      finalSuggestedTitle: stringOrNull(body.finalSuggestedTitle),
+      angle: stringOrNull(body.angle),
+      editorialObjective: stringOrNull(body.editorialObjective),
+      competitorAngle: stringOrNull(body.competitorAngle),
+      suggestedInternalLinks: stringArrayOrNull(body.suggestedInternalLinks),
+      suggestedExternalEvidenceTypes: stringArrayOrNull(body.suggestedExternalEvidenceTypes),
+      faqCandidates: Array.isArray(body.faqCandidates) ? body.faqCandidates : body.faqCandidates === null ? null : undefined,
+      schemaTypes: stringArrayOrNull(body.schemaTypes),
+      outline: Array.isArray(body.outline) ? body.outline : body.outline === null ? null : undefined,
+      recommendedWordCountMin: typeof body.recommendedWordCountMin === "number" || body.recommendedWordCountMin === null ? body.recommendedWordCountMin : undefined,
+      recommendedWordCountMax: typeof body.recommendedWordCountMax === "number" || body.recommendedWordCountMax === null ? body.recommendedWordCountMax : undefined,
+      difficultyEstimate: typeof body.difficultyEstimate === "number" || body.difficultyEstimate === null ? body.difficultyEstimate : undefined,
+      confidence: typeof body.confidence === "number" || body.confidence === null ? body.confidence : undefined,
+      rationale: stringOrNull(body.rationale),
+      freshnessRequirement: stringOrNull(body.freshnessRequirement),
     });
     if (!updated) return notFound(reply, "editorial plan item not found");
     return reply.send(updated);

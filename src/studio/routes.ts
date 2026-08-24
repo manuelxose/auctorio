@@ -139,6 +139,7 @@ import {
 import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
 import { registerDiscoveryRoutes } from "./routes-discovery";
+import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
 
 const SITE_TYPES: SiteType[] = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS: ProjectGoal[] = [
@@ -333,6 +334,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerEditorialRoutes(fastify);
   registerConnectionRoutes(fastify);
   registerDiscoveryRoutes(fastify);
+  registerSiteIntelligenceRoutes(fastify);
 
   fastify.get("/health/live", async () => ({ status: "ok" }));
 
