@@ -741,6 +741,7 @@ export async function generateContentFromEditorialPlanItem(tenantId: string, ite
       outline: outline,
       recommendedWordCountMin: item.recommendedWordCountMin ?? null,
       recommendedWordCountMax: item.recommendedWordCountMax ?? null,
+      cannibalizationRisk: item.cannibalizationRisk ?? null,
       seoTitle: item.seoTitle ?? null,
       metaDescription: item.metaDescription ?? null,
       suggestedSlug: item.suggestedSlug ?? null,

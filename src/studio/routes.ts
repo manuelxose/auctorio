@@ -72,7 +72,7 @@ import {
 } from "./orchestration";
 import { archiveProject } from "./projects";
 import { linkDurableWebsitePublication } from "./publication";
-import { runVersionQa } from "./qa";
+import { runVersionQaV2 } from "./qa";
 import { getStudioGoogleClientId } from "./google";
 import {
   approveStudioPromptVersion,
@@ -1710,7 +1710,12 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       let qaReport: unknown = null;
 
       if (latestVersion && latestVersion.id === version.id) {
-        qaReport = runVersionQa(
+        const projectMetadata = (project?.metadata ?? {}) as Record<string, unknown>;
+        const readNum = (key: string): number | null => {
+          const value = projectMetadata[key];
+          return typeof value === "number" && Number.isFinite(value) ? value : null;
+        };
+        qaReport = runVersionQaV2(
           {
             title: version.title,
             excerpt: version.excerpt,
@@ -1718,7 +1723,14 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
             seoTitle: version.seoTitle,
             seoDescription: version.seoDescription,
           },
-          isHeroImageReady(latestVersion.contentImage),
+          {
+            imageReady: isHeroImageReady(latestVersion.contentImage),
+            metadata: projectMetadata,
+            siteType: project?.site?.type ?? null,
+            recommendedWordCountMin: readNum("recommendedWordCountMin"),
+            recommendedWordCountMax: readNum("recommendedWordCountMax"),
+            cannibalizationRisk: typeof projectMetadata.cannibalizationRisk === "string" ? projectMetadata.cannibalizationRisk : null,
+          },
         );
         await updateVersionQa(
           version.id,

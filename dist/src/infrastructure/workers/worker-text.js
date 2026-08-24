@@ -63,9 +63,23 @@ async function runTextWorker() {
             language: data.language,
             options: data.options ?? {},
         });
+        // Scale output budget from the approved brief's word target so long-form
+        // content is not truncated by the default token budget.
+        const briefMetadata = data.options?.metadata && typeof data.options.metadata === "object"
+            ? data.options.metadata
+            : {};
+        const targetWordMax = typeof briefMetadata.recommendedWordCountMax === "number"
+            ? briefMetadata.recommendedWordCountMax
+            : undefined;
+        const maxTokens = targetWordMax
+            ? Math.min(8000, Math.max(1400, Math.round(targetWordMax * 2.2)))
+            : data.type === "seo"
+                ? 3200
+                : undefined;
         const result = await provider.generate({
             prompt: promptData.userPrompt,
             systemPrompt: promptData.systemPrompt,
+            ...(maxTokens ? { maxTokens } : {}),
         });
         const costUsd = computeTextCost({
             promptTokens: result.usage?.promptTokens,
