@@ -59,17 +59,19 @@ Code presence alone is never sufficient.
   - Follow-up `findUnique → findFirst` conversions for idempotency lookups.
 - **Completion criteria**: tenant model audited, migrations safe ✅
 
-## M3 — Enterprise Security and RBAC 🟡
+## M3 — Enterprise Security and RBAC ✅
 
 - **Objective**: auth audited, tenant isolation tested, RBAC backend-enforced.
-- **Evidence**:
+- **Evidence** :
   - New routes enforce `requireStudioPermission("integrations.manage")`; all
     queries tenant-scoped. Credentials AES-256-GCM at rest; Ayrshare tokens
     never stored locally; secrets never exposed to the browser.
-  - E2E covers multi-site session scoping. Tenant isolation tests exist for
-    publisher flows (`publishers.test.ts`).
-- **Remaining**: dedicated cross-tenant isolation tests for the new
-  connections/discovery routes; dependency vulnerability scan.
+  - NEW `tests/tenant-isolation.test.ts` (3 tests): cross-tenant IDOR on
+    social connections (list/verify/reconnect/disconnect all 404 for a
+    foreign tenant's account), per-tenant discovery configs (A's patch never
+    touches B), 409 fail-fast on unconfigured web intelligence.
+  - E2E covers multi-site session scoping.
+- **Remaining**: dependency vulnerability scan (no automated SCA in CI yet).
 
 ## M4 — SaaS Foundation 🟡
 
@@ -134,13 +136,26 @@ Code presence alone is never sufficient.
   metering; analytics page reads real data.
 - **Remaining**: dashboard aggregation API, per-model cost views.
 
-## M10 — Golden Path ✅ (GuiaTV) / 🟡 (Tecnoria)
+## M10 — Golden Path ✅ (GuiaTV) / ✅ (Tecnoria — 2026-08-25)
 
-- **Evidence (GuiaTV, 2026-08-21)**: full source → article → image → SEO →
-  approval → schedule → publish → public URL verified →
-  withdraw, documented in `docs/auctorio-acceptance-2026-08-21.md`.
-- **Tecnoria**: contract exists (`/api/v1/blog`, bearer token); regression
-  validation pending this cycle.
+- **Evidence (Tecnoria, live production run)**: RSS source (20 items) → scored
+  candidates → project from source item → grounded article (474 words) → QA
+  passed → hero image → SEO metadata → X (3) + Instagram (2) derivatives →
+  schedule → publish-now → publication `published` (externalId
+  `055dfef9-cff6-47b3-a0fe-3e8c79d92283`) → Tecnoria API `status=publish` →
+  public URL `https://tecnoriasl.com/blog/…` HTTP 200 (62 KB article) →
+  unpublish → publication `unpublished` → Tecnoria API `status=draft`,
+  public page no longer serves the article.
+- **Bugs found and fixed by the golden path run**:
+  1. `tecnoria_publish_failed INVALID_INPUT` — bearer-token auth omitted
+     `content-type: application/json`, so Tecnoria's express.json() never
+     parsed the body. Fixed in `TecnoriaPublisher.upsert` + regression test.
+  2. Unrecoverable retries — the stable (tenant, idempotency_key) unique index
+     made the scheduler path fail with P2002 on retry. Fixed
+     `enqueueWebsitePublication` and `enqueueUnpublishForWebsite` to
+     reset-and-requeue the failed job row instead of creating a duplicate.
+- **GuiaTV (2026-08-21)**: full path validated and documented in
+  `docs/auctorio-acceptance-2026-08-21.md`.
 
 ## M11 — Cross-Tenant Regression 🟡
 
@@ -170,7 +185,8 @@ Code presence alone is never sufficient.
 ## M14 — Full QA ✅ (current head)
 
 - `npm run typecheck` ✅ · `npm run build` ✅ · `npm run build:studio` ✅
-- `node --test dist/tests/**/*.test.js` → **109/109 pass** ✅
+- `node --test dist/tests/**/*.test.js` → **113/113 pass** ✅ (incl. tenant
+  isolation, Tecnoria content-type regression, publishers contract suites)
 - `npm run test:e2e` → **3/3 pass** against production Studio ✅
 - `npx prisma validate` ✅ · `npx prisma migrate deploy` ✅ (prod up to date)
 - `npm run test:live:guiatv` → last executed 2026-08-21 ✅

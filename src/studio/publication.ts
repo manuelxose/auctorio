@@ -7,6 +7,7 @@ import {
   getLatestVersion,
   getProjectById,
   getSiteById,
+  resetPublicationJobForRetry,
   updateProjectStatus,
 } from "./repository";
 import { queuePublication } from "./orchestration";
@@ -586,6 +587,24 @@ async function enqueueWebsitePublication(publicationId: string): Promise<void> {
       where: { id: publication.id },
       data: { publicationJobId: existingJob.id },
     });
+    return;
+  }
+
+  if (existingJob) {
+    // The idempotency key is stable per (site, project, version, action), so a
+    // failed/canceled job cannot be re-created without violating the unique
+    // index. Reset the row and requeue it instead — retries must be possible.
+    const retried = await resetPublicationJobForRetry(existingJob.id, {
+      action,
+      targetStatus: "publish",
+      requestedBy: "scheduler",
+    });
+    await updateProjectStatus(publication.tenantId, project.id, "publish_queued");
+    await prisma.publication.update({
+      where: { id: publication.id },
+      data: { publicationJobId: retried.id },
+    });
+    await queuePublication(retried.id);
     return;
   }
 

@@ -607,7 +607,7 @@ class TecnoriaPublisher implements PublisherAdapter {
 
     const response = await fetchWithTimeout(url, {
       method,
-      headers: await this.getAuthHeaders(context.site),
+      headers: await this.getAuthHeaders(context.site, "application/json"),
       body: payload,
       timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
       retries: 1,
