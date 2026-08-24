@@ -29,6 +29,7 @@ const views_1 = require("./views");
 const routes_editorial_1 = require("./routes-editorial");
 const routes_connections_1 = require("./routes-connections");
 const routes_discovery_1 = require("./routes-discovery");
+const routes_site_intelligence_1 = require("./routes-site-intelligence");
 const SITE_TYPES = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS = [
     "article",
@@ -192,6 +193,7 @@ function registerStudioRoutes(fastify) {
     (0, routes_editorial_1.registerEditorialRoutes)(fastify);
     (0, routes_connections_1.registerConnectionRoutes)(fastify);
     (0, routes_discovery_1.registerDiscoveryRoutes)(fastify);
+    (0, routes_site_intelligence_1.registerSiteIntelligenceRoutes)(fastify);
     fastify.get("/health/live", async () => ({ status: "ok" }));
     fastify.get("/health/ready", async (_request, reply) => {
         try {

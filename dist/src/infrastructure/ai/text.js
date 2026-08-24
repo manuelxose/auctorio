@@ -33,6 +33,7 @@ class OpenAICompatibleTextProvider {
                 ],
                 temperature: input.temperature ?? (0, env_1.getNumberEnv)("TEXT_TEMPERATURE", 0.7),
                 max_tokens: input.maxTokens ?? (0, env_1.getNumberEnv)("TEXT_MAX_TOKENS", 800),
+                ...(input.responseFormat ? { response_format: input.responseFormat } : {}),
             },
             timeoutMs: (0, env_1.getNumberEnv)("TEXT_TIMEOUT_MS", 60_000),
             retries: (0, env_1.getNumberEnv)("TEXT_RETRIES", 1),
@@ -50,6 +51,7 @@ class OpenAICompatibleTextProvider {
                 completionTokens: data.usage?.completion_tokens,
                 totalTokens: data.usage?.total_tokens,
             },
+            finishReason: data.choices?.[0]?.finish_reason ?? null,
         };
     }
 }

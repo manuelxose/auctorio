@@ -5,6 +5,20 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { writeAudit } from "./audit";
 import { createProject } from "./repository";
 import { startProjectGeneration } from "./orchestration";
+import { structuredEvent } from "../shared/utils/logger";
+import { generateStructured, StructuredOutputError, type StructuredGenerationAttempt } from "../infrastructure/ai/structured";
+import {
+  EDITORIAL_PLAN_PROMPT_VERSION,
+  EDITORIAL_PLAN_SCHEMA_NAME,
+  editorialPlanSchemaV2,
+  WORD_TARGETS,
+  type ContentFormat,
+  type EditorialPlanBriefV2,
+  type SearchIntent,
+} from "./editorial-plan-schema";
+import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
+import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
+import { registerSearchTargets } from "./site-intelligence";
 
 const prisma = getPrismaClient();
 const CHANNELS = ["website", "x", "instagram"] as const;
@@ -27,117 +41,172 @@ export type GenerateEditorialPlanInput = {
   topics?: string[];
   excludedTopics?: string[];
   userId?: string | null;
+  strategy?: PlanningStrategy;
+  allowWithoutIntelligence?: boolean;
 };
 
-type GeneratedPlanItem = {
-  title: string;
-  workingTitle?: string;
-  topic?: string;
-  channel: PlanChannel;
-  scheduledFor: string;
-  newsOrEvergreen?: string;
-  objective?: string;
-  audience?: string;
-  searchIntent?: string;
-  primaryKeyword?: string;
-  secondaryKeywords?: string[];
-  relatedEntities?: string[];
-  suggestedSlug?: string;
-  seoTitle?: string;
-  metaDescription?: string;
-  socialHook?: string;
-  cta?: string;
-  suggestedHashtags?: string[];
-  imageConcept?: string;
-  imageRequirements?: string;
-  priority?: number;
-  notes?: string;
+export type PostValidationResult = {
+  kept: EditorialPlanBriefV2[];
+  dropped: Array<{ title: string; reason: string }>;
+  warnings: string[];
 };
 
-function parseGeneratedJson(output: string): unknown {
-  const cleaned = output.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "");
-  try {
-    return JSON.parse(cleaned);
-  } catch {
-    const start = cleaned.indexOf("{");
-    const end = cleaned.lastIndexOf("}");
-    if (start < 0 || end <= start) {
-      throw new Error("editorial_plan_invalid_json");
+function normalizeSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
+ * App-level post-validation: the application, not the LLM, owns correctness.
+ * Enforces dates, duplicates, internal-link inventory, evidence whitelist,
+ * relevance guardrails, word targets and cannibalization classification.
+ */
+export function postValidatePlanItems(
+  items: EditorialPlanBriefV2[],
+  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels">,
+  context: EditorialPlanningContext,
+): PostValidationResult {
+  const kept: EditorialPlanBriefV2[] = [];
+  const dropped: Array<{ title: string; reason: string }> = [];
+  const warnings: string[] = [];
+  const seenTitles = new Set<string>();
+  const seenQueries = new Set<string>();
+
+  const allowedEvidenceUrls = new Set<string>([
+    ...context.evidence.map((entry) => entry.url).filter((url): url is string => Boolean(url)),
+    ...context.indexedUrlInventory,
+  ]);
+
+  for (const item of items) {
+    const title = item.workingTitle.trim();
+
+    // 1. Duplicate titles.
+    const titleKey = normalizeSlug(title);
+    if (seenTitles.has(titleKey)) {
+      dropped.push({ title, reason: "duplicate title" });
+      continue;
     }
-    return JSON.parse(cleaned.slice(start, end + 1));
+    seenTitles.add(titleKey);
+
+    // 2. Date bounds.
+    const scheduled = new Date(item.scheduledFor);
+    if (Number.isNaN(scheduled.getTime()) || scheduled < input.dateFrom || scheduled > input.dateTo) {
+      dropped.push({ title, reason: "scheduledFor outside plan date range" });
+      continue;
+    }
+
+    // 3. Channel must be requested.
+    if (!input.channels.includes(item.channel as PlanChannel)) {
+      dropped.push({ title, reason: `channel ${item.channel} not requested` });
+      continue;
+    }
+
+    // 4. Internal links must exist in the indexed inventory. AI never invents URLs.
+    const validLinks = (item.suggestedInternalLinks ?? []).filter((url) => context.indexedUrlInventory.includes(url));
+    if (validLinks.length !== (item.suggestedInternalLinks ?? []).length) {
+      warnings.push(`removed ${(item.suggestedInternalLinks ?? []).length - validLinks.length} non-inventoried internal link(s) from "${title}"`);
+    }
+
+    // 5. Evidence URLs must come from the provided evidence set.
+    const validEvidence = (item.sourceEvidence ?? []).map((entry) =>
+      entry.url && !allowedEvidenceUrls.has(entry.url) ? { ...entry, url: undefined } : entry,
+    );
+    const invented = (item.sourceEvidence ?? []).filter((entry) => entry.url && !allowedEvidenceUrls.has(entry.url)).length;
+    if (invented > 0) {
+      warnings.push(`stripped ${invented} unverified source url(s) from "${title}"`);
+    }
+
+    // 6. Relevance guardrail.
+    const relevance = computeSiteRelevanceScore(
+      item,
+      context.profile ?? syntheticProfileForSiteType(context.site.type),
+      title,
+    );
+    if (relevance.rejected) {
+      dropped.push({ title, reason: `relevance guardrail (score ${relevance.score}): ${relevance.reasons.join("; ")}` });
+      continue;
+    }
+
+    // 7. Cannibalization classification.
+    const cannibalization = classifyCannibalization(item, title, {
+      queries: [...context.searchTargets, ...context.existingPlanQueries],
+      keywords: [...context.existingPlanQueries],
+      indexedUrls: context.indexedUrlInventory,
+      plannedTitles: context.existingPlanTitles,
+    });
+
+    // 8. Word targets: default from content format, clamp to format bounds.
+    const formatTargets = WORD_TARGETS[item.contentType as ContentFormat] ?? { min: 1200, max: 2200 };
+    let wordMin = item.recommendedWordCountMin;
+    let wordMax = item.recommendedWordCountMax;
+    if (!wordMin || !wordMax) {
+      wordMin = formatTargets.min;
+      wordMax = formatTargets.max;
+    }
+    wordMin = Math.max(200, Math.min(wordMin, wordMax));
+    wordMax = Math.max(wordMin, Math.min(wordMax, formatTargets.max * 1.5));
+
+    // 9. Duplicate target queries inside the same batch.
+    const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : null;
+    if (queryKey && seenQueries.has(queryKey)) {
+      dropped.push({ title, reason: `duplicate target query ${item.targetQuery}` });
+      continue;
+    }
+    if (queryKey) {
+      seenQueries.add(queryKey);
+    }
+
+    kept.push({
+      ...item,
+      suggestedInternalLinks: validLinks,
+      sourceEvidence: validEvidence,
+      relevanceScore: relevance.score,
+      cannibalizationRisk: cannibalization.risk,
+      recommendedWordCountMin: wordMin,
+      recommendedWordCountMax: wordMax,
+      secondaryIntents: (item.secondaryIntents ?? []).filter((intent) => intent !== item.primaryIntent),
+      opportunityScore: Math.max(0, Math.min(100, item.opportunityScore ?? relevance.score)),
+      confidence: Math.max(0, Math.min(1, item.confidence ?? 0.7)),
+    });
   }
+
+  const excess = kept.slice(input.publicationCount);
+  for (const item of excess) {
+    dropped.push({ title: item.workingTitle, reason: "exceeds requested publication count" });
+  }
+  const finalItems = kept.slice(0, input.publicationCount);
+  if (finalItems.length === 0 && kept.length === 0) {
+    warnings.push("no relevant items survived post-validation");
+  }
+  return { kept: finalItems, dropped, warnings };
 }
 
-function readString(value: unknown, field: string, required = false): string | undefined {
-  if (typeof value !== "string" || !value.trim()) {
-    if (required) throw new Error(`editorial_plan_invalid_${field}`);
-    return undefined;
-  }
-  return value.trim();
-}
+function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlanningContext): string {
+  const strategy: PlanningStrategy = input.strategy ?? {
+    mode: "balanced",
+    language: input.language ?? "es",
+    audience: input.audience ?? null,
+    objective: input.objective ?? null,
+    priorityTopics: input.topics ?? [],
+    excludedTopics: input.excludedTopics ?? [],
+  };
 
-function readStringArray(value: unknown): string[] | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    throw new Error("editorial_plan_invalid_array");
-  }
-  return value.map((item) => item.trim()).filter(Boolean);
-}
-
-function validateItems(value: unknown, expectedCount: number): GeneratedPlanItem[] {
-  if (!value || typeof value !== "object" || !Array.isArray((value as { items?: unknown }).items)) {
-    throw new Error("editorial_plan_items_required");
-  }
-  const items = (value as { items: unknown[] }).items;
-  if (items.length === 0 || items.length > expectedCount) {
-    throw new Error("editorial_plan_invalid_item_count");
-  }
-  return items.map((raw) => {
-    if (!raw || typeof raw !== "object") throw new Error("editorial_plan_invalid_item");
-    const item = raw as Record<string, unknown>;
-    const channel = readString(item.channel, "channel", true)!;
-    if (!CHANNELS.includes(channel as PlanChannel)) throw new Error("editorial_plan_invalid_channel");
-    const scheduledFor = readString(item.scheduledFor, "scheduledFor", true)!;
-    if (Number.isNaN(new Date(scheduledFor).getTime())) throw new Error("editorial_plan_invalid_schedule");
-    return {
-      title: readString(item.title, "title", true)!,
-      workingTitle: readString(item.workingTitle, "workingTitle"),
-      topic: readString(item.topic, "topic"),
-      channel: channel as PlanChannel,
-      scheduledFor,
-      newsOrEvergreen: readString(item.newsOrEvergreen, "newsOrEvergreen"),
-      objective: readString(item.objective, "objective"),
-      audience: readString(item.audience, "audience"),
-      searchIntent: readString(item.searchIntent, "searchIntent"),
-      primaryKeyword: readString(item.primaryKeyword, "primaryKeyword"),
-      secondaryKeywords: readStringArray(item.secondaryKeywords),
-      relatedEntities: readStringArray(item.relatedEntities),
-      suggestedSlug: readString(item.suggestedSlug, "suggestedSlug"),
-      seoTitle: readString(item.seoTitle, "seoTitle"),
-      metaDescription: readString(item.metaDescription, "metaDescription"),
-      socialHook: readString(item.socialHook, "socialHook"),
-      cta: readString(item.cta, "cta"),
-      suggestedHashtags: readStringArray(item.suggestedHashtags),
-      imageConcept: readString(item.imageConcept, "imageConcept"),
-      imageRequirements: readString(item.imageRequirements, "imageRequirements"),
-      priority: typeof item.priority === "number" && Number.isFinite(item.priority) ? item.priority : 0,
-      notes: readString(item.notes, "notes"),
-    };
-  });
-}
-
-function buildPrompt(input: GenerateEditorialPlanInput, sourceTitles: string[]): string {
   return [
-    "Generate an editorial publication plan. Return JSON only, with no markdown.",
-    `Create at most ${input.publicationCount} unique items between ${input.dateFrom.toISOString()} and ${input.dateTo.toISOString()}.`,
-    `Allowed channels: ${input.channels.join(", ")}. Use timezone ${input.timezone ?? "Europe/Madrid"}.`,
-    `Objective: ${input.objective ?? "balanced editorial coverage"}. Language: ${input.language ?? "es"}.`,
-    `Audience: ${input.audience ?? "general digital audience"}.`,
-    `Topics: ${(input.topics ?? []).join(", ") || "use source relevance and balanced coverage"}.`,
-    `Excluded topics: ${(input.excludedTopics ?? []).join(", ") || "none"}.`,
-    "Avoid duplicate titles, repeated hooks, keyword cannibalization, and identical schedule times.",
-    `Recent source candidates: ${sourceTitles.join(" | ") || "none available"}.`,
-    "Schema: {\"items\":[{\"title\":string,\"workingTitle\":string,\"topic\":string,\"channel\":\"website\"|\"x\"|\"instagram\",\"scheduledFor\":ISO datetime,\"newsOrEvergreen\":string,\"objective\":string,\"audience\":string,\"searchIntent\":string,\"primaryKeyword\":string,\"secondaryKeywords\":string[],\"relatedEntities\":string[],\"suggestedSlug\":string,\"seoTitle\":string,\"metaDescription\":string,\"socialHook\":string,\"cta\":string,\"suggestedHashtags\":string[],\"imageConcept\":string,\"imageRequirements\":string,\"priority\":number,\"notes\":string}]}",
+    `Generate exactly ${input.publicationCount} editorial plan items for the destination site described below.`,
+    `Date range (ISO): from ${input.dateFrom.toISOString()} to ${input.dateTo.toISOString()} (timezone ${input.timezone ?? "Europe/Madrid"}). All scheduledFor values must fall inside this range.`,
+    `Channels: ${input.channels.join(", ")}.`,
+    "Every item is a professional SEO brief. Ground each topic in the site intelligence evidence below. Do NOT invent topics that are unrelated to the destination.",
+    "Do not duplicate titles, target queries or primary keywords within the batch or against existing plan titles.",
+    "For suggestedInternalLinks, use ONLY urls present in the evidence. For sourceEvidence, use ONLY the allowed evidence urls listed (or omit url).",
+    "Do not invent statistics, prices or schedules; reference evidence types only.",
+    "",
+    renderPlanningContext(context, strategy),
+    "",
+    `Schema name: ${EDITORIAL_PLAN_SCHEMA_NAME}. Return JSON only.`,
   ].join("\n");
 }
 
@@ -159,12 +228,21 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     throw new Error("editorial_plan_account_channel_mismatch");
   }
 
+  const strategy = input.strategy ?? {
+    mode: "balanced",
+    language: input.language ?? "es",
+    audience: input.audience ?? null,
+    objective: input.objective ?? null,
+    priorityTopics: input.topics ?? [],
+    excludedTopics: input.excludedTopics ?? [],
+  };
+
   const plan = await prisma.editorialPlan.create({
     data: {
       tenantId: input.tenantId,
-      siteId: input.siteId ?? null,
+      siteId: input.siteId,
       briefId: input.briefId ?? null,
-      name: `Editorial plan ${input.dateFrom.toISOString().slice(0, 10)}`,
+      name: input.strategy?.campaignName || `Editorial plan ${input.dateFrom.toISOString().slice(0, 10)}`,
       status: "generating",
       dateFrom: input.dateFrom,
       dateTo: input.dateTo,
@@ -173,75 +251,229 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
       accountIds: input.accountIds?.length ? (input.accountIds as Prisma.InputJsonArray) : Prisma.JsonNull,
       frequency: input.frequency ?? null,
       timezone: input.timezone ?? "Europe/Madrid",
+      strategyMode: strategy.mode,
+      primaryIntent: strategy.primaryIntent ?? null,
+      contentFormats: strategy.contentFormats?.length ? (strategy.contentFormats as Prisma.InputJsonArray) : Prisma.JsonNull,
+      topicStrategy: {
+        priorityTopics: strategy.priorityTopics ?? [],
+        excludedTopics: strategy.excludedTopics ?? [],
+        existingCluster: strategy.existingCluster ?? null,
+        newCluster: strategy.newCluster ?? false,
+        freeAiDiscovery: strategy.freeAiDiscovery ?? false,
+        seasonalEvents: strategy.seasonalEvents ?? [],
+        brandsOrEntities: strategy.brandsOrEntities ?? [],
+        keywordSeeds: strategy.keywordSeeds ?? [],
+      } as Prisma.InputJsonObject,
+      relevanceThreshold: 45,
       configuration: {
         publicationCount: input.publicationCount,
         language: input.language ?? "es",
         audience: input.audience ?? null,
-        topics: input.topics ?? [],
-        excludedTopics: input.excludedTopics ?? [],
+        market: strategy.market ?? null,
+        campaignName: strategy.campaignName ?? null,
       } as Prisma.InputJsonObject,
+      promptVersion: EDITORIAL_PLAN_PROMPT_VERSION,
     },
   });
 
-  try {
-    const sourceItems = await prisma.sourceItem.findMany({
-      where: { tenantId: input.tenantId, processingStatus: "candidate" },
-      orderBy: [{ score: "desc" }, { discoveredAt: "desc" }],
-      take: 20,
-      select: { title: true },
-    });
-    const provider = getTextProvider();
-    const result = await provider.generate({
-      prompt: buildPrompt(input, sourceItems.map((item) => item.title)),
-      systemPrompt: "You are a structured editorial planning engine. Never output prose outside the requested JSON object.",
-      temperature: 0,
-      maxTokens: Math.max(1200, input.publicationCount * 220),
-    });
-    const parsed = parseGeneratedJson(result.output);
-    const items = validateItems(parsed, input.publicationCount);
-    const uniqueTitles = new Set(items.map((item) => item.title.toLowerCase()));
-    if (uniqueTitles.size !== items.length) throw new Error("editorial_plan_duplicate_titles");
+  structuredEvent("editorial_plan.generation.started", {
+    tenantId: input.tenantId,
+    siteId: input.siteId,
+    planId: plan.id,
+    strategyMode: strategy.mode,
+    publicationCount: input.publicationCount,
+    channels: input.channels,
+  });
 
-    await prisma.$transaction(async (tx) => {
-      await tx.editorialPlanItem.createMany({
-        data: items.map((item) => ({
-          tenantId: input.tenantId,
-          planId: plan.id,
-          siteId: input.siteId ?? null,
-          accountId: accounts.filter((account) => account.platform === item.channel)[
-            items.filter((candidate) => candidate.channel === item.channel).indexOf(item) %
-              Math.max(1, accounts.filter((account) => account.platform === item.channel).length)
-          ]?.id ?? null,
-          title: item.title,
-          workingTitle: item.workingTitle ?? null,
-          topic: item.topic ?? null,
-          channel: item.channel as PublicationChannel,
-          scheduledFor: new Date(item.scheduledFor),
-          newsOrEvergreen: item.newsOrEvergreen ?? null,
-          objective: item.objective ?? input.objective ?? null,
-          audience: item.audience ?? input.audience ?? null,
-          searchIntent: item.searchIntent ?? null,
-          primaryKeyword: item.primaryKeyword ?? null,
-          secondaryKeywords: item.secondaryKeywords?.length ? (item.secondaryKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
-          relatedEntities: item.relatedEntities?.length ? (item.relatedEntities as Prisma.InputJsonArray) : Prisma.JsonNull,
-          suggestedSlug: item.suggestedSlug ?? null,
-          seoTitle: item.seoTitle ?? null,
-          metaDescription: item.metaDescription ?? null,
-          socialHook: item.socialHook ?? null,
-          cta: item.cta ?? null,
-          suggestedHashtags: item.suggestedHashtags?.length ? (item.suggestedHashtags as Prisma.InputJsonArray) : Prisma.JsonNull,
-          imageConcept: item.imageConcept ?? null,
-          imageRequirements: item.imageRequirements ?? null,
-          priority: item.priority ?? 0,
-          status: "proposed",
-          notes: item.notes ?? null,
-        })),
+  try {
+    const contextStarted = Date.now();
+    const context = await buildEditorialPlanningContext(input.tenantId, input.siteId);
+    structuredEvent("editorial_plan.context.built", {
+      tenantId: input.tenantId,
+      siteId: input.siteId,
+      planId: plan.id,
+      assemblyMs: Date.now() - contextStarted,
+      profileVersion: context.profile?.version ?? null,
+      indexedUrls: context.indexedUrlInventory.length,
+      evidenceCount: context.evidence.length,
+    });
+
+    if (!context.profile && input.allowWithoutIntelligence !== true) {
+      throw new Error("site_intelligence_required");
+    }
+
+    const systemPrompt =
+      "You are a site-aware editorial strategy engine. You plan content ONLY for the destination site described by the evidence. " +
+      `Your output MUST match ${EDITORIAL_PLAN_SCHEMA_NAME}. Never output prose outside the JSON object.`;
+
+    let validated: PostValidationResult | null = null;
+    let attempts: StructuredGenerationAttempt[] = [];
+    let lastProvider = "unknown";
+    let lastModel = "unknown";
+
+    const runOnce = async (extraFeedback?: string) =>
+      generateStructured({
+        schemaName: EDITORIAL_PLAN_SCHEMA_NAME,
+        schema: editorialPlanSchemaV2,
+        prompt: buildPromptV2(input, context) + (extraFeedback ?? ""),
+        systemPrompt,
+        temperature: 0,
+        maxTokens: Math.max(4000, input.publicationCount * 1100),
+        eventContext: { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, siteType: context.site.type },
       });
+
+    try {
+      const result = await runOnce();
+      attempts = result.attempts;
+      lastProvider = result.attempts[result.attempts.length - 1].provider;
+      lastModel = result.attempts[result.attempts.length - 1].model;
+      validated = postValidatePlanItems(result.data.items, input, context);
+    } catch (error) {
+      if (error instanceof StructuredOutputError) {
+        await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
+        structuredEvent("editorial_plan.generation.failed", {
+          tenantId: input.tenantId,
+          siteId: input.siteId,
+          planId: plan.id,
+          normalizedError: "EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID",
+          attempts: error.attempts.length,
+        }, "error");
+        throw new Error("EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID");
+      }
+      throw error;
+    }
+
+    // Guardrail recovery: if every row was rejected, retry once with feedback.
+    if (validated && validated.kept.length === 0) {
+      const feedback = `\nYour previous plan was rejected. Rejected rows: ${validated.dropped.slice(0, 10).map((drop) => `${drop.title} (${drop.reason})`).join("; ")}. Propose topics that clearly belong to this destination.`;
+      try {
+        const retryResult = await runOnce(feedback);
+        attempts = [...attempts, ...retryResult.attempts];
+        lastProvider = retryResult.attempts[retryResult.attempts.length - 1].provider;
+        lastModel = retryResult.attempts[retryResult.attempts.length - 1].model;
+        validated = postValidatePlanItems(retryResult.data.items, input, context);
+      } catch (error) {
+        if (error instanceof StructuredOutputError) {
+          await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
+          throw new Error("EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID");
+        }
+        throw error;
+      }
+    }
+
+    if (!validated || validated.kept.length === 0) {
+      structuredEvent("editorial_plan.generation.failed", {
+        tenantId: input.tenantId,
+        siteId: input.siteId,
+        planId: plan.id,
+        normalizedError: "EDITORIAL_PLAN_NO_RELEVANT_ITEMS",
+        dropped: validated?.dropped.slice(0, 20) ?? [],
+      }, "error");
+      throw new Error("EDITORIAL_PLAN_NO_RELEVANT_ITEMS");
+    }
+
+    await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, attempts, "succeeded");
+
+    const items = validated.kept;
+    await prisma.$transaction(async (tx) => {
+      for (const item of items) {
+        await tx.editorialPlanItem.create({
+          data: {
+            tenantId: input.tenantId,
+            planId: plan.id,
+            siteId: input.siteId,
+            accountId:
+              accounts.filter((account) => account.platform === item.channel)[
+                items.filter((candidate) => candidate.channel === item.channel).indexOf(item) %
+                  Math.max(1, accounts.filter((account) => account.platform === item.channel).length)
+              ]?.id ?? null,
+            title: item.workingTitle,
+            workingTitle: item.workingTitle,
+            finalSuggestedTitle: item.finalSuggestedTitle ?? null,
+            topic: item.topic,
+            topicCluster: item.topicCluster ?? null,
+            pillarPage: item.pillarPage ?? null,
+            angle: item.angle ?? null,
+            channel: item.channel as PublicationChannel,
+            scheduledFor: new Date(item.scheduledFor),
+            newsOrEvergreen: item.newsOrEvergreen,
+            editorialObjective: item.editorialObjective ?? input.objective ?? null,
+            audience: item.targetAudience ?? input.audience ?? null,
+            searchIntent: item.primaryIntent,
+            primaryIntent: item.primaryIntent,
+            secondaryIntents: item.secondaryIntents.length ? (item.secondaryIntents as Prisma.InputJsonArray) : Prisma.JsonNull,
+            funnelStage: item.funnelStage ?? null,
+            targetQuery: item.targetQuery ?? null,
+            primaryKeyword: item.primaryKeyword,
+            secondaryKeywords: item.secondaryKeywords.length ? (item.secondaryKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
+            semanticKeywords: item.semanticKeywords.length ? (item.semanticKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
+            relatedEntities: item.relatedEntities.length ? (item.relatedEntities as Prisma.InputJsonArray) : Prisma.JsonNull,
+            questionsToAnswer: item.questionsToAnswer.length ? (item.questionsToAnswer as Prisma.InputJsonArray) : Prisma.JsonNull,
+            competitorAngle: item.competitorAngle ?? null,
+            suggestedSlug: item.suggestedSlug ?? null,
+            seoTitle: item.seoTitle ?? null,
+            metaDescription: item.metaDescription ?? null,
+            suggestedInternalLinks: item.suggestedInternalLinks.length ? (item.suggestedInternalLinks as Prisma.InputJsonArray) : Prisma.JsonNull,
+            suggestedExternalEvidenceTypes: item.suggestedExternalEvidenceTypes.length ? (item.suggestedExternalEvidenceTypes as Prisma.InputJsonArray) : Prisma.JsonNull,
+            faqCandidates: item.faqCandidates.length ? (item.faqCandidates as Prisma.InputJsonArray) : Prisma.JsonNull,
+            schemaTypes: item.schemaTypes.length ? (item.schemaTypes as Prisma.InputJsonArray) : Prisma.JsonNull,
+            outline: item.outline.length ? (item.outline as Prisma.InputJsonArray) : Prisma.JsonNull,
+            recommendedWordCountMin: item.recommendedWordCountMin,
+            recommendedWordCountMax: item.recommendedWordCountMax,
+            difficultyEstimate: item.difficultyEstimate,
+            opportunityScore: item.opportunityScore,
+            relevanceScore: item.relevanceScore,
+            cannibalizationRisk: item.cannibalizationRisk,
+            confidence: item.confidence,
+            rationale: item.rationale,
+            sourceEvidence: item.sourceEvidence.length ? (item.sourceEvidence as Prisma.InputJsonArray) : Prisma.JsonNull,
+            freshnessRequirement: item.freshnessRequirement,
+            contentType: item.contentType,
+            socialHook: item.socialHook ?? null,
+            cta: item.cta ?? null,
+            suggestedHashtags: item.suggestedHashtags.length ? (item.suggestedHashtags as Prisma.InputJsonArray) : Prisma.JsonNull,
+            imageConcept: item.imageConcept ?? null,
+            imageRequirements: item.imageRequirements ?? null,
+            priority: item.priority,
+            status: "proposed",
+            metadata: { relevanceReasons: undefined } as Prisma.InputJsonObject,
+          },
+        });
+      }
       await tx.editorialPlan.update({
         where: { id: plan.id },
-        data: { status: "ready", provider: result.provider, model: result.model, generatedOutput: parsed as Prisma.InputJsonObject, error: null },
+        data: {
+          status: "ready",
+          provider: lastProvider,
+          model: lastModel,
+          siteIntelligenceVersion: context.profile?.version ?? null,
+          generatedOutput: { items, dropped: validated.dropped, warnings: validated.warnings } as Prisma.InputJsonObject,
+          error: null,
+        },
       });
     });
+
+    // Register target queries so future plans avoid cannibalization.
+    const targetItems = items.filter((item) => item.targetQuery);
+    if (targetItems.length > 0) {
+      await registerSearchTargets(
+        input.tenantId,
+        input.siteId,
+        targetItems.map((item) => ({ query: item.targetQuery!, keyword: item.primaryKeyword, intent: item.primaryIntent })),
+      );
+    }
+
+    structuredEvent("editorial_plan.generation.completed", {
+      tenantId: input.tenantId,
+      siteId: input.siteId,
+      planId: plan.id,
+      itemCount: items.length,
+      droppedCount: validated.dropped.length,
+      provider: lastProvider,
+      model: lastModel,
+      siteIntelligenceVersion: context.profile?.version ?? null,
+    });
+
     await writeAudit({
       tenantId: input.tenantId,
       actorType: input.userId ? "user" : "system",
@@ -249,16 +481,59 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
       action: "editorial_plan.generated",
       entityType: "editorial_plan",
       entityId: plan.id,
-      metadata: { itemCount: items.length, channels: input.channels },
+      metadata: {
+        itemCount: items.length,
+        droppedCount: validated.dropped.length,
+        channels: input.channels,
+        strategyMode: strategy.mode,
+        siteIntelligenceVersion: context.profile?.version ?? null,
+      },
     });
     return prisma.editorialPlan.findUnique({ where: { id: plan.id }, include: { items: true } });
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     await prisma.editorialPlan.update({
       where: { id: plan.id },
-      data: { status: "failed", error: error instanceof Error ? error.message : String(error) },
+      data: { status: "failed", error: message },
     });
+    structuredEvent("editorial_plan.generation.failed", {
+      tenantId: input.tenantId,
+      siteId: input.siteId,
+      planId: plan.id,
+      normalizedError: message,
+    }, "error");
     throw error;
   }
+}
+
+async function recordGenerationAttempts(
+  tenantId: string,
+  planId: string,
+  siteId: string | null | undefined,
+  attempts: StructuredGenerationAttempt[],
+  finalStatus: "succeeded" | "failed",
+): Promise<void> {
+  await prisma.editorialPlanGenerationAttempt.createMany({
+    data: attempts.map((attempt) => ({
+      tenantId,
+      planId,
+      siteId: siteId ?? null,
+      provider: attempt.provider,
+      model: attempt.model,
+      attempt: attempt.attempt,
+      status: attempt.validation.ok ? "validated" : finalStatus,
+      finishReason: attempt.finishReason ?? null,
+      tokenUsage: attempt.usage ?? Prisma.JsonNull,
+      schemaValidation: {
+        ok: attempt.validation.ok,
+        errors: attempt.validation.errors.slice(0, 20),
+      } as Prisma.InputJsonObject,
+      normalizedError: attempt.validation.ok ? null : attempt.validation.errors[0] ?? "schema_validation_failed",
+      repairAttempted: attempt.repairAttempted,
+      retryAttempted: attempts.length > attempt.attempt,
+      durationMs: null,
+    })),
+  });
 }
 
 export async function listEditorialPlans(tenantId: string, page: number, pageSize: number) {
@@ -287,26 +562,78 @@ export async function updateEditorialPlanItem(
     metaDescription?: string | null;
     socialHook?: string | null;
     imageConcept?: string | null;
+    imageRequirements?: string | null;
     priority?: number;
     notes?: string | null;
+    contentType?: string | null;
+    primaryIntent?: string | null;
+    secondaryIntents?: string[] | null;
+    funnelStage?: string | null;
+    targetQuery?: string | null;
+    semanticKeywords?: string[] | null;
+    questionsToAnswer?: string[] | null;
+    topicCluster?: string | null;
+    pillarPage?: string | null;
+    finalSuggestedTitle?: string | null;
+    angle?: string | null;
+    editorialObjective?: string | null;
+    competitorAngle?: string | null;
+    suggestedInternalLinks?: string[] | null;
+    suggestedExternalEvidenceTypes?: string[] | null;
+    faqCandidates?: Array<{ question: string; answer: string }> | null;
+    schemaTypes?: string[] | null;
+    outline?: Array<{ heading: string; subpoints?: string[] }> | null;
+    recommendedWordCountMin?: number | null;
+    recommendedWordCountMax?: number | null;
+    difficultyEstimate?: number | null;
+    confidence?: number | null;
+    rationale?: string | null;
+    freshnessRequirement?: string | null;
   },
 ) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
   if (!item) return null;
+  const jsonOrNull = (value: unknown) => (value === undefined ? undefined : value === null ? Prisma.JsonNull : (value as Prisma.InputJsonArray));
   return prisma.editorialPlanItem.update({
     where: { id: item.id },
     data: {
       title: input.title?.trim() || undefined,
       workingTitle: input.workingTitle === undefined ? undefined : input.workingTitle?.trim() || null,
+      finalSuggestedTitle: input.finalSuggestedTitle === undefined ? undefined : input.finalSuggestedTitle?.trim() || null,
       topic: input.topic === undefined ? undefined : input.topic?.trim() || null,
+      topicCluster: input.topicCluster === undefined ? undefined : input.topicCluster?.trim() || null,
+      pillarPage: input.pillarPage === undefined ? undefined : input.pillarPage?.trim() || null,
+      angle: input.angle === undefined ? undefined : input.angle?.trim() || null,
+      editorialObjective: input.editorialObjective === undefined ? undefined : input.editorialObjective?.trim() || null,
+      competitorAngle: input.competitorAngle === undefined ? undefined : input.competitorAngle?.trim() || null,
       scheduledFor: input.scheduledFor,
       primaryKeyword: input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null,
       seoTitle: input.seoTitle === undefined ? undefined : input.seoTitle?.trim() || null,
       metaDescription: input.metaDescription === undefined ? undefined : input.metaDescription?.trim() || null,
       socialHook: input.socialHook === undefined ? undefined : input.socialHook?.trim() || null,
       imageConcept: input.imageConcept === undefined ? undefined : input.imageConcept?.trim() || null,
+      imageRequirements: input.imageRequirements === undefined ? undefined : input.imageRequirements?.trim() || null,
       priority: input.priority,
       notes: input.notes === undefined ? undefined : input.notes?.trim() || null,
+      contentType: input.contentType === undefined ? undefined : input.contentType?.trim() || null,
+      primaryIntent: input.primaryIntent === undefined ? undefined : input.primaryIntent?.trim() || null,
+      searchIntent: input.primaryIntent === undefined ? undefined : input.primaryIntent?.trim() || undefined,
+      secondaryIntents: input.secondaryIntents === undefined ? undefined : input.secondaryIntents?.length ? (input.secondaryIntents as Prisma.InputJsonArray) : Prisma.JsonNull,
+      funnelStage: input.funnelStage === undefined ? undefined : input.funnelStage?.trim() || null,
+      targetQuery: input.targetQuery === undefined ? undefined : input.targetQuery?.trim() || null,
+      semanticKeywords: input.semanticKeywords === undefined ? undefined : input.semanticKeywords?.length ? (input.semanticKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
+      questionsToAnswer: input.questionsToAnswer === undefined ? undefined : input.questionsToAnswer?.length ? (input.questionsToAnswer as Prisma.InputJsonArray) : Prisma.JsonNull,
+      suggestedInternalLinks: input.suggestedInternalLinks === undefined ? undefined : input.suggestedInternalLinks?.length ? (input.suggestedInternalLinks as Prisma.InputJsonArray) : Prisma.JsonNull,
+      suggestedExternalEvidenceTypes: input.suggestedExternalEvidenceTypes === undefined ? undefined : input.suggestedExternalEvidenceTypes?.length ? (input.suggestedExternalEvidenceTypes as Prisma.InputJsonArray) : Prisma.JsonNull,
+      faqCandidates: input.faqCandidates === undefined ? undefined : input.faqCandidates?.length ? (input.faqCandidates as Prisma.InputJsonArray) : Prisma.JsonNull,
+      schemaTypes: input.schemaTypes === undefined ? undefined : input.schemaTypes?.length ? (input.schemaTypes as Prisma.InputJsonArray) : Prisma.JsonNull,
+      outline: input.outline === undefined ? undefined : input.outline?.length ? (input.outline as Prisma.InputJsonArray) : Prisma.JsonNull,
+      recommendedWordCountMin: input.recommendedWordCountMin === undefined ? undefined : input.recommendedWordCountMin,
+      recommendedWordCountMax: input.recommendedWordCountMax === undefined ? undefined : input.recommendedWordCountMax,
+      difficultyEstimate: input.difficultyEstimate === undefined ? undefined : input.difficultyEstimate,
+      confidence: input.confidence === undefined ? undefined : input.confidence,
+      rationale: input.rationale === undefined ? undefined : input.rationale?.trim() || null,
+      freshnessRequirement: input.freshnessRequirement === undefined ? undefined : input.freshnessRequirement?.trim() || null,
     },
   });
 }
@@ -369,13 +696,57 @@ export async function generateContentFromEditorialPlanItem(tenantId: string, ite
   if (item.status !== "approved") throw new Error("editorial_plan_item_must_be_approved");
   if (!item.siteId) throw new Error("editorial_plan_item_site_required");
 
+  const outline = Array.isArray(item.outline) ? item.outline : [];
+  const briefSections = [
+    `Titulo: ${item.workingTitle || item.title}`,
+    item.angle ? `Angulo: ${item.angle}` : null,
+    item.topic ? `Tema: ${item.topic}` : null,
+    item.topicCluster ? `Cluster: ${item.topicCluster}` : null,
+    item.primaryIntent ? `Intencion de busqueda: ${item.primaryIntent}` : null,
+    item.targetQuery ? `Query objetivo: ${item.targetQuery}` : null,
+    item.primaryKeyword ? `Keyword principal: ${item.primaryKeyword}` : null,
+    item.recommendedWordCountMin ? `Extension objetivo: ${item.recommendedWordCountMin}-${item.recommendedWordCountMax ?? item.recommendedWordCountMin} palabras` : null,
+    outline.length > 0
+      ? `Estructura sugerida:\n${outline.map((entry, index) => `${index + 1}. ${typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).heading ?? "") : String(entry)}`).join("\n")}`
+      : null,
+    item.metaDescription ? `Meta description sugerida: ${item.metaDescription}` : null,
+    item.imageConcept ? `Concepto de imagen: ${item.imageConcept}` : null,
+  ].filter((section): section is string => Boolean(section));
+
   const project = await createProject(tenantId, {
     siteId: item.siteId,
-    title: item.workingTitle || item.title,
-    brief: [item.title, item.topic, item.primaryKeyword, item.metaDescription, item.imageConcept].filter(Boolean).join("\n\n"),
+    title: item.finalSuggestedTitle || item.workingTitle || item.title,
+    brief: briefSections.join("\n\n"),
     goal: item.channel === "website" ? "article" : "social_pack",
     primaryLanguage: "es",
-    metadata: { editorialPlanId: item.planId, editorialPlanItemId: item.id, channel: item.channel } as Prisma.InputJsonObject,
+    metadata: {
+      editorialPlanId: item.planId,
+      editorialPlanItemId: item.id,
+      channel: item.channel,
+      contentType: item.contentType ?? null,
+      primaryIntent: item.primaryIntent ?? item.searchIntent ?? null,
+      secondaryIntents: item.secondaryIntents ?? [],
+      funnelStage: item.funnelStage ?? null,
+      targetQuery: item.targetQuery ?? null,
+      primaryKeyword: item.primaryKeyword ?? null,
+      semanticKeywords: item.semanticKeywords ?? [],
+      relatedEntities: item.relatedEntities ?? [],
+      questionsToAnswer: item.questionsToAnswer ?? [],
+      topicCluster: item.topicCluster ?? null,
+      pillarPage: item.pillarPage ?? null,
+      suggestedInternalLinks: item.suggestedInternalLinks ?? [],
+      suggestedExternalEvidenceTypes: item.suggestedExternalEvidenceTypes ?? [],
+      faqCandidates: item.faqCandidates ?? [],
+      schemaTypes: item.schemaTypes ?? [],
+      outline: outline,
+      recommendedWordCountMin: item.recommendedWordCountMin ?? null,
+      recommendedWordCountMax: item.recommendedWordCountMax ?? null,
+      seoTitle: item.seoTitle ?? null,
+      metaDescription: item.metaDescription ?? null,
+      suggestedSlug: item.suggestedSlug ?? null,
+      freshnessRequirement: item.freshnessRequirement ?? null,
+      angle: item.angle ?? null,
+    } as Prisma.InputJsonObject,
   });
   await prisma.editorialPlanItem.update({ where: { id: item.id }, data: { projectId: project.id, status: "generating", contentGenerationStatus: "generating" } });
   await startProjectGeneration(project.id, tenantId);

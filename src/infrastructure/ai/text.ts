@@ -7,6 +7,8 @@ export type TextGenerationInput = {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  /** OpenAI-compatible response_format passthrough (e.g. { type: "json_object" }). */
+  responseFormat?: { type: "json_object" };
 };
 
 export type TextUsage = {
@@ -20,6 +22,7 @@ export type TextGenerationResult = {
   provider: string;
   model: string;
   usage?: TextUsage;
+  finishReason?: string | null;
 };
 
 export type TextProvider = {
@@ -46,7 +49,7 @@ class OpenAICompatibleTextProvider implements TextProvider {
     }
 
     const data = await fetchJson<{
-      choices?: Array<{ message?: { content?: string } }>;
+      choices?: Array<{ message?: { content?: string }; finish_reason?: string | null }>;
       usage?: { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number };
     }>(`${this.baseUrl}/v1/chat/completions`, {
       method: "POST",
@@ -62,6 +65,7 @@ class OpenAICompatibleTextProvider implements TextProvider {
         ],
         temperature: input.temperature ?? getNumberEnv("TEXT_TEMPERATURE", 0.7),
         max_tokens: input.maxTokens ?? getNumberEnv("TEXT_MAX_TOKENS", 800),
+        ...(input.responseFormat ? { response_format: input.responseFormat } : {}),
       },
       timeoutMs: getNumberEnv("TEXT_TIMEOUT_MS", 60_000),
       retries: getNumberEnv("TEXT_RETRIES", 1),
@@ -81,6 +85,7 @@ class OpenAICompatibleTextProvider implements TextProvider {
         completionTokens: data.usage?.completion_tokens,
         totalTokens: data.usage?.total_tokens,
       },
+      finishReason: data.choices?.[0]?.finish_reason ?? null,
     };
   }
 }
