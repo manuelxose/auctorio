@@ -208,8 +208,8 @@ import type { StudioOverview, WorkerHealth } from '../models/studio.models';
             <div class="au-row" *ngFor="let connection of overview.connections">
               <span class="au-row__title">{{ connection.displayName }}</span>
               <span class="au-channel" [class]="'au-channel--' + connection.platform">{{ connection.platform }}</span>
-              <span class="au-badge" [class.au-badge--success]="connection.enabled && connection.status === 'active'" [class.au-badge--danger]="connection.enabled && connection.status === 'error'" [class.au-badge--neutral]="!connection.enabled">
-                {{ !connection.enabled ? 'Disabled' : connection.status === 'active' ? 'Connected' : 'Action required' }}
+              <span class="au-badge" [class.au-badge--success]="connectionStateLabel(connection) === 'Connected'" [class.au-badge--danger]="connectionStateLabel(connection) !== 'Connected' && connectionStateLabel(connection) !== 'Disabled'" [class.au-badge--neutral]="connectionStateLabel(connection) === 'Disabled'">
+                {{ connectionStateLabel(connection) }}
               </span>
             </div>
           </section>
@@ -395,6 +395,28 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
 
   slotLabel(value: string): string {
     return new Date(value).toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  connectionStateLabel(connection: { enabled: boolean; status: string; connectionState: string | null }): string {
+    if (!connection.enabled) {
+      return 'Disabled';
+    }
+    if (connection.connectionState === 'expired') {
+      return 'Reconnect required';
+    }
+    if (connection.connectionState === 'permissions_required') {
+      return 'Permissions needed';
+    }
+    if (connection.connectionState === 'provider_error' || connection.status === 'error') {
+      return 'Action required';
+    }
+    if (connection.connectionState === 'connected' || connection.status === 'active') {
+      return 'Connected';
+    }
+    if (connection.connectionState === 'connecting') {
+      return 'Connecting…';
+    }
+    return connection.status === 'pending' ? 'Pending' : 'Not connected';
   }
 }
 

@@ -82,6 +82,10 @@ function isDryRunEnabled(hasCredentials: boolean): { enabled: boolean; reason: s
   return { enabled: false, reason: null };
 }
 
+export function dryRunGate(hasCredentials: boolean): { enabled: boolean; reason: string | null } {
+  return isDryRunEnabled(hasCredentials);
+}
+
 function dryRunResult(platform: string, seed: string): SocialPublishResult {
   const digest = crypto.createHash("sha1").update(seed).digest("hex").slice(0, 16);
   return {
@@ -94,6 +98,10 @@ function dryRunResult(platform: string, seed: string): SocialPublishResult {
     },
     dryRun: true,
   };
+}
+
+export function buildDryRunResult(platform: string, seed: string): SocialPublishResult {
+  return dryRunResult(platform, seed);
 }
 
 // ────────────────────────────────────────────────────────────── X (Twitter) — OAuth 1.0a user context + API v2

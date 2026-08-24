@@ -173,12 +173,10 @@ export async function createPublication(input: CreatePublicationInput): Promise<
     scheduledFor ? scheduledFor.toISOString() : "now",
   ].join(":");
 
-  const existing = await prisma.publication.findUnique({
+  const existing = await prisma.publication.findFirst({
     where: {
-      tenantId_idempotencyKey: {
-        tenantId: input.tenantId,
-        idempotencyKey,
-      },
+      tenantId: input.tenantId,
+      idempotencyKey,
     },
   });
   if (existing) {
@@ -577,12 +575,10 @@ async function enqueueWebsitePublication(publicationId: string): Promise<void> {
     "publish",
   ].join(":");
 
-  const existingJob = await prisma.publicationJob.findUnique({
+  const existingJob = await prisma.publicationJob.findFirst({
     where: {
-      tenantId_idempotencyKey: {
-        tenantId: publication.tenantId,
-        idempotencyKey,
-      },
+      tenantId: publication.tenantId,
+      idempotencyKey,
     },
   });
   if (existingJob && ["queued", "processing", "draft_synced", "published"].includes(existingJob.status)) {

@@ -2,6 +2,8 @@ import { getEnv, getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
 import { listDueSources, fetchSourceNow } from "../../studio/sources";
 import { scoreAndPromoteSourceItem } from "../../studio/editorial";
+import { runWebDiscoveryTick } from "../../studio/web-discovery";
+import { structuredEvent } from "../../shared/utils/logger";
 
 const prisma = getPrismaClient();
 
@@ -84,8 +86,10 @@ export async function runDiscoveryWorker() {
   }
 
   const intervalMs = Math.max(15_000, getNumberEnv("DISCOVERY_INTERVAL_MS", 60_000));
+  const webIntervalMs = Math.max(300_000, getNumberEnv("WEB_DISCOVERY_INTERVAL_MS", 30 * 60_000));
   let running = false;
   let shuttingDown = false;
+  let webRunning = false;
 
   const tick = async () => {
     if (running || shuttingDown) {
@@ -104,14 +108,32 @@ export async function runDiscoveryWorker() {
     }
   };
 
+  // AI web source discovery: plan, search, evaluate, scrape and feed the
+  // existing source-item / cluster pipeline.
+  const webTick = async () => {
+    if (webRunning || shuttingDown) {
+      return;
+    }
+    webRunning = true;
+    try {
+      await runWebDiscoveryTick();
+    } catch (error) {
+      structuredEvent("web.discovery.tick_failed", { error: error instanceof Error ? error.message : String(error) }, "error");
+    } finally {
+      webRunning = false;
+    }
+  };
+
   const timer = setInterval(() => void tick(), intervalMs);
+  const webTimer = setInterval(() => void webTick(), webIntervalMs);
   const stop = () => {
     shuttingDown = true;
     clearInterval(timer);
+    clearInterval(webTimer);
   };
   process.on("SIGTERM", stop);
   process.on("SIGINT", stop);
 
   void tick();
-  console.log("[worker:discovery] started", { intervalMs });
+  console.log("[worker:discovery] started", { intervalMs, webIntervalMs });
 }

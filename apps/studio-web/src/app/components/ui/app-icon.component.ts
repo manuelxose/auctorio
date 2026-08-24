@@ -212,6 +212,12 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'rect', x: 3, y: 11, width: 18, height: 11, rx: 2 },
     { kind: 'path', d: 'M7 11V7a5 5 0 0 1 10 0v4' },
   ],
+  plug: [
+    { kind: 'path', d: 'M12 22v-5' },
+    { kind: 'path', d: 'M9 8V2' },
+    { kind: 'path', d: 'M15 8V2' },
+    { kind: 'path', d: 'M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z' },
+  ],
 };
 
 export type StudioIconName = keyof typeof ICONS;

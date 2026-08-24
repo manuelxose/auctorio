@@ -603,6 +603,7 @@ export type StudioSourceItem = {
   cluster: { id: string; headline: string | null; sourceCount: number } | null;
   projects: Array<{ id: string; title: string; status: ProjectStatus }>;
   projectCount: number;
+  retrieval: { id: string; provider: string; retrievedAt: string } | null;
 };
 
 export type StudioStoryCluster = {
@@ -733,6 +734,109 @@ export type PublishingAccount = {
   site: { id: string; name: string; key: string } | null;
 };
 
+// ─── Social connections (OAuth / managed provider) ───────────────────────
+
+export type SocialConnectionState =
+  | 'not_connected'
+  | 'connecting'
+  | 'connected'
+  | 'expired'
+  | 'permissions_required'
+  | 'provider_error'
+  | 'disabled';
+
+export type SocialConnection = {
+  id: string;
+  platform: 'x' | 'instagram' | 'website';
+  provider: string;
+  displayName: string;
+  externalAccountId: string | null;
+  username: string | null;
+  avatarUrl: string | null;
+  connectionState: SocialConnectionState;
+  status: string;
+  enabled: boolean;
+  connectedAt: string | null;
+  lastVerifiedAt: string | null;
+  lastError: string | null;
+  capabilities: Record<string, boolean>;
+  hasCredentials: boolean;
+  siteId: string | null;
+  createdAt: string;
+};
+
+export type SocialConnectionSession = {
+  sessionId: string;
+  url: string;
+  provider: string;
+  expiresAt: string;
+  callbackUrl: string;
+};
+
+export type SocialSetupInfo = {
+  provider: { provider: string; configured: boolean; requiresSetup: string | null };
+  callbackUrl: string;
+  platforms: {
+    instagram: { ready: boolean; requirement: string };
+    x: { ready: boolean; requirement: string };
+  };
+};
+
+// ─── AI web discovery ────────────────────────────────────────────────────
+
+export type DiscoverySettings = {
+  enabled: boolean;
+  mode: 'manual' | 'recommend' | 'automatic';
+  frequencyMinutes: number;
+  languages: string[];
+  regions: string[];
+  maxSearchesPerDay: number;
+  maxScrapesPerDay: number;
+  maxDiscoveryCostPerDay: number;
+  preferPrimarySources: boolean;
+  requireTwoSources: boolean;
+  avoidLowAuthority: boolean;
+  detectDevelopingStories: boolean;
+  autoEnableSources: boolean;
+  minRecommendationScore: number;
+};
+
+export type DiscoverySettingsResponse = {
+  config: DiscoverySettings & { id: string; siteId: string | null };
+  provider: { provider: string; configured: boolean; message: string };
+  usageToday: { searches: number; scrapes: number; estimatedCostUsd: number };
+};
+
+export type SourceRecommendation = {
+  id: string;
+  domain: string;
+  sourceId: string | null;
+  status: 'open' | 'accepted' | 'dismissed';
+  score: number;
+  searchesCount: number;
+  reasonSummary: string | null;
+  lastSeenAt: string;
+  createdAt: string;
+};
+
+export type DiscoveredDomain = {
+  id: string;
+  domain: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  discoveryCount: number;
+  blocked: boolean;
+  qualityScore: number | null;
+  tier: string | null;
+};
+
+export type BlockedDomain = {
+  id: string;
+  domain: string;
+  reason: string | null;
+  createdAt: string;
+};
+
 export type EditorialPlanItem = {
   id: string;
   projectId: string | null;
@@ -858,6 +962,7 @@ export type StudioOverview = {
     displayName: string;
     enabled: boolean;
     status: string;
+    connectionState: string | null;
     lastVerifiedAt: string | null;
     siteName: string | null;
   }>;

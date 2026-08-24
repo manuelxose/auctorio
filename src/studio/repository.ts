@@ -702,12 +702,10 @@ export async function findPublicationJobByIdempotency(
   tenantId: string,
   idempotencyKey: string,
 ) {
-  return prisma.publicationJob.findUnique({
+  return prisma.publicationJob.findFirst({
     where: {
-      tenantId_idempotencyKey: {
-        tenantId,
-        idempotencyKey,
-      },
+      tenantId,
+      idempotencyKey,
     },
   });
 }

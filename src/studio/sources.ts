@@ -712,7 +712,7 @@ export async function upsertSourceItem(
   tenantId: string,
   sourceId: string,
   item: ParsedSourceItem,
-): Promise<{ created: boolean; sourceItemId: string | null }> {
+): Promise<{ created: boolean; updated: boolean; sourceItemId: string | null }> {
   const contentHash = buildItemContentHash(item.title, item.cleanedText ?? item.description);
   const data = {
     tenantId,
@@ -741,19 +741,64 @@ export async function upsertSourceItem(
         { contentHash },
       ],
     },
-    select: { id: true, processingStatus: true },
   });
 
   if (existing) {
-    return { created: false, sourceItemId: existing.id };
+    // Developing story detection: same item with changed content is an update,
+    // not a new story. Rewrite the item so it re-enters scoring and bump the
+    // cluster update counter.
+    if (existing.contentHash !== contentHash) {
+      const updated = await prisma.sourceItem.update({
+        where: { id: existing.id },
+        data: {
+          title: data.title,
+          description: data.description,
+          rawText: data.rawText,
+          cleanedText: data.cleanedText,
+          author: data.author,
+          publishedAt: data.publishedAt,
+          sourceImageUrls: data.sourceImageUrls,
+          language: data.language,
+          categories: data.categories,
+          contentHash,
+          processingStatus: "parsed",
+          updatedAt: new Date(),
+          metadata: {
+            contentUpdatedAt: new Date().toISOString(),
+            previousContentHash: existing.contentHash,
+          } as Prisma.InputJsonObject,
+        },
+      });
+      if (existing.clusterId) {
+        const cluster = await prisma.storyCluster.findUnique({
+          where: { id: existing.clusterId },
+          select: { status: true },
+        });
+        if (cluster) {
+          const newStatus =
+            cluster.status === "selected" || cluster.status === "covered" ? "updated" : "developing";
+          await prisma.storyCluster.update({
+            where: { id: existing.clusterId },
+            data: {
+              updateCount: { increment: 1 },
+              lastUpdateAt: new Date(),
+              lastSeenAt: new Date(),
+              status: newStatus,
+            },
+          });
+        }
+      }
+      return { created: false, updated: true, sourceItemId: updated.id };
+    }
+    return { created: false, updated: false, sourceItemId: existing.id };
   }
 
   try {
     const created = await prisma.sourceItem.create({ data });
-    return { created: true, sourceItemId: created.id };
+    return { created: true, updated: false, sourceItemId: created.id };
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return { created: false, sourceItemId: null };
+      return { created: false, updated: false, sourceItemId: null };
     }
     throw error;
   }
@@ -784,6 +829,12 @@ export async function fetchSourceNow(tenantId: string, sourceId: string): Promis
       const upserted = await upsertSourceItem(tenantId, source.id, item);
       if (upserted.created) {
         result.created += 1;
+        if (upserted.sourceItemId) {
+          createdItemIds.push(upserted.sourceItemId);
+        }
+      } else if (upserted.updated) {
+        // A previously covered story changed: re-score the updated item so the
+        // inbox surfaces it as a developing story.
         if (upserted.sourceItemId) {
           createdItemIds.push(upserted.sourceItemId);
         }
@@ -897,6 +948,11 @@ export async function listSourceItems(
         source: { select: { id: true, name: true, type: true, trustScore: true } },
         cluster: { select: { id: true, headline: true, sourceCount: true } },
         projects: { select: { id: true, title: true, status: true } },
+        webRetrievals: {
+          select: { id: true, provider: true, retrievedAt: true },
+          orderBy: { retrievedAt: "desc" },
+          take: 1,
+        },
       },
     }),
   ]);
@@ -924,6 +980,7 @@ export async function listSourceItems(
       cluster: item.cluster,
       projects: item.projects,
       projectCount: item.projects.length,
+      retrieval: item.webRetrievals[0] ?? null,
     })),
     page: input.page,
     pageSize: input.pageSize,

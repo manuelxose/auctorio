@@ -56,6 +56,7 @@ import {
 } from "./social";
 import { listAudit } from "./audit";
 import { writeAudit } from "./audit";
+import { computeConnectionState } from "./social-connections";
 import { buildAssetPublicUrl } from "./orchestration";
 import {
   bulkApproveEditorialPlanItems,
@@ -1704,6 +1705,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           displayName: true,
           enabled: true,
           status: true,
+          provider: true,
+          providerProfileId: true,
+          username: true,
+          connectionStatus: true,
+          credentialsRef: true,
           lastVerifiedAt: true,
           site: { select: { name: true } },
         },
@@ -1755,9 +1761,10 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       connections: connections.map((connection) => ({
         id: connection.id,
         platform: connection.platform,
-        displayName: connection.displayName,
+        displayName: connection.username ? `@${connection.username}` : connection.displayName,
         enabled: connection.enabled,
         status: connection.status,
+        connectionState: computeConnectionState(connection as never),
         lastVerifiedAt: connection.lastVerifiedAt,
         siteName: connection.site?.name ?? null,
       })),
@@ -1811,6 +1818,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     try {
       const { Queue } = await import("bullmq");
       const { getRedisConnectionOptions } = await import("../infrastructure/queue/redis");
+      const { webIntelligenceAvailability } = await import("./web-intelligence");
+      const { providerAvailability } = await import("./social-connections");
       const connection = getRedisConnectionOptions();
 
       const entries = await Promise.all(
@@ -1824,7 +1833,29 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           }
         }),
       );
-      return reply.send({ workers: entries });
+
+      // Recent connection health for social accounts.
+      const accounts = await prisma.publishingAccount.findMany({
+        where: { tenantId: context.tenantId, platform: { in: ["x", "instagram"] } },
+        select: { platform: true, provider: true, connectionStatus: true, lastVerifiedAt: true, enabled: true, username: true },
+        orderBy: { platform: "asc" },
+      });
+
+      return reply.send({
+        workers: entries,
+        providers: {
+          social: providerAvailability(),
+          webIntelligence: webIntelligenceAvailability(),
+        },
+        connections: accounts.map((account) => ({
+          platform: account.platform,
+          provider: account.provider,
+          username: account.username,
+          enabled: account.enabled,
+          connectionStatus: account.connectionStatus ?? "unknown",
+          lastVerifiedAt: account.lastVerifiedAt,
+        })),
+      });
     } catch (error) {
       return reply.code(503).send({ status: "degraded", message: error instanceof Error ? error.message : String(error) });
     }

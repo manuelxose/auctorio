@@ -17,6 +17,14 @@ import type {
   ProjectStatus,
   PublishProjectPayload,
   PublishingAccount,
+  BlockedDomain,
+  DiscoveredDomain,
+  DiscoverySettings,
+  DiscoverySettingsResponse,
+  SocialConnection,
+  SocialConnectionSession,
+  SocialSetupInfo,
+  SourceRecommendation,
   EditorialPlan,
   PublishingWindow,
   SourceItemStatus,
@@ -601,6 +609,82 @@ export class StudioApiService {
 
   verifyPublishingAccount(accountId: string): Observable<{ ok: boolean; message: string }> {
     return this.http.post<{ ok: boolean; message: string }>(`${this.apiBase}/backend/v2/publishing-accounts/${accountId}/verify`, {});
+  }
+
+  // ─── Social connections (OAuth / managed provider) ────────────────────
+
+  listSocialConnections(): Observable<{ items: SocialConnection[]; provider: SocialSetupInfo['provider']; callbackUrl: string }> {
+    return this.http.get<{ items: SocialConnection[]; provider: SocialSetupInfo['provider']; callbackUrl: string }>(`${this.apiBase}/backend/v2/social-connections`);
+  }
+
+  getSocialSetup(): Observable<SocialSetupInfo> {
+    return this.http.get<SocialSetupInfo>(`${this.apiBase}/backend/v2/social-connections/setup`);
+  }
+
+  startSocialConnectionSession(platform: 'x' | 'instagram'): Observable<SocialConnectionSession> {
+    return this.http.post<SocialConnectionSession>(`${this.apiBase}/backend/v2/social-connections/session`, { platform });
+  }
+
+  verifySocialConnection(connectionId: string): Observable<{ ok: boolean; state: string; message: string }> {
+    return this.http.post<{ ok: boolean; state: string; message: string }>(`${this.apiBase}/backend/v2/social-connections/${connectionId}/verify`, {});
+  }
+
+  reconnectSocialConnection(connectionId: string): Observable<SocialConnectionSession> {
+    return this.http.post<SocialConnectionSession>(`${this.apiBase}/backend/v2/social-connections/${connectionId}/reconnect`, {});
+  }
+
+  disconnectSocialConnection(connectionId: string): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiBase}/backend/v2/social-connections/${connectionId}`);
+  }
+
+  // ─── AI web discovery ─────────────────────────────────────────────────
+
+  getDiscoverySettings(): Observable<DiscoverySettingsResponse> {
+    return this.http.get<DiscoverySettingsResponse>(`${this.apiBase}/backend/v2/discovery/settings`);
+  }
+
+  updateDiscoverySettings(payload: Partial<DiscoverySettings>): Observable<DiscoverySettings> {
+    return this.http.patch<DiscoverySettings>(`${this.apiBase}/backend/v2/discovery/settings`, payload);
+  }
+
+  runDiscoveryNow(): Observable<{ status: string }> {
+    return this.http.post<{ status: string }>(`${this.apiBase}/backend/v2/discovery/run`, {});
+  }
+
+  listSourceRecommendations(page = 1, pageSize = 50, status?: string): Observable<PaginatedResponse<SourceRecommendation>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (status) {
+      params = params.set('status', status);
+    }
+    return this.http.get<PaginatedResponse<SourceRecommendation>>(`${this.apiBase}/backend/v2/discovery/recommendations`, { params });
+  }
+
+  acceptSourceRecommendation(recommendationId: string): Observable<{ ok: boolean; sourceId: string }> {
+    return this.http.post<{ ok: boolean; sourceId: string }>(`${this.apiBase}/backend/v2/discovery/recommendations/${recommendationId}/accept`, {});
+  }
+
+  dismissSourceRecommendation(recommendationId: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.apiBase}/backend/v2/discovery/recommendations/${recommendationId}/dismiss`, {});
+  }
+
+  listDiscoveredDomains(page = 1, pageSize = 50, blocked = false): Observable<PaginatedResponse<DiscoveredDomain>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (blocked) {
+      params = params.set('blocked', 'true');
+    }
+    return this.http.get<PaginatedResponse<DiscoveredDomain>>(`${this.apiBase}/backend/v2/discovery/domains`, { params });
+  }
+
+  blockDiscoveredDomain(domain: string, reason?: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.apiBase}/backend/v2/discovery/domains/block`, { domain, reason });
+  }
+
+  unblockDiscoveredDomain(domain: string): Observable<{ ok: boolean }> {
+    return this.http.post<{ ok: boolean }>(`${this.apiBase}/backend/v2/discovery/domains/unblock`, { domain });
+  }
+
+  listBlockedDomains(): Observable<{ items: BlockedDomain[] }> {
+    return this.http.get<{ items: BlockedDomain[] }>(`${this.apiBase}/backend/v2/discovery/blocked-domains`);
   }
 
   listEditorialPlans(page = 1, pageSize = 20): Observable<PaginatedResponse<EditorialPlan>> {

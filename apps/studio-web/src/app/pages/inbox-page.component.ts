@@ -109,6 +109,7 @@ type InboxTab = 'inbox' | 'clusters';
                 <div class="au-feed__body">
                   <div class="au-feed__meta">
                     <span class="au-badge au-badge--outline">{{ item.source.name }}</span>
+                    <span class="au-badge au-badge--brand" *ngIf="item.retrieval">AI discovered · {{ item.retrieval.provider }} · {{ dateLabel(item.retrieval.retrievedAt) }}</span>
                     <span class="au-badge au-badge--brand" *ngIf="item.cluster">cluster ×{{ item.cluster.sourceCount }}</span>
                     <span
                       class="au-badge"
