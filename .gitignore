@@ -14,6 +14,7 @@ apps/studio-web/releases/
 .claude-flow/
 .claude/
 .swarm/
+ruvector.db
 tmp-storage/
 current
 releases/

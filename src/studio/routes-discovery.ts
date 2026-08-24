@@ -72,6 +72,18 @@ export function registerDiscoveryRoutes(fastify: FastifyInstance) {
     if (!context) {
       return;
     }
+    const availability = webIntelligenceAvailability();
+    if (!availability.configured) {
+      // Fail fast and tell the operator what to do instead of accepting a run
+      // that can only log a background failure the UI never surfaces.
+      return reply.code(409).send({
+        error: {
+          code: "web_intelligence_provider_not_configured",
+          message: availability.message,
+          requestId: request.id,
+        },
+      });
+    }
     // Kick off asynchronously; the endpoint returns immediately and the run is
     // visible through queries/usage/audit. The worker also runs this on its
     // own schedule.

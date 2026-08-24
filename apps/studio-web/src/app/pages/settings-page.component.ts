@@ -232,7 +232,7 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai' | 'discover
 
             <div class="au-form__actions">
               <button class="au-btn au-btn--primary" type="submit" [disabled]="savingDiscovery">{{ savingDiscovery ? 'Saving…' : 'Save discovery settings' }}</button>
-              <button class="au-btn au-btn--secondary" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery">
+              <button class="au-btn au-btn--secondary" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery || !discovery?.provider?.configured" [attr.title]="discovery?.provider?.configured ? '' : 'Web search needs a provider key server-side. Configure firecrawl or tavily to enable discovery runs.'">
                 {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
               </button>
             </div>
@@ -396,12 +396,12 @@ export class SettingsPageComponent implements OnInit {
     this.api.runDiscoveryNow().subscribe({
       next: () => {
         this.runningDiscovery = false;
-        this.toast.success('AI discovery started.');
+        this.toast.success('AI discovery started — results appear in the Inbox and Sources.');
       },
       error: (err) => {
         this.runningDiscovery = false;
-        const body = (err as { error?: { message?: string } })?.error;
-        this.error = body?.message ? String(body.message) : 'Discovery could not be started.';
+        const body = (err as { error?: { code?: string; message?: string } })?.error;
+        this.toast.error(body?.message ? String(body.message) : 'Discovery could not be started.');
       },
     });
   }

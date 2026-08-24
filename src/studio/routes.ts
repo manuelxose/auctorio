@@ -2,9 +2,11 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
 import type { ProjectGoal, ProjectStatus, PublicationStatus, SiteType } from "@prisma/client";
+import { Queue } from "bullmq";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
 import { getEnv } from "../shared/utils/env";
 import { getContentTypeFromPath } from "../shared/utils/mime";
@@ -344,6 +346,42 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         message: String(error),
       });
     }
+  });
+
+  fastify.get("/health/queues", async (_request, reply) => {
+    const entries = await Promise.all(
+      Object.entries(QUEUE_NAMES).map(async ([key, queueName]) => {
+        const queue = new Queue(queueName, { connection: getRedisConnectionOptions() });
+        try {
+          const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed");
+          const oldest = await queue.getJobs(["waiting", "delayed"], 0, 0, true);
+          const oldestWaiting = oldest[0];
+          return {
+            key,
+            queueName,
+            counts,
+            oldestWaitingAgeMs: oldestWaiting?.timestamp
+              ? Math.max(0, Date.now() - oldestWaiting.timestamp)
+              : null,
+          };
+        } catch (error) {
+          return {
+            key,
+            queueName,
+            counts: null,
+            oldestWaitingAgeMs: null,
+            error: error instanceof Error ? error.message : String(error),
+          };
+        } finally {
+          await queue.close();
+        }
+      }),
+    );
+    const broken = entries.filter((entry) => "error" in entry);
+    return reply.code(broken.length > 0 ? 503 : 200).send({
+      status: broken.length > 0 ? "degraded" : "ok",
+      queues: entries,
+    });
   });
 
   fastify.get("/health/destinations", async (_request, reply) => {
