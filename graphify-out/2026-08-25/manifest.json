@@ -876,9 +876,9 @@
     "semantic_hash": "4c58459e65e3f8d0a03f21c862c741dc"
   },
   "src/studio/projects.ts": {
-    "mtime": 1787603684.769646,
-    "seen": 1787603831.2445984,
-    "ast_hash": "4e3e1514e7800b49d76fcc5e6e1bb9a0",
+    "mtime": 1787610011.8913028,
+    "seen": 1787610534.7876775,
+    "ast_hash": "93b189a4216ac08cda58e435d8c9a29d",
     "semantic_hash": ""
   },
   "src/studio/prompts.ts": {
@@ -888,16 +888,16 @@
     "semantic_hash": "bc6c2156c58a845bfec68eac9a206dfc"
   },
   "src/studio/publication.ts": {
-    "mtime": 1787603684.8386447,
-    "seen": 1787603831.2446036,
-    "ast_hash": "5a91379da16faf45f1145bf29a8cebb0",
+    "mtime": 1787610011.9233022,
+    "seen": 1787610534.787749,
+    "ast_hash": "3f2f297ec8a2c25221aa34d627e0206c",
     "semantic_hash": ""
   },
   "src/studio/publishers.ts": {
-    "mtime": 1787338594.2778728,
-    "seen": 1787599470.2782123,
-    "ast_hash": "98fb84e458f54801355ed8acf91cf271",
-    "semantic_hash": "98fb84e458f54801355ed8acf91cf271"
+    "mtime": 1787609652.488102,
+    "seen": 1787610534.7877514,
+    "ast_hash": "ca3a4604fa5866e1a0aaa2f159cab7f2",
+    "semantic_hash": ""
   },
   "src/studio/qa.ts": {
     "mtime": 1787338594.3698714,
@@ -1038,10 +1038,10 @@
     "semantic_hash": "8bdc77f8b99de11005a8fdf4946ee354"
   },
   "tests/publishers.test.ts": {
-    "mtime": 1787355944.7879984,
-    "seen": 1787599470.2782521,
-    "ast_hash": "dada2dd9b2469dd2840091266c06f630",
-    "semantic_hash": "dada2dd9b2469dd2840091266c06f630"
+    "mtime": 1787609707.44521,
+    "seen": 1787610534.7894049,
+    "ast_hash": "fb5904c5348520d91e2766cd8cd74692",
+    "semantic_hash": ""
   },
   "tests/qa.test.ts": {
     "mtime": 1787338594.3708713,
@@ -1136,7 +1136,7 @@
   ".vscode/mcp.json": {
     "mtime": 1773257216.5235314,
     "seen": 1787607827.7209902,
-    "ast_hash": "690f19f462da3192a98806fdb2377e72",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "prisma/migrations/20260824000000_social_connections_and_web_discovery/migration.sql": {
@@ -1542,9 +1542,15 @@
     "semantic_hash": ""
   },
   "MILESTONES.md": {
-    "mtime": 1787607794.967175,
-    "seen": 1787607818.2205,
-    "ast_hash": "1a97f5d2c0702db8fc0d246780fb0996",
+    "mtime": 1787610505.5764186,
+    "seen": 1787610534.7901118,
+    "ast_hash": "3c9140e83afb9865e10f0d35366ddf22",
+    "semantic_hash": ""
+  },
+  "tests/tenant-isolation.test.ts": {
+    "mtime": 1787610326.7592676,
+    "seen": 1787610534.789853,
+    "ast_hash": "32f57b05762271df83109866a2f8d357",
     "semantic_hash": ""
   }
 }

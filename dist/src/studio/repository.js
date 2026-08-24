@@ -618,12 +618,10 @@ async function createPublicationJob(tenantId, siteId, projectId, versionId, acti
     });
 }
 async function findPublicationJobByIdempotency(tenantId, idempotencyKey) {
-    return prisma.publicationJob.findUnique({
+    return prisma.publicationJob.findFirst({
         where: {
-            tenantId_idempotencyKey: {
-                tenantId,
-                idempotencyKey,
-            },
+            tenantId,
+            idempotencyKey,
         },
     });
 }

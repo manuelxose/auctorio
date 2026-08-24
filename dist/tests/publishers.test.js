@@ -589,3 +589,62 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
         await server.close();
     }
 });
+(0, node_test_1.default)("tecnoria sends JSON content-type with bearer-token auth (regression: INVALID_INPUT)", async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
+    const seenHeaders = [];
+    const server = await createMockServer((req, res, bodyText) => {
+        const headers = req.headers;
+        seenHeaders.push(headers);
+        if (req.url === "/api/v1/blog" && req.method === "POST") {
+            strict_1.default.equal(String(headers.authorization), "Bearer tecnoria-token");
+            const contentType = String(headers["content-type"] ?? "");
+            strict_1.default.match(contentType, /application\/json/);
+            const body = JSON.parse(bodyText);
+            strict_1.default.equal(body.status, "draft");
+            strict_1.default.equal(body.slug, "proyecto-test");
+            res.statusCode = 201;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ id: "tpost-1", slug: "proyecto-test", status: "draft" }));
+            return;
+        }
+        if (req.url === "/api/v1/blog/tpost-1" && req.method === "PUT") {
+            strict_1.default.equal(String(headers.authorization), "Bearer tecnoria-token");
+            const contentType = String(headers["content-type"] ?? "");
+            strict_1.default.match(contentType, /application\/json/);
+            const body = JSON.parse(bodyText);
+            strict_1.default.equal(body.status, "publish");
+            res.statusCode = 200;
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ id: "tpost-1", slug: "proyecto-test", status: "publish" }));
+            return;
+        }
+        res.statusCode = 404;
+        res.end();
+    });
+    try {
+        const context = buildContext("tecnoria", {
+            site: {
+                ...buildContext("tecnoria").site,
+                baseUrl: server.url,
+                publishingCredentialsRef: "TECNORIA_TEST_TOKEN",
+            },
+        });
+        const publisher = (0, publishers_1.getPublisher)(context.site);
+        const draft = await publisher.publishDraft(context);
+        strict_1.default.equal(draft.externalId, "tpost-1");
+        strict_1.default.equal(draft.externalUrl, `${server.url}/blog/proyecto-test`);
+        const published = await publisher.publish(context, draft.externalId);
+        strict_1.default.equal(published.externalId, "tpost-1");
+        // Every JSON request in the flow must carry a JSON content type so the
+        // destination's express.json() parses the body.
+        for (const headers of seenHeaders) {
+            strict_1.default.match(String(headers["content-type"] ?? ""), /application\/json/);
+        }
+    }
+    finally {
+        await server.close();
+    }
+});

@@ -6,8 +6,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registerStudioRoutes = registerStudioRoutes;
 const node_fs_1 = require("node:fs");
 const node_path_1 = __importDefault(require("node:path"));
+const bullmq_1 = require("bullmq");
 const ioredis_1 = __importDefault(require("ioredis"));
 const prisma_1 = require("../infrastructure/db/prisma");
+const queues_1 = require("../infrastructure/queue/queues");
 const redis_1 = require("../infrastructure/queue/redis");
 const env_1 = require("../shared/utils/env");
 const mime_1 = require("../shared/utils/mime");
@@ -25,6 +27,8 @@ const security_1 = require("./security");
 const http_utils_1 = require("./http-utils");
 const views_1 = require("./views");
 const routes_editorial_1 = require("./routes-editorial");
+const routes_connections_1 = require("./routes-connections");
+const routes_discovery_1 = require("./routes-discovery");
 const SITE_TYPES = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS = [
     "article",
@@ -186,6 +190,8 @@ async function serveAsset(request, reply) {
 }
 function registerStudioRoutes(fastify) {
     (0, routes_editorial_1.registerEditorialRoutes)(fastify);
+    (0, routes_connections_1.registerConnectionRoutes)(fastify);
+    (0, routes_discovery_1.registerDiscoveryRoutes)(fastify);
     fastify.get("/health/live", async () => ({ status: "ok" }));
     fastify.get("/health/ready", async (_request, reply) => {
         try {
@@ -198,6 +204,41 @@ function registerStudioRoutes(fastify) {
                 message: String(error),
             });
         }
+    });
+    fastify.get("/health/queues", async (_request, reply) => {
+        const entries = await Promise.all(Object.entries(queues_1.QUEUE_NAMES).map(async ([key, queueName]) => {
+            const queue = new bullmq_1.Queue(queueName, { connection: (0, redis_1.getRedisConnectionOptions)() });
+            try {
+                const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed");
+                const oldest = await queue.getJobs(["waiting", "delayed"], 0, 0, true);
+                const oldestWaiting = oldest[0];
+                return {
+                    key,
+                    queueName,
+                    counts,
+                    oldestWaitingAgeMs: oldestWaiting?.timestamp
+                        ? Math.max(0, Date.now() - oldestWaiting.timestamp)
+                        : null,
+                };
+            }
+            catch (error) {
+                return {
+                    key,
+                    queueName,
+                    counts: null,
+                    oldestWaitingAgeMs: null,
+                    error: error instanceof Error ? error.message : String(error),
+                };
+            }
+            finally {
+                await queue.close();
+            }
+        }));
+        const broken = entries.filter((entry) => "error" in entry);
+        return reply.code(broken.length > 0 ? 503 : 200).send({
+            status: broken.length > 0 ? "degraded" : "ok",
+            queues: entries,
+        });
     });
     fastify.get("/health/destinations", async (_request, reply) => {
         try {
