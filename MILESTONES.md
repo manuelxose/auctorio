@@ -27,14 +27,21 @@ Code presence alone is never sufficient.
 ## M1 — Multi-Agent Foundation (RuFlo) 🟡
 
 - **Objective**: replace Claude Flow-era tooling with RuFlo, keep project knowledge.
-- **Evidence**:
-  - RuFlo v3.38.16 installed (`/usr/bin/ruflo`), `ruflo doctor`: 13 passed /
-    14 warnings (memory.db absent, no API keys, optional packages not installed).
-  - `.claude` reduced to settings/proven-config; `.agents/workflows/` holds
-    develop/uxui/test/architect workflows.
-  - MCP connectivity and agent spawning not yet exercised in this pass.
-- **Remaining**: `ruflo init` in repo for hooks + AgentDB, validate swarm spawn
-  and persistent memory, then remove obsolete artifacts.
+- **Evidence (2026-08-24)** :
+  - RuFlo v3.38.16 installed (`/usr/bin/ruflo`); `ruflo init hooks --minimal`
+    installed the helper suite; RuFlo daemon + MCP server running
+    (`npx ruflo@latest mcp start` since 22:27, daemon PID 1118183).
+  - Memory DB initialized (`.swarm/memory.db`): `memory store/retrieve/list`
+    validated with a real project fact (Fastify :4401 / Studio :4400 / 9
+    systemd units). Semantic `memory search` returns empty until the vector
+    index is warmed — keyword retrieve works (recorded quirk).
+  - Swarm primitive validated: `ruflo swarm init -t hierarchical -m 8`
+    succeeded; status shows 0 active agents.
+  - Claude Flow debris removed from `.claude/settings.json` (env vars + `npx
+    @claude-flow*`/`mcp__claude-flow__*` permissions replaced with ruflo).
+    `.claude-flow/` runtime dir is the live RuFlo daemon state and is preserved.
+- **Remaining**: live agent spawning requires LLM API keys (none configured —
+  `ruflo doctor` reports "No API keys found"); run once keys are provisioned.
 - **Completion criteria**: swarm/agent/memory validated 🟡
 
 ## M2 — Architecture and Data Integrity ✅
@@ -152,10 +159,13 @@ Code presence alone is never sufficient.
 ## M13 — Realtime, Reliability, Observability 🟡
 
 - **Evidence**: structured logs (requestId, tenant, provider), `/health/live`,
-  `/health/ready` (storage probe), `/health/destinations`, worker/provider
-  health in overview; connection health loop.
+  `/health/ready` (storage probe), `/health/destinations`, NEW `/health/queues`
+  (per-queue depth: waiting/active/delayed/failed/completed + oldest waiting
+  job age, 503 when any queue probe fails), worker/provider health in overview;
+  connection health loop; discovery run now fails fast (409) when the web
+  intelligence provider is missing and the Settings UI disables the run button.
 - **Remaining**: SSE for job/publication events (polling still in place),
-  queue-depth metrics.
+  worker-level throughput metrics.
 
 ## M14 — Full QA ✅ (current head)
 
