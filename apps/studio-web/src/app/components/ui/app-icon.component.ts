@@ -177,6 +177,13 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'path', d: 'M20 3v4' },
     { kind: 'path', d: 'M22 5h-4' },
   ],
+  scan: [
+    { kind: 'path', d: 'M3 7V5a2 2 0 0 1 2-2h2' },
+    { kind: 'path', d: 'M17 3h2a2 2 0 0 1 2 2v2' },
+    { kind: 'path', d: 'M21 17v2a2 2 0 0 1-2 2h-2' },
+    { kind: 'path', d: 'M7 21H5a2 2 0 0 1-2-2v-2' },
+    { kind: 'path', d: 'M7 12h10' },
+  ],
   upload: [
     { kind: 'path', d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' },
     { kind: 'path', d: 'm17 8-5-5-5 5' },

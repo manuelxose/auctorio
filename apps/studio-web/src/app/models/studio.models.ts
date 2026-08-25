@@ -842,16 +842,45 @@ export type EditorialPlanItem = {
   projectId: string | null;
   title: string;
   workingTitle: string | null;
+  finalSuggestedTitle: string | null;
   topic: string | null;
+  topicCluster: string | null;
+  pillarPage: string | null;
+  angle: string | null;
+  editorialObjective: string | null;
   channel: 'website' | 'x' | 'instagram';
   scheduledFor: string | null;
   primaryKeyword: string | null;
   secondaryKeywords: unknown;
+  semanticKeywords: unknown;
+  relatedEntities: unknown;
+  questionsToAnswer: unknown;
   seoTitle: string | null;
   metaDescription: string | null;
   socialHook: string | null;
   imageConcept: string | null;
   status: string;
+  contentType: string | null;
+  primaryIntent: string | null;
+  secondaryIntents: unknown;
+  funnelStage: string | null;
+  targetQuery: string | null;
+  suggestedSlug: string | null;
+  suggestedInternalLinks: unknown;
+  suggestedExternalEvidenceTypes: unknown;
+  faqCandidates: unknown;
+  schemaTypes: unknown;
+  outline: unknown;
+  recommendedWordCountMin: number | null;
+  recommendedWordCountMax: number | null;
+  difficultyEstimate: number | null;
+  opportunityScore: number | null;
+  relevanceScore: number | null;
+  cannibalizationRisk: string | null;
+  confidence: number | null;
+  rationale: string | null;
+  sourceEvidence: unknown;
+  freshnessRequirement: string | null;
 };
 
 export type EditorialPlan = {
@@ -866,8 +895,62 @@ export type EditorialPlan = {
   provider: string | null;
   model: string | null;
   error: string | null;
+  strategyMode: string | null;
   items?: EditorialPlanItem[];
+  generatedOutput?: { items?: unknown[]; dropped?: Array<{ title: string; reason: string }>; warnings?: string[] } | null;
   _count?: { items: number };
+};
+
+export type SiteIntelligenceOverview = {
+  site: { id: string; name: string; type: string; baseUrl: string | null };
+  profile: {
+    version: number;
+    indexedAt: string | null;
+    pageCount: number;
+    detectedSiteType: string | null;
+    detectedLanguage: string | null;
+    detectedAudience: string | null;
+    brandSummary: string | null;
+    mainTopics: string[];
+    categories: string[];
+    contentTypes: Array<{ type: string; count: number }>;
+    topicClusters: Array<{ name: string; slug: string; pagesCount: number; authorityScore: number; keywords: string[]; sampleUrls: string[] }>;
+    editorialTone: string | null;
+    commonArticleLength: number | null;
+    commercialTopics: string[];
+    evergreenTopics: string[];
+    newsTopics: string[];
+    sportsTopics: string[];
+    entities: Array<{ name: string; type: string; mentions: number }>;
+    confidence: number | null;
+    warnings: string[];
+  } | null;
+  sitemaps: Array<{ id: string; url: string; kind: string; status: string; urlCount: number | null; lastFetchedAt: string | null; error: string | null }>;
+  pageStates: Record<string, number>;
+  totalPages: number;
+  extractedPages: number;
+  clusters: Array<{ id: string; name: string; slug: string; pagesCount: number; authorityScore: number; gapScore: number; keywords: unknown; sampleUrls: unknown }>;
+  indexing: boolean;
+  lastRun: string | null;
+};
+
+export type SiteIndexedPageRow = {
+  id: string;
+  url: string;
+  title: string | null;
+  contentType: string | null;
+  wordCount: number | null;
+  crawlState: string;
+  modifiedAt: string | null;
+  lastIndexedAt: string | null;
+};
+
+export type InternalLinkSuggestion = {
+  url: string;
+  title: string;
+  anchor: string;
+  reason: string;
+  score: number;
 };
 
 export type PublishingWindow = { channel: string; days: number[]; from: string; to: string };

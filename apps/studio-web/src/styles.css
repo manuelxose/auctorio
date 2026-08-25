@@ -3776,3 +3776,54 @@ html[data-theme='dark'] .au-channel-dot--x { background: #f3f4f6; }
 
 
 
+
+/* ── Site intelligence & enterprise planning (M16/M18) ── */
+.au-si-strip {
+  display: flex; flex-wrap: wrap; gap: var(--au-s2); align-items: center;
+  padding: var(--au-s2) var(--au-s3); margin-bottom: var(--au-s3);
+  border: 1px solid var(--au-border); border-radius: var(--au-radius);
+  background: var(--au-surface-2);
+}
+.au-si-strip--empty { border-style: dashed; }
+.au-si-strip__title { display: inline-flex; align-items: center; gap: var(--au-s1); font-weight: 600; }
+.au-si-strip__facts { display: flex; flex-wrap: wrap; gap: var(--au-s2); color: var(--au-muted); font-size: var(--au-font-sm); }
+.au-si-strip__actions { margin-left: auto; display: flex; gap: var(--au-s1); }
+
+.au-format-pills { display: flex; flex-wrap: wrap; gap: var(--au-s2); }
+.au-format-pills .au-checkbox { display: inline-flex; align-items: center; gap: var(--au-s1); }
+
+.au-progress-steps {
+  display: flex; flex-wrap: wrap; gap: var(--au-s2); margin: var(--au-s3) 0;
+}
+.au-progress-step {
+  display: inline-flex; align-items: center; gap: var(--au-s1);
+  padding: var(--au-s1) var(--au-s2); border-radius: var(--au-radius);
+  background: var(--au-surface-2); color: var(--au-muted); font-size: var(--au-font-sm);
+  border: 1px solid var(--au-border);
+}
+.au-progress-step.is-active { color: var(--au-text); border-color: var(--au-brand); background: var(--au-brand-soft, var(--au-surface-2)); }
+.au-progress-step.is-done { opacity: 0.75; }
+
+.au-score {
+  display: inline-block; min-width: 2.6rem; text-align: center;
+  padding: 2px var(--au-s1); border-radius: var(--au-radius);
+  background: var(--au-surface-2); font-weight: 600;
+}
+.au-score--good { color: var(--au-success); }
+.au-score--low { color: var(--au-danger); }
+
+.au-brief-row td { background: var(--au-surface-2); border-top: none; }
+.au-brief { display: block; }
+.au-brief .au-meta strong { display: block; margin-bottom: 2px; }
+.au-brief .au-meta p, .au-brief .au-meta ul { margin: 0; font-size: var(--au-font-sm); }
+.au-brief ul { padding-left: var(--au-s3); }
+
+.au-chips { display: flex; flex-wrap: wrap; gap: var(--au-s1); }
+.au-chip {
+  display: inline-flex; align-items: center; padding: 2px var(--au-s2);
+  border-radius: 999px; background: var(--au-surface-2);
+  border: 1px solid var(--au-border); font-size: var(--au-font-sm);
+}
+.au-chip--brand { color: var(--au-brand); border-color: var(--au-brand); }
+
+.au-ellipsis { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
