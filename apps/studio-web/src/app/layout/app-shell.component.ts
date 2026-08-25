@@ -188,7 +188,7 @@ type NavItem = {
               class="au-icon-button au-icon-button--bell"
               type="button"
               #bellTrigger
-              (click)="bellMenu.toggle(bellTrigger)"
+              (click)="refreshNotificationSummary(); bellMenu.toggle(bellTrigger)"
               [attr.aria-expanded]="bellMenu.isOpen()"
               aria-haspopup="menu"
               aria-label="Notifications"
@@ -207,9 +207,10 @@ type NavItem = {
                   class="au-menu__item"
                   type="button"
                   *ngFor="let item of notificationPreview"
+                  [class.au-menu__item--unread]="!item.readAt"
                   [routerLink]="notificationPath(item)"
                   [queryParams]="notificationQuery(item)"
-                  (click)="bellMenu.hide()"
+                  (click)="openNotification(item, bellMenu)"
                 >
                   <span class="au-menu__item-text">
                     <span class="au-menu__item-title">{{ item.title }}</span>
@@ -313,6 +314,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private sseUnsubscribe: (() => void) | null = null;
   private sseSubscription: Subscription | null = null;
   private notificationTimer: ReturnType<typeof setTimeout> | null = null;
+  private notificationFallbackTimer: ReturnType<typeof setInterval> | null = null;
 
   session: StudioSession | null = null;
   sites: StudioSite[] = [];
@@ -368,6 +370,9 @@ export class AppShellComponent implements OnInit, OnDestroy {
     if (this.notificationTimer) {
       clearTimeout(this.notificationTimer);
     }
+    if (this.notificationFallbackTimer) {
+      clearInterval(this.notificationFallbackTimer);
+    }
   }
 
   private watchLiveUpdates(): void {
@@ -381,14 +386,20 @@ export class AppShellComponent implements OnInit, OnDestroy {
     });
     this.sseSubscription = this.sse.connection$.subscribe();
     this.refreshNotificationSummary();
+    // Fallback heartbeat keeps the badge accurate even when SSE is unavailable.
+    this.notificationFallbackTimer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        this.refreshNotificationSummary();
+      }
+    }, 45_000);
   }
 
-  private refreshNotificationSummary(): void {
+  refreshNotificationSummary(): void {
     if (this.notificationTimer) {
       clearTimeout(this.notificationTimer);
     }
     this.notificationTimer = setTimeout(() => {
-      this.api.listNotifications({ page: 1, pageSize: 5 }).subscribe({
+      this.api.listNotifications({ page: 1, pageSize: 10 }).subscribe({
         next: (response) => {
           this.unreadCount = response.unread;
           this.notificationPreview = response.items;
@@ -396,6 +407,19 @@ export class AppShellComponent implements OnInit, OnDestroy {
         error: () => undefined,
       });
     }, 250);
+  }
+
+  openNotification(item: StudioNotification, popover: AppPopoverComponent): void {
+    popover.hide();
+    if (!item.readAt) {
+      this.api.markNotificationRead(item.id, true).subscribe({
+        next: () => {
+          this.unreadCount = Math.max(0, this.unreadCount - 1);
+          this.notificationPreview = this.notificationPreview.map((entry) => (entry.id === item.id ? { ...entry, readAt: new Date().toISOString() } : entry));
+        },
+        error: () => undefined,
+      });
+    }
   }
 
   /** Router-safe path for a notification action URL (query string split off). */

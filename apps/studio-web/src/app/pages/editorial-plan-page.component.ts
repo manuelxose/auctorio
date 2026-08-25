@@ -18,50 +18,37 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
     `
       .au-panel__header--wrap { flex-wrap: wrap; align-items: flex-start; }
       .au-min-0 { min-width: 0; }
-      .au-chip--success { color: var(--au-success); border-color: var(--au-success); }
-      .au-chip--danger { color: var(--au-danger); border-color: var(--au-danger); }
-      .au-plan-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--au-s3); }
-      .au-plan-card { display: flex; flex-direction: column; gap: var(--au-s2); text-align: left; border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface); padding: var(--au-s3); cursor: pointer; font: inherit; color: var(--au-text); transition: border-color var(--au-ease), box-shadow var(--au-ease); }
-      .au-plan-card:hover { border-color: var(--au-border-strong); }
-      .au-plan-card.is-active { border-color: var(--au-brand); box-shadow: var(--au-focus-ring); }
-      .au-plan-card__head { display: flex; align-items: center; justify-content: space-between; gap: var(--au-s2); }
-      .au-plan-card__name { font-weight: 650; }
-      .au-plan-card__period { display: flex; align-items: center; gap: 6px; color: var(--au-text-2); font-size: var(--au-fs-body-sm); }
-      .au-plan-card__meta { display: flex; flex-wrap: wrap; gap: var(--au-s2); color: var(--au-muted); font-size: var(--au-fs-metadata); }
-      .au-plan-card__meta span { display: inline-flex; align-items: center; gap: 4px; }
-      .au-plan-card__stats { display: flex; flex-wrap: wrap; gap: 6px; }
-      .au-plan-card__foot { display: flex; align-items: center; justify-content: space-between; gap: var(--au-s2); margin-top: auto; padding-top: var(--au-s2); border-top: 1px solid var(--au-border); }
-      .au-plan-card__open { display: inline-flex; align-items: center; gap: 4px; color: var(--au-brand); font-weight: 600; font-size: var(--au-fs-body-sm); }
-      .au-plan-summary { display: flex; flex-direction: column; gap: var(--au-s1); padding: var(--au-s2) var(--au-s4); border-bottom: 1px solid var(--au-border); }
-      .au-plan-summary__bar { display: flex; height: 8px; border-radius: 999px; background: var(--au-surface-2); overflow: hidden; }
+      .au-accordion-toggle { width: 100%; text-align: left; background: transparent; border: none; font: inherit; cursor: pointer; }
+      .au-accordion-toggle:hover { background: var(--au-surface-hover); }
+      .au-plan-row { cursor: pointer; }
+      .au-plan-row:hover td { background: var(--au-surface-hover); }
+      .au-plan-row.is-open td { background: var(--au-surface-selected); }
+      .au-plan-detail-row td { background: var(--au-surface-2); padding: 0; }
+      .au-plan-detail { border-bottom: 1px solid var(--au-border); }
+      .au-plan-summary { display: flex; align-items: center; gap: var(--au-s3); padding: var(--au-s2) var(--au-s4); border-bottom: 1px solid var(--au-border); flex-wrap: wrap; }
+      .au-plan-summary__bar { display: flex; flex: 1 1 240px; height: 8px; border-radius: 999px; background: var(--au-surface); overflow: hidden; }
       .au-plan-summary__fill { height: 100%; }
       .au-plan-summary__fill--approved { background: var(--au-success); }
       .au-plan-summary__fill--ready { background: var(--au-brand); }
       .au-plan-summary__legend { display: flex; flex-wrap: wrap; gap: var(--au-s3); font-size: var(--au-fs-metadata); color: var(--au-muted); }
       .au-legend { display: inline-flex; align-items: center; gap: 6px; }
       .au-legend__dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
-      .au-plan-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--au-s3); padding: var(--au-s3); }
-      .au-brief-card { display: flex; flex-direction: column; gap: var(--au-s2); border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface); padding: var(--au-s3); }
-      .au-brief-card.is-selected { border-color: var(--au-brand); background: var(--au-surface-selected); }
-      .au-brief-card__head { display: flex; align-items: flex-start; gap: var(--au-s2); }
-      .au-brief-card__title { margin: 0; font-size: var(--au-fs-body); font-weight: 650; }
-      .au-brief-card__meta { margin: 2px 0 0; color: var(--au-muted); font-size: var(--au-fs-metadata); }
-      .au-brief-card__badges { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-      .au-brief-card__brief { border-top: 1px dashed var(--au-border); padding-top: var(--au-s2); }
-      .au-brief-card__actions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; padding-top: var(--au-s2); border-top: 1px solid var(--au-border); }
-      @media (max-width: 640px) { .au-plan-cards { grid-template-columns: 1fr; } .au-plan-grid { grid-template-columns: 1fr; } }
     `,
   ],
   template: `
     <section class="au-page">
-      <header class="au-page__header">
+      <header class="au-page__header au-page__header--split">
         <div>
           <p class="au-page__eyebrow">Editorial control</p>
           <h1 class="au-page__title">Editorial Plan</h1>
           <p class="au-page__subtitle">Decide what to publish before generating the actual content.</p>
         </div>
         <div class="au-page__actions">
-          <a class="au-btn au-btn--secondary" routerLink="/studio/calendar">
+          <button class="au-btn au-btn--secondary" type="button" (click)="showForm = !showForm">
+            <app-icon name="sparkles"></app-icon>
+            {{ showForm ? 'Hide generator' : 'Generate a plan' }}
+          </button>
+          <a class="au-btn au-btn--ghost" routerLink="/studio/calendar">
             <app-icon name="calendar"></app-icon>
             Open calendar
           </a>
@@ -74,16 +61,25 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
       </div>
 
-      <!-- Generate -->
-      <section class="au-panel au-panel--padded au-mb-3">
-        <h2 class="au-panel__title">Generate a plan</h2>
-        <p class="au-panel__subtitle au-mb-3">Period, destination and strategy. AI proposes site-aware structured briefs only.</p>
+      <!-- Generate (collapsible so the plan table stays the primary view) -->
+      <section class="au-panel au-mb-3" *ngIf="showForm">
+        <header class="au-panel__header">
+          <div>
+            <h2 class="au-panel__title">Generate a plan</h2>
+            <p class="au-panel__subtitle">Period, destination and strategy. AI proposes site-aware structured briefs only.</p>
+          </div>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="showForm = false" aria-label="Close generator">
+            <app-icon name="close"></app-icon>
+          </button>
+        </header>
+
+        <div class="au-panel--padded">
         <div class="au-plan-callout">
           <strong>Planning is separate from writing.</strong>
           Content is created later, one piece at a time, from approved rows.
         </div>
 
-        <!-- Step 3: site intelligence summary -->
+        <!-- Site intelligence summary -->
         <div class="au-si-strip" *ngIf="siteIntel">
           <div class="au-si-strip__title">
             <app-icon name="scan"></app-icon>
@@ -147,7 +143,6 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
             <label class="au-checkbox"><input type="checkbox" name="instagram" [(ngModel)]="channels.instagram" /> Instagram</label>
           </fieldset>
 
-          <!-- Step 2: strategy -->
           <h3 class="au-panel__subtitle au-mt-2 au-mb-1"><strong>Strategy</strong></h3>
           <div class="au-field-grid">
             <label class="au-field">
@@ -209,7 +204,6 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
 
           <p class="au-error" *ngIf="error">{{ error }}</p>
 
-          <!-- Step 4: generation progress -->
           <div class="au-progress-steps" *ngIf="generating">
             <span class="au-progress-step" *ngFor="let step of progressSteps" [class.is-active]="progressIndex === step.index" [class.is-done]="progressIndex > step.index">
               <app-icon name="circle-check" *ngIf="progressIndex > step.index"></app-icon>
@@ -226,368 +220,268 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
             <span class="au-muted" *ngIf="!siteIntel && draft.siteId">The plan will be site-aware once the destination is indexed.</span>
           </div>
         </form>
+        </div>
       </section>
 
-      <!-- Saved plans -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="plans.length > 0">
+      <!-- Saved plans: one expandable table -->
+      <section class="au-panel" *ngIf="plans.length > 0">
         <header class="au-panel__header">
           <div>
             <h2 class="au-panel__title">Saved plans</h2>
-            <p class="au-panel__subtitle">Open a plan to review its briefs, approve rows and generate content.</p>
+            <p class="au-panel__subtitle">Click a plan to expand its rows in place.</p>
           </div>
           <span class="au-badge au-badge--neutral">{{ plans.length }} plan{{ plans.length === 1 ? '' : 's' }}</span>
         </header>
 
-        <div class="au-plan-grid">
-          <button
-            class="au-plan-card"
-            type="button"
-            *ngFor="let plan of plans"
-            [class.is-active]="selectedPlan?.id === plan.id"
-            (click)="open(plan)"
-          >
-            <div class="au-plan-card__head">
-              <span class="au-plan-card__name au-truncate">{{ plan.name }}</span>
-              <span class="au-badge" [class]="'au-badge--' + planStatusTone(plan.status)">{{ plan.status }}</span>
-            </div>
-            <div class="au-plan-card__period">
-              <app-icon name="calendar"></app-icon>
-              {{ plan.dateFrom | date: 'mediumDate' }} → {{ plan.dateTo | date: 'mediumDate' }}
-            </div>
-            <div class="au-plan-card__meta">
-              <span *ngIf="plan.siteName"><app-icon name="globe"></app-icon>{{ plan.siteName }}</span>
-              <span *ngIf="plan.strategyMode"><app-icon name="filter"></app-icon>{{ plan.strategyMode }}</span>
-              <ng-container *ngIf="channelList(plan).length > 0">
-                <span *ngFor="let channel of channelList(plan)"><app-icon name="publications"></app-icon>{{ channelLabel(channel) }}</span>
-              </ng-container>
-            </div>
-            <div class="au-plan-card__stats">
-              <span class="au-chip">{{ plan._count?.items ?? 0 }} rows</span>
-              <span class="au-chip au-chip--success" *ngIf="(plan.statusCounts?.['approved'] ?? 0) > 0">{{ plan.statusCounts!['approved'] }} approved</span>
-              <span class="au-chip au-chip--brand" *ngIf="(plan.statusCounts?.['content_ready'] ?? 0) > 0">{{ plan.statusCounts!['content_ready'] }} ready</span>
-              <span class="au-chip au-chip--danger" *ngIf="(plan.statusCounts?.['rejected'] ?? 0) > 0">{{ plan.statusCounts!['rejected'] }} rejected</span>
-            </div>
-            <div class="au-plan-card__foot">
-              <span class="au-muted">{{ plan.updatedAt ? 'Updated ' + (plan.updatedAt | date: 'medium') : '—' }}</span>
-              <span class="au-plan-card__open">
-                Open plan
-                <app-icon name="chevron-right"></app-icon>
-              </span>
-            </div>
-          </button>
-        </div>
-      </section>
-
-      <!-- Selected plan -->
-      <section class="au-panel" *ngIf="selectedPlan">
-        <header class="au-panel__header au-panel__header--wrap">
-          <div class="au-flex-1">
-            <h2 class="au-panel__title">{{ selectedPlan.name }}</h2>
-            <p class="au-panel__subtitle">
-              {{ selectedPlan.dateFrom | date: 'mediumDate' }} → {{ selectedPlan.dateTo | date: 'mediumDate' }}
-              <ng-container *ngIf="selectedPlan.siteName"> · {{ selectedPlan.siteName }}</ng-container>
-              <ng-container *ngIf="selectedPlan.strategyMode"> · {{ selectedPlan.strategyMode }}</ng-container>
-              · {{ selectedPlan.items?.length || 0 }} rows
-            </p>
-          </div>
-          <div class="au-page__actions">
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkApprove()" [disabled]="selectedIds.size === 0">
-              <app-icon name="circle-check"></app-icon>
-              Approve selected
-            </button>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="bulkStatus('rejected')" [disabled]="selectedIds.size === 0">Reject selected</button>
-            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="bulkRemove()" [disabled]="selectedIds.size === 0">
-              <app-icon name="trash"></app-icon>
-              Delete selected
-            </button>
-          </div>
-        </header>
-
-        <!-- Plan progress summary -->
-        <div class="au-plan-summary">
-          <div class="au-plan-summary__bar" role="progressbar" [attr.aria-valuenow]="planProgress()" aria-valuemin="0" aria-valuemax="100">
-            <span class="au-plan-summary__fill au-plan-summary__fill--approved" [style.width.%]="planShare('approved')"></span>
-            <span class="au-plan-summary__fill au-plan-summary__fill--ready" [style.width.%]="planShare('content_ready')"></span>
-          </div>
-          <div class="au-plan-summary__legend">
-            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-success)"></span>{{ planCount('approved') }} approved</span>
-            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-brand)"></span>{{ planCount('content_ready') }} content ready</span>
-            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-warning)"></span>{{ planCount('proposed') }} proposed</span>
-            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-danger)"></span>{{ planCount('rejected') }} rejected</span>
-          </div>
-        </div>
-
-        <div class="au-toolbar au-toolbar--panel">
-          <div class="au-search">
-            <app-icon name="search"></app-icon>
-            <input class="au-input au-input--search" type="search" placeholder="Search rows…" [(ngModel)]="planSearch" (ngModelChange)="filterPlanRows()" />
-          </div>
-          <select class="au-select au-filter-select" [(ngModel)]="planChannelFilter" (ngModelChange)="filterPlanRows()" aria-label="Filter by channel">
-            <option value="">All channels</option>
-            <option value="website">Website</option>
-            <option value="x">X</option>
-            <option value="instagram">Instagram</option>
-          </select>
-          <select class="au-select au-filter-select" [(ngModel)]="planStatusFilter" (ngModelChange)="filterPlanRows()" aria-label="Filter by status">
-            <option value="">All statuses</option>
-            <option value="proposed">Proposed</option>
-            <option value="approved">Approved</option>
-            <option value="generating">Generating</option>
-            <option value="content_ready">Content ready</option>
-            <option value="rejected">Rejected</option>
-            <option value="canceled">Canceled</option>
-          </select>
-          <div class="au-toolbar__spacer"></div>
-          <div class="au-segmented" role="group" aria-label="Plan row view">
-            <button class="au-segmented__item" type="button" [class.is-active]="planView === 'table'" (click)="planView = 'table'">
-              <app-icon name="plan"></app-icon>
-              Table
-            </button>
-            <button class="au-segmented__item" type="button" [class.is-active]="planView === 'cards'" (click)="planView = 'cards'">
-              <app-icon name="overview"></app-icon>
-              Cards
-            </button>
-          </div>
-        </div>
-
-        @if (filteredPlanRows.length === 0) {
-          <div class="au-empty">
-            <p class="au-empty__title">No rows match the current filters</p>
-            <p class="au-empty__text">Adjust the search or filters above.</p>
-          </div>
-        } @else {
-          <div class="au-table-wrap" *ngIf="planView === 'table'">
-            <table class="au-table">
-              <thead>
-                <tr>
-                  <th style="width: 34px">
-                    <input type="checkbox" aria-label="Select all proposed rows" (change)="selectAll($event)" />
-                  </th>
-                  <th>Date</th>
-                  <th>Title</th>
-                  <th>Type</th>
-                  <th>Intent</th>
-                  <th>Relevance</th>
-                  <th>Risk</th>
-                  <th>Status</th>
-                  <th style="width: 210px">Actions</th>
+        <div class="au-table-wrap">
+          <table class="au-table au-table--hover">
+            <thead>
+              <tr>
+                <th scope="col">Plan</th>
+                <th scope="col">Period</th>
+                <th scope="col">Site</th>
+                <th scope="col">Status</th>
+                <th scope="col">Rows</th>
+                <th scope="col">Ready</th>
+                <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Expand</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <ng-container *ngFor="let plan of plans">
+                <tr class="au-plan-row" [class.is-open]="isExpanded(plan.id)" (click)="togglePlan(plan)" (keydown.enter)="togglePlan(plan)" [attr.tabindex]="0" [attr.aria-expanded]="isExpanded(plan.id)">
+                  <td data-label="Plan">
+                    <span class="au-table__title">{{ plan.name }}</span>
+                    <span class="au-table__sub">{{ plan.strategyMode || '—' }}<ng-container *ngIf="channelList(plan).length > 0"> · {{ channelList(plan).map(channelLabel).join(', ') }}</ng-container></span>
+                  </td>
+                  <td data-label="Period">{{ plan.dateFrom | date: 'mediumDate' }} → {{ plan.dateTo | date: 'mediumDate' }}</td>
+                  <td data-label="Site">{{ plan.siteName || '—' }}</td>
+                  <td data-label="Status">
+                    <span class="au-badge" [class]="'au-badge--' + planStatusTone(plan.status)">{{ plan.status }}</span>
+                  </td>
+                  <td data-label="Rows">{{ plan._count?.items ?? 0 }}</td>
+                  <td data-label="Ready">
+                    <div class="au-progress">
+                      <span class="au-progress__bar" [style.width.%]="listPlanProgress(plan)"></span>
+                    </div>
+                    <span class="au-table__meta">{{ plan.statusCounts?.['content_ready'] ?? 0 }} of {{ plan._count?.items ?? 0 }} ready</span>
+                  </td>
+                  <td class="au-table__actions">
+                    <app-icon [name]="isExpanded(plan.id) ? 'chevron-up' : 'chevron-down'" class="au-faint"></app-icon>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                <ng-container *ngFor="let item of filteredPlanRows">
-                  <tr [class.is-selected]="selectedIds.has(item.id)">
-                    <td>
-                      <input type="checkbox" [checked]="selectedIds.has(item.id)" (change)="toggleSelection(item.id)" [attr.aria-label]="'Select ' + item.title" />
-                    </td>
-                    <td class="au-nowrap">
-                      <ng-container *ngIf="editingItemId !== item.id">
-                        {{ item.scheduledFor | date: 'mediumDate' }}
-                        <span class="au-table__sub">{{ item.scheduledFor | date: 'shortTime' }}</span>
-                      </ng-container>
-                      <input
-                        *ngIf="editingItemId === item.id"
-                        class="au-input"
-                        type="datetime-local"
-                        [(ngModel)]="editDraft.scheduledFor"
-                        [attr.aria-label]="'Schedule ' + item.title"
-                      />
-                    </td>
-                    <td>
-                      <ng-container *ngIf="editingItemId !== item.id">
-                        <span class="au-table__title">{{ item.title }}</span>
-                        <span class="au-table__sub">{{ item.topicCluster ? 'Cluster: ' + item.topicCluster : (item.topic || 'Unassigned topic') }}</span>
-                      </ng-container>
-                      <input *ngIf="editingItemId === item.id" class="au-input" [(ngModel)]="editDraft.title" [attr.aria-label]="'Title for ' + item.title" />
-                    </td>
-                    <td>
-                      <span class="au-channel">{{ item.contentType || 'article' }}</span>
-                    </td>
-                    <td>
-                      <span class="au-badge au-badge--neutral">{{ item.primaryIntent || 'auto' }}</span>
-                      <span class="au-table__sub" *ngIf="item.targetQuery">{{ item.targetQuery }}</span>
-                    </td>
-                    <td>
-                      <ng-container *ngIf="item.relevanceScore !== null && item.relevanceScore !== undefined">
-                        <span class="au-score" [class.au-score--low]="(item.relevanceScore ?? 0) < 45" [class.au-score--good]="(item.relevanceScore ?? 0) >= 70">{{ item.relevanceScore }}</span>
-                      </ng-container>
-                      <span class="au-muted" *ngIf="item.relevanceScore === null || item.relevanceScore === undefined">—</span>
-                    </td>
-                    <td>
-                      <span class="au-badge" [class.au-badge--success]="item.cannibalizationRisk === 'none'" [class.au-badge--warning]="item.cannibalizationRisk === 'related-cluster'" [class.au-badge--danger]="item.cannibalizationRisk === 'high' || item.cannibalizationRisk === 'update-existing'" [class.au-badge--neutral]="!item.cannibalizationRisk">{{ item.cannibalizationRisk || '—' }}</span>
-                    </td>
-                    <td>
-                      <span class="au-badge" [class]="'au-badge--' + statusTone(item.status)">{{ item.status }}</span>
-                    </td>
-                    <td>
-                      <div class="au-inline">
-                        <ng-container *ngIf="editingItemId === item.id">
-                          <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="saveEdit(item.id)">Save</button>
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="cancelEdit()">Cancel</button>
-                        </ng-container>
-                        <ng-container *ngIf="editingItemId !== item.id">
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="toggleExpand(item.id)" [attr.aria-expanded]="expandedItemId === item.id">
-                            <app-icon name="chevron-down" *ngIf="expandedItemId !== item.id"></app-icon>
-                            <app-icon name="chevron-up" *ngIf="expandedItemId === item.id"></app-icon>
-                            Brief
-                          </button>
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="startEdit(item)">Edit</button>
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="item.status === 'proposed'" (click)="approve(item.id)">Approve</button>
-                          <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="item.status === 'approved' && !item.projectId" (click)="generateContent(item.id)">
-                            <app-icon name="sparkles"></app-icon>
-                            Generate
-                          </button>
-                          <button class="au-btn au-btn--danger-ghost au-btn--icon au-btn--sm" type="button" *ngIf="!item.projectId" (click)="remove(item.id)" [attr.aria-label]="'Delete ' + item.title">
-                            <app-icon name="trash"></app-icon>
-                          </button>
-                        </ng-container>
-                      </div>
-                    </td>
-                  </tr>
-                  <tr class="au-brief-row" *ngIf="expandedItemId === item.id && editingItemId !== item.id">
-                    <td colspan="9">
-                      <div class="au-brief">
-                        <div class="au-field-grid">
-                          <div class="au-meta">
-                            <strong>Rationale</strong>
-                            <p class="au-muted">{{ item.rationale || '—' }}</p>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Word target</strong>
-                            <p class="au-muted">{{ item.recommendedWordCountMin ?? '—' }}–{{ item.recommendedWordCountMax ?? '—' }} words</p>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Keyword</strong>
-                            <p class="au-muted">{{ item.primaryKeyword || '—' }}</p>
-                          </div>
-                          <div class="au-meta">
-                            <strong>SEO title</strong>
-                            <p class="au-muted">{{ item.seoTitle || '—' }}</p>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Meta description</strong>
-                            <p class="au-muted">{{ item.metaDescription || '—' }}</p>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Opportunity / difficulty</strong>
-                            <p class="au-muted">{{ item.opportunityScore ?? '—' }} / {{ item.difficultyEstimate ?? '—' }}</p>
-                          </div>
-                        </div>
-                        <div class="au-field-grid au-mt-2">
-                          <div class="au-meta">
-                            <strong>Outline</strong>
-                            <ul class="au-muted">
-                              <li *ngFor="let section of outlineOf(item.outline)">{{ section }}</li>
-                            </ul>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Internal links (from site inventory)</strong>
-                            <ul class="au-muted">
-                              <li *ngFor="let link of listOf(item.suggestedInternalLinks)">{{ link }}</li>
-                            </ul>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Source evidence</strong>
-                            <ul class="au-muted">
-                              <li *ngFor="let evidence of evidenceOf(item.sourceEvidence)">{{ evidence }}</li>
-                            </ul>
-                          </div>
-                          <div class="au-meta">
-                            <strong>Image brief</strong>
-                            <p class="au-muted">{{ item.imageConcept || '—' }}</p>
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                </ng-container>
-              </tbody>
-            </table>
-          </div>
 
-          <!-- Cards view -->
-          <div class="au-plan-cards" *ngIf="planView === 'cards'">
-            <article class="au-brief-card" *ngFor="let item of filteredPlanRows" [class.is-selected]="selectedIds.has(item.id)">
-              <header class="au-brief-card__head">
-                <input type="checkbox" [checked]="selectedIds.has(item.id)" (change)="toggleSelection(item.id)" [attr.aria-label]="'Select ' + item.title" />
-                <div class="au-flex-1 au-min-0">
-                  <h3 class="au-brief-card__title">{{ item.title }}</h3>
-                  <p class="au-brief-card__meta">
-                    {{ item.scheduledFor | date: 'medium' }}
-                    · {{ item.topicCluster ? 'Cluster: ' + item.topicCluster : (item.topic || 'Unassigned topic') }}
-                  </p>
-                </div>
-                <span class="au-badge" [class]="'au-badge--' + statusTone(item.status)">{{ item.status }}</span>
-              </header>
-              <div class="au-brief-card__badges">
-                <span class="au-channel">{{ item.contentType || 'article' }}</span>
-                <span class="au-badge au-badge--neutral">{{ item.primaryIntent || 'auto' }}</span>
-                <span class="au-badge" *ngIf="item.targetQuery" [title]="item.targetQuery">{{ item.targetQuery }}</span>
-                <span class="au-score" *ngIf="item.relevanceScore !== null && item.relevanceScore !== undefined" [class.au-score--low]="(item.relevanceScore ?? 0) < 45" [class.au-score--good]="(item.relevanceScore ?? 0) >= 70">relevance {{ item.relevanceScore }}</span>
-                <span class="au-badge" *ngIf="item.cannibalizationRisk" [class.au-badge--success]="item.cannibalizationRisk === 'none'" [class.au-badge--warning]="item.cannibalizationRisk === 'related-cluster'" [class.au-badge--danger]="item.cannibalizationRisk === 'high' || item.cannibalizationRisk === 'update-existing'">{{ item.cannibalizationRisk }}</span>
-              </div>
-              <div class="au-brief-card__brief" *ngIf="expandedItemId === item.id">
-                <div class="au-field-grid">
-                  <div class="au-meta">
-                    <strong>Rationale</strong>
-                    <p class="au-muted">{{ item.rationale || '—' }}</p>
-                  </div>
-                  <div class="au-meta">
-                    <strong>Word target</strong>
-                    <p class="au-muted">{{ item.recommendedWordCountMin ?? '—' }}–{{ item.recommendedWordCountMax ?? '—' }} words</p>
-                  </div>
-                  <div class="au-meta">
-                    <strong>Primary keyword</strong>
-                    <p class="au-muted">{{ item.primaryKeyword || '—' }}</p>
-                  </div>
-                  <div class="au-meta">
-                    <strong>SEO title</strong>
-                    <p class="au-muted">{{ item.seoTitle || '—' }}</p>
-                  </div>
-                </div>
-                <div class="au-field-grid au-mt-2">
-                  <div class="au-meta">
-                    <strong>Outline</strong>
-                    <ul class="au-muted">
-                      <li *ngFor="let section of outlineOf(item.outline)">{{ section }}</li>
-                    </ul>
-                  </div>
-                  <div class="au-meta">
-                    <strong>Internal links</strong>
-                    <ul class="au-muted">
-                      <li *ngFor="let link of listOf(item.suggestedInternalLinks)">{{ link }}</li>
-                    </ul>
-                  </div>
-                  <div class="au-meta">
-                    <strong>Image brief</strong>
-                    <p class="au-muted">{{ item.imageConcept || '—' }}</p>
-                  </div>
-                </div>
-              </div>
-              <footer class="au-brief-card__actions">
-                <ng-container *ngIf="editingItemId === item.id">
-                  <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="saveEdit(item.id)">Save</button>
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="cancelEdit()">Cancel</button>
-                </ng-container>
-                <ng-container *ngIf="editingItemId !== item.id">
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="toggleExpand(item.id)" [attr.aria-expanded]="expandedItemId === item.id">
-                    <app-icon name="chevron-down" *ngIf="expandedItemId !== item.id"></app-icon>
-                    <app-icon name="chevron-up" *ngIf="expandedItemId === item.id"></app-icon>
-                    Brief
-                  </button>
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="startEdit(item)">Edit</button>
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="item.status === 'proposed'" (click)="approve(item.id)">Approve</button>
-                  <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="item.status === 'approved' && !item.projectId" (click)="generateContent(item.id)">
-                    <app-icon name="sparkles"></app-icon>
-                    Generate
-                  </button>
-                  <button class="au-btn au-btn--danger-ghost au-btn--icon au-btn--sm" type="button" *ngIf="!item.projectId" (click)="remove(item.id)" [attr.aria-label]="'Delete ' + item.title">
-                    <app-icon name="trash"></app-icon>
-                  </button>
-                </ng-container>
-              </footer>
-            </article>
-          </div>
-        }
+                <tr class="au-plan-detail-row" *ngIf="isExpanded(plan.id)">
+                  <td colspan="7">
+                    <div class="au-plan-detail">
+                      <div class="au-skeleton" *ngIf="planDetailLoading" style="margin: var(--au-s3) var(--au-s4)">Loading plan…</div>
+
+                      <ng-container *ngIf="!planDetailLoading && selectedPlan?.id === plan.id">
+                        <!-- Summary -->
+                        <div class="au-plan-summary">
+                          <div class="au-plan-summary__bar" role="progressbar" [attr.aria-valuenow]="planProgress()" aria-valuemin="0" aria-valuemax="100">
+                            <span class="au-plan-summary__fill au-plan-summary__fill--approved" [style.width.%]="planShare('approved')"></span>
+                            <span class="au-plan-summary__fill au-plan-summary__fill--ready" [style.width.%]="planShare('content_ready')"></span>
+                          </div>
+                          <div class="au-plan-summary__legend">
+                            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-success)"></span>{{ planCount('approved') }} approved</span>
+                            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-brand)"></span>{{ planCount('content_ready') }} ready</span>
+                            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-warning)"></span>{{ planCount('proposed') }} proposed</span>
+                            <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-danger)"></span>{{ planCount('rejected') }} rejected</span>
+                          </div>
+                          <div class="au-inline">
+                            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkApprove()" [disabled]="selectedIds.size === 0">
+                              <app-icon name="circle-check"></app-icon>
+                              Approve selected
+                            </button>
+                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="bulkStatus('rejected')" [disabled]="selectedIds.size === 0">Reject selected</button>
+                            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="bulkRemove()" [disabled]="selectedIds.size === 0">
+                              <app-icon name="trash"></app-icon>
+                              Delete selected
+                            </button>
+                          </div>
+                        </div>
+
+                        <!-- Row filters -->
+                        <div class="au-toolbar au-toolbar--panel">
+                          <div class="au-search">
+                            <app-icon name="search"></app-icon>
+                            <input class="au-input au-input--search" type="search" placeholder="Search rows…" [(ngModel)]="planSearch" (ngModelChange)="filterPlanRows()" aria-label="Search plan rows" />
+                          </div>
+                          <select class="au-select au-filter-select" [(ngModel)]="planChannelFilter" (ngModelChange)="filterPlanRows()" aria-label="Filter by channel">
+                            <option value="">All channels</option>
+                            <option value="website">Website</option>
+                            <option value="x">X</option>
+                            <option value="instagram">Instagram</option>
+                          </select>
+                          <select class="au-select au-filter-select" [(ngModel)]="planStatusFilter" (ngModelChange)="filterPlanRows()" aria-label="Filter by status">
+                            <option value="">All statuses</option>
+                            <option value="proposed">Proposed</option>
+                            <option value="approved">Approved</option>
+                            <option value="generating">Generating</option>
+                            <option value="content_ready">Content ready</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="canceled">Canceled</option>
+                          </select>
+                          <span class="au-muted au-toolbar__spacer">{{ filteredPlanRows.length }} of {{ selectedPlan?.items?.length || 0 }} rows</span>
+                        </div>
+
+                        <!-- Rows -->
+                        @if (filteredPlanRows.length === 0) {
+                          <div class="au-empty">
+                            <p class="au-empty__title">No rows match the current filters</p>
+                            <p class="au-empty__text">Adjust the search or filters above.</p>
+                          </div>
+                        } @else {
+                          <div class="au-table-wrap">
+                            <table class="au-table">
+                              <thead>
+                                <tr>
+                                  <th style="width: 34px">
+                                    <input type="checkbox" aria-label="Select all proposed rows" (change)="selectAll($event)" />
+                                  </th>
+                                  <th>Date</th>
+                                  <th>Title</th>
+                                  <th>Type</th>
+                                  <th>Intent</th>
+                                  <th>Relevance</th>
+                                  <th>Risk</th>
+                                  <th>Status</th>
+                                  <th style="width: 210px">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                <ng-container *ngFor="let item of filteredPlanRows">
+                                  <tr [class.is-selected]="selectedIds.has(item.id)">
+                                    <td>
+                                      <input type="checkbox" [checked]="selectedIds.has(item.id)" (change)="toggleSelection(item.id)" [attr.aria-label]="'Select ' + item.title" />
+                                    </td>
+                                    <td class="au-nowrap">
+                                      <ng-container *ngIf="editingItemId !== item.id">
+                                        {{ item.scheduledFor | date: 'mediumDate' }}
+                                        <span class="au-table__sub">{{ item.scheduledFor | date: 'shortTime' }}</span>
+                                      </ng-container>
+                                      <input *ngIf="editingItemId === item.id" class="au-input" type="datetime-local" [(ngModel)]="editDraft.scheduledFor" [attr.aria-label]="'Schedule ' + item.title" />
+                                    </td>
+                                    <td>
+                                      <ng-container *ngIf="editingItemId !== item.id">
+                                        <span class="au-table__title">{{ item.title }}</span>
+                                        <span class="au-table__sub">{{ item.topicCluster ? 'Cluster: ' + item.topicCluster : (item.topic || 'Unassigned topic') }}</span>
+                                      </ng-container>
+                                      <input *ngIf="editingItemId === item.id" class="au-input" [(ngModel)]="editDraft.title" [attr.aria-label]="'Title for ' + item.title" />
+                                    </td>
+                                    <td>
+                                      <span class="au-channel">{{ item.contentType || 'article' }}</span>
+                                    </td>
+                                    <td>
+                                      <span class="au-badge au-badge--neutral">{{ item.primaryIntent || 'auto' }}</span>
+                                      <span class="au-table__sub" *ngIf="item.targetQuery">{{ item.targetQuery }}</span>
+                                    </td>
+                                    <td>
+                                      <ng-container *ngIf="item.relevanceScore !== null && item.relevanceScore !== undefined">
+                                        <span class="au-score" [class.au-score--low]="(item.relevanceScore ?? 0) < 45" [class.au-score--good]="(item.relevanceScore ?? 0) >= 70">{{ item.relevanceScore }}</span>
+                                      </ng-container>
+                                      <span class="au-muted" *ngIf="item.relevanceScore === null || item.relevanceScore === undefined">—</span>
+                                    </td>
+                                    <td>
+                                      <span class="au-badge" [class.au-badge--success]="item.cannibalizationRisk === 'none'" [class.au-badge--warning]="item.cannibalizationRisk === 'related-cluster'" [class.au-badge--danger]="item.cannibalizationRisk === 'high' || item.cannibalizationRisk === 'update-existing'" [class.au-badge--neutral]="!item.cannibalizationRisk">{{ item.cannibalizationRisk || '—' }}</span>
+                                    </td>
+                                    <td>
+                                      <span class="au-badge" [class]="'au-badge--' + statusTone(item.status)">{{ item.status }}</span>
+                                    </td>
+                                    <td>
+                                      <div class="au-inline">
+                                        <ng-container *ngIf="editingItemId === item.id">
+                                          <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="saveEdit(item.id)">Save</button>
+                                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="cancelEdit()">Cancel</button>
+                                        </ng-container>
+                                        <ng-container *ngIf="editingItemId !== item.id">
+                                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="toggleExpand(item.id)" [attr.aria-expanded]="expandedItemId === item.id">
+                                            <app-icon name="chevron-down" *ngIf="expandedItemId !== item.id"></app-icon>
+                                            <app-icon name="chevron-up" *ngIf="expandedItemId === item.id"></app-icon>
+                                            Brief
+                                          </button>
+                                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="startEdit(item)">Edit</button>
+                                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="item.status === 'proposed'" (click)="approve(item.id)">Approve</button>
+                                          <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="item.status === 'approved' && !item.projectId" (click)="generateContent(item.id)">
+                                            <app-icon name="sparkles"></app-icon>
+                                            Generate
+                                          </button>
+                                          <button class="au-btn au-btn--danger-ghost au-btn--icon au-btn--sm" type="button" *ngIf="!item.projectId" (click)="remove(item.id)" [attr.aria-label]="'Delete ' + item.title">
+                                            <app-icon name="trash"></app-icon>
+                                          </button>
+                                        </ng-container>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  <tr class="au-brief-row" *ngIf="expandedItemId === item.id && editingItemId !== item.id">
+                                    <td colspan="9">
+                                      <div class="au-brief">
+                                        <div class="au-field-grid">
+                                          <div class="au-meta">
+                                            <strong>Rationale</strong>
+                                            <p class="au-muted">{{ item.rationale || '—' }}</p>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Word target</strong>
+                                            <p class="au-muted">{{ item.recommendedWordCountMin ?? '—' }}–{{ item.recommendedWordCountMax ?? '—' }} words</p>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Keyword</strong>
+                                            <p class="au-muted">{{ item.primaryKeyword || '—' }}</p>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>SEO title</strong>
+                                            <p class="au-muted">{{ item.seoTitle || '—' }}</p>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Meta description</strong>
+                                            <p class="au-muted">{{ item.metaDescription || '—' }}</p>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Opportunity / difficulty</strong>
+                                            <p class="au-muted">{{ item.opportunityScore ?? '—' }} / {{ item.difficultyEstimate ?? '—' }}</p>
+                                          </div>
+                                        </div>
+                                        <div class="au-field-grid au-mt-2">
+                                          <div class="au-meta">
+                                            <strong>Outline</strong>
+                                            <ul class="au-muted">
+                                              <li *ngFor="let section of outlineOf(item.outline)">{{ section }}</li>
+                                            </ul>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Internal links (from site inventory)</strong>
+                                            <ul class="au-muted">
+                                              <li *ngFor="let link of listOf(item.suggestedInternalLinks)">{{ link }}</li>
+                                            </ul>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Source evidence</strong>
+                                            <ul class="au-muted">
+                                              <li *ngFor="let evidence of evidenceOf(item.sourceEvidence)">{{ evidence }}</li>
+                                            </ul>
+                                          </div>
+                                          <div class="au-meta">
+                                            <strong>Image brief</strong>
+                                            <p class="au-muted">{{ item.imageConcept || '—' }}</p>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                </ng-container>
+                              </tbody>
+                            </table>
+                          </div>
+                        }
+                      </ng-container>
+                    </div>
+                  </td>
+                </tr>
+              </ng-container>
+            </tbody>
+          </table>
+        </div>
       </section>
 
       <app-empty-state
@@ -595,7 +489,12 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
         icon="plan"
         title="No plan yet"
         text="Generate an AI plan for the next publishing period to see structured rows here."
-      ></app-empty-state>
+      >
+        <button class="au-btn au-btn--primary" type="button" (click)="showForm = true">
+          <app-icon name="sparkles"></app-icon>
+          Generate a plan
+        </button>
+      </app-empty-state>
     </section>
   `,
 })
@@ -611,7 +510,9 @@ export class EditorialPlanPageComponent implements OnInit {
   generating = false;
   error = '';
   loadError = '';
-  planView: 'table' | 'cards' = 'cards';
+  showForm = false;
+  expandedPlanId = '';
+  planDetailLoading = false;
   selectedIds = new Set<string>();
   editingItemId = '';
   expandedItemId = '';
@@ -653,6 +554,7 @@ export class EditorialPlanPageComponent implements OnInit {
     this.draft.siteId = this.appContext.activeSite()?.id ?? this.sites[0]?.id ?? '';
     this.load();
     this.onSiteChange();
+    this.showForm = false;
   }
   onSiteChange(): void {
     this.siteIntel = null;
@@ -718,7 +620,33 @@ export class EditorialPlanPageComponent implements OnInit {
     this.loading = true;
     this.api.listEditorialPlans().subscribe({ next: (response) => { this.plans = response.items; this.loading = false; }, error: () => { this.loadError = 'Editorial plans could not be loaded. Try again.'; this.loading = false; } });
   }
-  open(plan: EditorialPlan): void { this.api.getEditorialPlan(plan.id).subscribe({ next: (detail) => { this.selectedPlan = detail; this.filterPlanRows(); }, error: () => { this.loadError = 'This editorial plan could not be opened.'; } }); }
+  isExpanded(planId: string): boolean {
+    return this.expandedPlanId === planId;
+  }
+  togglePlan(plan: EditorialPlan): void {
+    if (this.isExpanded(plan.id)) {
+      this.expandedPlanId = '';
+      return;
+    }
+    this.expandedPlanId = plan.id;
+    this.planDetailLoading = true;
+    this.selectedIds = new Set();
+    this.planSearch = '';
+    this.planChannelFilter = '';
+    this.planStatusFilter = '';
+    this.expandedItemId = '';
+    this.api.getEditorialPlan(plan.id).subscribe({
+      next: (detail) => {
+        this.selectedPlan = detail;
+        this.planDetailLoading = false;
+        this.filterPlanRows();
+      },
+      error: () => {
+        this.planDetailLoading = false;
+        this.loadError = 'This editorial plan could not be opened.';
+      },
+    });
+  }
   planStatusTone(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
     if (status === 'ready') return 'success';
     if (status === 'failed') return 'danger';
@@ -746,6 +674,11 @@ export class EditorialPlanPageComponent implements OnInit {
     const items = this.selectedPlan?.items ?? [];
     if (items.length === 0) return 0;
     return Math.round((this.planCount(status) / items.length) * 100);
+  }
+  listPlanProgress(plan: EditorialPlan): number {
+    const total = plan._count?.items ?? 0;
+    if (total === 0) return 0;
+    return Math.round(((plan.statusCounts?.['content_ready'] ?? 0) / total) * 100);
   }
   filterPlanRows(): void {
     const query = this.planSearch.trim().toLowerCase();
@@ -788,7 +721,7 @@ export class EditorialPlanPageComponent implements OnInit {
     this.api.deleteEditorialPlanItem(itemId).subscribe({ next: () => this.refreshSelected(), error: (err) => { this.error = err?.error?.error?.message || 'The planned row could not be deleted.'; } });
   }
   generateContent(itemId: string): void { this.api.generateContentFromEditorialPlanItem(itemId).subscribe({ next: () => { this.toast.success('Content generation started from the approved row.'); this.refreshSelected(); }, error: (err) => { this.error = err?.error?.error?.message || 'Content could not be generated from this row.'; } }); }
-  private refreshSelected(): void { if (this.selectedPlan) this.open(this.selectedPlan); }
+  private refreshSelected(): void { if (this.selectedPlan) { const plan = this.selectedPlan; this.api.getEditorialPlan(plan.id).subscribe({ next: (detail) => { this.selectedPlan = detail; this.filterPlanRows(); }, error: () => undefined }); } }
   statusTone(status: string): 'success' | 'danger' | 'warning' | 'brand' | 'neutral' {
     switch (status) {
       case 'approved':
@@ -837,8 +770,9 @@ export class EditorialPlanPageComponent implements OnInit {
         this.generating = false;
         this.progressIndex = -1;
         this.plans = [plan, ...this.plans];
+        this.expandedPlanId = plan.id;
         this.selectedPlan = plan;
-        this.expandedItemId = '';
+        this.planDetailLoading = false;
         this.filterPlanRows();
         const dropped = plan.generatedOutput?.dropped?.length ?? 0;
         if (dropped > 0) {

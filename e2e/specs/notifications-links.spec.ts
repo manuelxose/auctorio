@@ -35,7 +35,7 @@ test('notification action links navigate with intact query strings (no encoded %
   await context.close();
 });
 
-test('saved editorial plans render as cards with row counts', async ({ browser }) => {
+test('saved editorial plans render as one expandable table', async ({ browser }) => {
   const context = await browser.newContext({ baseURL: BASE });
   const page = await context.newPage();
 
@@ -45,19 +45,22 @@ test('saved editorial plans render as cards with row counts', async ({ browser }
   expect(login.status()).toBe(200);
 
   await page.goto(`${BASE}/studio/editorial-plan`, { waitUntil: 'networkidle' });
-  await page.waitForSelector('.au-plan-card', { timeout: 20_000 });
+  await page.waitForSelector('.au-plan-row', { timeout: 20_000 });
   await page.waitForTimeout(1_200);
 
-  const cards = await page.locator('.au-plan-card').count();
-  expect(cards).toBeGreaterThan(0);
-  const firstCardText = await page.locator('.au-plan-card').first().innerText();
-  expect(firstCardText).toContain('rows');
+  const rows = await page.locator('.au-plan-row').count();
+  expect(rows).toBeGreaterThan(0);
 
-  // Opening a plan shows the summary + card view.
-  await page.locator('.au-plan-card').first().click();
-  await page.waitForSelector('.au-plan-summary', { timeout: 15_000 });
-  const briefCards = await page.locator('.au-brief-card').count();
-  expect(briefCards).toBeGreaterThan(0);
+  // Clicking a plan expands its rows in place.
+  await page.locator('.au-plan-row').first().click();
+  await page.waitForSelector('.au-plan-detail-row .au-table', { timeout: 15_000 });
+  const expanded = await page.locator('.au-plan-detail-row').count();
+  expect(expanded).toBeGreaterThan(0);
+
+  // The expanded detail contains the summary and the row table.
+  await page.waitForSelector('.au-plan-summary', { timeout: 10_000 });
+  const rowTables = await page.locator('.au-plan-detail-row .au-table tbody tr').count();
+  expect(rowTables).toBeGreaterThan(0);
 
   await context.close();
 });
