@@ -78,7 +78,7 @@ const CATEGORY_TABS: Array<{ id: string; label: string }> = [
             </div>
             <p class="au-notification__text">{{ item.message }}</p>
             <div class="au-notification__actions">
-              <a class="au-link" *ngIf="item.actionUrl" [routerLink]="item.actionUrl">{{ actionLabel(item.category) }}</a>
+              <a class="au-link" *ngIf="item.actionUrl" [routerLink]="linkPath(item.actionUrl)" [queryParams]="linkQuery(item.actionUrl)">{{ actionLabel(item.category) }}</a>
               <button class="au-link-button" type="button" (click)="toggleRead(item)">{{ item.readAt ? 'Mark unread' : 'Mark read' }}</button>
               <button class="au-link-button" type="button" (click)="toggleArchive(item)">{{ item.archivedAt ? 'Restore' : 'Archive' }}</button>
             </div>
@@ -283,5 +283,24 @@ export class NotificationsPageComponent implements OnInit, OnDestroy {
       case 'editorial': return 'Open editorial plan';
       default: return 'Open';
     }
+  }
+
+  /** Router-safe path portion of an action URL (query string split off). */
+  linkPath(actionUrl: string): string {
+    const path = actionUrl.split('?')[0] || '/studio/notifications';
+    return path.startsWith('/studio/') ? path : '/studio/notifications';
+  }
+
+  /** Query parameters extracted from an action URL so routerLink does not URL-encode them. */
+  linkQuery(actionUrl: string): Record<string, string> {
+    const queryIndex = actionUrl.indexOf('?');
+    if (queryIndex < 0) {
+      return {};
+    }
+    const params: Record<string, string> = {};
+    for (const [key, value] of new URLSearchParams(actionUrl.slice(queryIndex + 1))) {
+      params[key] = value;
+    }
+    return params;
   }
 }

@@ -207,7 +207,8 @@ type NavItem = {
                   class="au-menu__item"
                   type="button"
                   *ngFor="let item of notificationPreview"
-                  [routerLink]="item.actionUrl || '/studio/notifications'"
+                  [routerLink]="notificationPath(item)"
+                  [queryParams]="notificationQuery(item)"
                   (click)="bellMenu.hide()"
                 >
                   <span class="au-menu__item-text">
@@ -395,6 +396,27 @@ export class AppShellComponent implements OnInit, OnDestroy {
         error: () => undefined,
       });
     }, 250);
+  }
+
+  /** Router-safe path for a notification action URL (query string split off). */
+  notificationPath(item: StudioNotification): string {
+    const raw = item.actionUrl || '/studio/notifications';
+    const path = raw.split('?')[0] || '/studio/notifications';
+    return path.startsWith('/studio/') ? path : '/studio/notifications';
+  }
+
+  /** Query parameters so routerLink never URL-encodes them into the path. */
+  notificationQuery(item: StudioNotification): Record<string, string> {
+    const raw = item.actionUrl || '';
+    const queryIndex = raw.indexOf('?');
+    if (queryIndex < 0) {
+      return {};
+    }
+    const params: Record<string, string> = {};
+    for (const [key, value] of new URLSearchParams(raw.slice(queryIndex + 1))) {
+      params[key] = value;
+    }
+    return params;
   }
 
   siteInitialsOf(site: StudioSite): string {
