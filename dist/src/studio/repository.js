@@ -38,6 +38,10 @@ exports.listMediaImages = listMediaImages;
 exports.updateVersionContent = updateVersionContent;
 exports.getStudioSession = getStudioSession;
 const client_1 = require("@prisma/client");
+const html_sanitizer_1 = require("./html-sanitizer");
+function stripHtmlText(value) {
+    return (value ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
 const prisma_1 = require("../infrastructure/db/prisma");
 const review_1 = require("./review");
 const security_1 = require("./security");
@@ -543,7 +547,7 @@ async function updateVersionFromText(tenantId, versionId, data, status) {
         data: {
             title: data.title,
             excerpt: data.excerpt,
-            bodyHtml: data.bodyHtml,
+            bodyHtml: (0, html_sanitizer_1.sanitizeEditorialHtml)(data.bodyHtml),
             seoTitle: data.seoTitle,
             seoDescription: data.seoDescription,
             status,
@@ -859,8 +863,8 @@ async function updateVersionContent(tenantId, versionId, data) {
         where: { id: versionId },
         data: {
             title: data.title === undefined ? undefined : data.title.trim() || null,
-            excerpt: data.excerpt === undefined ? undefined : data.excerpt.trim() || null,
-            bodyHtml: data.bodyHtml === undefined ? undefined : data.bodyHtml,
+            excerpt: data.excerpt === undefined ? undefined : stripHtmlText(data.excerpt).slice(0, 1000) || null,
+            bodyHtml: data.bodyHtml === undefined ? undefined : (0, html_sanitizer_1.sanitizeEditorialHtml)(data.bodyHtml),
             seoTitle: data.seoTitle === undefined ? undefined : data.seoTitle.trim() || null,
             seoDescription: data.seoDescription === undefined ? undefined : data.seoDescription.trim() || null,
         },

@@ -11,6 +11,7 @@ import type {
 } from "./types";
 import { buildAssetPublicUrl } from "./orchestration";
 import { isProductionEnv } from "../shared/utils/env";
+import { sanitizeEditorialHtml } from "./html-sanitizer";
 
 type TecnoriaCredentials = {
   token?: string;
@@ -22,6 +23,45 @@ type DryRunDecision = {
   enabled: boolean;
   reason: string | null;
 };
+
+/**
+ * Pure GuiaTV payload builder (exported for fidelity tests). Maps the approved
+ * SEO brief fields from project metadata into the destination contract.
+ */
+export function buildGuiaTvPayload(
+  context: PublisherContext,
+  assetUrl: string | null,
+  status: "draft" | "publish",
+): Record<string, unknown> {
+  const metadata = getMetadata(context.project);
+  const categories = getStringArray(metadata.categories);
+  const keywords = getStringArray(metadata.keywords);
+
+  return {
+    title: context.version.title || context.project.title,
+    slug: String(metadata.slug || "").trim() || undefined,
+    status,
+    excerpt: sanitizeEditorialHtml(context.version.excerpt || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+    content: sanitizeEditorialHtml(context.version.bodyHtml || ""),
+    categories,
+    contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
+    featured: Boolean(metadata.featured),
+    primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
+    targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
+    relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
+    relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
+    faqItems: getFaqItems(context.project),
+    evergreen: metadata.evergreen !== false,
+    featuredImage: assetUrl ?? undefined,
+    coverImage: assetUrl ?? undefined,
+    metaTitle: context.version.seoTitle || undefined,
+    metaDescription: context.version.seoDescription || undefined,
+    keywords,
+    ogImage: assetUrl ?? undefined,
+    canonicalUrl: metadata.canonicalUrl ? String(metadata.canonicalUrl) : undefined,
+    publishedAt: new Date().toISOString(),
+  };
+}
 
 function asRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" ? (value as Record<string, unknown>) : {};
@@ -250,34 +290,7 @@ class GuiaTvPublisher implements PublisherAdapter {
   }
 
   private buildPayload(context: PublisherContext, assetUrl: string | null, status: "draft" | "publish") {
-    const metadata = getMetadata(context.project);
-    const categories = getStringArray(metadata.categories);
-    const keywords = getStringArray(metadata.keywords);
-
-    return {
-      title: context.version.title || context.project.title,
-      slug: String(metadata.slug || "").trim() || undefined,
-      status,
-      excerpt: context.version.excerpt || "",
-      content: context.version.bodyHtml || "",
-      categories,
-      contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
-      featured: Boolean(metadata.featured),
-      primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
-      targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
-      relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
-      relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
-      faqItems: getFaqItems(context.project),
-      evergreen: metadata.evergreen !== false,
-      featuredImage: assetUrl ?? undefined,
-      coverImage: assetUrl ?? undefined,
-      metaTitle: context.version.seoTitle || undefined,
-      metaDescription: context.version.seoDescription || undefined,
-      keywords,
-      ogImage: assetUrl ?? undefined,
-      canonicalUrl: metadata.canonicalUrl ? String(metadata.canonicalUrl) : undefined,
-      publishedAt: new Date().toISOString(),
-    };
+    return buildGuiaTvPayload(context, assetUrl, status);
   }
 
   async publishDraft(context: PublisherContext): Promise<PublishResult> {

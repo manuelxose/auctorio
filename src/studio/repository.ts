@@ -14,6 +14,11 @@ import type {
   VersionStatus,
 } from "@prisma/client";
 import { Prisma } from "@prisma/client";
+import { sanitizeEditorialHtml } from "./html-sanitizer";
+
+function stripHtmlText(value: string | undefined): string {
+  return (value ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+}
 import type {
   AssetVariantInput,
   CreateProjectInput,
@@ -586,7 +591,7 @@ export async function updateVersionFromText(tenantId: string, versionId: string,
     data: {
       title: data.title,
       excerpt: data.excerpt,
-      bodyHtml: data.bodyHtml,
+      bodyHtml: sanitizeEditorialHtml(data.bodyHtml),
       seoTitle: data.seoTitle,
       seoDescription: data.seoDescription,
       status,
@@ -1013,8 +1018,8 @@ export async function updateVersionContent(
     where: { id: versionId },
     data: {
       title: data.title === undefined ? undefined : data.title.trim() || null,
-      excerpt: data.excerpt === undefined ? undefined : data.excerpt.trim() || null,
-      bodyHtml: data.bodyHtml === undefined ? undefined : data.bodyHtml,
+      excerpt: data.excerpt === undefined ? undefined : stripHtmlText(data.excerpt).slice(0, 1000) || null,
+      bodyHtml: data.bodyHtml === undefined ? undefined : sanitizeEditorialHtml(data.bodyHtml),
       seoTitle: data.seoTitle === undefined ? undefined : data.seoTitle.trim() || null,
       seoDescription: data.seoDescription === undefined ? undefined : data.seoDescription.trim() || null,
     },
