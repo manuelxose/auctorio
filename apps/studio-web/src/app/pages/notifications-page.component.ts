@@ -78,7 +78,7 @@ const CATEGORY_TABS: Array<{ id: string; label: string }> = [
             </div>
             <p class="au-notification__text">{{ item.message }}</p>
             <div class="au-notification__actions">
-              <a class="au-link" *ngIf="item.actionUrl" [routerLink]="linkPath(item.actionUrl)" [queryParams]="linkQuery(item.actionUrl)">{{ actionLabel(item.category) }}</a>
+              <a class="au-link" *ngIf="item.actionUrl" [routerLink]="linkPath(item.actionUrl)" [queryParams]="linkQuery(item.actionUrl)" (click)="openAction(item)">{{ actionLabel(item.category) }}</a>
               <button class="au-link-button" type="button" (click)="toggleRead(item)">{{ item.readAt ? 'Mark unread' : 'Mark read' }}</button>
               <button class="au-link-button" type="button" (click)="toggleArchive(item)">{{ item.archivedAt ? 'Restore' : 'Archive' }}</button>
             </div>
@@ -91,6 +91,7 @@ const CATEGORY_TABS: Array<{ id: string; label: string }> = [
         <span class="au-pagination__meta">Page {{ page }} of {{ totalPages }}</span>
         <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="goPage(page + 1)" [disabled]="page >= totalPages">Next</button>
       </div>
+      <p class="au-muted au-mb-0" *ngIf="totalPages <= 1 && items.length > 0">Showing {{ items.length }} of {{ total }} notifications.</p>
 
       <section class="au-panel au-panel--padded au-mt-3" aria-label="Notification preferences">
         <h2 class="au-panel__title">Preferences</h2>
@@ -119,7 +120,7 @@ export class NotificationsPageComponent implements OnInit, OnDestroy {
   unreadOnly = false;
   archived = false;
   page = 1;
-  pageSize = 20;
+  pageSize = 50;
   total = 0;
   unread = 0;
   counts: Record<string, number> = {};
@@ -238,6 +239,16 @@ export class NotificationsPageComponent implements OnInit, OnDestroy {
       next: () => this.refreshSilently(),
       error: () => this.toast.error('Could not update the notification.'),
     });
+  }
+
+  /** Opening the action marks the notification read so it leaves the unread view. */
+  openAction(item: StudioNotification): void {
+    if (!item.readAt) {
+      this.api.markNotificationRead(item.id, true).subscribe({
+        next: () => this.refreshSilently(),
+        error: () => undefined,
+      });
+    }
   }
 
   toggleArchive(item: StudioNotification): void {
