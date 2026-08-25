@@ -59,7 +59,34 @@ function normalizeSlug(value: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
 }
+/** Token-overlap ratio between two titles; used to catch near-duplicates. */
+export function titleTokenOverlap(a: string, b: string): number {
+  const tokens = (value: string) =>
+    new Set(
+      value
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .split(/[^a-z0-9]+/)
+        .filter((token) => token.length > 3),
+    );
+  const ta = tokens(a);
+  const tb = tokens(b);
+  if (ta.size === 0 || tb.size === 0) {
+    return 0;
+  }
+  let intersection = 0;
+  for (const token of ta) {
+    if (tb.has(token)) {
+      intersection += 1;
+    }
+  }
+  return intersection / Math.min(ta.size, tb.size);
+}
 
+function isNearDuplicateTitle(candidate: string, existing: string[]): boolean {
+  return existing.some((title) => titleTokenOverlap(candidate, title) >= 0.75);
+}
 /**
  * App-level post-validation: the application, not the LLM, owns correctness.
  * Enforces dates, duplicates, internal-link inventory, evidence whitelist,
@@ -67,7 +94,7 @@ function normalizeSlug(value: string): string {
  */
 export function postValidatePlanItems(
   items: EditorialPlanBriefV2[],
-  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels">,
+  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy">,
   context: EditorialPlanningContext,
 ): PostValidationResult {
   const kept: EditorialPlanBriefV2[] = [];
@@ -75,7 +102,6 @@ export function postValidatePlanItems(
   const warnings: string[] = [];
   const seenTitles = new Set<string>();
   const seenQueries = new Set<string>();
-
   const allowedEvidenceUrls = new Set<string>([
     ...context.evidence.map((entry) => entry.url).filter((url): url is string => Boolean(url)),
     ...context.indexedUrlInventory,
@@ -125,6 +151,9 @@ export function postValidatePlanItems(
       item,
       context.profile ?? syntheticProfileForSiteType(context.site.type),
       title,
+      {
+        allowedContentFormats: input.strategy?.contentFormats ?? [],
+      },
     );
     if (relevance.rejected) {
       dropped.push({ title, reason: `relevance guardrail (score ${relevance.score}): ${relevance.reasons.join("; ")}` });
@@ -185,7 +214,7 @@ export function postValidatePlanItems(
   return { kept: finalItems, dropped, warnings };
 }
 
-function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlanningContext): string {
+function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlanningContext, countOverride?: number): string {
   const strategy: PlanningStrategy = input.strategy ?? {
     mode: "balanced",
     language: input.language ?? "es",
@@ -196,13 +225,15 @@ function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlan
   };
 
   return [
-    `Generate exactly ${input.publicationCount} editorial plan items for the destination site described below.`,
+    `Generate exactly ${countOverride ?? input.publicationCount} editorial plan items for the destination site described below.`,
     `Date range (ISO): from ${input.dateFrom.toISOString()} to ${input.dateTo.toISOString()} (timezone ${input.timezone ?? "Europe/Madrid"}). All scheduledFor values must fall inside this range.`,
     `Channels: ${input.channels.join(", ")}.`,
     "Every item is a professional SEO brief. Ground each topic in the site intelligence evidence below. Do NOT invent topics that are unrelated to the destination.",
     "Do not duplicate titles, target queries or primary keywords within the batch or against existing plan titles.",
     "For suggestedInternalLinks, use ONLY urls present in the evidence. For sourceEvidence, use ONLY the allowed evidence urls listed (or omit url).",
     "Do not invent statistics, prices or schedules; reference evidence types only.",
+    "Keep every item COMPACT so the full response fits the provider output limit: outline ≤6 entries with ≤4 subpoints, all arrays ≤6 entries, rationale ≤180 characters.",
+    "DIVERSITY IS MANDATORY: every item must target a DIFFERENT subject area. Do NOT produce format variants of the same subject (e.g. the same film genre once as a guide and again as a ranking). Spread the items across the topic clusters in the evidence.",
     "",
     renderPlanningContext(context, strategy),
     "",
@@ -210,7 +241,11 @@ function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlan
   ].join("\n");
 }
 
-export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
+async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<{
+  accounts: Array<{ id: string; platform: string }>;
+  strategy: PlanningStrategy;
+  plan: Awaited<ReturnType<typeof prisma.editorialPlan.create>>;
+}> {
   if (!input.siteId) throw new Error("editorial_plan_site_required");
   if (input.dateTo <= input.dateFrom) throw new Error("editorial_plan_invalid_date_range");
   if (input.publicationCount < 1 || input.publicationCount > 100) throw new Error("editorial_plan_invalid_quantity");
@@ -276,6 +311,15 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     },
   });
 
+  return { accounts, strategy, plan };
+}
+
+async function executeEditorialPlanGeneration(
+  plan: Awaited<ReturnType<typeof prisma.editorialPlan.create>>,
+  input: GenerateEditorialPlanInput,
+  strategy: PlanningStrategy,
+  accounts: Array<{ id: string; platform: string }>,
+) {
   structuredEvent("editorial_plan.generation.started", {
     tenantId: input.tenantId,
     siteId: input.siteId,
@@ -285,9 +329,12 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     channels: input.channels,
   });
 
+  // prepareEditorialPlan guarantees a site; re-assert for narrowing.
+  const siteId = input.siteId!;
+
   try {
     const contextStarted = Date.now();
-    const context = await buildEditorialPlanningContext(input.tenantId, input.siteId);
+    const context = await buildEditorialPlanningContext(input.tenantId, siteId);
     structuredEvent("editorial_plan.context.built", {
       tenantId: input.tenantId,
       siteId: input.siteId,
@@ -311,23 +358,117 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     let lastProvider = "unknown";
     let lastModel = "unknown";
 
-    const runOnce = async (extraFeedback?: string) =>
+    const runOnce = async (extraFeedback?: string, countOverride?: number) =>
       generateStructured({
         schemaName: EDITORIAL_PLAN_SCHEMA_NAME,
         schema: editorialPlanSchemaV2,
-        prompt: buildPromptV2(input, context) + (extraFeedback ?? ""),
+        prompt: buildPromptV2(input, context, countOverride) + (extraFeedback ?? ""),
         systemPrompt,
-        temperature: 0,
-        maxTokens: Math.max(4000, input.publicationCount * 1100),
+        temperature: 0.5,
+        maxTokens: 3000,
+        maxAttempts: 3,
         eventContext: { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, siteType: context.site.type },
       });
 
+    const mergeBatch = (
+      existing: PostValidationResult,
+      batch: PostValidationResult,
+      limit: number,
+    ): PostValidationResult => {
+      const seenTitles = new Set(existing.kept.map((item) => normalizeSlug(item.workingTitle)));
+      const seenQueries = new Set(existing.kept.map((item) => (item.targetQuery ? normalizeSlug(item.targetQuery) : "")));
+      const keptTitles = existing.kept.map((item) => item.workingTitle);
+      const extras: EditorialPlanBriefV2[] = [];
+      const dropped = [...existing.dropped];
+      for (const item of batch.kept) {
+        const titleKey = normalizeSlug(item.workingTitle);
+        const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : "";
+        if (seenTitles.has(titleKey)) {
+          dropped.push({ title: item.workingTitle, reason: "duplicate title across generation batches" });
+          continue;
+        }
+        if (isNearDuplicateTitle(item.workingTitle, keptTitles)) {
+          dropped.push({ title: item.workingTitle, reason: "near-duplicate topic across generation batches" });
+          continue;
+        }
+        if (queryKey && seenQueries.has(queryKey)) {
+          dropped.push({ title: item.workingTitle, reason: `duplicate target query ${item.targetQuery}` });
+          continue;
+        }
+        seenTitles.add(titleKey);
+        if (queryKey) {
+          seenQueries.add(queryKey);
+        }
+        keptTitles.push(item.workingTitle);
+        extras.push(item);
+      }
+      const kept = [...existing.kept, ...extras];
+      const excess = kept.slice(limit);
+      for (const item of excess) {
+        dropped.push({ title: item.workingTitle, reason: "exceeds requested publication count" });
+      }
+      return { kept: kept.slice(0, limit), dropped, warnings: [...existing.warnings, ...batch.warnings] };
+    };
+
+    // Batch size derives from the provider output cap: DeepSeek truncates at
+    // 4096 tokens, so ~2 full briefs per call is the safe budget.
+    const perCallBudget = 2;
+    const chunks: number[] = [];
+    let remaining = input.publicationCount;
+    while (remaining > 0) {
+      chunks.push(Math.min(perCallBudget, remaining));
+      remaining -= perCallBudget;
+    }
+
     try {
-      const result = await runOnce();
-      attempts = result.attempts;
-      lastProvider = result.attempts[result.attempts.length - 1].provider;
-      lastModel = result.attempts[result.attempts.length - 1].model;
-      validated = postValidatePlanItems(result.data.items, input, context);
+      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+        const chunkCount = chunks[chunkIndex];
+        try {
+          const alreadyPlanned =
+            chunkIndex > 0 && validated && validated.kept.length > 0
+              ? `\nAlready planned titles (do NOT repeat these or close variants of them): ${validated.kept.map((item) => item.workingTitle).join(" | ")}`
+              : undefined;
+          const result = await runOnce(alreadyPlanned, chunkCount);
+          attempts = [...attempts, ...result.attempts];
+          lastProvider = result.attempts[result.attempts.length - 1].provider;
+          lastModel = result.attempts[result.attempts.length - 1].model;
+          const batch = postValidatePlanItems(
+            result.data.items,
+            { ...input, publicationCount: chunkCount },
+            context,
+          );
+          validated = validated ? mergeBatch(validated, batch, input.publicationCount) : batch;
+          structuredEvent("editorial_plan.generation.chunk_completed", {
+            tenantId: input.tenantId,
+            siteId: input.siteId,
+            planId: plan.id,
+            chunkRequested: chunkCount,
+            chunkKept: batch.kept.length,
+            chunkDropped: batch.dropped.length,
+            runningKept: validated.kept.length,
+          });
+        } catch (error) {
+          // A failed later chunk must not destroy already-validated items:
+          // record the failure and continue with the next chunk.
+          if (error instanceof StructuredOutputError && validated && validated.kept.length > 0) {
+            await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
+            structuredEvent(
+              "editorial_plan.generation.chunk_failed",
+              {
+                tenantId: input.tenantId,
+                siteId: input.siteId,
+                planId: plan.id,
+                chunkRequested: chunkCount,
+                runningKept: validated.kept.length,
+                attempts: error.attempts.length,
+              },
+              "warn",
+            );
+            continue;
+          }
+          throw error;
+        }
+      }
     } catch (error) {
       if (error instanceof StructuredOutputError) {
         await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
@@ -347,7 +488,7 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     if (validated && validated.kept.length === 0) {
       const feedback = `\nYour previous plan was rejected. Rejected rows: ${validated.dropped.slice(0, 10).map((drop) => `${drop.title} (${drop.reason})`).join("; ")}. Propose topics that clearly belong to this destination.`;
       try {
-        const retryResult = await runOnce(feedback);
+        const retryResult = await runOnce(feedback, input.publicationCount);
         attempts = [...attempts, ...retryResult.attempts];
         lastProvider = retryResult.attempts[retryResult.attempts.length - 1].provider;
         lastModel = retryResult.attempts[retryResult.attempts.length - 1].model;
@@ -356,6 +497,55 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
         if (error instanceof StructuredOutputError) {
           await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
           throw new Error("EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID");
+        }
+        throw error;
+      }
+    }
+
+    // Quantity recovery: the model sometimes returns fewer rows than the exact
+    // count requested. Ask for the remaining items (bounded rounds, small
+    // batches to respect the provider output cap) and merge, deduping by
+    // normalized title, near-duplicate similarity and target query. The
+    // application owns quantity enforcement.
+    let topUpRounds = 0;
+    while (validated && validated.kept.length < input.publicationCount && topUpRounds < 2) {
+      topUpRounds += 1;
+      const missing = Math.min(3, input.publicationCount - validated.kept.length);
+      const existingTitles = validated.kept.map((item) => item.workingTitle).join(" | ");
+      const feedback =
+        `\nCORRECTION REQUIRED: you returned ${validated.kept.length} items but ${input.publicationCount} in total were requested. ` +
+        `Return ${missing} ADDITIONAL distinct items. Do NOT repeat these titles or close variants of them: ${existingTitles}. ` +
+        `All new items must obey the same relevance and schema rules.`;
+      try {
+        const topUpResult = await runOnce(feedback, missing);
+        attempts = [...attempts, ...topUpResult.attempts];
+        lastProvider = topUpResult.attempts[topUpResult.attempts.length - 1].provider;
+        lastModel = topUpResult.attempts[topUpResult.attempts.length - 1].model;
+        const batch = postValidatePlanItems(
+          topUpResult.data.items,
+          { ...input, publicationCount: missing },
+          context,
+        );
+        validated = mergeBatch(validated, batch, input.publicationCount);
+        structuredEvent("editorial_plan.generation.topup", {
+          tenantId: input.tenantId,
+          siteId: input.siteId,
+          planId: plan.id,
+          round: topUpRounds,
+          kept: validated.kept.length,
+          requested: input.publicationCount,
+        });
+      } catch (error) {
+        if (error instanceof StructuredOutputError) {
+          structuredEvent("editorial_plan.generation.topup_failed", {
+            tenantId: input.tenantId,
+            siteId: input.siteId,
+            planId: plan.id,
+            round: topUpRounds,
+            requested: input.publicationCount,
+            kept: validated.kept.length,
+          }, "warn");
+          break;
         }
         throw error;
       }
@@ -458,7 +648,7 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     if (targetItems.length > 0) {
       await registerSearchTargets(
         input.tenantId,
-        input.siteId,
+        siteId,
         targetItems.map((item) => ({ query: item.targetQuery!, keyword: item.primaryKeyword, intent: item.primaryIntent })),
       );
     }
@@ -504,6 +694,34 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
     }, "error");
     throw error;
   }
+}
+
+/** Synchronous generation (used by scripts and `wait` callers). */
+export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
+  const { accounts, strategy, plan } = await prepareEditorialPlan(input);
+  return executeEditorialPlanGeneration(plan, input, strategy, accounts);
+}
+
+/**
+ * Background generation: the plan row is created immediately and generation
+ * runs out-of-band. Callers poll GET /v2/editorial-plans/:id until the plan
+ * reaches ready|failed. Keeps long LLM pipelines off the request path.
+ */
+export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPlanInput) {
+  const { accounts, strategy, plan } = await prepareEditorialPlan(input);
+  void executeEditorialPlanGeneration(plan, input, strategy, accounts).catch((error) => {
+    structuredEvent(
+      "editorial_plan.generation.background_error",
+      {
+        tenantId: input.tenantId,
+        siteId: input.siteId,
+        planId: plan.id,
+        normalizedError: error instanceof Error ? error.message : String(error),
+      },
+      "error",
+    );
+  });
+  return { planId: plan.id };
 }
 
 async function recordGenerationAttempts(

@@ -197,6 +197,7 @@ export function computeSiteRelevanceScore(
     "mainTopics" | "categories" | "commercialTopics" | "evergreenTopics" | "newsTopics" | "sportsTopics" | "topicClusters" | "contentTypes" | "detectedSiteType"
   >,
   title: string,
+  options: { allowedContentFormats?: string[] } = {},
 ): RelevanceVerdict {
   const reasons: string[] = [];
   let score = 0;
@@ -221,6 +222,22 @@ export function computeSiteRelevanceScore(
     ...profile.categories,
   ].flatMap((topic) => tokenize(topic));
 
+  // Early-crawl profiles are sparse (few pages indexed). Blend the site-type
+  // lexicon as supplementary vocabulary so legitimate domain items are not
+  // under-credited while evidence accumulates. Off-topic terms still reject.
+  if (profileTopicTokens.length < 10) {
+    const synthetic = syntheticProfileForSiteType(profile.detectedSiteType ?? "");
+    profileTopicTokens.push(
+      ...[
+        ...synthetic.mainTopics,
+        ...synthetic.sportsTopics,
+        ...synthetic.commercialTopics,
+        ...synthetic.evergreenTopics,
+        ...synthetic.newsTopics,
+      ].flatMap((topic) => tokenize(topic)),
+    );
+  }
+
   // ── Topic overlap with site profile (0-35)
   const similarity = topicSimilarity(titleTokens, profileTopicTokens);
   const topicPoints = Math.round(similarity * 35);
@@ -237,6 +254,16 @@ export function computeSiteRelevanceScore(
     }
   }
 
+  // ── Sports affinity: competition/event overlap with site sports topics (0-10)
+  if (profile.sportsTopics.length > 0) {
+    const sportsHits = termHitScore(blob, profile.sportsTopics);
+    const sportsPoints = Math.min(10, sportsHits * 5);
+    score += sportsPoints;
+    if (sportsPoints > 0) {
+      reasons.push(`sports affinity: +${sportsPoints}`);
+    }
+  }
+
   // ── Cluster relevance (0-15)
   const topicCluster = brief.topicCluster;
   if (topicCluster) {
@@ -249,10 +276,13 @@ export function computeSiteRelevanceScore(
     }
   }
 
-  // ── Content type fit (0-10)
-  if (brief.contentType && profile.contentTypes.some((entry) => entry.type === brief.contentType)) {
+  // ── Content type fit (0-10). Formats explicitly requested by the
+  // editorial strategy are always acceptable, even if the crawl has not
+  // observed them yet.
+  const formatAllowed = brief.contentType ? (options.allowedContentFormats ?? []).includes(brief.contentType) : false;
+  if (brief.contentType && (profile.contentTypes.some((entry) => entry.type === brief.contentType) || formatAllowed)) {
     score += 10;
-    reasons.push(`content type "${brief.contentType}" present on site: +10`);
+    reasons.push(formatAllowed ? `content type "${brief.contentType}" requested by strategy: +10` : `content type "${brief.contentType}" present on site: +10`);
   } else if (brief.contentType) {
     reasons.push(`content type "${brief.contentType}" not yet observed on site`);
   }

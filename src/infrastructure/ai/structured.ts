@@ -146,7 +146,13 @@ export async function generateStructured<T>(options: StructuredGenerationOptions
   ].join("\n");
 
   for (let attemptNumber = 1; attemptNumber <= maxAttempts; attemptNumber += 1) {
-    const correction = attempts.length > 0 ? `\nYour previous response was invalid. Fix these validation errors and return valid JSON only:\n${attempts[attempts.length - 1].validation.errors.slice(0, 15).join("\n")}` : "";
+    const lastAttempt = attempts[attempts.length - 1];
+    const lastWasTruncated = lastAttempt?.validation.errors.includes("response_truncated_at_output_limit");
+    const correction = lastAttempt
+      ? lastWasTruncated
+        ? "\nYour previous response was cut off at the provider output limit. Make the JSON more compact: shorten outlines, lists and long fields so the complete object fits the limit."
+        : `\nYour previous response was invalid. Fix these validation errors and return valid JSON only:\n${lastAttempt.validation.errors.slice(0, 15).join("\n")}`
+      : "";
     let result: TextGenerationResult;
     try {
       result = await provider.generate({
@@ -215,6 +221,52 @@ export async function generateStructured<T>(options: StructuredGenerationOptions
     attempts.push(attempt);
 
     if (validation.ok) {
+      // Provider hit its output cap: the repaired JSON may be silently
+      // incomplete (items lost to truncation). Retry once with a
+      // compactness correction instead of trusting the truncated payload.
+      if (result.finishReason === "length" && attemptNumber < maxAttempts) {
+        const attempt: StructuredGenerationAttempt = {
+          attempt: attemptNumber,
+          provider: result.provider,
+          model: result.model,
+          finishReason: result.finishReason,
+          repairAttempted: parsed.repairAttempted,
+          validation: { ok: false, errors: ["response_truncated_at_output_limit"] },
+          usage: result.usage,
+        };
+        attempts.push(attempt);
+        structuredEvent(
+          "ai.structured.retry",
+          {
+            schemaName: options.schemaName,
+            provider: result.provider,
+            model: result.model,
+            attempt: attemptNumber,
+            finishReason: result.finishReason,
+            normalizedError: "response_truncated",
+            repairAttempted: parsed.repairAttempted,
+            retryAttempted: true,
+            ...options.eventContext,
+          },
+          "warn",
+        );
+        continue;
+      }
+
+      if (result.finishReason === "length") {
+        structuredEvent(
+          "ai.structured.completed_truncated",
+          {
+            schemaName: options.schemaName,
+            provider: result.provider,
+            model: result.model,
+            attempt: attemptNumber,
+            ...options.eventContext,
+          },
+          "warn",
+        );
+      }
+
       structuredEvent("ai.structured.completed", {
         schemaName: options.schemaName,
         provider: result.provider,

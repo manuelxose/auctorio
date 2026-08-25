@@ -177,6 +177,15 @@ export function renderPlanningContext(context: EditorialPlanningContext, strateg
     lines.push(`- categories: ${profile.categories.slice(0, 12).join(", ") || "n/a"}`);
     lines.push(`- content types present: ${profile.contentTypes.map((entry) => entry.type).join(", ") || "n/a"}`);
     lines.push(`- clusters: ${profile.topicClusters.slice(0, 12).map((cluster) => `${cluster.name}(${cluster.pagesCount})`).join(", ") || "n/a"}`);
+    const subjectSpace = [
+      ...profile.topicClusters.slice(0, 12).map((cluster) => cluster.name),
+      ...profile.sportsTopics,
+      ...profile.commercialTopics,
+      ...profile.evergreenTopics,
+    ].filter(Boolean);
+    if (subjectSpace.length > 0) {
+      lines.push(`TOPIC SPACE — pick a DIFFERENT subject for every item (never repeat a subject, only vary its format if requested): ${subjectSpace.slice(0, 25).join(", ")}`);
+    }
     lines.push(`- commercial topics: ${profile.commercialTopics.join(", ") || "n/a"}`);
     lines.push(`- evergreen topics: ${profile.evergreenTopics.join(", ") || "n/a"}`);
     lines.push(`- news topics: ${profile.newsTopics.join(", ") || "n/a"}`);

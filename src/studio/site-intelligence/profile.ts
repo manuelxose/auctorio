@@ -352,6 +352,13 @@ export async function rebuildSiteProfile(site: Pick<Site, "id" | "tenantId" | "t
     .sort((a, b) => b[1] - a[1])
     .map(([term]) => term);
 
+  // ── Topics: fixed domain lexicon hits merged with empirically dominant
+  // title tokens (so sparse early crawls still yield a useful vocabulary).
+  const mergedTopics = [
+    ...detectedTopics,
+    ...topKeywords.map(([token]) => token).filter((token) => !detectedTopics.includes(token)),
+  ].slice(0, 30);
+
   // ── Classified topics
   const topicTitleBlob = titleTexts.join(" ").toLowerCase();
   const commercialTopics = GUIATV_COMMERCIAL_TERMS.filter((term) => topicTitleBlob.includes(term));
@@ -458,7 +465,7 @@ export async function rebuildSiteProfile(site: Pick<Site, "id" | "tenantId" | "t
     detectedLanguage,
     detectedAudience: typeProfile.audience,
     brandSummary: `${site.name} — ${typeProfile.siteType} covering ${detectedTopics.slice(0, 6).join(", ") || "its connected content"}.`,
-    mainTopics: detectedTopics.length > 0 ? detectedTopics : topKeywords.slice(0, 12).map(([token]) => token),
+    mainTopics: mergedTopics.length > 0 ? mergedTopics : topKeywords.slice(0, 12).map(([token]) => token),
     excludedTopics: [],
     categories: detectedTopics,
     entities,

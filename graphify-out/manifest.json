@@ -90,9 +90,9 @@
     "semantic_hash": "a35726bba8f28cfc1c0c9aa5520abcc3"
   },
   "apps/studio-web/src/app/components/ui/app-icon.component.ts": {
-    "mtime": 1787615607.5630462,
-    "seen": 1787616171.2060251,
-    "ast_hash": "e54ae5a20d5faeabde30c72ab2707ac1",
+    "mtime": 1787616404.975412,
+    "seen": 1787617323.1768727,
+    "ast_hash": "73966b4a27b14d9934c71018ad2e081c",
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/components/ui/app-popover.component.ts": {
@@ -150,9 +150,9 @@
     "semantic_hash": "0351601b248db41e8ff23c71de3d1545"
   },
   "apps/studio-web/src/app/models/studio.models.ts": {
-    "mtime": 1787615474.4932077,
-    "seen": 1787616171.2060525,
-    "ast_hash": "a5bf72127f81bc66f9db4ab189ad02d2",
+    "mtime": 1787616448.831712,
+    "seen": 1787617323.176901,
+    "ast_hash": "76836da22798c5e86a2079725c751566",
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/pages/accept-invite-page.component.ts": {
@@ -198,10 +198,10 @@
     "semantic_hash": "41d740b348ff657b32ed5a6ed22aad3f"
   },
   "apps/studio-web/src/app/pages/content-workspace-page.component.ts": {
-    "mtime": 1787404499.3824837,
-    "seen": 1787599470.2778971,
-    "ast_hash": "3dc3d66c86389e3ee528d7b836f24e3c",
-    "semantic_hash": "3dc3d66c86389e3ee528d7b836f24e3c"
+    "mtime": 1787616592.2204216,
+    "seen": 1787617323.1769245,
+    "ast_hash": "d908c9931250dbe4d5e8e0c0a228cfb5",
+    "semantic_hash": ""
   },
   "apps/studio-web/src/app/pages/editorial-plan-page.component.ts": {
     "mtime": 1787615893.3225296,
@@ -894,9 +894,9 @@
     "semantic_hash": ""
   },
   "src/studio/publishers.ts": {
-    "mtime": 1787609652.488102,
-    "seen": 1787610534.7877514,
-    "ast_hash": "ca3a4604fa5866e1a0aaa2f159cab7f2",
+    "mtime": 1787616904.5734217,
+    "seen": 1787617323.17726,
+    "ast_hash": "17ac477d2e001d0fe45317b4cadeee89",
     "semantic_hash": ""
   },
   "src/studio/qa.ts": {
@@ -906,9 +906,9 @@
     "semantic_hash": ""
   },
   "src/studio/repository.ts": {
-    "mtime": 1787603684.7706459,
-    "seen": 1787603831.2446115,
-    "ast_hash": "5ade54c69ccb9e2c13556c25285df830",
+    "mtime": 1787616826.7476685,
+    "seen": 1787617323.1772635,
+    "ast_hash": "6b6d4cf55fa729442ce46549ce2b47b6",
     "semantic_hash": ""
   },
   "src/studio/review.ts": {
@@ -1671,6 +1671,24 @@
     "mtime": 1787615550.1999774,
     "seen": 1787616171.2061172,
     "ast_hash": "e65929e239ea4a24c4f26523574e2c4b",
+    "semantic_hash": ""
+  },
+  "apps/studio-web/src/app/components/ui/au-rich-editor.component.ts": {
+    "mtime": 1787616404.975412,
+    "seen": 1787617323.1768816,
+    "ast_hash": "f2e755557f96f2b71cfe3ccb92aa1a89",
+    "semantic_hash": ""
+  },
+  "src/studio/html-sanitizer.ts": {
+    "mtime": 1787617202.6746416,
+    "seen": 1787617323.1772368,
+    "ast_hash": "4af8c33bc9a8f06eb31ed0080bd63ed4",
+    "semantic_hash": ""
+  },
+  "tests/publisher-fidelity.test.ts": {
+    "mtime": 1787617027.3484535,
+    "seen": 1787617323.1773562,
+    "ast_hash": "7ae215895694a2d8cb34d490c860f3c8",
     "semantic_hash": ""
   }
 }

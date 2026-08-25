@@ -261,3 +261,29 @@ test("active day filtering respects configured days of week", () => {
   assert.equal(isDayActive(policy as never, sunday), false);
   assert.equal(readPublishingWindows(policy as never).length, 1);
 });
+
+// ── Body normalization regression (M22 golden path fix) ──
+
+import { stripLeadingDuplicateTitle } from "../src/studio/orchestration";
+
+test("stripLeadingDuplicateTitle removes a raw title leaked before the first tag", () => {
+  const body =
+    "Cómo ver series en TV y streaming: guía completa para no perderte ningún estreno " +
+    "<p>El mundo de las series ha cambiado drásticamente.</p><h2>TV tradicional vs streaming</h2><p>Texto.</p>";
+  const title = "Cómo ver series en TV y streaming: guía completa para no perderte ningún estreno";
+  const result = stripLeadingDuplicateTitle(body, title);
+  assert.equal(result.startsWith("<p>"), true);
+  assert.equal(result.includes("<h2>"), true);
+});
+
+test("stripLeadingDuplicateTitle keeps bodies that start with a real paragraph", () => {
+  const body = "<p>Intro detallada.</p><h2>Sección</h2><p>Texto.</p>";
+  assert.equal(stripLeadingDuplicateTitle(body, "Un título diferente"), body);
+});
+
+test("stripLeadingDuplicateTitle is accent and case insensitive", () => {
+  const body = "Como ver series en tv y streaming: guia completa <p>Texto.</p>";
+  const title = "Cómo ver series en TV y streaming: guía completa";
+  const result = stripLeadingDuplicateTitle(body, title);
+  assert.equal(result.startsWith("<p>"), true);
+});
