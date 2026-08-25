@@ -940,173 +940,69 @@
       "source_location": "L27"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_loadedpublication",
+      "id": "src_infrastructure_workers_worker_social_loadedpublication",
       "label": "LoadedPublication",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
       "norm_label": "loadedpublication",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L27"
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L61"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_publishingdependencies",
-      "label": "PublishingDependencies",
+      "id": "src_infrastructure_workers_worker_social_socialgeneratejobdata",
+      "label": "SocialGenerateJobData",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "publishingdependencies",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L29"
+      "norm_label": "socialgeneratejobdata",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L24"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_publishingjobdata",
-      "label": "PublishingJobData",
+      "id": "src_infrastructure_workers_worker_social_socialjobdata",
+      "label": "SocialJobData",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "publishingjobdata",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L23"
-    },
-    {
-      "id": "src_studio_types_assetvariantinput",
-      "label": "AssetVariantInput",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "assetvariantinput",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L125"
-    },
-    {
-      "id": "src_studio_types_createprojectinput",
-      "label": "CreateProjectInput",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "createprojectinput",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L44"
-    },
-    {
-      "id": "src_studio_types_createsiteinput",
-      "label": "CreateSiteInput",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "createsiteinput",
-      "source_file": "src/studio/types.ts",
+      "norm_label": "socialjobdata",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
       "source_location": "L32"
     },
     {
-      "id": "src_studio_types_listprojectsinput",
-      "label": "ListProjectsInput",
+      "id": "src_infrastructure_workers_worker_social_socialpublishjobdata",
+      "label": "SocialPublishJobData",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "listprojectsinput",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L407"
+      "norm_label": "socialpublishjobdata",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L18"
     },
     {
-      "id": "src_studio_types_paginatedresult",
-      "label": "PaginatedResult",
+      "id": "src_infrastructure_workers_worker_social_socialunpublishjobdata",
+      "label": "SocialUnpublishJobData",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "paginatedresult",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L141"
-    },
-    {
-      "id": "src_studio_types_studiomediaitem",
-      "label": "StudioMediaItem",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "studiomediaitem",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L362"
-    },
-    {
-      "id": "src_studio_types_studioprojectsummary",
-      "label": "StudioProjectSummary",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "studioprojectsummary",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L498"
-    },
-    {
-      "id": "src_studio_types_studiositesummary",
-      "label": "StudioSiteSummary",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "studiositesummary",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L387"
-    },
-    {
-      "id": "src_studio_types_updateprojectinput",
-      "label": "UpdateProjectInput",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "updateprojectinput",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L53"
-    },
-    {
-      "id": "src_studio_types_updatesiteinput",
-      "label": "UpdateSiteInput",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "updatesiteinput",
-      "source_file": "src/studio/types.ts",
-      "source_location": "L622"
+      "norm_label": "socialunpublishjobdata",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L26"
     },
     {
       "id": "apps_studio_web_src_app_components_auctorio_chat_widget_component_auctoriochatwidgetcomponent",
@@ -4746,7 +4642,7 @@
       "file_type": "code",
       "norm_label": "editorialplanpagecomponent",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L509"
+      "source_location": "L551"
     },
     {
       "id": "src_studio_connectors_discovery_discoveredauthoption",
@@ -5126,30 +5022,56 @@
       "source_location": "L548"
     },
     {
-      "id": "src_studio_discovery_planner_discoveryqueryplan",
-      "label": "DiscoveryQueryPlan",
+      "id": "src_studio_editorial_coveragecheckresult",
+      "label": "CoverageCheckResult",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "discoveryqueryplan",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L8"
+      "norm_label": "coveragecheckresult",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L270"
     },
     {
-      "id": "src_studio_discovery_planner_editorialdiscoverycontext",
-      "label": "EditorialDiscoveryContext",
+      "id": "src_studio_editorial_scoreexplanationentry",
+      "label": "ScoreExplanationEntry",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "editorialdiscoverycontext",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L34"
+      "norm_label": "scoreexplanationentry",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L73"
+    },
+    {
+      "id": "src_studio_editorial_scoreresult",
+      "label": "ScoreResult",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "scoreresult",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L79"
+    },
+    {
+      "id": "src_studio_editorial_scoringcontext",
+      "label": "ScoringContext",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "scoringcontext",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L63"
     },
     {
       "id": "src_studio_editorial_plan_schema_cannibalizationrisk",
@@ -5568,82 +5490,173 @@
       "source_location": "L200"
     },
     {
-      "id": "src_studio_security_studiosignedcontext",
-      "label": "StudioSignedContext",
+      "id": "src_infrastructure_workers_worker_publishing_loadedpublication",
+      "label": "LoadedPublication",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "studiosignedcontext",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L58"
+      "norm_label": "loadedpublication",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L27"
     },
     {
-      "id": "src_studio_security_systemroledefinition",
-      "label": "SystemRoleDefinition",
+      "id": "src_infrastructure_workers_worker_publishing_publishingdependencies",
+      "label": "PublishingDependencies",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "systemroledefinition",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L19"
+      "norm_label": "publishingdependencies",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L29"
     },
     {
-      "id": "src_studio_editorial_coveragecheckresult",
-      "label": "CoverageCheckResult",
+      "id": "src_infrastructure_workers_worker_publishing_publishingjobdata",
+      "label": "PublishingJobData",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "coveragecheckresult",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L270"
+      "norm_label": "publishingjobdata",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L23"
     },
     {
-      "id": "src_studio_editorial_scoreexplanationentry",
-      "label": "ScoreExplanationEntry",
+      "id": "src_studio_types_assetvariantinput",
+      "label": "AssetVariantInput",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "scoreexplanationentry",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L73"
+      "norm_label": "assetvariantinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L125"
     },
     {
-      "id": "src_studio_editorial_scoreresult",
-      "label": "ScoreResult",
+      "id": "src_studio_types_createprojectinput",
+      "label": "CreateProjectInput",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "scoreresult",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L79"
+      "norm_label": "createprojectinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L44"
     },
     {
-      "id": "src_studio_editorial_scoringcontext",
-      "label": "ScoringContext",
+      "id": "src_studio_types_createsiteinput",
+      "label": "CreateSiteInput",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "scoringcontext",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L63"
+      "norm_label": "createsiteinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L32"
+    },
+    {
+      "id": "src_studio_types_listprojectsinput",
+      "label": "ListProjectsInput",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "listprojectsinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L407"
+    },
+    {
+      "id": "src_studio_types_paginatedresult",
+      "label": "PaginatedResult",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "paginatedresult",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L141"
+    },
+    {
+      "id": "src_studio_types_studiomediaitem",
+      "label": "StudioMediaItem",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "studiomediaitem",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L362"
+    },
+    {
+      "id": "src_studio_types_studioprojectsummary",
+      "label": "StudioProjectSummary",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "studioprojectsummary",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L498"
+    },
+    {
+      "id": "src_studio_types_studiositesummary",
+      "label": "StudioSiteSummary",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "studiositesummary",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L387"
+    },
+    {
+      "id": "src_studio_types_updateprojectinput",
+      "label": "UpdateProjectInput",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "updateprojectinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L53"
+    },
+    {
+      "id": "src_studio_types_updatesiteinput",
+      "label": "UpdateSiteInput",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "updatesiteinput",
+      "source_file": "src/studio/types.ts",
+      "source_location": "L622"
     },
     {
       "id": "src_studio_publication_createpublicationinput",
@@ -6010,82 +6023,56 @@
       "source_location": "L4"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider",
-      "label": "SocialIntegrationProvider",
+      "id": "src_studio_discovery_planner_discoveryqueryplan",
+      "label": "DiscoveryQueryPlan",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": "socialintegrationprovider",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L82"
+      "norm_label": "discoveryqueryplan",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L8"
     },
     {
-      "id": "src_infrastructure_workers_worker_social_loadedpublication",
-      "label": "LoadedPublication",
+      "id": "src_studio_discovery_planner_editorialdiscoverycontext",
+      "label": "EditorialDiscoveryContext",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 69,
+      "community_name": "discovery-planner.ts",
+      "file_type": "code",
+      "norm_label": "editorialdiscoverycontext",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L34"
+    },
+    {
+      "id": "src_studio_security_studiosignedcontext",
+      "label": "StudioSignedContext",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 7,
-      "community_name": "worker-social.ts",
+      "community_name": "security.ts",
       "file_type": "code",
-      "norm_label": "loadedpublication",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L61"
+      "norm_label": "studiosignedcontext",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L58"
     },
     {
-      "id": "src_infrastructure_workers_worker_social_socialgeneratejobdata",
-      "label": "SocialGenerateJobData",
+      "id": "src_studio_security_systemroledefinition",
+      "label": "SystemRoleDefinition",
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
       "community": 7,
-      "community_name": "worker-social.ts",
+      "community_name": "security.ts",
       "file_type": "code",
-      "norm_label": "socialgeneratejobdata",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L24"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_socialjobdata",
-      "label": "SocialJobData",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "socialjobdata",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L32"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_socialpublishjobdata",
-      "label": "SocialPublishJobData",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "socialpublishjobdata",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L18"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_socialunpublishjobdata",
-      "label": "SocialUnpublishJobData",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "socialunpublishjobdata",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L26"
+      "norm_label": "systemroledefinition",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L19"
     },
     {
       "id": "src_infrastructure_ai_image_imagedownloaderror",
@@ -6268,6 +6255,19 @@
       "norm_label": "connectorkind",
       "source_file": "src/studio/connectors/registry.ts",
       "source_location": "L6"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider",
+      "label": "SocialIntegrationProvider",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": "socialintegrationprovider",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L82"
     },
     {
       "id": "apps_studio_web_src_app_components_ui_app_toast_host_component_apptoasthostcomponent",
@@ -8448,256 +8448,136 @@
       "source_location": "L75"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_processpublishingjob",
-      "label": "processPublishingJob()",
+      "id": "src_infrastructure_workers_worker_social_buildpublishinput",
+      "label": "buildPublishInput()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "processpublishingjob()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L107"
+      "norm_label": "buildpublishinput()",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L34"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_readtargetstatus",
-      "label": "readTargetStatus()",
+      "id": "src_infrastructure_workers_worker_social_loadpublication",
+      "label": "loadPublication()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "readtargetstatus()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L51"
+      "norm_label": "loadpublication()",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L79"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_resolvepublicationstatus",
-      "label": "resolvePublicationStatus()",
+      "id": "src_infrastructure_workers_worker_social_processpublish",
+      "label": "processPublish()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "resolvepublicationstatus()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L59"
+      "norm_label": "processpublish()",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L90"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_runpublisheraction",
-      "label": "runPublisherAction()",
+      "id": "src_infrastructure_workers_worker_social_processunpublish",
+      "label": "processUnpublish()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "runpublisheraction()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L74"
+      "norm_label": "processunpublish()",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L146"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_runpublishingworker",
-      "label": "runPublishingWorker()",
+      "id": "src_infrastructure_workers_worker_social_runsocialworker",
+      "label": "runSocialWorker()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "runpublishingworker()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L214"
+      "norm_label": "runsocialworker()",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L200"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_syncdurablepublication",
-      "label": "syncDurablePublication()",
+      "id": "src_studio_publication_startattempt",
+      "label": "startAttempt()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "syncdurablepublication()",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L159"
+      "norm_label": "startattempt()",
+      "source_file": "src/studio/publication.ts",
+      "source_location": "L649"
     },
     {
-      "id": "src_studio_repository_addmanualfact",
-      "label": "addManualFact()",
+      "id": "src_studio_publication_succeedattempt",
+      "label": "succeedAttempt()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "addmanualfact()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L505"
+      "norm_label": "succeedattempt()",
+      "source_file": "src/studio/publication.ts",
+      "source_location": "L656"
     },
     {
-      "id": "src_studio_repository_approveversion",
-      "label": "approveVersion()",
+      "id": "src_studio_social_publishers_builddryrunresult",
+      "label": "buildDryRunResult()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "approveversion()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L655"
+      "norm_label": "builddryrunresult()",
+      "source_file": "src/studio/social-publishers.ts",
+      "source_location": "L103"
     },
     {
-      "id": "src_studio_repository_clearprojectpublicationstate",
-      "label": "clearProjectPublicationState()",
+      "id": "src_studio_social_publishers_dryrungate",
+      "label": "dryRunGate()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "clearprojectpublicationstate()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L844"
+      "norm_label": "dryrungate()",
+      "source_file": "src/studio/social-publishers.ts",
+      "source_location": "L85"
     },
     {
-      "id": "src_studio_repository_createassetvariant",
-      "label": "createAssetVariant()",
+      "id": "src_studio_social_publishers_getsocialpublisher",
+      "label": "getSocialPublisher()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "createassetvariant()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L856"
+      "norm_label": "getsocialpublisher()",
+      "source_file": "src/studio/social-publishers.ts",
+      "source_location": "L568"
     },
     {
-      "id": "src_studio_repository_getlatestpublishedexternalid",
-      "label": "getLatestPublishedExternalId()",
+      "id": "src_studio_social_socialasseturlforversion",
+      "label": "socialAssetUrlForVersion()",
       "_callable": true,
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "getlatestpublishedexternalid()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L884"
-    },
-    {
-      "id": "src_studio_repository_getpublicationjobbyid",
-      "label": "getPublicationJobById()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "getpublicationjobbyid()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L741"
-    },
-    {
-      "id": "src_studio_repository_getstudiosession",
-      "label": "getStudioSession()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "getstudiosession()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L1029"
-    },
-    {
-      "id": "src_studio_repository_mappublicationjob",
-      "label": "mapPublicationJob()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "mappublicationjob()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L1104"
-    },
-    {
-      "id": "src_studio_repository_mapqastate",
-      "label": "mapQaState()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "mapqastate()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L1087"
-    },
-    {
-      "id": "src_studio_repository_markprojectpublished",
-      "label": "markProjectPublished()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "markprojectpublished()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L828"
-    },
-    {
-      "id": "src_studio_repository_readpublicationtargetstatus",
-      "label": "readPublicationTargetStatus()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "readpublicationtargetstatus()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L44"
-    },
-    {
-      "id": "src_studio_repository_striphtmltext",
-      "label": "stripHtmlText()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "striphtmltext()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L19"
-    },
-    {
-      "id": "src_studio_repository_updateprojectstatus",
-      "label": "updateProjectStatus()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "updateprojectstatus()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L567"
-    },
-    {
-      "id": "src_studio_repository_updatepublicationjob",
-      "label": "updatePublicationJob()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "updatepublicationjob()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L800"
-    },
-    {
-      "id": "src_studio_repository_updateversioncontent",
-      "label": "updateVersionContent()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "updateversioncontent()",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L996"
+      "norm_label": "socialasseturlforversion()",
+      "source_file": "src/studio/social.ts",
+      "source_location": "L499"
     },
     {
       "id": "apps_studio_web_src_app_components_auctorio_chat_widget_component_auctoriochatwidgetcomponent_constructor",
@@ -11878,30 +11758,6 @@
       "norm_label": "sourcetypetofactsourcetype()",
       "source_file": "src/studio/planner.ts",
       "source_location": "L22"
-    },
-    {
-      "id": "src_studio_publication_createpublication",
-      "label": "createPublication()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "planner.ts",
-      "file_type": "code",
-      "norm_label": "createpublication()",
-      "source_file": "src/studio/publication.ts",
-      "source_location": "L161"
-    },
-    {
-      "id": "src_studio_publication_linkdurablewebsitepublication",
-      "label": "linkDurableWebsitePublication()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 16,
-      "community_name": "planner.ts",
-      "file_type": "code",
-      "norm_label": "linkdurablewebsitepublication()",
-      "source_file": "src/studio/publication.ts",
-      "source_location": "L113"
     },
     {
       "id": "src_studio_repository_createproject",
@@ -18405,7 +18261,7 @@
       "file_type": "code",
       "norm_label": ".approve()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L718"
+      "source_location": "L760"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkapprove",
@@ -18417,7 +18273,7 @@
       "file_type": "code",
       "norm_label": ".bulkapprove()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L719"
+      "source_location": "L761"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkremove",
@@ -18429,7 +18285,7 @@
       "file_type": "code",
       "norm_label": ".bulkremove()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L721"
+      "source_location": "L763"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkstatus",
@@ -18441,7 +18297,7 @@
       "file_type": "code",
       "norm_label": ".bulkstatus()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L720"
+      "source_location": "L762"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_canceledit",
@@ -18453,7 +18309,7 @@
       "file_type": "code",
       "norm_label": ".canceledit()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L715"
+      "source_location": "L757"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_channellabel",
@@ -18465,7 +18321,7 @@
       "file_type": "code",
       "norm_label": ".channellabel()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L670"
+      "source_location": "L713"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_channellist",
@@ -18477,7 +18333,7 @@
       "file_type": "code",
       "norm_label": ".channellist()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L666"
+      "source_location": "L709"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmbulkremove",
@@ -18489,7 +18345,7 @@
       "file_type": "code",
       "norm_label": ".confirmbulkremove()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L722"
+      "source_location": "L764"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmremove",
@@ -18501,7 +18357,7 @@
       "file_type": "code",
       "norm_label": ".confirmremove()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L734"
+      "source_location": "L776"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_evidenceof",
@@ -18513,7 +18369,7 @@
       "file_type": "code",
       "norm_label": ".evidenceof()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L617"
+      "source_location": "L659"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_filterplanrows",
@@ -18525,7 +18381,7 @@
       "file_type": "code",
       "norm_label": ".filterplanrows()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L693"
+      "source_location": "L736"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_generate",
@@ -18537,7 +18393,7 @@
       "file_type": "code",
       "norm_label": ".generate()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L762"
+      "source_location": "L804"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_generatecontent",
@@ -18549,19 +18405,19 @@
       "file_type": "code",
       "norm_label": ".generatecontent()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L744"
+      "source_location": "L786"
     },
     {
-      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanrowpage",
-      "label": ".goPlanRowPage()",
+      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanpage",
+      "label": ".goPlanPage()",
       "_callable": true,
       "_origin": "ast",
       "community": 42,
       "community_name": "EditorialPlanPageComponent",
       "file_type": "code",
-      "norm_label": ".goplanrowpage()",
+      "norm_label": ".goplanpage()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L710"
+      "source_location": "L752"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_isexpanded",
@@ -18573,7 +18429,7 @@
       "file_type": "code",
       "norm_label": ".isexpanded()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L633"
+      "source_location": "L676"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_listof",
@@ -18585,7 +18441,7 @@
       "file_type": "code",
       "norm_label": ".listof()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L604"
+      "source_location": "L646"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_listplanprogress",
@@ -18597,7 +18453,7 @@
       "file_type": "code",
       "norm_label": ".listplanprogress()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L688"
+      "source_location": "L731"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_load",
@@ -18609,7 +18465,7 @@
       "file_type": "code",
       "norm_label": ".load()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L629"
+      "source_location": "L671"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_loadintel",
@@ -18621,7 +18477,7 @@
       "file_type": "code",
       "norm_label": ".loadintel()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L575"
+      "source_location": "L617"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_ngoninit",
@@ -18633,7 +18489,7 @@
       "file_type": "code",
       "norm_label": ".ngoninit()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L562"
+      "source_location": "L604"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_onsitechange",
@@ -18645,7 +18501,7 @@
       "file_type": "code",
       "norm_label": ".onsitechange()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L569"
+      "source_location": "L611"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_outlineof",
@@ -18657,19 +18513,19 @@
       "file_type": "code",
       "norm_label": ".outlineof()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L607"
+      "source_location": "L649"
     },
     {
-      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplanrows",
-      "label": ".pagedPlanRows()",
+      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplans",
+      "label": ".pagedPlans()",
       "_callable": true,
       "_origin": "ast",
       "community": 42,
       "community_name": "EditorialPlanPageComponent",
       "file_type": "code",
-      "norm_label": ".pagedplanrows()",
+      "norm_label": ".pagedplans()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L706"
+      "source_location": "L748"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_plancount",
@@ -18681,7 +18537,7 @@
       "file_type": "code",
       "norm_label": ".plancount()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L673"
+      "source_location": "L716"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planprogress",
@@ -18693,19 +18549,7 @@
       "file_type": "code",
       "norm_label": ".planprogress()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L677"
-    },
-    {
-      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planrowtotalpages",
-      "label": ".planRowTotalPages()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 42,
-      "community_name": "EditorialPlanPageComponent",
-      "file_type": "code",
-      "norm_label": ".planrowtotalpages()",
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L703"
+      "source_location": "L720"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planshare",
@@ -18717,7 +18561,7 @@
       "file_type": "code",
       "norm_label": ".planshare()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L683"
+      "source_location": "L726"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planstatustone",
@@ -18729,7 +18573,19 @@
       "file_type": "code",
       "norm_label": ".planstatustone()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L660"
+      "source_location": "L703"
+    },
+    {
+      "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_plantotalpages",
+      "label": ".planTotalPages()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 42,
+      "community_name": "EditorialPlanPageComponent",
+      "file_type": "code",
+      "norm_label": ".plantotalpages()",
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L745"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_refreshintel",
@@ -18741,7 +18597,7 @@
       "file_type": "code",
       "norm_label": ".refreshintel()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L581"
+      "source_location": "L623"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_refreshselected",
@@ -18753,7 +18609,7 @@
       "file_type": "code",
       "norm_label": ".refreshselected()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L745"
+      "source_location": "L787"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_remove",
@@ -18765,7 +18621,7 @@
       "file_type": "code",
       "norm_label": ".remove()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L733"
+      "source_location": "L775"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_saveedit",
@@ -18777,7 +18633,7 @@
       "file_type": "code",
       "norm_label": ".saveedit()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L716"
+      "source_location": "L758"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_selectall",
@@ -18789,7 +18645,7 @@
       "file_type": "code",
       "norm_label": ".selectall()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L717"
+      "source_location": "L759"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_startedit",
@@ -18801,7 +18657,7 @@
       "file_type": "code",
       "norm_label": ".startedit()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L714"
+      "source_location": "L756"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_statustone",
@@ -18813,7 +18669,7 @@
       "file_type": "code",
       "norm_label": ".statustone()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L746"
+      "source_location": "L788"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleexpand",
@@ -18825,7 +18681,7 @@
       "file_type": "code",
       "norm_label": ".toggleexpand()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L601"
+      "source_location": "L643"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleformat",
@@ -18837,7 +18693,7 @@
       "file_type": "code",
       "norm_label": ".toggleformat()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L596"
+      "source_location": "L638"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleplan",
@@ -18849,7 +18705,7 @@
       "file_type": "code",
       "norm_label": ".toggleplan()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L636"
+      "source_location": "L679"
     },
     {
       "id": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleselection",
@@ -18861,7 +18717,7 @@
       "file_type": "code",
       "norm_label": ".toggleselection()",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L713"
+      "source_location": "L755"
     },
     {
       "id": "apps_studio_web_src_app_services_studio_api_service_studioapiservice_generateeditorialplan",
@@ -20160,18 +20016,6 @@
       "source_location": "L73"
     },
     {
-      "id": "src_studio_sources_getsource",
-      "label": "getSource()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 48,
-      "community_name": "sources.ts",
-      "file_type": "code",
-      "norm_label": "getsource()",
-      "source_file": "src/studio/sources.ts",
-      "source_location": "L635"
-    },
-    {
       "id": "src_studio_sources_getsourceadapter",
       "label": "getSourceAdapter()",
       "_callable": true,
@@ -20400,64 +20244,124 @@
       "source_location": "L711"
     },
     {
-      "id": "src_studio_discovery_planner_buildplanprompt",
-      "label": "buildPlanPrompt()",
+      "id": "src_studio_editorial_assignsourceitemtocluster",
+      "label": "assignSourceItemToCluster()",
       "_callable": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "buildplanprompt()",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L94"
+      "norm_label": "assignsourceitemtocluster()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L209"
     },
     {
-      "id": "src_studio_discovery_planner_gathereditorialcontext",
-      "label": "gatherEditorialContext()",
+      "id": "src_studio_editorial_buildsemantichash",
+      "label": "buildSemanticHash()",
       "_callable": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "gathereditorialcontext()",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L47"
+      "norm_label": "buildsemantichash()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L56"
     },
     {
-      "id": "src_studio_discovery_planner_parsediscoveryplan",
-      "label": "parseDiscoveryPlan()",
+      "id": "src_studio_editorial_clampscore",
+      "label": "clampScore()",
       "_callable": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "parsediscoveryplan()",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L128"
+      "norm_label": "clampscore()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L84"
     },
     {
-      "id": "src_studio_discovery_planner_plandiscovery",
-      "label": "planDiscovery()",
+      "id": "src_studio_editorial_liststoryclusters",
+      "label": "listStoryClusters()",
       "_callable": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "plandiscovery()",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L175"
+      "norm_label": "liststoryclusters()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L313"
     },
     {
-      "id": "src_studio_social_extractjsonobject",
-      "label": "extractJsonObject()",
+      "id": "src_studio_editorial_overlapratio",
+      "label": "overlapRatio()",
       "_callable": true,
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "extractjsonobject()",
-      "source_file": "src/studio/social.ts",
-      "source_location": "L137"
+      "norm_label": "overlapratio()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L29"
+    },
+    {
+      "id": "src_studio_editorial_scoresourceitem",
+      "label": "scoreSourceItem()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "scoresourceitem()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L88"
+    },
+    {
+      "id": "src_studio_editorial_setclusterstatus",
+      "label": "setClusterStatus()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "setclusterstatus()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L362"
+    },
+    {
+      "id": "src_studio_editorial_titlesimilarity",
+      "label": "titleSimilarity()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "titlesimilarity()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L45"
+    },
+    {
+      "id": "src_studio_editorial_tobigrams",
+      "label": "toBigrams()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "tobigrams()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L18"
+    },
+    {
+      "id": "src_studio_editorial_tokenize",
+      "label": "tokenize()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "editorial.ts",
+      "file_type": "code",
+      "norm_label": "tokenize()",
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L11"
     },
     {
       "id": "src_studio_editorial_plan_postvalidateplanitems",
@@ -21876,280 +21780,256 @@
       "source_location": "L440"
     },
     {
-      "id": "scripts_bootstrap_studio_access_main",
-      "label": "main()",
+      "id": "src_infrastructure_workers_worker_publishing_processpublishingjob",
+      "label": "processPublishingJob()",
       "_callable": true,
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "main()",
-      "source_file": "scripts/bootstrap-studio-access.ts",
-      "source_location": "L51"
-    },
-    {
-      "id": "src_studio_auth_ensureuniquetenantslug",
-      "label": "ensureUniqueTenantSlug()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "ensureuniquetenantslug()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L572"
-    },
-    {
-      "id": "src_studio_auth_getinternalstudioidentityproviderbyslug",
-      "label": "getInternalStudioIdentityProviderBySlug()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "getinternalstudioidentityproviderbyslug()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L909"
-    },
-    {
-      "id": "src_studio_auth_getinternalstudioworkspaceaccessbyslug",
-      "label": "getInternalStudioWorkspaceAccessBySlug()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "getinternalstudioworkspaceaccessbyslug()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L950"
-    },
-    {
-      "id": "src_studio_auth_getstudioidentityproviderconfig",
-      "label": "getStudioIdentityProviderConfig()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "getstudioidentityproviderconfig()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L885"
-    },
-    {
-      "id": "src_studio_auth_readjsonobject",
-      "label": "readJsonObject()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "readjsonobject()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L195"
-    },
-    {
-      "id": "src_studio_auth_resolvetenantbyslug",
-      "label": "resolveTenantBySlug()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "resolvetenantbyslug()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L837"
-    },
-    {
-      "id": "src_studio_auth_toprismajsonobject",
-      "label": "toPrismaJsonObject()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "toprismajsonobject()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L202"
-    },
-    {
-      "id": "src_studio_auth_upsertstudioidentityprovider",
-      "label": "upsertStudioIdentityProvider()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "upsertstudioidentityprovider()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L995"
-    },
-    {
-      "id": "src_studio_security_buildsecretkey",
-      "label": "buildSecretKey()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "buildsecretkey()",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L102"
-    },
-    {
-      "id": "src_studio_security_decryptstudiosecret",
-      "label": "decryptStudioSecret()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "decryptstudiosecret()",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L126"
-    },
-    {
-      "id": "src_studio_security_encryptstudiosecret",
-      "label": "encryptStudioSecret()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "encryptstudiosecret()",
-      "source_file": "src/studio/security.ts",
+      "norm_label": "processpublishingjob()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
       "source_location": "L107"
     },
     {
-      "id": "src_studio_security_slugifytenantname",
-      "label": "slugifyTenantName()",
+      "id": "src_infrastructure_workers_worker_publishing_readtargetstatus",
+      "label": "readTargetStatus()",
       "_callable": true,
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "slugifytenantname()",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L84"
+      "norm_label": "readtargetstatus()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L51"
     },
     {
-      "id": "src_studio_editorial_assignsourceitemtocluster",
-      "label": "assignSourceItemToCluster()",
+      "id": "src_infrastructure_workers_worker_publishing_resolvepublicationstatus",
+      "label": "resolvePublicationStatus()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "assignsourceitemtocluster()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L209"
+      "norm_label": "resolvepublicationstatus()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L59"
     },
     {
-      "id": "src_studio_editorial_buildsemantichash",
-      "label": "buildSemanticHash()",
+      "id": "src_infrastructure_workers_worker_publishing_runpublisheraction",
+      "label": "runPublisherAction()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "buildsemantichash()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L56"
+      "norm_label": "runpublisheraction()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L74"
     },
     {
-      "id": "src_studio_editorial_clampscore",
-      "label": "clampScore()",
+      "id": "src_infrastructure_workers_worker_publishing_runpublishingworker",
+      "label": "runPublishingWorker()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "clampscore()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L84"
+      "norm_label": "runpublishingworker()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L214"
     },
     {
-      "id": "src_studio_editorial_liststoryclusters",
-      "label": "listStoryClusters()",
+      "id": "src_infrastructure_workers_worker_publishing_syncdurablepublication",
+      "label": "syncDurablePublication()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "liststoryclusters()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L313"
+      "norm_label": "syncdurablepublication()",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L159"
     },
     {
-      "id": "src_studio_editorial_overlapratio",
-      "label": "overlapRatio()",
+      "id": "src_studio_repository_addmanualfact",
+      "label": "addManualFact()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "overlapratio()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L29"
+      "norm_label": "addmanualfact()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L505"
     },
     {
-      "id": "src_studio_editorial_scoresourceitem",
-      "label": "scoreSourceItem()",
+      "id": "src_studio_repository_approveversion",
+      "label": "approveVersion()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "scoresourceitem()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L88"
+      "norm_label": "approveversion()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L655"
     },
     {
-      "id": "src_studio_editorial_setclusterstatus",
-      "label": "setClusterStatus()",
+      "id": "src_studio_repository_clearprojectpublicationstate",
+      "label": "clearProjectPublicationState()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "setclusterstatus()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L362"
+      "norm_label": "clearprojectpublicationstate()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L844"
     },
     {
-      "id": "src_studio_editorial_titlesimilarity",
-      "label": "titleSimilarity()",
+      "id": "src_studio_repository_createassetvariant",
+      "label": "createAssetVariant()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "titlesimilarity()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L45"
+      "norm_label": "createassetvariant()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L856"
     },
     {
-      "id": "src_studio_editorial_tobigrams",
-      "label": "toBigrams()",
+      "id": "src_studio_repository_getlatestpublishedexternalid",
+      "label": "getLatestPublishedExternalId()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "tobigrams()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L18"
+      "norm_label": "getlatestpublishedexternalid()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L884"
     },
     {
-      "id": "src_studio_editorial_tokenize",
-      "label": "tokenize()",
+      "id": "src_studio_repository_getpublicationjobbyid",
+      "label": "getPublicationJobById()",
       "_callable": true,
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "tokenize()",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L11"
+      "norm_label": "getpublicationjobbyid()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L741"
+    },
+    {
+      "id": "src_studio_repository_getstudiosession",
+      "label": "getStudioSession()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "getstudiosession()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L1029"
+    },
+    {
+      "id": "src_studio_repository_mappublicationjob",
+      "label": "mapPublicationJob()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "mappublicationjob()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L1104"
+    },
+    {
+      "id": "src_studio_repository_mapqastate",
+      "label": "mapQaState()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "mapqastate()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L1087"
+    },
+    {
+      "id": "src_studio_repository_markprojectpublished",
+      "label": "markProjectPublished()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "markprojectpublished()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L828"
+    },
+    {
+      "id": "src_studio_repository_readpublicationtargetstatus",
+      "label": "readPublicationTargetStatus()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "readpublicationtargetstatus()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L44"
+    },
+    {
+      "id": "src_studio_repository_striphtmltext",
+      "label": "stripHtmlText()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "striphtmltext()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L19"
+    },
+    {
+      "id": "src_studio_repository_updateprojectstatus",
+      "label": "updateProjectStatus()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "updateprojectstatus()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L567"
+    },
+    {
+      "id": "src_studio_repository_updatepublicationjob",
+      "label": "updatePublicationJob()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "updatepublicationjob()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L800"
+    },
+    {
+      "id": "src_studio_repository_updateversioncontent",
+      "label": "updateVersionContent()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "updateversioncontent()",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L996"
     },
     {
       "id": "src_studio_publication_cantransition",
@@ -22176,6 +22056,18 @@
       "source_location": "L93"
     },
     {
+      "id": "src_studio_publication_createpublication",
+      "label": "createPublication()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 60,
+      "community_name": "publication.ts",
+      "file_type": "code",
+      "norm_label": "createpublication()",
+      "source_file": "src/studio/publication.ts",
+      "source_location": "L161"
+    },
+    {
       "id": "src_studio_publication_failattempt",
       "label": "failAttempt()",
       "_callable": true,
@@ -22186,6 +22078,18 @@
       "norm_label": "failattempt()",
       "source_file": "src/studio/publication.ts",
       "source_location": "L712"
+    },
+    {
+      "id": "src_studio_publication_linkdurablewebsitepublication",
+      "label": "linkDurableWebsitePublication()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 60,
+      "community_name": "publication.ts",
+      "file_type": "code",
+      "norm_label": "linkdurablewebsitepublication()",
+      "source_file": "src/studio/publication.ts",
+      "source_location": "L113"
     },
     {
       "id": "src_studio_publication_maxpublicationretries",
@@ -24024,244 +23928,220 @@
       "source_location": "L46"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider_createsession",
-      "label": ".createSession()",
+      "id": "src_studio_discovery_planner_buildplanprompt",
+      "label": "buildPlanPrompt()",
       "_callable": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": ".createsession()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L85"
-    },
-    {
-      "id": "src_studio_social_provider_socialintegrationprovider_deletepublication",
-      "label": ".deletePublication()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 69,
-      "community_name": "SocialIntegrationProvider",
-      "file_type": "code",
-      "norm_label": ".deletepublication()",
-      "source_file": "src/studio/social-provider.ts",
+      "norm_label": "buildplanprompt()",
+      "source_file": "src/studio/discovery-planner.ts",
       "source_location": "L94"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider_disconnect",
-      "label": ".disconnect()",
+      "id": "src_studio_discovery_planner_gathereditorialcontext",
+      "label": "gatherEditorialContext()",
       "_callable": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": ".disconnect()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L92"
+      "norm_label": "gathereditorialcontext()",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L47"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider_exchangeconnection",
-      "label": ".exchangeConnection()",
+      "id": "src_studio_discovery_planner_parsediscoveryplan",
+      "label": "parseDiscoveryPlan()",
       "_callable": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": ".exchangeconnection()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L86"
+      "norm_label": "parsediscoveryplan()",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L128"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider_getconnectionstatus",
-      "label": ".getConnectionStatus()",
+      "id": "src_studio_discovery_planner_plandiscovery",
+      "label": "planDiscovery()",
       "_callable": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": ".getconnectionstatus()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L87"
+      "norm_label": "plandiscovery()",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L175"
     },
     {
-      "id": "src_studio_social_provider_socialintegrationprovider_getpublicationstatus",
-      "label": ".getPublicationStatus()",
+      "id": "src_studio_social_extractjsonobject",
+      "label": "extractJsonObject()",
       "_callable": true,
       "_origin": "ast",
       "community": 69,
-      "community_name": "SocialIntegrationProvider",
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": ".getpublicationstatus()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L95"
-    },
-    {
-      "id": "src_studio_social_provider_socialintegrationprovider_publish",
-      "label": ".publish()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 69,
-      "community_name": "SocialIntegrationProvider",
-      "file_type": "code",
-      "norm_label": ".publish()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L93"
-    },
-    {
-      "id": "src_studio_social_provider_socialintegrationprovider_refreshconnection",
-      "label": ".refreshConnection()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 69,
-      "community_name": "SocialIntegrationProvider",
-      "file_type": "code",
-      "norm_label": ".refreshconnection()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L91"
-    },
-    {
-      "id": "src_studio_social_provider_socialintegrationprovider_validatecontent",
-      "label": ".validateContent()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 69,
-      "community_name": "SocialIntegrationProvider",
-      "file_type": "code",
-      "norm_label": ".validatecontent()",
-      "source_file": "src/studio/social-provider.ts",
-      "source_location": "L96"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_buildpublishinput",
-      "label": "buildPublishInput()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "buildpublishinput()",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L34"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_loadpublication",
-      "label": "loadPublication()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "loadpublication()",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L79"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_processpublish",
-      "label": "processPublish()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "processpublish()",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L90"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_processunpublish",
-      "label": "processUnpublish()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "processunpublish()",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L146"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_runsocialworker",
-      "label": "runSocialWorker()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "runsocialworker()",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L200"
-    },
-    {
-      "id": "src_studio_publication_startattempt",
-      "label": "startAttempt()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "startattempt()",
-      "source_file": "src/studio/publication.ts",
-      "source_location": "L649"
-    },
-    {
-      "id": "src_studio_publication_succeedattempt",
-      "label": "succeedAttempt()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "succeedattempt()",
-      "source_file": "src/studio/publication.ts",
-      "source_location": "L656"
-    },
-    {
-      "id": "src_studio_social_publishers_builddryrunresult",
-      "label": "buildDryRunResult()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "builddryrunresult()",
-      "source_file": "src/studio/social-publishers.ts",
-      "source_location": "L103"
-    },
-    {
-      "id": "src_studio_social_publishers_dryrungate",
-      "label": "dryRunGate()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "dryrungate()",
-      "source_file": "src/studio/social-publishers.ts",
-      "source_location": "L85"
-    },
-    {
-      "id": "src_studio_social_publishers_getsocialpublisher",
-      "label": "getSocialPublisher()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "getsocialpublisher()",
-      "source_file": "src/studio/social-publishers.ts",
-      "source_location": "L568"
-    },
-    {
-      "id": "src_studio_social_socialasseturlforversion",
-      "label": "socialAssetUrlForVersion()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "socialasseturlforversion()",
+      "norm_label": "extractjsonobject()",
       "source_file": "src/studio/social.ts",
-      "source_location": "L499"
+      "source_location": "L137"
+    },
+    {
+      "id": "scripts_bootstrap_studio_access_main",
+      "label": "main()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "main()",
+      "source_file": "scripts/bootstrap-studio-access.ts",
+      "source_location": "L51"
+    },
+    {
+      "id": "src_studio_auth_ensureuniquetenantslug",
+      "label": "ensureUniqueTenantSlug()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "ensureuniquetenantslug()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L572"
+    },
+    {
+      "id": "src_studio_auth_getinternalstudioidentityproviderbyslug",
+      "label": "getInternalStudioIdentityProviderBySlug()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "getinternalstudioidentityproviderbyslug()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L909"
+    },
+    {
+      "id": "src_studio_auth_getinternalstudioworkspaceaccessbyslug",
+      "label": "getInternalStudioWorkspaceAccessBySlug()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "getinternalstudioworkspaceaccessbyslug()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L950"
+    },
+    {
+      "id": "src_studio_auth_getstudioidentityproviderconfig",
+      "label": "getStudioIdentityProviderConfig()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "getstudioidentityproviderconfig()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L885"
+    },
+    {
+      "id": "src_studio_auth_readjsonobject",
+      "label": "readJsonObject()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "readjsonobject()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L195"
+    },
+    {
+      "id": "src_studio_auth_resolvetenantbyslug",
+      "label": "resolveTenantBySlug()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "resolvetenantbyslug()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L837"
+    },
+    {
+      "id": "src_studio_auth_toprismajsonobject",
+      "label": "toPrismaJsonObject()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "toprismajsonobject()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L202"
+    },
+    {
+      "id": "src_studio_auth_upsertstudioidentityprovider",
+      "label": "upsertStudioIdentityProvider()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "upsertstudioidentityprovider()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L995"
+    },
+    {
+      "id": "src_studio_security_buildsecretkey",
+      "label": "buildSecretKey()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "buildsecretkey()",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L102"
+    },
+    {
+      "id": "src_studio_security_decryptstudiosecret",
+      "label": "decryptStudioSecret()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "decryptstudiosecret()",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L126"
+    },
+    {
+      "id": "src_studio_security_encryptstudiosecret",
+      "label": "encryptStudioSecret()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "encryptstudiosecret()",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L107"
+    },
+    {
+      "id": "src_studio_security_slugifytenantname",
+      "label": "slugifyTenantName()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "slugifytenantname()",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L84"
     },
     {
       "id": "src_infrastructure_ai_image_backoffdelay",
@@ -24516,28 +24396,112 @@
       "source_location": "L84"
     },
     {
-      "id": "apps_studio_web_src_app_infrastructure_http_ssr_cookie_interceptor_ssrcookieinterceptor",
-      "label": "ssrCookieInterceptor()",
+      "id": "src_studio_social_provider_socialintegrationprovider_createsession",
+      "label": ".createSession()",
       "_callable": true,
       "_origin": "ast",
       "community": 74,
-      "community_name": "app.config.ts",
+      "community_name": "SocialIntegrationProvider",
       "file_type": "code",
-      "norm_label": "ssrcookieinterceptor()",
-      "source_file": "apps/studio-web/src/app/infrastructure/http/ssr-cookie.interceptor.ts",
-      "source_location": "L4"
+      "norm_label": ".createsession()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L85"
     },
     {
-      "id": "apps_studio_web_src_app_infrastructure_http_studio_site_interceptor_studiositeinterceptor",
-      "label": "studioSiteInterceptor()",
+      "id": "src_studio_social_provider_socialintegrationprovider_deletepublication",
+      "label": ".deletePublication()",
       "_callable": true,
       "_origin": "ast",
       "community": 74,
-      "community_name": "app.config.ts",
+      "community_name": "SocialIntegrationProvider",
       "file_type": "code",
-      "norm_label": "studiositeinterceptor()",
-      "source_file": "apps/studio-web/src/app/infrastructure/http/studio-site.interceptor.ts",
-      "source_location": "L9"
+      "norm_label": ".deletepublication()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L94"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_disconnect",
+      "label": ".disconnect()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".disconnect()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L92"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_exchangeconnection",
+      "label": ".exchangeConnection()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".exchangeconnection()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L86"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_getconnectionstatus",
+      "label": ".getConnectionStatus()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".getconnectionstatus()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L87"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_getpublicationstatus",
+      "label": ".getPublicationStatus()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".getpublicationstatus()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L95"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_publish",
+      "label": ".publish()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".publish()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L93"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_refreshconnection",
+      "label": ".refreshConnection()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".refreshconnection()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L91"
+    },
+    {
+      "id": "src_studio_social_provider_socialintegrationprovider_validatecontent",
+      "label": ".validateContent()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 74,
+      "community_name": "SocialIntegrationProvider",
+      "file_type": "code",
+      "norm_label": ".validatecontent()",
+      "source_file": "src/studio/social-provider.ts",
+      "source_location": "L96"
     },
     {
       "id": "apps_studio_web_src_app_components_ui_app_toast_host_component_apptoasthostcomponent_dismiss",
@@ -26136,6 +26100,30 @@
       "source_location": "L13"
     },
     {
+      "id": "apps_studio_web_src_app_infrastructure_http_ssr_cookie_interceptor_ssrcookieinterceptor",
+      "label": "ssrCookieInterceptor()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 88,
+      "community_name": "app.config.ts",
+      "file_type": "code",
+      "norm_label": "ssrcookieinterceptor()",
+      "source_file": "apps/studio-web/src/app/infrastructure/http/ssr-cookie.interceptor.ts",
+      "source_location": "L4"
+    },
+    {
+      "id": "apps_studio_web_src_app_infrastructure_http_studio_site_interceptor_studiositeinterceptor",
+      "label": "studioSiteInterceptor()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 88,
+      "community_name": "app.config.ts",
+      "file_type": "code",
+      "norm_label": "studiositeinterceptor()",
+      "source_file": "apps/studio-web/src/app/infrastructure/http/studio-site.interceptor.ts",
+      "source_location": "L9"
+    },
+    {
       "id": "src_studio_audit_writeaudit",
       "label": "writeAudit()",
       "_callable": true,
@@ -26530,6 +26518,18 @@
       "norm_label": "deletesource()",
       "source_file": "src/studio/sources.ts",
       "source_location": "L618"
+    },
+    {
+      "id": "src_studio_sources_getsource",
+      "label": "getSource()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 9,
+      "community_name": "routes-editorial.ts",
+      "file_type": "code",
+      "norm_label": "getsource()",
+      "source_file": "src/studio/sources.ts",
+      "source_location": "L635"
     },
     {
       "id": "src_studio_sources_listsourceitems",
@@ -28274,15 +28274,26 @@
       "source_location": ""
     },
     {
-      "id": "bullmq_bullmq",
-      "label": "bullmq",
+      "id": "apps_studio_web_package_devdependencies_typescript",
+      "label": "typescript",
       "_origin": "ast",
       "community": 106,
-      "community_name": "bullmq",
-      "confidence": "EXTRACTED",
+      "community_name": "typescript",
       "file_type": "code",
-      "norm_label": "bullmq",
-      "source_file": "bullmq"
+      "norm_label": "typescript",
+      "source_file": "apps/studio-web/package.json",
+      "source_location": "L53"
+    },
+    {
+      "id": "apps_studio_web_package_json_typescript",
+      "label": "typescript",
+      "_origin": "ast",
+      "community": 106,
+      "community_name": "typescript",
+      "file_type": "concept",
+      "norm_label": "typescript",
+      "source_file": "apps/studio-web/package.json",
+      "source_location": "L53"
     },
     {
       "id": "docs_frontend_rebuild_audit",
@@ -28440,70 +28451,48 @@
       "source_location": "L1"
     },
     {
-      "id": "scripts_start_worker_publishing",
-      "label": "start-worker-publishing.ts",
+      "id": "bullmq_bullmq",
+      "label": "bullmq",
+      "_origin": "ast",
+      "community": 109,
+      "community_name": "bullmq",
+      "confidence": "EXTRACTED",
+      "file_type": "code",
+      "norm_label": "bullmq",
+      "source_file": "bullmq"
+    },
+    {
+      "id": "scripts_start_worker_social",
+      "label": "start-worker-social.ts",
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "start-worker-publishing.ts",
-      "source_file": "scripts/start-worker-publishing.ts",
+      "norm_label": "start-worker-social.ts",
+      "source_file": "scripts/start-worker-social.ts",
       "source_location": "L1"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing",
-      "label": "worker-publishing.ts",
+      "id": "src_infrastructure_workers_worker_social",
+      "label": "worker-social.ts",
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
-      "norm_label": "worker-publishing.ts",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "norm_label": "worker-social.ts",
+      "source_file": "src/infrastructure/workers/worker-social.ts",
       "source_location": "L1"
     },
     {
-      "id": "src_infrastructure_workers_worker_publishing_defaultdependencies",
-      "label": "defaultDependencies",
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "defaultdependencies",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L40"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_publishing_prisma",
+      "id": "src_infrastructure_workers_worker_social_prisma",
       "label": "prisma",
       "_origin": "ast",
       "community": 11,
-      "community_name": "repository.ts",
+      "community_name": "worker-social.ts",
       "file_type": "code",
       "norm_label": "prisma",
-      "source_file": "src/infrastructure/workers/worker-publishing.ts",
-      "source_location": "L21"
-    },
-    {
-      "id": "src_studio_repository",
-      "label": "repository.ts",
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "repository.ts",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "src_studio_repository_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 11,
-      "community_name": "repository.ts",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "src/studio/repository.ts",
-      "source_location": "L42"
+      "source_file": "src/infrastructure/workers/worker-social.ts",
+      "source_location": "L16"
     },
     {
       "id": "claude",
@@ -36979,37 +36968,26 @@
       "source_location": "L14"
     },
     {
-      "id": "src_studio_discovery_planner",
-      "label": "discovery-planner.ts",
+      "id": "src_studio_editorial",
+      "label": "editorial.ts",
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
-      "norm_label": "discovery-planner.ts",
-      "source_file": "src/studio/discovery-planner.ts",
+      "norm_label": "editorial.ts",
+      "source_file": "src/studio/editorial.ts",
       "source_location": "L1"
     },
     {
-      "id": "src_studio_discovery_planner_prisma",
+      "id": "src_studio_editorial_prisma",
       "label": "prisma",
       "_origin": "ast",
       "community": 49,
-      "community_name": "discovery-planner.ts",
+      "community_name": "editorial.ts",
       "file_type": "code",
       "norm_label": "prisma",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L6"
-    },
-    {
-      "id": "src_studio_discovery_planner_query_categories",
-      "label": "QUERY_CATEGORIES",
-      "_origin": "ast",
-      "community": 49,
-      "community_name": "discovery-planner.ts",
-      "file_type": "code",
-      "norm_label": "query_categories",
-      "source_file": "src/studio/discovery-planner.ts",
-      "source_location": "L23"
+      "source_file": "src/studio/editorial.ts",
+      "source_location": "L7"
     },
     {
       "id": "prisma_migrations_20231220170000_init_migration",
@@ -39213,81 +39191,70 @@
       "source_location": ""
     },
     {
-      "id": "scripts_bootstrap_studio_access",
-      "label": "bootstrap-studio-access.ts",
+      "id": "scripts_start_worker_publishing",
+      "label": "start-worker-publishing.ts",
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "bootstrap-studio-access.ts",
-      "source_file": "scripts/bootstrap-studio-access.ts",
+      "norm_label": "start-worker-publishing.ts",
+      "source_file": "scripts/start-worker-publishing.ts",
       "source_location": "L1"
     },
     {
-      "id": "scripts_bootstrap_studio_access_workspace_bootstrap",
-      "label": "WORKSPACE_BOOTSTRAP",
+      "id": "src_infrastructure_workers_worker_publishing",
+      "label": "worker-publishing.ts",
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "workspace_bootstrap",
-      "source_file": "scripts/bootstrap-studio-access.ts",
-      "source_location": "L3"
-    },
-    {
-      "id": "src_studio_security",
-      "label": "security.ts",
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "security.ts",
-      "source_file": "src/studio/security.ts",
+      "norm_label": "worker-publishing.ts",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
       "source_location": "L1"
     },
     {
-      "id": "src_studio_security_studio_permissions",
-      "label": "STUDIO_PERMISSIONS",
+      "id": "src_infrastructure_workers_worker_publishing_defaultdependencies",
+      "label": "defaultDependencies",
       "_origin": "ast",
       "community": 6,
-      "community_name": "security.ts",
+      "community_name": "repository.ts",
       "file_type": "code",
-      "norm_label": "studio_permissions",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L5"
+      "norm_label": "defaultdependencies",
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L40"
     },
     {
-      "id": "src_studio_security_studio_system_roles",
-      "label": "STUDIO_SYSTEM_ROLES",
-      "_origin": "ast",
-      "community": 6,
-      "community_name": "security.ts",
-      "file_type": "code",
-      "norm_label": "studio_system_roles",
-      "source_file": "src/studio/security.ts",
-      "source_location": "L25"
-    },
-    {
-      "id": "src_studio_editorial",
-      "label": "editorial.ts",
-      "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
-      "file_type": "code",
-      "norm_label": "editorial.ts",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "src_studio_editorial_prisma",
+      "id": "src_infrastructure_workers_worker_publishing_prisma",
       "label": "prisma",
       "_origin": "ast",
-      "community": 60,
-      "community_name": "publication.ts",
+      "community": 6,
+      "community_name": "repository.ts",
       "file_type": "code",
       "norm_label": "prisma",
-      "source_file": "src/studio/editorial.ts",
-      "source_location": "L7"
+      "source_file": "src/infrastructure/workers/worker-publishing.ts",
+      "source_location": "L21"
+    },
+    {
+      "id": "src_studio_repository",
+      "label": "repository.ts",
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "repository.ts",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_studio_repository_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 6,
+      "community_name": "repository.ts",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "src/studio/repository.ts",
+      "source_location": "L42"
     },
     {
       "id": "src_studio_publication",
@@ -40029,6 +39996,17 @@
       "source_location": "L42"
     },
     {
+      "id": "apps_studio_web_package_devdependencies_angular_compiler_cli",
+      "label": "@angular/compiler-cli",
+      "_origin": "ast",
+      "community": 66,
+      "community_name": "devDependencies",
+      "file_type": "code",
+      "norm_label": "@angular/compiler-cli",
+      "source_file": "apps/studio-web/package.json",
+      "source_location": "L43"
+    },
+    {
       "id": "apps_studio_web_package_devdependencies_jasmine_core",
       "label": "jasmine-core",
       "_origin": "ast",
@@ -40117,17 +40095,6 @@
       "source_location": "L46"
     },
     {
-      "id": "apps_studio_web_package_devdependencies_typescript",
-      "label": "typescript",
-      "_origin": "ast",
-      "community": 66,
-      "community_name": "devDependencies",
-      "file_type": "code",
-      "norm_label": "typescript",
-      "source_file": "apps/studio-web/package.json",
-      "source_location": "L53"
-    },
-    {
       "id": "angular_build",
       "label": "@angular/build",
       "_origin": "ast",
@@ -40150,6 +40117,17 @@
       "source_location": "L42"
     },
     {
+      "id": "angular_compiler_cli",
+      "label": "@angular/compiler-cli",
+      "_origin": "ast",
+      "community": 66,
+      "community_name": "devDependencies",
+      "file_type": "concept",
+      "norm_label": "@angular/compiler-cli",
+      "source_file": "apps/studio-web/package.json",
+      "source_location": "L43"
+    },
+    {
       "id": "apps_studio_web_package_json_types_node",
       "label": "@types/node",
       "_origin": "ast",
@@ -40159,17 +40137,6 @@
       "norm_label": "@types/node",
       "source_file": "apps/studio-web/package.json",
       "source_location": "L46"
-    },
-    {
-      "id": "apps_studio_web_package_json_typescript",
-      "label": "typescript",
-      "_origin": "ast",
-      "community": 66,
-      "community_name": "devDependencies",
-      "file_type": "concept",
-      "norm_label": "typescript",
-      "source_file": "apps/studio-web/package.json",
-      "source_location": "L53"
     },
     {
       "id": "jasmine_core",
@@ -40535,37 +40502,92 @@
       "source_location": "L1"
     },
     {
-      "id": "scripts_start_worker_social",
-      "label": "start-worker-social.ts",
+      "id": "src_studio_discovery_planner",
+      "label": "discovery-planner.ts",
       "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
+      "community": 69,
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
-      "norm_label": "start-worker-social.ts",
-      "source_file": "scripts/start-worker-social.ts",
+      "norm_label": "discovery-planner.ts",
+      "source_file": "src/studio/discovery-planner.ts",
       "source_location": "L1"
     },
     {
-      "id": "src_infrastructure_workers_worker_social",
-      "label": "worker-social.ts",
-      "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
-      "file_type": "code",
-      "norm_label": "worker-social.ts",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "src_infrastructure_workers_worker_social_prisma",
+      "id": "src_studio_discovery_planner_prisma",
       "label": "prisma",
       "_origin": "ast",
-      "community": 7,
-      "community_name": "worker-social.ts",
+      "community": 69,
+      "community_name": "discovery-planner.ts",
       "file_type": "code",
       "norm_label": "prisma",
-      "source_file": "src/infrastructure/workers/worker-social.ts",
-      "source_location": "L16"
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L6"
+    },
+    {
+      "id": "src_studio_discovery_planner_query_categories",
+      "label": "QUERY_CATEGORIES",
+      "_origin": "ast",
+      "community": 69,
+      "community_name": "discovery-planner.ts",
+      "file_type": "code",
+      "norm_label": "query_categories",
+      "source_file": "src/studio/discovery-planner.ts",
+      "source_location": "L23"
+    },
+    {
+      "id": "scripts_bootstrap_studio_access",
+      "label": "bootstrap-studio-access.ts",
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "bootstrap-studio-access.ts",
+      "source_file": "scripts/bootstrap-studio-access.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "scripts_bootstrap_studio_access_workspace_bootstrap",
+      "label": "WORKSPACE_BOOTSTRAP",
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "workspace_bootstrap",
+      "source_file": "scripts/bootstrap-studio-access.ts",
+      "source_location": "L3"
+    },
+    {
+      "id": "src_studio_security",
+      "label": "security.ts",
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "security.ts",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_studio_security_studio_permissions",
+      "label": "STUDIO_PERMISSIONS",
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "studio_permissions",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L5"
+    },
+    {
+      "id": "src_studio_security_studio_system_roles",
+      "label": "STUDIO_SYSTEM_ROLES",
+      "_origin": "ast",
+      "community": 7,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "studio_system_roles",
+      "source_file": "src/studio/security.ts",
+      "source_location": "L25"
     },
     {
       "id": "docs_talkaris_product_architecture",
@@ -41138,50 +41160,6 @@
       "norm_label": "verify:platforms",
       "source_file": "package.json",
       "source_location": "L12"
-    },
-    {
-      "id": "apps_studio_web_src_app_app_config",
-      "label": "app.config.ts",
-      "_origin": "ast",
-      "community": 74,
-      "community_name": "app.config.ts",
-      "file_type": "code",
-      "norm_label": "app.config.ts",
-      "source_file": "apps/studio-web/src/app/app.config.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "apps_studio_web_src_app_app_routes_routes",
-      "label": "routes",
-      "_origin": "ast",
-      "community": 74,
-      "community_name": "app.config.ts",
-      "file_type": "code",
-      "norm_label": "routes",
-      "source_file": "apps/studio-web/src/app/app.routes.ts",
-      "source_location": "L8"
-    },
-    {
-      "id": "apps_studio_web_src_app_infrastructure_http_ssr_cookie_interceptor",
-      "label": "ssr-cookie.interceptor.ts",
-      "_origin": "ast",
-      "community": 74,
-      "community_name": "app.config.ts",
-      "file_type": "code",
-      "norm_label": "ssr-cookie.interceptor.ts",
-      "source_file": "apps/studio-web/src/app/infrastructure/http/ssr-cookie.interceptor.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "apps_studio_web_src_app_infrastructure_http_studio_site_interceptor",
-      "label": "studio-site.interceptor.ts",
-      "_origin": "ast",
-      "community": 74,
-      "community_name": "app.config.ts",
-      "file_type": "code",
-      "norm_label": "studio-site.interceptor.ts",
-      "source_file": "apps/studio-web/src/app/infrastructure/http/studio-site.interceptor.ts",
-      "source_location": "L1"
     },
     {
       "id": "apps_studio_web_src_app_components_ui_app_toast_host_component_ts_component",
@@ -42413,26 +42391,48 @@
       "source_location": "L7"
     },
     {
-      "id": "apps_studio_web_package_devdependencies_angular_compiler_cli",
-      "label": "@angular/compiler-cli",
+      "id": "apps_studio_web_src_app_app_config",
+      "label": "app.config.ts",
       "_origin": "ast",
       "community": 88,
-      "community_name": "@angular/compiler-cli",
+      "community_name": "app.config.ts",
       "file_type": "code",
-      "norm_label": "@angular/compiler-cli",
-      "source_file": "apps/studio-web/package.json",
-      "source_location": "L43"
+      "norm_label": "app.config.ts",
+      "source_file": "apps/studio-web/src/app/app.config.ts",
+      "source_location": "L1"
     },
     {
-      "id": "angular_compiler_cli",
-      "label": "@angular/compiler-cli",
+      "id": "apps_studio_web_src_app_app_routes_routes",
+      "label": "routes",
       "_origin": "ast",
       "community": 88,
-      "community_name": "@angular/compiler-cli",
-      "file_type": "concept",
-      "norm_label": "@angular/compiler-cli",
-      "source_file": "apps/studio-web/package.json",
-      "source_location": "L43"
+      "community_name": "app.config.ts",
+      "file_type": "code",
+      "norm_label": "routes",
+      "source_file": "apps/studio-web/src/app/app.routes.ts",
+      "source_location": "L8"
+    },
+    {
+      "id": "apps_studio_web_src_app_infrastructure_http_ssr_cookie_interceptor",
+      "label": "ssr-cookie.interceptor.ts",
+      "_origin": "ast",
+      "community": 88,
+      "community_name": "app.config.ts",
+      "file_type": "code",
+      "norm_label": "ssr-cookie.interceptor.ts",
+      "source_file": "apps/studio-web/src/app/infrastructure/http/ssr-cookie.interceptor.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "apps_studio_web_src_app_infrastructure_http_studio_site_interceptor",
+      "label": "studio-site.interceptor.ts",
+      "_origin": "ast",
+      "community": 88,
+      "community_name": "app.config.ts",
+      "file_type": "code",
+      "norm_label": "studio-site.interceptor.ts",
+      "source_file": "apps/studio-web/src/app/infrastructure/http/studio-site.interceptor.ts",
+      "source_location": "L1"
     },
     {
       "id": "apps_studio_web_angular_build_options",
@@ -45858,7 +45858,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L718",
+      "source_location": "L760",
       "weight": 1.0
     },
     {
@@ -45870,7 +45870,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L719",
+      "source_location": "L761",
       "weight": 1.0
     },
     {
@@ -45882,7 +45882,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L721",
+      "source_location": "L763",
       "weight": 1.0
     },
     {
@@ -45894,7 +45894,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L720",
+      "source_location": "L762",
       "weight": 1.0
     },
     {
@@ -45906,7 +45906,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L731",
+      "source_location": "L773",
       "weight": 1.0
     },
     {
@@ -45918,7 +45918,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L742",
+      "source_location": "L784",
       "weight": 1.0
     },
     {
@@ -45930,7 +45930,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L797",
+      "source_location": "L840",
       "weight": 1.0
     },
     {
@@ -45942,19 +45942,19 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L744",
+      "source_location": "L786",
       "weight": 1.0
     },
     {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanrowpage",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planrowtotalpages",
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanpage",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_plantotalpages",
       "relation": "calls",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L711",
+      "source_location": "L753",
       "weight": 1.0
     },
     {
@@ -45966,7 +45966,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L565",
+      "source_location": "L607",
       "weight": 1.0
     },
     {
@@ -45978,7 +45978,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L566",
+      "source_location": "L608",
       "weight": 1.0
     },
     {
@@ -45990,7 +45990,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L572",
+      "source_location": "L614",
       "weight": 1.0
     },
     {
@@ -46002,7 +46002,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L686",
+      "source_location": "L729",
       "weight": 1.0
     },
     {
@@ -46014,7 +46014,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L588",
+      "source_location": "L630",
       "weight": 1.0
     },
     {
@@ -46026,7 +46026,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L745",
+      "source_location": "L787",
       "weight": 1.0
     },
     {
@@ -46038,7 +46038,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L733",
+      "source_location": "L775",
       "weight": 1.0
     },
     {
@@ -46050,7 +46050,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L716",
+      "source_location": "L758",
       "weight": 1.0
     },
     {
@@ -46062,7 +46062,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L637",
+      "source_location": "L680",
       "weight": 1.0
     },
     {
@@ -46074,7 +46074,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L652",
+      "source_location": "L695",
       "weight": 1.0
     },
     {
@@ -69606,7 +69606,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L514",
+      "source_location": "L556",
       "weight": 1.0
     },
     {
@@ -69618,7 +69618,7 @@
       "confidence_score": 1.0,
       "context": "field",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L549",
+      "source_location": "L591",
       "weight": 1.0
     },
     {
@@ -70014,19 +70014,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L533",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplanrows",
-      "target": "apps_studio_web_src_app_models_studio_models_editorialplan",
-      "relation": "references",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "generic_arg",
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L706",
+      "source_location": "L575",
       "weight": 1.0
     },
     {
@@ -70038,7 +70026,7 @@
       "confidence_score": 1.0,
       "context": "generic_arg",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L714",
+      "source_location": "L756",
       "weight": 1.0
     },
     {
@@ -99232,7 +99220,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L666",
+      "source_location": "L709",
       "weight": 1.0
     },
     {
@@ -99244,7 +99232,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L688",
+      "source_location": "L731",
       "weight": 1.0
     },
     {
@@ -99256,7 +99244,7 @@
       "confidence_score": 1.0,
       "context": "parameter_type",
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L636",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -100733,6 +100721,18 @@
       "context": "return_type",
       "source_file": "apps/studio-web/src/app/pages/content-workspace-page.component.ts",
       "source_location": "L549",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplans",
+      "target": "apps_studio_web_src_app_models_studio_models_editorialplan",
+      "relation": "references",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "return_type",
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L748",
       "weight": 1.0
     },
     {
@@ -105012,7 +105012,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L509",
+      "source_location": "L551",
       "weight": 1.0
     },
     {
@@ -131725,7 +131725,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L562",
+      "source_location": "L604",
       "weight": 1.0
     },
     {
@@ -131736,7 +131736,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L569",
+      "source_location": "L611",
       "weight": 1.0
     },
     {
@@ -131747,7 +131747,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L575",
+      "source_location": "L617",
       "weight": 1.0
     },
     {
@@ -131758,7 +131758,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L581",
+      "source_location": "L623",
       "weight": 1.0
     },
     {
@@ -131769,7 +131769,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L596",
+      "source_location": "L638",
       "weight": 1.0
     },
     {
@@ -131780,7 +131780,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L601",
+      "source_location": "L643",
       "weight": 1.0
     },
     {
@@ -131791,7 +131791,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L604",
+      "source_location": "L646",
       "weight": 1.0
     },
     {
@@ -131802,7 +131802,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L607",
+      "source_location": "L649",
       "weight": 1.0
     },
     {
@@ -131813,7 +131813,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L617",
+      "source_location": "L659",
       "weight": 1.0
     },
     {
@@ -131824,7 +131824,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L629",
+      "source_location": "L671",
       "weight": 1.0
     },
     {
@@ -131835,7 +131835,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L633",
+      "source_location": "L676",
       "weight": 1.0
     },
     {
@@ -131846,7 +131846,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L636",
+      "source_location": "L679",
       "weight": 1.0
     },
     {
@@ -131857,7 +131857,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L660",
+      "source_location": "L703",
       "weight": 1.0
     },
     {
@@ -131868,7 +131868,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L666",
+      "source_location": "L709",
       "weight": 1.0
     },
     {
@@ -131879,7 +131879,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L670",
+      "source_location": "L713",
       "weight": 1.0
     },
     {
@@ -131890,7 +131890,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L673",
+      "source_location": "L716",
       "weight": 1.0
     },
     {
@@ -131901,7 +131901,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L677",
+      "source_location": "L720",
       "weight": 1.0
     },
     {
@@ -131912,7 +131912,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L683",
+      "source_location": "L726",
       "weight": 1.0
     },
     {
@@ -131923,7 +131923,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L688",
+      "source_location": "L731",
       "weight": 1.0
     },
     {
@@ -131934,188 +131934,12 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L693",
+      "source_location": "L736",
       "weight": 1.0
     },
     {
       "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_planrowtotalpages",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L703",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplanrows",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L706",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanrowpage",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L710",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleselection",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L713",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_startedit",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L714",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_canceledit",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L715",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_saveedit",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L716",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_selectall",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L717",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_approve",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L718",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkapprove",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L719",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkstatus",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L720",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkremove",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L721",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmbulkremove",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L722",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_remove",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L733",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmremove",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L734",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_generatecontent",
-      "relation": "method",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L744",
-      "weight": 1.0
-    },
-    {
-      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
-      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_refreshselected",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_plantotalpages",
       "relation": "method",
       "_origin": "ast",
       "confidence": "EXTRACTED",
@@ -132126,13 +131950,189 @@
     },
     {
       "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_pagedplans",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L748",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_goplanpage",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L752",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_toggleselection",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L755",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_startedit",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L756",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_canceledit",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L757",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_saveedit",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L758",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_selectall",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L759",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_approve",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L760",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkapprove",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L761",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkstatus",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L762",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_bulkremove",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L763",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmbulkremove",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L764",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_remove",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L775",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_confirmremove",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L776",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_generatecontent",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L786",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
+      "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_refreshselected",
+      "relation": "method",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
+      "source_location": "L787",
+      "weight": 1.0
+    },
+    {
+      "source": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent",
       "target": "apps_studio_web_src_app_pages_editorial_plan_page_component_editorialplanpagecomponent_statustone",
       "relation": "method",
       "_origin": "ast",
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L746",
+      "source_location": "L788",
       "weight": 1.0
     },
     {
@@ -132143,7 +132143,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "apps/studio-web/src/app/pages/editorial-plan-page.component.ts",
-      "source_location": "L762",
+      "source_location": "L804",
       "weight": 1.0
     },
     {
@@ -139278,5 +139278,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "873c6fbd8008fce70b6aa1fc0cb01b5bbe27485c"
+  "built_at_commit": "8701491b2939a6fb8f9183e8f2e8d82ded2eea05"
 }
