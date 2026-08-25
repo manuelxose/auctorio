@@ -63,12 +63,14 @@ import {
   bulkDeleteEditorialPlanItems,
   bulkSetEditorialPlanItemStatus,
   deleteEditorialPlanItem,
+  enqueueEditorialPlanGeneration,
   generateContentFromEditorialPlanItem,
   generateEditorialPlan,
   getEditorialPlan,
   listEditorialPlans,
   setEditorialPlanItemStatus,
   updateEditorialPlanItem,
+  type GenerateEditorialPlanInput,
 } from "./editorial-plan";
 import { CONTENT_FORMATS, SEARCH_INTENTS, STRATEGY_MODES } from "./editorial-plan-schema";
 
@@ -1328,6 +1330,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       brandsOrEntities?: string[];
       keywordSeeds?: string[];
       allowWithoutIntelligence?: boolean;
+      async?: boolean;
     }>(request);
     const dateFrom = parseIsoDate(body.dateFrom);
     const dateTo = parseIsoDate(body.dateTo);
@@ -1339,7 +1342,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (channels.length === 0) return badRequest(reply, "channels must include website, x, or instagram");
     if (!body.publicationCount) return badRequest(reply, "publicationCount must be greater than zero");
     try {
-      const plan = await generateEditorialPlan({
+      const generationInput: GenerateEditorialPlanInput = {
         tenantId: context.tenantId,
         siteId: parseOptionalString(body.siteId),
         briefId: parseOptionalString(body.briefId),
@@ -1375,7 +1378,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           brandsOrEntities: body.brandsOrEntities ?? [],
           keywordSeeds: body.keywordSeeds ?? [],
         },
-      });
+      };
+
+      if (body.async !== false) {
+        const enqueued = await enqueueEditorialPlanGeneration(generationInput);
+        return reply.code(202).send({ planId: enqueued.planId, status: "generating" });
+      }
+
+      const plan = await generateEditorialPlan(generationInput);
       return reply.code(201).send(plan);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

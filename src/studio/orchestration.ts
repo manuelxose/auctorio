@@ -56,9 +56,37 @@ function toHtml(text: string): string {
     .join("\n");
 }
 
+export function stripLeadingDuplicateTitle(html: string, title: string): string {
+  const match = html.match(/^([^<]*)(.*)$/s);
+  if (!match || !match[1].trim()) {
+    return html;
+  }
+  const prefix = match[1].trim();
+  if (prefix.length < 20 || prefix.length > 220) {
+    return html;
+  }
+  const normalized = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const titleNorm = normalized(title);
+  const prefixNorm = normalized(prefix);
+  if (!titleNorm || !prefixNorm) {
+    return html;
+  }
+  if (titleNorm.includes(prefixNorm) || prefixNorm.includes(titleNorm)) {
+    return match[2].trimStart();
+  }
+  return html;
+}
+
 function deriveVersion(text: string, project: ContentProject): StudioVersionDerivation {
   const normalized = text.trim();
-  const html = /<h\d|<p|<ul|<ol/i.test(normalized) ? normalized : toHtml(normalized);
+  let html = /<h\d|<p|<ul|<ol/i.test(normalized) ? normalized : toHtml(normalized);
+  html = stripLeadingDuplicateTitle(html, project.title);
   const plain = stripHtml(html);
   const title = project.title.trim() || plain.split(/[.!?\n]/)[0] || "Contenido generado";
 

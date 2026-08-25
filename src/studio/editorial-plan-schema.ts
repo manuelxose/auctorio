@@ -2,7 +2,7 @@ import { arr, enums, num, obj, optionalString, optNul, str, type SchemaDef, type
 
 /** Versioned schema identity for editorial plan generation. */
 export const EDITORIAL_PLAN_SCHEMA_NAME = "EditorialPlanGenerationSchemaV2";
-export const EDITORIAL_PLAN_PROMPT_VERSION = "v2";
+export const EDITORIAL_PLAN_PROMPT_VERSION = "v2.1";
 
 // ────────────────────────────────────────────────────────────── Enums
 

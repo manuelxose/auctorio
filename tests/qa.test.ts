@@ -38,3 +38,39 @@ test("runVersionQa fails when image and body are missing", () => {
   assert.equal(report.passed, false);
   assert.equal(report.checks.some((check) => check.key === "image_ready" && check.passed === false), true);
 });
+
+test("placeholder detection does not flag the common Spanish word 'todo'", () => {
+  const report = runVersionQa(
+    {
+      title: "Guia completa para ver series en television",
+      excerpt: "Todo lo que necesitas saber para no perderte ningun estreno, con todo el detalle de plataformas y horarios.",
+      bodyHtml:
+        "<p>Todo el mundo quiere saber que ver esta noche. Esta guia explica todo lo necesario sobre horarios y plataformas.</p>" +
+        "<h2>Plataformas</h2><p>" + "contenido ".repeat(80) + "</p>",
+      seoTitle: "Guia completa para ver series en television",
+      seoDescription: "Todo lo que necesitas saber para no perderte ningun estreno, con detalle de plataformas y horarios.",
+    },
+    true,
+  );
+
+  const placeholderCheck = report.checks.find((check) => check.key === "no_placeholders");
+  assert.ok(placeholderCheck);
+  assert.equal(placeholderCheck.passed, true);
+});
+
+test("placeholder detection still flags real TODO markers", () => {
+  const report = runVersionQa(
+    {
+      title: "Guia completa para ver series en television",
+      excerpt: "Todo lo que necesitas saber para no perderte ningun estreno.",
+      bodyHtml: "<p>TODO: revisar la tabla de horarios antes de publicar.</p><h2>Plataformas</h2><p>" + "contenido ".repeat(80) + "</p>",
+      seoTitle: "Guia completa para ver series en television",
+      seoDescription: "Todo lo que necesitas saber para no perderte ningun estreno, con detalle de plataformas y horarios.",
+    },
+    true,
+  );
+
+  const placeholderCheck = report.checks.find((check) => check.key === "no_placeholders");
+  assert.ok(placeholderCheck);
+  assert.equal(placeholderCheck.passed, false);
+});

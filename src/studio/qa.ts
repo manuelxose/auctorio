@@ -44,7 +44,7 @@ const GENERIC_AI_PHRASES = [
   "en un mundo cada vez más",
 ];
 
-const PLACEHOLDER_PATTERNS = [/lorem ipsum/i, /\[insert/i, /TODO/i, /RELLENAR/i, /XXXX/];
+const PLACEHOLDER_PATTERNS = [/lorem ipsum/i, /\[insert/i, /\bTODO\b/, /\bTBD\b/, /RELLENAR/i, /XXXX{3,}/];
 
 function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
