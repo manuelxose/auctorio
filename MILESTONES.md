@@ -191,17 +191,145 @@ Code presence alone is never sufficient.
 - `npx prisma validate` ✅ · `npx prisma migrate deploy` ✅ (prod up to date)
 - `npm run test:live:guiatv` → last executed 2026-08-21 ✅
 
-## M15 — Production Deployment ✅ (this pass)
+---
 
-- **Evidence**:
-  - Migration `20260824000000` applied to production PostgreSQL.
-  - Studio release `20260824_225042` published, SSR 200 + expected content.
-  - All 9 `content-ai-*` systemd services restarted and `active`.
-  - API health live/ready 200; new routes respond (401 unauth / 200 authed via
-    BFF session); structured request logs with reqIds.
-  - Workers tick cleanly (`worker:discovery tick ... errors: 0`).
-  - Rollback: previous Studio release dir retained; migrations are additive
-    with zero drops; backups via `/etc/cron.d/auctorio-backup`.
+# M16–M22 — Site Intelligence → Editorial Planning → SEO Content Engine Rebuild
+
+Executed 2026-08-25 against `f027ce5..4d77e9c`. Multi-agent role decomposition
+(Repository Architect, Site Intelligence Architect, SEO Strategy Architect,
+Editorial Planning Architect, AI Reliability Engineer, Content Engine Engineer,
+Editor UX Engineer, Publishing Contract Engineer, Adversarial Reviewer) was
+executed sequentially by the primary model — live RuFlo LLM agent spawning is
+unavailable (no provider keys); the limitation is recorded. RuFlo memory/project
+state, Graphify, repository memory and existing docs were used.
+
+## M15 — Production Deployment ✅ (2026-08-24, prior pass)
+
+- Migration `20260824000000` applied to production PostgreSQL.
+- Studio release `20260824_225042` published; all 9 services active.
+
+## M16 — Site Intelligence Foundation ✅
+
+- **Backend** (`src/studio/site-intelligence/`): sitemap discovery with
+  `/sitemap.xml`, `/sitemap_index.xml`, `robots.txt` and nested index recursion
+  (depth + entry caps, dedupe, cross-origin blocking, malformed-XML failure
+  isolation); page crawler with SSRF-safe validation, boilerplate removal,
+  canonical/headings/content/JSON-LD/OG extraction, word counts, internal-link
+  capture, content-hash change detection; deterministic profile synthesis with
+  GuiaTV platform/sports/commercial lexicons and topic clustering.
+- **Persistence**: migration `20260825000000_site_intelligence` — additive
+  tables `site_sitemaps`, `site_indexed_pages`, `site_topic_clusters`,
+  `site_entities`, `site_internal_links`, `site_intelligence_profiles`,
+  `search_targets`, `editorial_plan_generation_attempts`; tenant/site scoped.
+- **Routes**: `/v2/site-intelligence/:siteId` (overview), `POST …/index`
+  (`wait`/`crawl`/`budget` options, background-safe), `GET …/pages`.
+- **Studio UI**: Site Intelligence page (overview, topic map, page inventory
+  search, index actions) inside Connections; planner step 3 shows live index
+  stats and blocks generation when intelligence is missing.
+- **Tests**: sitemap/index/malformed/nested/dedupe parsing, SSRF blocking, page
+  extraction, content-type inference, tenant isolation (Guiatv vs Tecnoria).
+- **Live evidence (GuiaTV)**: repeated production indexes via the golden path;
+  planner context reported `indexedUrls: 36, profileVersion: 14`,
+  `detectedSiteType` contains `tv`, real topic clusters and link inventory.
+  E2E step 1 asserts sitemaps discovered + extracted pages + TV site type.
+
+## M17 — Reliable Structured AI ✅
+
+- **AI layer** (`src/infrastructure/ai/structured.ts`): `generateStructured<T>`
+  with versioned JSON-schema validation, provider-native JSON mode, safe
+  extraction, controlled repair, one corrective retry with validation errors,
+  truncation-aware retry (`finish_reason=length` triggers a compactness
+  retry instead of trusting repaired payloads), typed
+  `StructuredOutputError` + per-attempt observability (provider, model,
+  attempt, finish reason, token usage, schema validation, repair/retry flags).
+- **Planner schema**: `EditorialPlanGenerationSchemaV2` (prompt v2.1).
+- **Persistence**: `editorial_plan_generation_attempts` records every attempt.
+- **Error UX**: raw parser errors never reach editors; the route maps failures
+  to a friendly message with a normalized code in the plan record.
+- **Tests** (`structured-output.test.ts`): perfect JSON, fenced JSON, trailing
+  text, missing comma, truncated response, wrong enum, invalid date, excessive
+  rows, duplicate title, unknown property, retry succeeds/fails.
+
+## M18 — Enterprise Editorial Planning ✅
+
+- **Context**: `buildEditorialPlanningContext(siteId)` loads the site profile,
+  ranked indexed pages, cluster data, search targets, existing plans/projects
+  and source evidence — strictly site-scoped (regression-tested).
+- **Briefs**: every plan row is a full SEO brief (primaryIntent,
+  secondaryIntents, contentType, funnel stage, target query, primary/secondary/
+  semantic keywords, related entities, questions, competitor angle, slug, SEO
+  title/description, internal links from the real inventory, evidence types,
+  FAQ candidates, schema types, outline, word targets, difficulty/opportunity/
+  relevance/cannibalization/confidence, rationale, source evidence).
+- **Guardrails**: deterministic relevance scoring (off-topic hard-reject
+  lexicon, topic overlap, TV-domain affinity, sports affinity, cluster and
+  content-type fit, intent fit, query fit) with threshold 45; cannibalization
+  classification (none / related-cluster / update-existing / merge-candidate /
+  high) against indexed URLs, search targets and existing plan queries.
+- **Reliability**: batched generation (2 items/call under the provider output
+  cap), truncation retries, cross-batch exact + near-duplicate detection
+  (token overlap ≥0.75), bounded top-up rounds, chunk failure tolerance,
+  background (async) generation with plan polling.
+- **Studio UX**: 5-step planner (period/site → strategy → intelligence summary
+  → generation progress → review) with expandable briefs, editing, bulk
+  actions and relevance/cannibalization visibility.
+
+## M19 — SEO Content Engine V2 ✅
+
+- **Generation profiles** per content type (guide/ranking/where-to-watch/news/
+  sports/comparison…) with intent-aware word targets (600–4500 by format) and
+  token scaling in the text worker; brief fields flow into project metadata.
+- **QA V2** (`runVersionQaV2`): 24 explainable checks across structural / SEO /
+  editorial / evidence / publishing groups with error|warning|info severities
+  and a weighted score; errors block publication.
+- **Internal linking engine**: suggestions come from real indexed pages
+  (`site_indexed_pages` / `site_internal_links`), never invented.
+
+## M20 — Professional Rich Editor ✅
+
+- `au-rich-editor` component (H2/H3, bold/italic, lists, blockquote, link,
+  table, clear formatting, undo/redo, word/char count, reading time, heading
+  outline, autosave, dirty indicator, paste cleanup) replaces the raw
+  textarea; SSR-safe and within the bundle budget.
+- SEO workspace: metadata editor with length gauges, strategy fields, content
+  analysis findings, explainable score (`SEO readiness: 82/100`), Google-style
+  SERP preview.
+
+## M21 — Publishing Fidelity ✅
+
+- Allowlist HTML sanitizer; semantic structure (h2/h3/strong/em/ul/ol/a/
+  blockquote/table) preserved through the editor → version → GuiaTV payload.
+- Round-trip unit tests + live draft: GuiaTV `draft_synced` with externalId and
+  externalUrl (E2E step 4).
+
+## M22 — Golden Path & Production ✅
+
+- **Golden path E2E (live production)** `e2e/specs/guiatv-seo-golden-path.spec.ts`:
+  1. index GuiaTV → real sitemaps + pages + TV profile ✅
+  2. SEO-growth plan → site-aware briefs above relevance threshold ✅
+  3. approve row → generate → QA passed → semantic HTML ✅
+  4. approve version → publish draft → GuiaTV `draft_synced` ✅
+- **Regression E2E**: studio workflow (login/site switching/content) 3/3 ✅
+- **Validation**: typecheck ✅ · build ✅ · build:studio ✅ ·
+  174/174 unit tests ✅ · `prisma validate` ✅ · prod migrations up to date ✅
+- **Production**: migration `20260825000000` + brief-columns migration applied;
+  API + all 9 workers restarted (running new code, verified); health 200.
+- **Bugs found & fixed by the golden path** (with regression tests):
+  1. `/TODO/i` placeholder regex matched Spanish "todo" → every ES article
+     failed QA. Fixed to word-boundary, case-sensitive patterns.
+  2. Model leaked the title as plain text before the first `<p>`; added
+     `stripLeadingDuplicateTitle`.
+  3. DeepSeek output cap (~4096 tokens) truncated 7-item plans
+     (`finish_reason=length`) → batched generation + truncation retry +
+     compactness/diversity instructions.
+  4. Sparse early-crawl profiles under-scored legitimate topics → synthetic
+     site-type lexicon blend + strategy-requested format allowance + sports
+     affinity.
+  5. Model repeated near-identical topics across batches → token-overlap
+     near-duplicate detection + subject-space guidance + bounded top-up rounds.
+  6. Long LLM pipelines timed out on the request path → async generation with
+     plan polling; draft publication terminal status documented
+     (`draft_synced`); approval gate documented in the golden path.
 
 ## Known non-blocking residuals
 
@@ -210,6 +338,9 @@ Code presence alone is never sufficient.
 - No social/web-intelligence provider credentials in prod env (provision keys
   to activate live X/Instagram OAuth and AI source search).
 - Analytics depth and billing-ready entitlements remain P1/P2 backlog.
+- Provider-side output variance: plan quantity is best-effort bounded recovery
+  (batches + top-up); every surviving row is schema-valid and above the
+  relevance threshold.
 
 ## Milestone closure protocol
 
