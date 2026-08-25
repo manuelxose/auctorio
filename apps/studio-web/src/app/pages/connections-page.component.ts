@@ -1,27 +1,53 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { StudioApiService } from '../services/studio-api.service';
-import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { PublishingAccount, SocialConnection, SocialSetupInfo, StudioSite } from '../models/studio.models';
+import type {
+  ConnectorInstallation,
+  PublishingAccount,
+  SocialConnection,
+  SocialSetupInfo,
+} from '../models/studio.models';
+
+type TabId = 'all' | 'websites' | 'social' | 'attention';
+
+type ConnectionRow = {
+  id: string;
+  kind: 'website' | 'x' | 'instagram';
+  provider: string;
+  displayName: string;
+  state: string;
+  needsAttention: boolean;
+  lastError: string | null;
+  verifiedAt: string | null;
+  activatedAt: string | null;
+  siteName: string | null;
+  social?: SocialConnection;
+  website?: PublishingAccount;
+  installation?: ConnectorInstallation;
+};
 
 @Component({
   selector: 'app-connections-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
-      <header class="au-page__header">
+      <header class="au-page__header au-page__header--split">
         <div>
           <p class="au-page__eyebrow">Publishing destinations</p>
           <h1 class="au-page__title">Connections</h1>
-          <p class="au-page__subtitle">Connect the websites and social accounts Auctorio can publish to.</p>
+          <p class="au-page__subtitle">Discover, verify and manage the websites and social accounts Auctorio publishes to.</p>
         </div>
+        <a class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">
+          <app-icon name="plug"></app-icon>
+          Connect destination
+        </a>
       </header>
 
       <div class="au-banner au-banner--error" *ngIf="loadError">
@@ -34,186 +60,149 @@ import type { PublishingAccount, SocialConnection, SocialSetupInfo, StudioSite }
         <app-icon name="info"></app-icon>
         <span class="au-banner__text">
           One-click social connections need a provider configured server-side (Ayrshare managed API or your own X/Meta developer apps).
-          Until then, use the advanced credential references below.
+          Until then, website destinations and advanced credential references remain available.
         </span>
       </div>
 
-      <h2 class="au-section-title">Social accounts</h2>
-      <div class="au-connection-grid" *ngIf="!loading">
-        <article class="au-connection-card" *ngFor="let platform of socialPlatforms">
-          <div class="au-connection-card__head">
-            <span class="au-platform-icon" aria-hidden="true">{{ platformMark(platform) }}</span>
-            <div class="au-flex-1">
-              <h2>{{ platformLabel(platform) }}</h2>
-              <p *ngIf="connection(platform)">
-                {{ connection(platform)!.username ? '@' + connection(platform)!.username : connection(platform)!.displayName }}
-              </p>
-              <p *ngIf="!connection(platform)">Not connected yet</p>
-            </div>
-            <span class="au-badge" [class]="stateBadgeClass(platform)">
-              {{ stateLabel(platform) }}
-            </span>
-          </div>
-
-          <dl class="au-connection-card__details" *ngIf="connection(platform)">
-            <dt>Status</dt><dd>{{ connectionDetail(platform) }}</dd>
-            <dt>Last checked</dt><dd>{{ connection(platform)!.lastVerifiedAt ? (connection(platform)!.lastVerifiedAt | date: 'medium') : 'Not checked yet' }}</dd>
-          </dl>
-
-          <p class="au-error au-mb-2" *ngIf="connection(platform) && connection(platform)!.lastError">{{ humanError(connection(platform)!.lastError!) }}</p>
-
-          <div class="au-inline">
-            <button class="au-btn au-btn--primary au-btn--sm" type="button" *ngIf="!connection(platform)" (click)="connect(platform)" [disabled]="busy === platform">
-              <app-icon name="plug"></app-icon>
-              {{ busy === platform ? 'Preparing…' : 'Connect ' + platformLabel(platform) }}
-            </button>
-            <ng-container *ngIf="connection(platform)">
-              <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="verify(connection(platform)!)" [disabled]="busy === platform">
-                <app-icon name="circle-check"></app-icon>
-                Test connection
-              </button>
-              <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="reconnect(connection(platform)!)" [disabled]="busy === platform">
-                <app-icon name="refresh"></app-icon>
-                Reconnect
-              </button>
-              <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="disconnect(connection(platform)!)" [disabled]="busy === platform">
-                <app-icon name="trash"></app-icon>
-                Disconnect
-              </button>
-            </ng-container>
-          </div>
-          <p class="au-error au-mb-0" *ngIf="actionError === platform">{{ actionErrorText }}</p>
-        </article>
-      </div>
-
-      <h2 class="au-section-title">Websites &amp; advanced</h2>
-
-      <div class="au-inline" *ngIf="!showForm">
-        <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="showForm = true">
-          <app-icon name="plus"></app-icon>
-          Add website or advanced connection
+      <div class="au-tabs" role="tablist" aria-label="Connection types">
+        <button
+          class="au-tab"
+          type="button"
+          role="tab"
+          *ngFor="let tab of tabs"
+          [class.is-active]="activeTab === tab.id"
+          [attr.aria-selected]="activeTab === tab.id"
+          (click)="selectTab(tab.id)"
+        >
+          {{ tab.label }}
+          <span class="au-tab__count" *ngIf="countFor(tab.id) > 0">{{ countFor(tab.id) }}</span>
         </button>
       </div>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="showForm">
-        <h2 class="au-panel__title">Add a publishing destination</h2>
-        <p class="au-panel__subtitle au-mb-3">Websites and legacy credential references. For social accounts, use the cards above.</p>
-        <form (ngSubmit)="createWebsite()">
-          <div class="au-field-grid">
-            <label class="au-field">
-              <span class="au-field__label">Platform</span>
-              <select class="au-select" name="platform" [(ngModel)]="draft.platform">
-                <option value="website">Website</option>
-                <option value="x">X (advanced)</option>
-                <option value="instagram">Instagram (advanced)</option>
-              </select>
-            </label>
-            <label class="au-field">
-              <span class="au-field__label">Display name</span>
-              <input class="au-input" name="displayName" [(ngModel)]="draft.displayName" required placeholder="Main website or @brand" />
-            </label>
-            <label class="au-field">
-              <span class="au-field__label">Site</span>
-              <select class="au-select" name="siteId" [(ngModel)]="draft.siteId">
-                <option value="">Workspace default</option>
-                <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-              </select>
-            </label>
-            <label class="au-field">
-              <span class="au-field__label">Remote account or domain</span>
-              <input class="au-input" name="externalAccountId" [(ngModel)]="draft.externalAccountId" placeholder="Optional" />
-            </label>
-          </div>
-          <label class="au-field" *ngIf="draft.platform !== 'website'">
-            <span class="au-field__label">Credential reference</span>
-            <input class="au-input au-mono" name="credentialsRef" [(ngModel)]="draft.credentialsRef" placeholder="Environment variable or secret reference" />
-            <span class="au-field__hint">Stored secrets are never displayed here. Only the reference is stored.</span>
-          </label>
-          <p class="au-error" *ngIf="error">{{ error }}</p>
-          <div class="au-form__actions">
-            <button class="au-btn au-btn--primary" type="submit" [disabled]="saving">{{ saving ? 'Saving…' : 'Save connection' }}</button>
-            <button class="au-btn au-btn--ghost" type="button" (click)="showForm = false">Cancel</button>
-          </div>
-        </form>
-      </section>
+      <div class="au-toolbar au-mb-2">
+        <label class="au-search au-flex-1">
+          <app-icon name="search"></app-icon>
+          <input
+            class="au-search__input"
+            type="search"
+            placeholder="Search connections…"
+            [(ngModel)]="search"
+            (input)="applyFilters()"
+            aria-label="Search connections"
+          />
+        </label>
+      </div>
+
+      <div class="au-skeleton-list" *ngIf="loading" aria-label="Loading connections">
+        <div class="au-skeleton" *ngFor="let _ of [1, 2, 3]" style="height: 76px"></div>
+      </div>
 
       <app-empty-state
-        *ngIf="!loading && !loadError && websiteAccounts.length === 0"
+        *ngIf="!loading && !loadError && rows.length === 0"
         icon="connections"
-        title="Connect a publishing destination"
-        text="Add your website, X account or Instagram account to start publishing."
-      ></app-empty-state>
+        title="No destinations yet"
+        text="Connect a website, X or Instagram destination to start publishing."
+      >
+        <a class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">Connect destination</a>
+      </app-empty-state>
 
-      <div class="au-connection-grid" *ngIf="websiteAccounts.length > 0">
-        <article class="au-connection-card" *ngFor="let account of websiteAccounts">
-          <div class="au-connection-card__head">
-            <span class="au-platform-icon" aria-hidden="true">{{ platformMark(account.platform) }}</span>
-            <div class="au-flex-1">
-              <h2>{{ account.displayName }}</h2>
-              <p>{{ platformLabel(account.platform) }} · {{ account.externalAccountId || account.site?.name || 'Workspace default' }}</p>
-            </div>
-            <span
-              class="au-badge"
-              [class.au-badge--success]="account.status === 'active' && account.enabled"
-              [class.au-badge--danger]="account.status === 'error'"
-              [class.au-badge--warning]="account.status === 'pending'"
-              [class.au-badge--neutral]="!account.enabled"
-            >
-              {{ statusLabel(account) }}
-            </span>
-          </div>
-          <dl class="au-connection-card__details">
-            <dt>Site</dt><dd>{{ account.site?.name || 'Workspace default' }}</dd>
-            <dt>Credentials</dt><dd>{{ account.hasCredentials ? 'Configured securely' : 'Not configured' }}</dd>
-            <dt>Last checked</dt><dd>{{ account.lastVerifiedAt ? (account.lastVerifiedAt | date: 'medium') : 'Not checked yet' }}</dd>
-          </dl>
-          <div class="au-inline">
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="verifyLegacy(account)" [disabled]="busyId === account.id">
-              <app-icon name="circle-check"></app-icon>
-              Test connection
-            </button>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="toggle(account)" [disabled]="busyId === account.id">
-              {{ account.enabled ? 'Disable' : 'Enable' }}
-            </button>
-            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="removeLegacy(account)" [disabled]="busyId === account.id">
-              <app-icon name="trash"></app-icon>
-              Remove
-            </button>
-          </div>
-          <p class="au-error au-mb-0" *ngIf="accountError === account.id">The connection check failed. Review its credentials and try again.</p>
-        </article>
+      <div class="au-empty-note" *ngIf="!loading && !loadError && rows.length > 0 && filteredRows.length === 0">
+        No connections match this view.
+      </div>
+
+      <div class="au-table-wrap" *ngIf="filteredRows.length > 0">
+        <table class="au-table au-table--hover">
+          <thead>
+            <tr>
+              <th scope="col">Destination</th>
+              <th scope="col">Type</th>
+              <th scope="col">Site</th>
+              <th scope="col">Status</th>
+              <th scope="col">Last checked</th>
+              <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr *ngFor="let row of filteredRows">
+              <td data-label="Destination">
+                <div class="au-cell-title">
+                  <span class="au-platform-icon au-platform-icon--sm" aria-hidden="true">{{ mark(row.kind) }}</span>
+                  <div>
+                    <div class="au-cell-title__name">{{ row.displayName }}</div>
+                    <div class="au-cell-title__meta">
+                      {{ row.social?.username ? '@' + row.social!.username : row.website?.externalAccountId || row.installation?.provider || row.provider }}
+                    </div>
+                  </div>
+                </div>
+              </td>
+              <td data-label="Type">{{ kindLabel(row.kind) }}</td>
+              <td data-label="Site">{{ row.siteName || 'Workspace default' }}</td>
+              <td data-label="Status">
+                <span class="au-badge" [class]="badgeClass(row)">
+                  {{ stateLabel(row) }}
+                </span>
+              </td>
+              <td data-label="Last checked">
+                {{ row.verifiedAt ? (row.verifiedAt | date: 'medium') : 'Not checked yet' }}
+              </td>
+              <td class="au-table__actions">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website" (click)="verifyLegacy(row.website)" [disabled]="busyId === row.id">
+                  Test
+                </button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.social" (click)="verifySocial(row.social)" [disabled]="busyId === row.id">
+                  Test
+                </button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.installation && resumable(row.installation)" (click)="resume(row.installation)">
+                  {{ row.installation.state === 'ready' ? 'Activate' : 'Resume' }}
+                </button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website || row.social || (row.installation && !isActive(row.installation))" (click)="remove(row)" [disabled]="busyId === row.id">
+                  <app-icon name="trash"></app-icon>
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </section>
   `,
 })
 export class ConnectionsPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
-  private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly platformId = inject(PLATFORM_ID);
   private readonly isBrowser = isPlatformBrowser(this.platformId);
 
-  socialPlatforms: Array<'x' | 'instagram'> = ['instagram', 'x'];
-  socialConnections: SocialConnection[] = [];
-  websiteAccounts: PublishingAccount[] = [];
-  sites: StudioSite[] = [];
-  setup: SocialSetupInfo | null = null;
+  readonly tabs: Array<{ id: TabId; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'websites', label: 'Websites' },
+    { id: 'social', label: 'Social' },
+    { id: 'attention', label: 'Needs attention' },
+  ];
+
+  activeTab: TabId = 'all';
+  search = '';
   loading = true;
   loadError = '';
-  error = '';
-  accountError = '';
-  actionError = '';
-  actionErrorText = '';
-  showForm = false;
-  saving = false;
-  busy = '';
   busyId = '';
-  draft = { platform: 'website' as 'website' | 'x' | 'instagram', displayName: '', externalAccountId: '', credentialsRef: '', siteId: '' };
+  rows: ConnectionRow[] = [];
+  filteredRows: ConnectionRow[] = [];
+  setup: SocialSetupInfo | null = null;
+  socialConnections: SocialConnection[] = [];
+  websiteAccounts: PublishingAccount[] = [];
+  installations: ConnectorInstallation[] = [];
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
+    const tab = this.route.snapshot.queryParamMap.get('tab');
+    if (tab === 'websites' || tab === 'social' || tab === 'attention') {
+      this.activeTab = tab;
+    }
+    const query = this.route.snapshot.queryParamMap.get('q');
+    if (query) {
+      this.search = query;
+    }
     this.load();
     this.readCallbackStatus();
   }
@@ -242,118 +231,227 @@ export class ConnectionsPageComponent implements OnInit {
     this.api.listSocialConnections().subscribe({
       next: (response) => {
         this.socialConnections = response.items.filter((item) => item.platform === 'x' || item.platform === 'instagram');
+        this.rebuildRows();
         this.loading = false;
       },
-      error: () => { this.loading = false; this.loadError = 'Connections could not be loaded. Try again.'; },
+      error: () => {
+        this.loading = false;
+        this.loadError = 'Connections could not be loaded. Try again.';
+      },
     });
     this.api.listPublishingAccounts().subscribe({
       next: (response) => {
         this.websiteAccounts = response.items.filter((item) => !this.socialConnections.some((social) => social.id === item.id));
+        this.rebuildRows();
       },
-      error: () => { /* the connections list already surfaced an error */ },
+      error: () => undefined,
+    });
+    this.api.listConnectorInstallations().subscribe({
+      next: (response) => {
+        this.installations = response.items;
+        this.rebuildRows();
+      },
+      error: () => undefined,
     });
     this.api.getSocialSetup().subscribe({
-      next: (setup) => { this.setup = setup; },
-      error: () => { this.setup = null; },
-    });
-  }
-
-  connection(platform: 'x' | 'instagram'): SocialConnection | undefined {
-    return this.socialConnections.find((item) => item.platform === platform);
-  }
-
-  stateLabel(platform: 'x' | 'instagram'): string {
-    const connection = this.connection(platform);
-    if (!connection) {
-      return 'Not connected';
-    }
-    switch (connection.connectionState) {
-      case 'connected': return 'Connected';
-      case 'connecting': return 'Connecting…';
-      case 'expired': return 'Reconnect required';
-      case 'permissions_required': return 'Permissions needed';
-      case 'provider_error': return 'Action required';
-      case 'disabled': return 'Disabled';
-      default: return 'Not connected';
-    }
-  }
-
-  stateBadgeClass(platform: 'x' | 'instagram'): string {
-    const connection = this.connection(platform);
-    if (!connection || connection.connectionState === 'not_connected') {
-      return 'au-badge--neutral';
-    }
-    switch (connection.connectionState) {
-      case 'connected': return 'au-badge--success';
-      case 'connecting': return 'au-badge--warning';
-      case 'disabled': return 'au-badge--neutral';
-      default: return 'au-badge--danger';
-    }
-  }
-
-  connectionDetail(platform: 'x' | 'instagram'): string {
-    const connection = this.connection(platform);
-    if (!connection) {
-      return 'Not connected';
-    }
-    if (platform === 'instagram' && connection.capabilities['canPostStories'] === false) {
-      return 'Connected (feed posts only)';
-    }
-    return 'Connection healthy';
-  }
-
-  humanError(error: string): string {
-    if (error === 'credentials_not_resolved') return 'The stored credentials could not be resolved. Reconnect to fix this.';
-    if (error === 'connection_credentials_missing') return 'The stored credentials are missing. Reconnect to fix this.';
-    return error;
-  }
-
-  connect(platform: 'x' | 'instagram'): void {
-    this.busy = platform;
-    this.actionError = '';
-    this.api.startSocialConnectionSession(platform).subscribe({
-      next: (session) => {
-        this.busy = '';
-        if (this.isBrowser) {
-          window.open(session.url, '_blank', 'noopener');
-        } else {
-          this.toast.info(`Open ${session.url} to authorize ${platform}.`);
-        }
-        this.toast.info(`Authorize ${platform === 'x' ? 'X' : 'Instagram'} in the opened window. This page updates automatically when done.`);
-        this.watchForCompletion();
+      next: (setup) => {
+        this.setup = setup;
       },
-      error: (err) => {
-        this.busy = '';
-        this.actionError = platform;
-        this.actionErrorText = err?.error?.error?.message || err?.error?.message || 'The connection could not be started.';
+      error: () => {
+        this.setup = null;
       },
     });
   }
 
-  private watchForCompletion(): void {
-    // The provider callback redirects to this page with ?social=… and the list
-    // refreshes here automatically.
-    let attempts = 0;
-    const interval = setInterval(() => {
-      attempts += 1;
-      this.api.listSocialConnections().subscribe({
-        next: (response) => {
-          this.socialConnections = response.items.filter((item) => item.platform === 'x' || item.platform === 'instagram');
-          if (attempts >= 12) {
-            clearInterval(interval);
-          }
-        },
-        error: () => { if (attempts >= 12) clearInterval(interval); },
+  private rebuildRows(): void {
+    const merged = new Map<string, ConnectionRow>();
+    for (const account of this.websiteAccounts) {
+      merged.set(`website:${account.id}`, {
+        id: account.id,
+        kind: account.platform === 'x' ? 'x' : account.platform === 'instagram' ? 'instagram' : 'website',
+        provider: account.provider || 'legacy',
+        displayName: account.displayName,
+        state: !account.enabled ? 'disabled' : account.status === 'active' ? 'connected' : account.status === 'error' ? 'error' : account.status,
+        needsAttention: !account.enabled || account.status === 'error',
+        lastError: null,
+        verifiedAt: account.lastVerifiedAt,
+        activatedAt: account.connectedAt ?? null,
+        siteName: account.site?.name ?? null,
+        website: account,
       });
-    }, 5000);
+    }
+    for (const social of this.socialConnections) {
+      merged.set(`social:${social.id}`, {
+        id: social.id,
+        kind: social.platform,
+        provider: social.provider,
+        displayName: social.displayName,
+        state: social.connectionState,
+        needsAttention: ['expired', 'permissions_required', 'provider_error'].includes(social.connectionState),
+        lastError: social.lastError,
+        verifiedAt: social.lastVerifiedAt,
+        activatedAt: social.connectedAt,
+        siteName: null,
+        social,
+      });
+    }
+    for (const installation of this.installations) {
+      merged.set(`installation:${installation.id}`, {
+        id: installation.id,
+        kind: installation.kind,
+        provider: installation.provider,
+        displayName: installation.displayName ?? installation.provider,
+        state: installation.state,
+        needsAttention: ['failed', 'expired', 'credentials_required'].includes(installation.state),
+        lastError: installation.lastError,
+        verifiedAt: installation.verifiedAt,
+        activatedAt: installation.activatedAt,
+        siteName: null,
+        installation,
+      });
+    }
+    this.rows = Array.from(merged.values()).sort((a, b) => {
+      const score = (row: ConnectionRow): number => (row.needsAttention ? 0 : 1);
+      return score(a) - score(b) || String(a.displayName).localeCompare(String(b.displayName));
+    });
+    this.applyFilters();
   }
 
-  verify(connection: SocialConnection): void {
-    this.busy = connection.platform;
-    this.actionError = '';
+  applyFilters(): void {
+    const query = this.search.trim().toLowerCase();
+    this.filteredRows = this.rows.filter((row) => {
+      if (this.activeTab === 'websites' && row.kind !== 'website') {
+        return false;
+      }
+      if (this.activeTab === 'social' && row.kind === 'website') {
+        return false;
+      }
+      if (this.activeTab === 'attention' && !row.needsAttention) {
+        return false;
+      }
+      if (query) {
+        const haystack = `${row.displayName} ${row.provider} ${row.siteName ?? ''}`.toLowerCase();
+        return haystack.includes(query);
+      }
+      return true;
+    });
+  }
+
+  selectTab(tab: TabId): void {
+    this.activeTab = tab;
+    this.applyFilters();
+    const query = this.route.snapshot.queryParams;
+    void this.router.navigate([], {
+      queryParams: { ...query, tab },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  countFor(tab: TabId): number {
+    if (tab === 'websites') {
+      return this.rows.filter((row) => row.kind === 'website').length;
+    }
+    if (tab === 'social') {
+      return this.rows.filter((row) => row.kind !== 'website').length;
+    }
+    if (tab === 'attention') {
+      return this.rows.filter((row) => row.needsAttention).length;
+    }
+    return this.rows.length;
+  }
+
+  mark(kind: string): string {
+    return kind === 'x' ? 'X' : kind === 'instagram' ? 'IG' : 'WEB';
+  }
+
+  kindLabel(kind: string): string {
+    return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : 'Website';
+  }
+
+  stateLabel(row: ConnectionRow): string {
+    switch (row.state) {
+      case 'connected':
+        return 'Connected';
+      case 'active':
+        return 'Active';
+      case 'ready':
+        return 'Ready to activate';
+      case 'verifying':
+        return 'Verifying…';
+      case 'discovering':
+        return 'Discovering…';
+      case 'credentials_required':
+        return 'Needs credentials';
+      case 'failed':
+        return 'Action required';
+      case 'expired':
+        return 'Reconnect required';
+      case 'permissions_required':
+        return 'Permissions needed';
+      case 'provider_error':
+        return 'Provider error';
+      case 'disabled':
+        return 'Disabled';
+      case 'error':
+        return 'Action required';
+      case 'draft':
+        return 'Draft';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return row.state;
+    }
+  }
+
+  badgeClass(row: ConnectionRow): string {
+    switch (row.state) {
+      case 'connected':
+      case 'active':
+        return 'au-badge--success';
+      case 'ready':
+      case 'verifying':
+      case 'discovering':
+      case 'draft':
+        return 'au-badge--warning';
+      case 'failed':
+      case 'error':
+      case 'expired':
+      case 'permissions_required':
+      case 'provider_error':
+        return 'au-badge--danger';
+      default:
+        return 'au-badge--neutral';
+    }
+  }
+
+  resumable(installation: ConnectorInstallation): boolean {
+    return ['draft', 'credentials_required', 'failed', 'ready', 'cancelled'].includes(installation.state);
+  }
+
+  isActive(installation: ConnectorInstallation): boolean {
+    return installation.state === 'active' || installation.state === 'disabled';
+  }
+
+  resume(installation: ConnectorInstallation): void {
+    if (installation.state === 'ready') {
+      this.api.activateInstallation(installation.id).subscribe({
+        next: () => {
+          this.toast.success('Destination activated.');
+          this.load();
+        },
+        error: (err) => this.toast.error(err?.error?.error?.message || 'Activation failed.'),
+      });
+      return;
+    }
+    void this.router.navigate(['/studio/connections/wizard', installation.id]);
+  }
+
+  verifySocial(connection: SocialConnection): void {
+    this.busyId = connection.id;
     this.api.verifySocialConnection(connection.id).subscribe({
       next: (result) => {
-        this.busy = '';
+        this.busyId = '';
         if (result.ok) {
           this.toast.success('Connection verified.');
         } else {
@@ -361,70 +459,15 @@ export class ConnectionsPageComponent implements OnInit {
         }
         this.load();
       },
-      error: () => { this.busy = ''; this.toast.error('Connection check failed.'); },
-    });
-  }
-
-  reconnect(connection: SocialConnection): void {
-    this.busy = connection.platform;
-    this.api.reconnectSocialConnection(connection.id).subscribe({
-      next: (session) => {
-        this.busy = '';
-        if (this.isBrowser) {
-          window.open(session.url, '_blank', 'noopener');
-        }
-        this.toast.info('Authorize the account again in the opened window.');
-        this.watchForCompletion();
+      error: () => {
+        this.busyId = '';
+        this.toast.error('Connection check failed.');
       },
-      error: () => { this.busy = ''; this.toast.error('Reconnect could not be started.'); },
-    });
-  }
-
-  async disconnect(connection: SocialConnection): Promise<void> {
-    const confirmed = await this.confirm.confirm({
-      title: `Disconnect ${connection.username ? '@' + connection.username : connection.displayName}?`,
-      message: 'Auctorio will stop publishing to this account. Existing publications stay where they are.',
-      confirmLabel: 'Disconnect',
-      danger: true,
-    });
-    if (!confirmed) return;
-    this.busy = connection.platform;
-    this.api.disconnectSocialConnection(connection.id).subscribe({
-      next: () => {
-        this.busy = '';
-        this.socialConnections = this.socialConnections.filter((item) => item.id !== connection.id);
-        this.toast.success('Connection removed.');
-      },
-      error: () => { this.busy = ''; this.toast.error('Connection could not be removed.'); },
-    });
-  }
-
-  createWebsite(): void {
-    if (!this.draft.displayName.trim()) return;
-    this.saving = true;
-    this.error = '';
-    this.api.createPublishingAccount({
-      platform: this.draft.platform,
-      displayName: this.draft.displayName.trim(),
-      externalAccountId: this.draft.externalAccountId.trim() || undefined,
-      credentialsRef: this.draft.credentialsRef.trim() || undefined,
-      siteId: this.draft.siteId || undefined,
-    }).subscribe({
-      next: (account) => {
-        this.websiteAccounts = [account, ...this.websiteAccounts];
-        this.showForm = false;
-        this.saving = false;
-        this.draft.displayName = '';
-        this.draft.credentialsRef = '';
-        this.toast.success('Connection added.');
-      },
-      error: (err) => { this.saving = false; this.error = err?.error?.message || 'Connection could not be saved.'; },
     });
   }
 
   verifyLegacy(account: PublishingAccount): void {
     this.busyId = account.id;
-    this.accountError = '';
     this.api.verifyPublishingAccount(account.id).subscribe({
       next: (result) => {
         this.busyId = '';
@@ -432,45 +475,65 @@ export class ConnectionsPageComponent implements OnInit {
           this.toast.success('Connection verified.');
           this.load();
         } else {
-          this.accountError = account.id;
+          this.toast.error('Connection needs attention.');
+          this.load();
         }
       },
-      error: () => { this.busyId = ''; this.accountError = account.id; this.load(); },
-    });
-  }
-
-  toggle(account: PublishingAccount): void {
-    this.busyId = account.id;
-    this.api.updatePublishingAccount(account.id, { enabled: !account.enabled, status: account.enabled ? 'disabled' : 'pending' }).subscribe({
-      next: (updated) => {
-        this.websiteAccounts = this.websiteAccounts.map((item) => (item.id === updated.id ? updated : item));
+      error: () => {
         this.busyId = '';
-        this.toast.success(updated.enabled ? 'Connection enabled.' : 'Connection disabled.');
+        this.load();
       },
-      error: () => { this.busyId = ''; this.loadError = 'Connection state could not be updated.'; },
     });
   }
 
-  async removeLegacy(account: PublishingAccount): Promise<void> {
+  async remove(row: ConnectionRow): Promise<void> {
+    const label = row.kind === 'website' ? 'website destination' : 'social connection';
     const confirmed = await this.confirm.confirm({
-      title: `Remove ${account.displayName}?`,
-      message: 'Existing publication history will remain. Publishing to this destination stops immediately.',
-      confirmLabel: 'Remove connection',
+      title: `Remove ${row.displayName}?`,
+      message: `Existing publication history will remain. Publishing to this ${label} stops immediately.`,
+      confirmLabel: 'Remove',
       danger: true,
     });
-    if (!confirmed) return;
-    this.busyId = account.id;
-    this.api.deletePublishingAccount(account.id).subscribe({
-      next: () => {
-        this.websiteAccounts = this.websiteAccounts.filter((item) => item.id !== account.id);
-        this.busyId = '';
-        this.toast.success('Connection removed.');
-      },
-      error: () => { this.busyId = ''; this.loadError = 'Connection could not be removed.'; },
-    });
+    if (!confirmed) {
+      return;
+    }
+    this.busyId = row.id;
+    if (row.website) {
+      this.api.deletePublishingAccount(row.website.id).subscribe({
+        next: () => {
+          this.busyId = '';
+          this.toast.success('Connection removed.');
+          this.load();
+        },
+        error: () => {
+          this.busyId = '';
+          this.loadError = 'Connection could not be removed.';
+        },
+      });
+    } else if (row.social) {
+      this.api.disconnectSocialConnection(row.social.id).subscribe({
+        next: () => {
+          this.busyId = '';
+          this.toast.success('Connection removed.');
+          this.load();
+        },
+        error: () => {
+          this.busyId = '';
+          this.toast.error('Connection could not be removed.');
+        },
+      });
+    } else if (row.installation) {
+      this.api.deleteConnectorInstallation(row.installation.id).subscribe({
+        next: () => {
+          this.busyId = '';
+          this.toast.success('Draft removed.');
+          this.load();
+        },
+        error: (err) => {
+          this.busyId = '';
+          this.toast.error(err?.error?.error?.message || 'Could not be removed.');
+        },
+      });
+    }
   }
-
-  platformLabel(platform: string): string { return platform === 'x' ? 'X' : platform === 'instagram' ? 'Instagram' : 'Website'; }
-  platformMark(platform: string): string { return platform === 'x' ? 'X' : platform === 'instagram' ? 'IG' : 'WEB'; }
-  statusLabel(account: PublishingAccount): string { return !account.enabled ? 'Disabled' : account.status === 'active' ? 'Connected' : account.status === 'error' ? 'Action required' : account.status === 'pending' ? 'Pending' : 'Unavailable'; }
 }

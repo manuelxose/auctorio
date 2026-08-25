@@ -138,6 +138,10 @@ import {
 } from "./views";
 import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
+import { registerConnectorRoutes } from "./routes-connectors";
+import { registerOperationRoutes } from "./routes-operations";
+import { registerNotificationRoutes } from "./routes-notifications";
+import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
 import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
 
@@ -335,6 +339,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerConnectionRoutes(fastify);
   registerDiscoveryRoutes(fastify);
   registerSiteIntelligenceRoutes(fastify);
+  registerConnectorRoutes(fastify);
+  registerOperationRoutes(fastify);
+  registerNotificationRoutes(fastify);
+  registerEventRoutes(fastify);
 
   fastify.get("/health/live", async () => ({ status: "ok" }));
 

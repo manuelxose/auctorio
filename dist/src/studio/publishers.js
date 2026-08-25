@@ -12,6 +12,7 @@ const env_1 = require("../shared/utils/env");
 const orchestration_1 = require("./orchestration");
 const env_2 = require("../shared/utils/env");
 const html_sanitizer_1 = require("./html-sanitizer");
+const installation_1 = require("./connectors/installation");
 /**
  * Pure GuiaTV payload builder (exported for fidelity tests). Maps the approved
  * SEO brief fields from project metadata into the destination contract.
@@ -625,11 +626,15 @@ class TalkarisPublisher {
     }
 }
 class GenericWebhookPublisher {
-    getSecret(site) {
+    async getSecret(site) {
+        const installation = await (0, installation_1.loadActiveInstallationForSite)(site.tenantId, site.id, "generic_webhook");
+        if (installation?.decryptedSecrets?.signingSecret) {
+            return installation.decryptedSecrets.signingSecret;
+        }
         return readCredentialRef(site.publishingCredentialsRef);
     }
     async maybeDryRun(context, action, externalId) {
-        const decision = getDryRunDecision(Boolean(this.getSecret(context.site)));
+        const decision = getDryRunDecision(Boolean(await this.getSecret(context.site)));
         if (!decision.enabled || !decision.reason) {
             return null;
         }
@@ -690,7 +695,7 @@ class GenericWebhookPublisher {
         const payload = this.buildPayload(context, action, targetStatus, externalId);
         const body = JSON.stringify(payload);
         const signature = node_crypto_1.default
-            .createHmac("sha256", this.getSecret(context.site))
+            .createHmac("sha256", await this.getSecret(context.site))
             .update(body)
             .digest("hex");
         const response = await (0, http_1.fetchWithTimeout)(siteBaseUrl, {
@@ -723,6 +728,219 @@ class GenericWebhookPublisher {
         return this.dispatch(context, "unpublish", null, externalId);
     }
 }
+class GenericRestPublisher {
+    async resolveConfig(site) {
+        const installation = await (0, installation_1.loadActiveInstallationForSite)(site.tenantId, site.id, "generic_rest");
+        if (installation) {
+            const config = (installation.config ?? {});
+            return {
+                baseUrl: String(config.baseUrl ?? site.baseUrl ?? ""),
+                restBasePath: String(config.restBasePath ?? ""),
+                contentPath: String(config.contentPath ?? "posts"),
+                mediaPath: String(config.mediaPath ?? "media"),
+                authScheme: String(config.authScheme ?? "bearer"),
+                apiToken: installation.decryptedSecrets?.apiToken ?? "",
+                authorId: String(config.authorId ?? ""),
+                categoryIds: String(config.categoryIds ?? ""),
+                locale: String(config.locale ?? site.locale ?? ""),
+            };
+        }
+        // Fallback: environment-referenced credentials for compatibility.
+        return {
+            baseUrl: String(site.baseUrl ?? ""),
+            restBasePath: "",
+            contentPath: "posts",
+            mediaPath: "media",
+            authScheme: "bearer",
+            apiToken: readCredentialRef(site.publishingCredentialsRef),
+            authorId: "",
+            categoryIds: "",
+            locale: site.locale ?? "",
+        };
+    }
+    async getHeaders(site) {
+        const config = await this.resolveConfig(site);
+        if (!config.apiToken) {
+            throw new Error("generic_rest_missing_credentials");
+        }
+        const headers = { "content-type": "application/json" };
+        if ((config.authScheme ?? "bearer") === "basic_user_pass") {
+            headers.authorization = `Basic ${Buffer.from(config.apiToken).toString("base64")}`;
+        }
+        else {
+            headers.authorization = `Bearer ${config.apiToken}`;
+        }
+        return headers;
+    }
+    async restBase(site) {
+        const config = await this.resolveConfig(site);
+        const baseUrl = String(config.baseUrl || "").replace(/\/$/, "");
+        const rest = String(config.restBasePath || "/wp-json/wp/v2").replace(/^\/+/, "");
+        return `${baseUrl}/${rest}`;
+    }
+    buildPayload(context, assetUrl, status) {
+        const metadata = getMetadata(context.project);
+        return {
+            title: context.version.title || context.project.title,
+            slug: String(metadata.slug || "").trim() || undefined,
+            status,
+            excerpt: (0, html_sanitizer_1.sanitizeEditorialHtml)(context.version.excerpt || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+            content: (0, html_sanitizer_1.sanitizeEditorialHtml)(context.version.bodyHtml || ""),
+            featured_media: assetUrl ?? undefined,
+            categories: getStringArray(metadata.categories),
+            tags: getStringArray(metadata.keywords),
+            lang: undefined,
+            meta: {
+                _auctorio_seo_title: context.version.seoTitle || undefined,
+                _auctorio_seo_description: context.version.seoDescription || undefined,
+            },
+        };
+    }
+    async maybeDryRun(context, action, externalId) {
+        const config = await this.resolveConfig(context.site);
+        const decision = getDryRunDecision(Boolean(config.apiToken));
+        if (!decision.enabled || !decision.reason) {
+            return null;
+        }
+        return buildDryRunResult(context, action, decision.reason, externalId);
+    }
+    async uploadAsset(context) {
+        const assetUrl = await resolveAssetUrl(context);
+        if (!assetUrl) {
+            return null;
+        }
+        const config = await this.resolveConfig(context.site);
+        const base = await this.restBase(context.site);
+        const mediaPath = String(config.mediaPath || "media").replace(/^\/+/, "");
+        const headers = await this.getHeaders(context.site);
+        delete headers["content-type"];
+        const assetResponse = await (0, http_1.fetchWithTimeout)(assetUrl, {
+            timeoutMs: (0, env_1.getNumberEnv)("IMAGE_DOWNLOAD_TIMEOUT_MS", 60_000),
+            retries: 1,
+        });
+        if (!assetResponse.ok) {
+            const body = await assetResponse.text();
+            throw new Error(`asset_download_failed status=${assetResponse.status} body=${body}`);
+        }
+        const buffer = Buffer.from(await assetResponse.arrayBuffer());
+        const formData = new FormData();
+        formData.append("file", new Blob([buffer]), imageFileName(assetUrl));
+        const upload = await (0, http_1.fetchJson)(`${base}/${mediaPath}`, {
+            method: "POST",
+            headers,
+            body: formData,
+            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 60_000),
+            retries: 1,
+        });
+        return upload.source_url ?? upload.url ?? null;
+    }
+    async publishDraft(context) {
+        const dryRun = await this.maybeDryRun(context, "publishDraft");
+        if (dryRun) {
+            return dryRun;
+        }
+        const config = await this.resolveConfig(context.site);
+        const base = await this.restBase(context.site);
+        const contentPath = String(config.contentPath || "posts").replace(/^\/+/, "");
+        let assetUrl = null;
+        try {
+            assetUrl = await this.uploadAsset(context);
+        }
+        catch {
+            assetUrl = null;
+        }
+        const payload = {
+            ...this.buildPayload(context, assetUrl, "draft"),
+            ...(config.authorId ? { author: Number(config.authorId) || config.authorId } : {}),
+            ...(config.categoryIds ? { categories: config.categoryIds.split(",").map((id) => Number(id.trim()) || id.trim()).filter(Boolean) } : {}),
+        };
+        const response = await (0, http_1.fetchJson)(`${base}/${contentPath}`, {
+            method: "POST",
+            headers: await this.getHeaders(context.site),
+            body: payload,
+            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+            retries: 1,
+        });
+        return {
+            externalId: String(response.id ?? ""),
+            externalUrl: typeof response.link === "string" ? response.link : null,
+            effectiveTargetStatus: "draft",
+            responsePayload: response,
+        };
+    }
+    async updateDraft(context, externalId) {
+        const dryRun = await this.maybeDryRun(context, "updateDraft", externalId);
+        if (dryRun) {
+            return dryRun;
+        }
+        const config = await this.resolveConfig(context.site);
+        const base = await this.restBase(context.site);
+        const contentPath = String(config.contentPath || "posts").replace(/^\/+/, "");
+        const response = await (0, http_1.fetchJson)(`${base}/${contentPath}/${externalId}`, {
+            method: "PUT",
+            headers: await this.getHeaders(context.site),
+            body: { ...this.buildPayload(context, null, "draft") },
+            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+            retries: 1,
+        });
+        return {
+            externalId,
+            externalUrl: typeof response.link === "string" ? response.link : null,
+            effectiveTargetStatus: "draft",
+            responsePayload: response,
+        };
+    }
+    async publish(context, externalId) {
+        const dryRun = await this.maybeDryRun(context, "publish", externalId);
+        if (dryRun) {
+            return dryRun;
+        }
+        if (externalId) {
+            const config = await this.resolveConfig(context.site);
+            const base = await this.restBase(context.site);
+            const contentPath = String(config.contentPath || "posts").replace(/^\/+/, "");
+            const response = await (0, http_1.fetchJson)(`${base}/${contentPath}/${externalId}`, {
+                method: "PUT",
+                headers: await this.getHeaders(context.site),
+                body: { status: "publish" },
+                timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+                retries: 1,
+            });
+            return {
+                externalId,
+                externalUrl: typeof response.link === "string" ? response.link : null,
+                effectiveTargetStatus: "publish",
+                responsePayload: response,
+            };
+        }
+        const draft = await this.publishDraft(context);
+        if (!draft.externalId) {
+            return draft;
+        }
+        return this.publish(context, draft.externalId);
+    }
+    async unpublish(context, externalId) {
+        const dryRun = await this.maybeDryRun(context, "unpublish", externalId);
+        if (dryRun) {
+            return dryRun;
+        }
+        const config = await this.resolveConfig(context.site);
+        const base = await this.restBase(context.site);
+        const contentPath = String(config.contentPath || "posts").replace(/^\/+/, "");
+        const response = await (0, http_1.fetchJson)(`${base}/${contentPath}/${externalId}`, {
+            method: "PUT",
+            headers: await this.getHeaders(context.site),
+            body: { status: "draft" },
+            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+            retries: 1,
+        });
+        return {
+            externalId,
+            effectiveTargetStatus: "draft",
+            responsePayload: response,
+        };
+    }
+}
 function getPublisher(site) {
     switch (site.type) {
         case "guiatv":
@@ -733,6 +951,8 @@ function getPublisher(site) {
             return new TalkarisPublisher();
         case "webhook":
             return new GenericWebhookPublisher();
+        case "generic_rest":
+            return new GenericRestPublisher();
         default:
             throw new Error(`unsupported_publisher_type ${site.type}`);
     }

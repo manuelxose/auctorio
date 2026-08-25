@@ -347,3 +347,93 @@ state, Graphify, repository memory and existing docs were used.
 Before marking any future milestone complete, the Adversarial Reviewer must
 answer: implemented? backend? frontend? persistence? permissions? states?
 mobile? meaningful tests? regressions? evidence? — any "no" blocks closure.
+
+---
+
+# M23–M31 — Universal Magic Installer, Activity Center, Notifications, UX Polish
+
+Executed 2026-08-25 against `43c1c2e8..43c1c2e8ec0b4394ea59708a8d6be406f367a4d0` following
+`docs/AUCTORIO_MAGIC_INSTALLER_MASTER_PROMPT.md`. Single primary agent;
+Graphify scoped the audit (see `docs/auctorio-magic-installer-implementation-map.md`).
+
+## M23 — Graph-scoped audit and implementation map ✅
+- Written map: `docs/auctorio-magic-installer-implementation-map.md`.
+- Corrected stale anchors (`publishers` live in `src/studio/publishers.ts`,
+  not `src/infrastructure/publishing`); hard-coded brand/bootstrap paths
+  identified (provision script, legacy website-account form assumptions).
+
+## M24 — Additive migrations and domain contracts ✅
+- `20260826000000_connections_operations_notifications`: `connector_installations`,
+  `operations`, `notifications`, `notification_preferences` (+ enums). Additive only.
+- `20260826010000_generic_rest_site_type`: `SiteType.generic_rest` (ALTER TYPE ADD VALUE).
+- Residual index-name drift (`site_internal_links`) fixed inside the first migration; prod zero drift.
+- Prisma validate ✅ · migrate deploy applied to production ✅.
+
+## M25 — Connector registry, secure discovery and verification ✅
+- `src/studio/connectors/{registry,discovery,verification,installation}.ts`.
+- SSRF-safe normalization + DNS/private-IP blocking (reuses scraping guards).
+- Reversible verification probes (auth, sandbox draft roundtrip, media, signed webhook probe).
+- Tests: `connector-registry`, `connection-discovery` (SSRF), `installation-state-machine`
+  (transitions, secret redaction, audit), route RBAC/IDOR/redaction suites.
+
+## M26 — Magic Installer API and Angular wizard ✅
+- Routes `src/studio/routes-connectors.ts` (capabilities, discover, CRUD, credentials,
+  verify, activate, social-session, cancel/resume, delete) + `queue_connection` worker.
+- `GenericRestPublisher` added to `publishers.ts`; webhook publisher resolves installation secrets.
+- Studio: Connections hub (tabs All/Websites/Social/Needs attention, search, counts,
+  deep-link query params, table→card mobile transform) + 6-step wizard
+  (`connection-wizard-page.component.ts`) with resume/failure recovery and save-as-incomplete.
+- Provisioning: `scripts/provision-linked-tenants.ts` now parameter-driven with opt-in
+  fictitious fixtures; `scripts/cleanup-seeded-connections.ts` (dry-run, audited,
+  never deletes accounts with historical publications).
+- E2E golden paths 1+2 live: no seeded brand connections; website discovery → credentials →
+  reversible verification → activation (5/5 installer specs green in production).
+
+## M27 — Operation correlation and Activity Center ✅
+- `src/studio/operations.ts` + correlation in orchestration (text/image), publishing
+  (web + social), site indexing, editorial plan generation, installer queues;
+  worker `operation-hooks.ts` completes/fails the correlated operation.
+- `/v2/operations` list/detail/retry/cancel (retry requeues the correlated queue job).
+- Studio `/studio/activity`: status tabs with counts, search, progress, pagination,
+  details drawer, retry/cancel; live refresh via SSE.
+- Tests: `operations.test.ts` (lifecycle, progress math, classification, idempotent
+  job-key correlation, tenant scoping).
+
+## M28 — Authenticated SSE with replay and fallback ✅
+- Redis Streams event bus (`src/studio/events.ts`, sanitized payloads, bounded retention).
+- `GET /v2/events/stream` with heartbeats, Last-Event-ID replay, rate limit, tenant/site scope;
+  BFF streams the signed response through.
+- Angular `SseService` with visibility-aware polling fallback.
+- Tests: SSE authorization (401 unauthenticated), tenant scoping.
+
+## M29 — Notification Center and shell controls ✅
+- `src/studio/notifications.ts` (dedupe, sanitization, preferences) + `/v2/notifications*` routes.
+- Emissions: installer verify/activate, operation cancel, worker/operation outcomes.
+- Topbar bell with unread badge + popover preview; `/studio/notifications` inbox with
+  category tabs, unread/archived filters, mark read/all/archive and per-category preferences.
+- Tests: `notifications.test.ts` (dedupe, secret redaction, read/archive, preferences).
+
+## M30 — Navigation and responsive polish ✅
+- Activity added to the Operate nav group; notifications via bell (sidebar not lengthened).
+- Connections tabs, activity tabs/segments, mobile table→card transforms, sticky headers,
+  skeletons, empty states, drawer, deep-link query params.
+- Visual QA: 40 screenshots at 320/375/768/1280/1440 × light/dark — 0 horizontal overflow
+  (evidence in `test-results/visual-qa/`); initial bundle 499.98 kB (budget 500 kB).
+
+## M31 — Security review, deployment and smoke tests ✅
+- Adversarial checks: secret redaction in views/events/notifications, cross-tenant 404s,
+  invalid transition 409s, SSRF blocks, rate-limited SSE, write-only credentials.
+- Validation: typecheck ✅ · build ✅ · build:studio ✅ · 201/201 unit/integration ✅ ·
+  Prisma validate ✅ · migrate deploy ✅ · E2E installer 5/5 ✅ · studio regression 3/3 ✅ ·
+  guiatv golden path 3/4 first run, 1/1 on retry (documented DeepSeek output variance).
+- Production: migrations applied; API + all workers restarted; new
+  `content-ai-worker-connection.service` active; Studio release deployed;
+  health/ready + health/queues 200.
+- OpenAPI updated (`docs/openapi.yaml`), architecture doc
+  `docs/auctorio-installer-activity-notifications-architecture.md`, Graphify refreshed.
+
+## Known non-blocking residuals (unchanged)
+- No X/Meta/Ayrshare credentials in prod env — live social OAuth blocked; sandbox contract
+  coverage + honest capability reporting in place.
+- `talkaris-blog` destination unreachable from VPS.
+- DeepSeek plan-quantity variance (bounded top-up documented; retried green).

@@ -277,10 +277,22 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
 
   const jobId = crypto.randomUUID();
   const { enqueueSocialJob } = await import("../infrastructure/queue/producer");
+  const { createOperation } = await import("./operations");
+  const operation = await createOperation({
+    tenantId,
+    siteId: version.project.siteId,
+    type: "social_generation",
+    initiatorUserId: null,
+    entityType: "content_version",
+    entityId: version.id,
+    queueName: "queue_social",
+    jobKey: jobId,
+  });
   await enqueueSocialJob(jobId, {
     kind: "generate",
     jobId,
     tenantId,
+    operationId: operation.id,
     projectId: version.projectId,
     versionId: version.id,
     threadLength: input.threadLength ?? 1,
@@ -300,10 +312,22 @@ export async function regenerateSocial(tenantId: string, socialContentId: string
   });
   const jobId = crypto.randomUUID();
   const { enqueueSocialJob } = await import("../infrastructure/queue/producer");
+  const { createOperation } = await import("./operations");
+  const operation = await createOperation({
+    tenantId,
+    siteId: null,
+    type: "social_generation",
+    initiatorUserId: null,
+    entityType: "social_content",
+    entityId: social.id,
+    queueName: "queue_social",
+    jobKey: jobId,
+  });
   await enqueueSocialJob(jobId, {
     kind: "generate",
     jobId,
     tenantId,
+    operationId: operation.id,
     projectId: social.projectId,
     versionId: social.versionId,
     regenerateIds: [social.id],

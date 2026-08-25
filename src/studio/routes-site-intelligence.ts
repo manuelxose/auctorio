@@ -17,6 +17,8 @@ import {
   refreshSiteIntelligence,
 } from "./site-intelligence";
 import { suggestInternalLinks } from "./internal-linking";
+import { completeOperation, createOperation, failOperation, startOperation } from "./operations";
+import { publishEvent } from "./events";
 
 async function loadSiteForParams(request: FastifyRequest, reply: FastifyReply, tenantId: string) {
   const siteId = (request.params as { siteId: string }).siteId;
@@ -59,17 +61,53 @@ export function registerSiteIntelligenceRoutes(fastify: FastifyInstance) {
     };
 
     const running = isSiteIndexing(siteId);
-    const promise = refreshSiteIntelligence(context.tenantId, siteId, options);
+
+    const operation = await createOperation({
+      tenantId: context.tenantId,
+      siteId,
+      type: "site_index",
+      initiatorUserId: context.userId,
+      entityType: "site",
+      entityId: siteId,
+      metadata: { crawl: options.crawl, budget: options.budget ?? null },
+    });
+    await startOperation(operation.id, "discovering");
+    await publishEvent({
+      tenantId: context.tenantId,
+      siteId,
+      type: "operation.created",
+      payload: { operationId: operation.id, type: "site_index" },
+    });
+
+    const promise = refreshSiteIntelligence(context.tenantId, siteId, options)
+      .then(async (result) => {
+        await completeOperation(operation.id);
+        await publishEvent({
+          tenantId: context.tenantId,
+          siteId,
+          type: "operation.completed",
+          payload: { operationId: operation.id },
+        });
+        return result;
+      })
+      .catch(async (error) => {
+        await failOperation(operation.id, {
+          errorCode: "site_index_failed",
+          errorSummary: error instanceof Error ? error.message : String(error),
+          retryable: true,
+        });
+        throw error;
+      });
 
     if (body.wait === true) {
       try {
         const result = await promise;
-        return reply.send({ started: !running, result });
+        return reply.send({ started: !running, operationId: operation.id, result });
       } catch (error) {
         return badRequest(reply, error instanceof Error ? error.message : String(error));
       }
     }
-    return reply.code(202).send({ started: !running, indexing: true });
+    return reply.code(202).send({ started: !running, indexing: true, operationId: operation.id });
   });
 
   // Searchable indexed page inventory.

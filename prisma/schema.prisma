@@ -62,6 +62,7 @@ enum SiteType {
   tecnoria
   talkaris
   webhook
+  generic_rest
 }
 
 enum ProjectGoal {
@@ -369,6 +370,10 @@ model Tenant {
   SiteIntelligenceProfile        SiteIntelligenceProfile[]
   SearchTarget                   SearchTarget[]
   EditorialPlanGenerationAttempt EditorialPlanGenerationAttempt[]
+  connectorInstallations         ConnectorInstallation[]
+  operations                     Operation[]
+  notifications                  Notification[]
+  notificationPreferences        NotificationPreference[]
 
   @@map("tenants")
 }
@@ -554,6 +559,9 @@ model Site {
   intelligenceProfile SiteIntelligenceProfile?
   searchTargets       SearchTarget[]
   SiteInternalLink    SiteInternalLink[]
+  connectorInstallations ConnectorInstallation[]
+  operations          Operation[]
+  notifications       Notification[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -1893,4 +1901,148 @@ model BlockedDomain {
 
   @@unique([tenantId, domain])
   @@map("blocked_domains")
+}
+
+enum InstallationKind {
+  website
+  x
+  instagram
+}
+
+enum InstallationState {
+  draft
+  discovering
+  credentials_required
+  verifying
+  ready
+  active
+  failed
+  expired
+  disabled
+  cancelled
+}
+
+enum OperationStatus {
+  queued
+  running
+  retrying
+  succeeded
+  partial
+  failed
+  cancelled
+}
+
+enum NotificationSeverity {
+  info
+  success
+  warning
+  error
+}
+
+model ConnectorInstallation {
+  id                     String            @id @default(uuid()) @db.Uuid
+  tenantId               String            @map("tenant_id") @db.Uuid
+  siteId                 String?           @map("site_id") @db.Uuid
+  kind                   InstallationKind
+  provider               String
+  state                  InstallationState @default(draft)
+  displayName            String?           @map("display_name")
+  externalAccountId      String?           @map("external_account_id")
+  config                 Json?
+  discovered             Json?
+  capabilities           Json?
+  credentialsCiphertext  String?           @map("credentials_ciphertext") @db.Text
+  credentialsRef         String?           @map("credentials_ref")
+  secretFingerprint      String?           @map("secret_fingerprint")
+  lastError              String?           @map("last_error") @db.Text
+  verifiedAt             DateTime?         @map("verified_at")
+  activatedAt            DateTime?         @map("activated_at")
+  version                Int               @default(1)
+  createdByStudioUserId  String?           @map("created_by_studio_user_id") @db.Uuid
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, kind, state])
+  @@index([tenantId, state])
+  @@index([tenantId, siteId])
+  @@map("connector_installations")
+}
+
+model Operation {
+  id               String          @id @default(uuid()) @db.Uuid
+  tenantId         String          @map("tenant_id") @db.Uuid
+  siteId           String?         @map("site_id") @db.Uuid
+  type             String
+  status           OperationStatus @default(queued)
+  phase            String?
+  progress         Int             @default(0)
+  totalSteps       Int             @default(0) @map("total_steps")
+  completedSteps   Int             @default(0) @map("completed_steps")
+  initiatorUserId  String?         @map("initiator_user_id") @db.Uuid
+  entityType       String?         @map("entity_type")
+  entityId         String?         @map("entity_id") @db.Uuid
+  retryCount       Int             @default(0) @map("retry_count")
+  errorSummary     String?         @map("error_summary") @db.Text
+  errorCode        String?         @map("error_code")
+  queueName        String?         @map("queue_name")
+  jobKey           String?         @map("job_key")
+  metadata         Json?
+  startedAt        DateTime?       @map("started_at")
+  finishedAt       DateTime?       @map("finished_at")
+  cancelledAt      DateTime?       @map("cancelled_at")
+  createdAt        DateTime        @default(now()) @map("created_at")
+  updatedAt        DateTime        @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([tenantId, siteId, createdAt])
+  @@index([tenantId, jobKey])
+  @@map("operations")
+}
+
+model Notification {
+  id         String               @id @default(uuid()) @db.Uuid
+  tenantId   String               @map("tenant_id") @db.Uuid
+  userId     String?              @map("user_id") @db.Uuid
+  siteId     String?              @map("site_id") @db.Uuid
+  category   String
+  severity   NotificationSeverity @default(info)
+  title      String
+  message    String
+  entityType String?              @map("entity_type")
+  entityId   String?              @map("entity_id") @db.Uuid
+  actionUrl  String?              @map("action_url")
+  dedupeKey  String?              @map("dedupe_key")
+  readAt     DateTime?            @map("read_at")
+  archivedAt DateTime?            @map("archived_at")
+  createdAt  DateTime             @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, dedupeKey])
+  @@index([tenantId, userId, readAt, createdAt])
+  @@index([tenantId, category, createdAt])
+  @@map("notifications")
+}
+
+model NotificationPreference {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  category  String
+  enabled   Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, category])
+  @@map("notification_preferences")
 }

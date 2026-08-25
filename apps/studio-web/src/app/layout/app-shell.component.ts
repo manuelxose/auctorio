@@ -13,9 +13,11 @@ import { Subscription, filter, startWith } from 'rxjs';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
 import { ThemeService } from '../services/theme.service';
+import { StudioApiService } from '../services/studio-api.service';
+import { SseService } from '../services/sse.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
-import type { StudioSession, StudioSite } from '../models/studio.models';
+import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 type NavItem = {
   label: string;
@@ -174,6 +176,50 @@ type NavItem = {
             <span class="au-topbar__title">{{ sectionTitle }}</span>
           </div>
           <div class="au-topbar__actions">
+            <a
+              class="au-icon-button"
+              routerLink="/studio/activity"
+              aria-label="Background activity"
+              title="Background activity"
+            >
+              <app-icon name="activity"></app-icon>
+            </a>
+            <button
+              class="au-icon-button au-icon-button--bell"
+              type="button"
+              #bellTrigger
+              (click)="bellMenu.toggle(bellTrigger)"
+              [attr.aria-expanded]="bellMenu.isOpen()"
+              aria-haspopup="menu"
+              aria-label="Notifications"
+              title="Notifications"
+            >
+              <app-icon name="bell"></app-icon>
+              <span class="au-bell-badge" *ngIf="unreadCount > 0" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+            </button>
+            <app-popover #bellMenu>
+              <div class="au-menu au-menu--wide" aria-label="Notifications preview">
+                <div class="au-menu__label au-menu__label--split">
+                  Notifications
+                  <a class="au-link au-link--sm" routerLink="/studio/notifications" (click)="bellMenu.hide()">View all</a>
+                </div>
+                <button
+                  class="au-menu__item"
+                  type="button"
+                  *ngFor="let item of notificationPreview"
+                  [routerLink]="item.actionUrl || '/studio/notifications'"
+                  (click)="bellMenu.hide()"
+                >
+                  <span class="au-menu__item-text">
+                    <span class="au-menu__item-title">{{ item.title }}</span>
+                    <span class="au-menu__item-meta">{{ item.createdAt | date: 'short' }}</span>
+                  </span>
+                </button>
+                <div class="au-menu__empty" *ngIf="notificationPreview.length === 0">
+                  No notifications yet.
+                </div>
+              </div>
+            </app-popover>
             <div class="au-split">
               <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
                 <app-icon name="plus"></app-icon>
@@ -228,6 +274,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private readonly seo = inject(SeoService);
   private readonly appContext = inject(AppContextService);
   private readonly themeService = inject(ThemeService);
+  private readonly api = inject(StudioApiService);
+  private readonly sse = inject(SseService);
   private readonly platformId = inject(PLATFORM_ID);
 
   readonly navGroups: Array<{ label: string; items: NavItem[] }> = [
@@ -255,11 +303,15 @@ export class AppShellComponent implements OnInit, OnDestroy {
         { label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan' },
         { label: 'Sources', path: '/studio/sources', icon: 'sources' },
         { label: 'Automation', path: '/studio/automation', icon: 'automation' },
+        { label: 'Activity', path: '/studio/activity', icon: 'activity' },
       ],
     },
   ];
 
   private subscription: Subscription | null = null;
+  private sseUnsubscribe: (() => void) | null = null;
+  private sseSubscription: Subscription | null = null;
+  private notificationTimer: ReturnType<typeof setTimeout> | null = null;
 
   session: StudioSession | null = null;
   sites: StudioSite[] = [];
@@ -267,6 +319,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
   loading = true;
   menuOpen = false;
   sectionTitle = '';
+  unreadCount = 0;
+  notificationPreview: StudioNotification[] = [];
 
   get activeSiteName(): string {
     return this.sites.find((site) => site.id === this.activeSiteId)?.name ?? 'All sites';
@@ -308,6 +362,39 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
+    this.sseUnsubscribe?.();
+    this.sseSubscription?.unsubscribe();
+    if (this.notificationTimer) {
+      clearTimeout(this.notificationTimer);
+    }
+  }
+
+  private watchLiveUpdates(): void {
+    if (!isPlatformBrowser(this.platformId)) {
+      return;
+    }
+    this.sseUnsubscribe = this.sse.subscribe((event) => {
+      if (event.type === 'notification.created' || event.type === 'notification.read') {
+        this.refreshNotificationSummary();
+      }
+    });
+    this.sseSubscription = this.sse.connection$.subscribe();
+    this.refreshNotificationSummary();
+  }
+
+  private refreshNotificationSummary(): void {
+    if (this.notificationTimer) {
+      clearTimeout(this.notificationTimer);
+    }
+    this.notificationTimer = setTimeout(() => {
+      this.api.listNotifications({ page: 1, pageSize: 5 }).subscribe({
+        next: (response) => {
+          this.unreadCount = response.unread;
+          this.notificationPreview = response.items;
+        },
+        error: () => undefined,
+      });
+    }, 250);
   }
 
   siteInitialsOf(site: StudioSite): string {
@@ -332,6 +419,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       this.sites = session?.sites ?? [];
       this.activeSiteId = session?.activeSiteId ?? this.sites[0]?.id ?? null;
       this.loading = false;
+      this.watchLiveUpdates();
       this.seo.update({
         title: 'Auctorio',
         description: 'Editorial workspace',

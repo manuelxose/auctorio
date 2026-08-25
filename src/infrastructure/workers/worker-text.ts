@@ -8,6 +8,7 @@ import { getPrismaClient } from "../db/prisma";
 import { getTextProvider } from "../ai/text";
 import { resolveTextPrompt } from "../../studio/prompts";
 import { syncTextResultToStudio } from "../../studio/orchestration";
+import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 
 type TextJobData = {
   jobId: string;
@@ -150,6 +151,7 @@ export async function runTextWorker() {
       return;
     }
     await markJobDone(job.id.toString());
+    await completeOperationForJob(job.data);
   });
 
   worker.on("failed", async (job, err) => {
@@ -158,6 +160,7 @@ export async function runTextWorker() {
     }
     const data = job.data as TextJobData | undefined;
     await markJobFailed(job.id.toString(), err.message);
+    await failOperationForJob(job.data, err);
     if (data?.contentTextId) {
       await prisma.contentText.update({
         where: { id: data.contentTextId },
