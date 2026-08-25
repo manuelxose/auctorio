@@ -1,16 +1,16 @@
 # Graph Report - auctorio  (2026-08-25)
 
 ## Corpus Check
-- 296 files · ~262,208 words
+- 300 files · ~264,854 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 3653 nodes · 8267 edges · 165 communities (151 shown, 14 thin omitted)
+- 3686 nodes · 8334 edges · 167 communities (149 shown, 18 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 35 edges (avg confidence: 0.84)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `8701491b`
+- Built from commit: `2a76d753`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -21,8 +21,8 @@
 - StudioApiService
 - ContentWorkspacePageComponent
 - "tenants"
-- repository.ts
-- security.ts
+- worker-publishing.ts
+- loginStudioAccountWithPassword
 - notifications.ts
 - routes-editorial.ts
 - CalendarPageComponent
@@ -36,7 +36,7 @@
 - Auctorio — Milestones
 - sha256
 - ConnectionsPageComponent
-- structured-output.test.ts
+- crawler.ts
 - fetchWithTimeout
 - Auctorio Design System
 - topic.ts
@@ -47,27 +47,27 @@
 - StudioPublication
 - repositories.ts
 - social-publishers.ts
-- routes-discovery.ts
+- http-utils.ts
 - marketing-content.ts
 - Talkaris Admin Redesign
 - scraping/index.ts
-- worker-image.ts
-- topic-controller.ts
+- getPrismaClient
+- AyrshareSocialProvider
 - views.ts
 - getMarketingPath
 - SourcesPageComponent
-- editorial-plan-v2.test.ts
+- fetchUrl
 - EditorialPlanPageComponent
 - verification.ts
 - profile.ts
 - AppShellComponent
 - compilerOptions
-- operations.ts
+- structuredEvent
 - sources.ts
 - editorial.ts
 - editorial-plan-schema.ts
 - Auctorio — SEO Architecture
-- site-relevance.ts
+- editorial-plan.ts
 - orchestration.ts
 - 2. Mapa objetivo de rutas
 - qa.ts
@@ -76,39 +76,39 @@
 - SettingsPageComponent
 - InboxPageComponent
 - publication.ts
-- http-utils.ts
-- publishers.ts
+- web-discovery.ts
+- getNumberEnv
 - ActivityPageComponent
 - Arquitectura Tecnica del Backend de Generacion de Contenido con IA (SEO e Instagram)
-- getEnv
+- social-connections.ts
 - devDependencies
 - dependencies
-- env.ts
-- discovery-planner.ts
+- getEnv
+- sitemap.ts
 - Talkaris Product Architecture
 - image.ts
 - registry.ts
 - scripts
-- SocialIntegrationProvider
+- social-provider.ts
 - AppToastHostComponent
-- web-discovery.ts
+- source-quality.ts
 - MarketingLocale
 - AUCTORIO REBUILD STATUS
 - deps.ts
 - social.ts
-- PublishingPageComponent
-- getPrismaClient
+- WebIntelligenceProvider
+- prisma.ts
 - MediaPageComponent
 - AutomationPageComponent
 - dependencies
-- structured.ts
-- internal-linking.ts
+- web-intelligence.ts
+- TavilyWebIntelligenceProvider
 - app.config.ts
 - options
-- getNumberEnv
+- FirecrawlWebIntelligenceProvider
 - SeoService
 - Auctorio Studio — Design System (Phase 2)
-- karma-chrome-launcher
+- browser.ts
 - ThemeService
 - home-page.component.ts
 - 1. Universal connection installer
@@ -121,9 +121,11 @@
 - Image Manifest
 - seo.service.ts
 - SiteIntelligencePageComponent
-- typescript
+- karma
 - Auctorio Studio — Frontend Rebuild Audit (Phase 0)
 - verify-platform-credentials.ts
+- karma-coverage
+- Component
 - CLAUDE.md - Auctorio Agent Guide
 - Studio Simplification — Architecture Report
 - Studio Simplification — Deletion Report
@@ -132,6 +134,7 @@
 - AuctorioChatWidgetComponent
 - OverviewPageComponent
 - studio/auth.ts
+- Injectable
 - development
 - SseService
 - Auctorio SEO Engine V2 — Architecture & Operator Notes (M16–M22)
@@ -142,7 +145,6 @@
 - studio-web/package.json
 - scripts
 - Studio Web
-- ai/text.ts
 - shouldUseSecureCookie
 - getInternalHeaders
 - postInternalAuth
@@ -155,7 +157,7 @@
 - readSession
 - cloudflare-cutover.sh
 - qa-visual-installer.mjs
-- getRedisConnectionOptions
+- events.ts
 - studio-ssr.test.ts
 - architect
 - audit.ts
@@ -173,44 +175,44 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `StudioApiService` - 156 edges
-2. `getNumberEnv()` - 112 edges
+2. `getNumberEnv()` - 113 edges
 3. `registerStudioRoutes()` - 109 edges
-4. `getEnv()` - 95 edges
-5. `getPrismaClient()` - 81 edges
+4. `getEnv()` - 97 edges
+5. `getPrismaClient()` - 82 edges
 6. `ContentWorkspacePageComponent` - 71 edges
-7. `registerEditorialRoutes()` - 67 edges
-8. `writeAudit()` - 66 edges
+7. `writeAudit()` - 68 edges
+8. `registerEditorialRoutes()` - 67 edges
 9. `"tenants"` - 56 edges
 10. `structuredEvent()` - 50 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `createFixture()` --calls--> `sha256()`  [EXTRACTED]
-  tests/connector-routes.test.ts → src/shared/utils/hash.ts
-- `buildServer()` --calls--> `registerStudioRoutes()`  [EXTRACTED]
-  tests/connector-routes.test.ts → src/studio/routes.ts
 - `buildServer()` --calls--> `registerStudioRoutes()`  [EXTRACTED]
   tests/social-connections-routes.test.ts → src/studio/routes.ts
 - `buildStudioTestServer()` --calls--> `registerStudioRoutes()`  [EXTRACTED]
   tests/studio-routes.test.ts → src/studio/routes.ts
 - `buildServer()` --calls--> `registerStudioRoutes()`  [EXTRACTED]
   tests/tenant-isolation.test.ts → src/studio/routes.ts
+- `createTenant()` --calls--> `sha256()`  [EXTRACTED]
+  tests/operations.test.ts → src/shared/utils/hash.ts
+- `main()` --calls--> `writeAudit()`  [EXTRACTED]
+  scripts/reset-generated-content.ts → src/studio/audit.ts
 
 ## Import Cycles
 - None detected.
 
-## Communities (165 total, 14 thin omitted)
+## Communities (167 total, 18 thin omitted)
 
 ### Community 0 - "studio.models.ts"
 Cohesion: 0.03
-Nodes (59): AutomationStatus, ConfigSchemaField, ConnectorAuthMethodView, ConnectorCapabilitiesResponse, ConnectorView, CreateProjectPayload, CreateSitePayload, DiscoveredDomain (+51 more)
+Nodes (58): ConfigSchemaField, ConnectorAuthMethodView, ConnectorCapabilitiesResponse, ConnectorView, CreateProjectPayload, CreateSitePayload, DiscoveredDomain, DiscoverySettings (+50 more)
 
 ### Community 1 - "routes.ts"
-Cohesion: 0.07
-Nodes (48): getContentTypeFromPath(), MIME_BY_EXTENSION, assignStudioRoleToUser(), createStudioRole(), ensureStudioRoles(), ensureTenantBootstrap(), ensureUniqueRoleKey(), listStudioRoles() (+40 more)
+Cohesion: 0.05
+Nodes (76): getContentTypeFromPath(), MIME_BY_EXTENSION, assignStudioRoleToUser(), createStudioRole(), ensureStudioRoles(), ensureTenantBootstrap(), ensureUniqueRoleKey(), getInternalStudioWorkspaceAccessBySlug() (+68 more)
 
 ### Community 2 - "app.routes.ts"
 Cohesion: 0.08
-Nodes (40): AppEmptyStateComponent, Component, AppIconComponent, IconElement, ICONS, StudioIconName, Component, studioAuthGuard() (+32 more)
+Nodes (41): AppEmptyStateComponent, Component, AppIconComponent, IconElement, ICONS, StudioIconName, Component, studioAuthGuard() (+33 more)
 
 ### Community 3 - "StudioApiService"
 Cohesion: 0.03
@@ -224,33 +226,33 @@ Nodes (5): ProjectVersionDetail, StudioSocialContent, ContentWorkspacePageCompon
 Cohesion: 0.08
 Nodes (60): "ai_audit", "content_image", "content_text", "facts", "jobs", "tenants", "topics", "asset_variants" (+52 more)
 
-### Community 6 - "repository.ts"
-Cohesion: 0.08
-Nodes (34): defaultDependencies, LoadedPublication, prisma, processPublishingJob(), PublishingDependencies, PublishingJobData, readTargetStatus(), resolvePublicationStatus() (+26 more)
+### Community 6 - "worker-publishing.ts"
+Cohesion: 0.23
+Nodes (12): defaultDependencies, LoadedPublication, prisma, processPublishingJob(), PublishingDependencies, PublishingJobData, readTargetStatus(), resolvePublicationStatus() (+4 more)
 
-### Community 7 - "security.ts"
-Cohesion: 0.14
-Nodes (18): main(), WORKSPACE_BOOTSTRAP, ensureUniqueTenantSlug(), getInternalStudioIdentityProviderBySlug(), getInternalStudioWorkspaceAccessBySlug(), getStudioIdentityProviderConfig(), readJsonObject(), resolveTenantBySlug() (+10 more)
+### Community 7 - "loginStudioAccountWithPassword"
+Cohesion: 0.11
+Nodes (30): main(), acceptStudioInvitation(), completeLocalAccountLogin(), consumeStudioAccountToken(), getStudioAccountByEmail(), getStudioAccountByGoogleSubject(), getStudioLoginOptions(), getStudioRequestAccessUrl() (+22 more)
 
 ### Community 8 - "notifications.ts"
 Cohesion: 0.22
 Nodes (16): archiveNotification(), getNotificationPreferences(), listNotifications(), markAllNotificationsRead(), markNotificationRead(), NotificationCategory, NotificationInput, NotificationView (+8 more)
 
 ### Community 9 - "routes-editorial.ts"
-Cohesion: 0.08
-Nodes (53): writeAudit(), UpdatePolicyInput, listCalendarEvents(), buildPromptV2(), bulkApproveEditorialPlanItems(), bulkDeleteEditorialPlanItems(), bulkSetEditorialPlanItemStatus(), CHANNELS (+45 more)
+Cohesion: 0.09
+Nodes (42): writeAudit(), getAutomationStatus(), getOrCreatePolicy(), pauseAutomation(), resumeAutomation(), updatePolicy(), CalendarFilters, listCalendarEvents() (+34 more)
 
 ### Community 10 - "CalendarPageComponent"
 Cohesion: 0.07
 Nodes (6): CalendarEvent, StudioProjectSummary, CalendarPageComponent, Component, ContentListPageComponent, Component
 
 ### Community 11 - "worker-social.ts"
-Cohesion: 0.20
-Nodes (17): buildPublishInput(), LoadedPublication, loadPublication(), prisma, processPublish(), processUnpublish(), runSocialWorker(), SocialGenerateJobData (+9 more)
+Cohesion: 0.17
+Nodes (24): buildPublishInput(), LoadedPublication, loadPublication(), prisma, processPublish(), processUnpublish(), runSocialWorker(), SocialGenerateJobData (+16 more)
 
 ### Community 12 - "routes-connectors.ts"
-Cohesion: 0.13
-Nodes (32): assertCanTransition(), cancelInstallation(), canTransition(), clearInstallationCredentials(), createInstallation(), deleteInstallationDraft(), getInstallation(), INSTALLATION_STATES (+24 more)
+Cohesion: 0.16
+Nodes (28): sha256Hex(), assertCanTransition(), cancelInstallation(), canTransition(), clearInstallationCredentials(), createInstallation(), deleteInstallationDraft(), getInstallation() (+20 more)
 
 ### Community 13 - "src/server.ts"
 Cohesion: 0.05
@@ -266,7 +268,7 @@ Nodes (46): buildImagePrompt(), buildTextPrompt(), ImagePromptInput, TextPromptI
 
 ### Community 16 - "planner.ts"
 Cohesion: 0.09
-Nodes (42): assertSafeAutomationPolicy(), AUTOMATION_DEFAULTS, AutomationStatus, countChannelPublicationsToday(), EditorialSlot, generateEditorialSlots(), getAutomationStatus(), getChannelWindow() (+34 more)
+Nodes (38): runAutomationWorker(), AUTOMATION_DEFAULTS, AutomationStatus, countChannelPublicationsToday(), EditorialSlot, generateEditorialSlots(), getChannelWindow(), isDayActive() (+30 more)
 
 ### Community 17 - "4. Componentes"
 Cohesion: 0.05
@@ -277,28 +279,28 @@ Cohesion: 0.05
 Nodes (38): Auctorio — Milestones, Known non-blocking residuals, Known non-blocking residuals (unchanged), M0 — Repository Intelligence ✅, M10 — Golden Path ✅ (GuiaTV) / ✅ (Tecnoria — 2026-08-25), M11 — Cross-Tenant Regression 🟡, M12 — UX/UI Enterprise Rebuild ✅, M13 — Realtime, Reliability, Observability 🟡 (+30 more)
 
 ### Community 19 - "sha256"
-Cohesion: 0.10
-Nodes (20): sha256(), authPlugin(), buildServer(), startServer(), createTenant(), createTenant(), createTenant(), createFixture() (+12 more)
+Cohesion: 0.07
+Nodes (29): sha256(), requireTenant(), anchorFromTitle(), InternalLinkSuggestion, prisma, slugTokens(), suggestInternalLinks(), tokenize() (+21 more)
 
 ### Community 20 - "ConnectionsPageComponent"
-Cohesion: 0.08
-Nodes (7): ConnectorInstallation, ConnectorKind, PublishingAccount, SocialConnection, SocialSetupInfo, ConnectionsPageComponent, Component
+Cohesion: 0.09
+Nodes (6): ConnectorInstallation, ConnectorKind, SocialConnection, SocialSetupInfo, ConnectionsPageComponent, Component
 
-### Community 21 - "structured-output.test.ts"
-Cohesion: 0.17
-Nodes (9): arr(), enums(), Infer, num(), obj(), optionalString(), optNul(), str() (+1 more)
+### Community 21 - "crawler.ts"
+Cohesion: 0.14
+Nodes (21): BOILERPLATE_SELECTORS, compact(), CrawlBatchResult, crawlPagesForSite(), ExtractedPage, extractPage(), extractPageFromHtml(), firstText() (+13 more)
 
 ### Community 22 - "fetchWithTimeout"
-Cohesion: 0.06
-Nodes (40): fetchJson(), fetchWithTimeout(), HttpRequestOptions, JsonRecord, normalizeBody(), sleep(), AyrshareSocialProvider, IG_LIMIT (+32 more)
+Cohesion: 0.12
+Nodes (16): pkceChallenge(), fetchJson(), fetchWithTimeout(), HttpRequestOptions, JsonRecord, normalizeBody(), sleep(), basicAuth() (+8 more)
 
 ### Community 23 - "Auctorio Design System"
 Cohesion: 0.06
 Nodes (35): 10. Accesibilidad, 11. Inventario de componentes para implementacion, 12. Regla final, 1. Direccion visual, 2. Principios del sistema, 3.1 Foundation tokens, 3.2 Semantic tokens, 3.3 Typography (+27 more)
 
 ### Community 24 - "topic.ts"
-Cohesion: 0.11
-Nodes (30): GenerateImageFromTextInput, GenerateImageFromTextOutput, generateImageFromTextUseCase(), GetContentImageInput, GetContentImageOutput, getContentImageUseCase(), GetContentTextInput, GetContentTextOutput (+22 more)
+Cohesion: 0.08
+Nodes (53): GenerateImageFromTextInput, GenerateImageFromTextOutput, generateImageFromTextUseCase(), GetContentImageInput, GetContentImageOutput, getContentImageUseCase(), GetContentTextInput, GetContentTextOutput (+45 more)
 
 ### Community 26 - "Auctorio Admin Redesign"
 Cohesion: 0.06
@@ -324,9 +326,9 @@ Nodes (26): AiAudit, ContentImage, ContentStatus, ContentText, ContentTextType, 
 Cohesion: 0.16
 Nodes (19): buildOAuthHeader(), dryRunResult(), igUrl(), InstagramCredentials, InstagramPublisherAdapterImpl, isDryRunEnabled(), percentEncode(), PublisherCapabilities (+11 more)
 
-### Community 32 - "routes-discovery.ts"
-Cohesion: 0.14
-Nodes (35): badRequest(), isUuid(), notFound(), parseBody(), parseOptionalString(), parsePage(), parsePageSize(), requireStudioContext() (+27 more)
+### Community 32 - "http-utils.ts"
+Cohesion: 0.11
+Nodes (44): badRequest(), conflict(), errorBody(), getInternalSharedSecret(), INTERNAL_SECRET_HEADER, isOneOf(), isUuid(), notFound() (+36 more)
 
 ### Community 33 - "marketing-content.ts"
 Cohesion: 0.08
@@ -337,20 +339,20 @@ Cohesion: 0.06
 Nodes (32): 10. Resultado de producto, 1. Objetivo del rediseño, 2. Principios de producto, 3. Nueva arquitectura del sidebar, 4. Pantallas rediseñadas, 5. Auth architecture implementada, 6. RBAC model, 7. Modelo mental (+24 more)
 
 ### Community 35 - "scraping/index.ts"
-Cohesion: 0.06
-Nodes (53): buildContentFromFields(), compactWhitespace(), enforceRateLimit(), ensureRobotsAllowed(), extractLink(), extractSelectors(), getRobotsRules(), isHostAllowed() (+45 more)
+Cohesion: 0.13
+Nodes (26): buildContentFromFields(), compactWhitespace(), enforceRateLimit(), ensureRobotsAllowed(), extractLink(), extractSelectors(), getRobotsRules(), isHostAllowed() (+18 more)
 
-### Community 36 - "worker-image.ts"
-Cohesion: 0.14
-Nodes (24): getTextProvider(), createJob(), findJobByIdempotency(), markJobDone(), markJobFailed(), markJobProcessing(), QUEUE_NAMES, ScrapeSourceType (+16 more)
+### Community 36 - "getPrismaClient"
+Cohesion: 0.09
+Nodes (35): hashApiKey(), main(), main(), ROLE_KEYS, main(), hashApiKey(), main(), allowedStatuses (+27 more)
 
-### Community 37 - "topic-controller.ts"
+### Community 37 - "AyrshareSocialProvider"
 Cohesion: 0.17
-Nodes (23): nowIso(), getIdempotencyKey(), mapErrorCodeToStatus(), sendContentAccepted(), sendJobAccepted(), sendTopicCreated(), sendUseCaseError(), generateImageFromText() (+15 more)
+Nodes (7): AyrshareSocialProvider, SocialPlatform, SocialProfile, SocialPublishInput, SocialPublishResult, validateInstagramPayload(), validateXPayload()
 
 ### Community 38 - "views.ts"
-Cohesion: 0.12
-Nodes (32): buildAssetPublicUrl(), listProjects(), buildReviewGate(), BuildReviewGateInput, countQaFailures(), countQaWarnings(), countWordsFromHtml(), ImageReadinessInput (+24 more)
+Cohesion: 0.11
+Nodes (32): listProjects(), mapQaState(), buildReviewGate(), BuildReviewGateInput, countQaFailures(), countQaWarnings(), countWordsFromHtml(), ImageReadinessInput (+24 more)
 
 ### Community 39 - "getMarketingPath"
 Cohesion: 0.14
@@ -360,17 +362,17 @@ Nodes (17): BRAND_NAME, getAlternatePagePaths(), getLocalizedPageSeo(), getMarke
 Cohesion: 0.12
 Nodes (6): BlockedDomain, SourceRecommendation, SourceType, StudioSource, SourcesPageComponent, Component
 
-### Community 41 - "editorial-plan-v2.test.ts"
-Cohesion: 0.15
-Nodes (11): EditorialPlanningContext, loadProfile(), PlanningEvidence, PlanningStrategy, prisma, EditorialPlanBriefV2, SiteIntelligenceProfileSummary, DEFAULT_RELEVANCE_THRESHOLD (+3 more)
+### Community 41 - "fetchUrl"
+Cohesion: 0.32
+Nodes (12): fetchUrl(), validateScrapeUrl(), asStringArray(), compact(), deriveExternalId(), extractLink(), extractListingItems(), extractMedia() (+4 more)
 
 ### Community 42 - "EditorialPlanPageComponent"
 Cohesion: 0.07
 Nodes (3): EditorialPlan, EditorialPlanPageComponent, Component
 
 ### Community 43 - "verification.ts"
-Cohesion: 0.13
-Nodes (26): detectCms(), DiscoveredAuthOption, discoverWebsite(), extractMetaContent(), isPrivateIpLiteral(), normalizeDestinationUrl(), PROBE_HEADERS, probeEndpoint() (+18 more)
+Cohesion: 0.14
+Nodes (25): detectCms(), DiscoveredAuthOption, discoverWebsite(), extractMetaContent(), isPrivateIpLiteral(), normalizeDestinationUrl(), PROBE_HEADERS, probeEndpoint() (+17 more)
 
 ### Community 44 - "profile.ts"
 Cohesion: 0.13
@@ -384,29 +386,29 @@ Nodes (7): AppPopoverComponent, Component, AppShellComponent, Component, StudioN
 Cohesion: 0.07
 Nodes (27): dist, DOM, ES2022, node, node_modules, scripts/**/*.ts, src/**/*.ts, tests/**/*.ts (+19 more)
 
-### Community 47 - "operations.ts"
-Cohesion: 0.14
-Nodes (28): markOperationStartedForJob(), ConnectionDependencies, ConnectionJobData, defaultDependencies, prisma, processConnectionJob(), runConnectionWorker(), runDiscovery() (+20 more)
+### Community 47 - "structuredEvent"
+Cohesion: 0.11
+Nodes (38): failOperationForJob(), JobDataWithOperation, markOperationStartedForJob(), ConnectionDependencies, ConnectionJobData, defaultDependencies, prisma, processConnectionJob() (+30 more)
 
 ### Community 48 - "sources.ts"
-Cohesion: 0.11
-Nodes (36): fetchUrl(), validateScrapeUrl(), ApiSourceAdapter, asStringArray(), AtomSourceAdapter, buildItemContentHash(), compact(), CreateSourceInput (+28 more)
+Cohesion: 0.07
+Nodes (26): ApiSourceAdapter, AtomSourceAdapter, CreateSourceInput, FetchSourceResult, firstOf(), HtmlListingSourceAdapter, HtmlSourceAdapter, ImdbDatasetOptions (+18 more)
 
 ### Community 49 - "editorial.ts"
-Cohesion: 0.18
-Nodes (15): assignSourceItemToCluster(), buildSemanticHash(), clampScore(), CoverageCheckResult, listStoryClusters(), overlapRatio(), prisma, ScoreExplanationEntry (+7 more)
+Cohesion: 0.14
+Nodes (22): DiscoveryTickResult, prisma, runDiscoveryTick(), runDiscoveryWorker(), scoreAndClusterItems(), assignSourceItemToCluster(), buildSemanticHash(), clampScore() (+14 more)
 
 ### Community 50 - "editorial-plan-schema.ts"
-Cohesion: 0.07
-Nodes (27): briefItemSchema, CANNIBALIZATION_RISKS, CannibalizationRisk, channelSchema, CONTENT_FORMATS, ContentFormat, contentTypeSchema, EDITORIAL_PLAN_PROMPT_VERSION (+19 more)
+Cohesion: 0.05
+Nodes (53): balanceJson(), extractJsonCandidate(), generateStructured(), parseJsonWithRepair(), repairJson(), stripFences(), StructuredGenerationAttempt, StructuredGenerationOptions (+45 more)
 
 ### Community 51 - "Auctorio — SEO Architecture"
 Cohesion: 0.07
 Nodes (26): 1. URL Structure, 2. Meta Tags, 3. Structured Data (JSON-LD), 4. Content Architecture, 5. Technical SEO, 6. Open Graph & Social, 7. Recommendations, Auctorio — SEO Architecture (+18 more)
 
-### Community 52 - "site-relevance.ts"
-Cohesion: 0.21
-Nodes (16): postValidatePlanItems(), SearchIntent, CannibalizationVerdict, classifyCannibalization(), computeSiteRelevanceScore(), intentFitsProfile(), knownPlatformFromText(), normalize() (+8 more)
+### Community 52 - "editorial-plan.ts"
+Cohesion: 0.07
+Nodes (48): buildPromptV2(), CHANNELS, buildEditorialPlanningContext(), EditorialPlanningContext, loadProfile(), PlanningEvidence, PlanningStrategy, prisma (+40 more)
 
 ### Community 53 - "orchestration.ts"
 Cohesion: 0.09
@@ -437,16 +439,16 @@ Cohesion: 0.13
 Nodes (5): SourceItemStatus, StudioSourceItem, StudioStoryCluster, InboxPageComponent, Component
 
 ### Community 60 - "publication.ts"
-Cohesion: 0.18
-Nodes (16): ALLOWED_TRANSITIONS, canTransition(), classifyPublicationError(), createPublication(), CreatePublicationInput, failAttempt(), FailureClass, linkDurableWebsitePublication() (+8 more)
+Cohesion: 0.11
+Nodes (24): assertSafeAutomationPolicy(), ScoringContext, ALLOWED_TRANSITIONS, canTransition(), classifyPublicationError(), createPublication(), CreatePublicationInput, deletePublication() (+16 more)
 
-### Community 61 - "http-utils.ts"
-Cohesion: 0.13
-Nodes (18): errorBody(), getInternalSharedSecret(), INTERNAL_SECRET_HEADER, parseJsonObjectField(), readSignedStudioContext(), readSingleHeader(), requireInternalSecret(), requireTenant() (+10 more)
+### Community 61 - "web-discovery.ts"
+Cohesion: 0.19
+Nodes (16): loadBlockedDomainSet(), recommendSource(), upsertSourceItem(), DailyUsage, dedupeCandidates(), DiscoveryRunResult, ensureDomainSource(), estimateScrapeCost() (+8 more)
 
-### Community 62 - "publishers.ts"
+### Community 62 - "getNumberEnv"
 Cohesion: 0.06
-Nodes (41): ALLOWED_ATTRIBUTES, ALLOWED_TAGS, sanitizeEditorialHtml(), asRecord(), buildDryRunExternalId(), buildDryRunResult(), buildGuiaTvPayload(), DryRunDecision (+33 more)
+Nodes (42): getNumberEnv(), ALLOWED_ATTRIBUTES, ALLOWED_TAGS, sanitizeEditorialHtml(), asRecord(), buildDryRunExternalId(), buildDryRunResult(), buildGuiaTvPayload() (+34 more)
 
 ### Community 63 - "ActivityPageComponent"
 Cohesion: 0.14
@@ -456,9 +458,9 @@ Nodes (4): OperationItem, OperationStatus, ActivityPageComponent, Component
 Cohesion: 0.08
 Nodes (23): 0.1 Estados y transiciones (publicaciones), 0.2 Workers y colas, 0.3 Idempotencia y reintentos, 0.4 Seguridad, 0.5 Automatizacion, 0. Dominio editorial (nuevo), 10. Seguridad y scraping, 11. Proveedores de IA (abstraccion) (+15 more)
 
-### Community 65 - "getEnv"
-Cohesion: 0.10
-Nodes (41): decryptSecret(), encryptionKey(), encryptSecret(), generateOAuthState(), generatePkceVerifier(), hmacHex(), pkceChallenge(), sha256Hex() (+33 more)
+### Community 65 - "social-connections.ts"
+Cohesion: 0.13
+Nodes (19): decryptSecret(), encryptionKey(), encryptSecret(), generateOAuthState(), generatePkceVerifier(), hmacHex(), tryDecryptSecret(), loadActiveInstallationForSite() (+11 more)
 
 ### Community 66 - "devDependencies"
 Cohesion: 0.09
@@ -468,37 +470,41 @@ Nodes (23): @angular/build, @angular/cli, @angular/compiler-cli, devDependencies
 Cohesion: 0.09
 Nodes (23): @angular/common, @angular/compiler, @angular/core, @angular/forms, @angular/platform-browser, @angular/platform-server, @angular/router, @angular/ssr (+15 more)
 
-### Community 68 - "env.ts"
-Cohesion: 0.18
-Nodes (11): ApiEnvelope, assert(), call(), main(), PostShape, getJsonEnv(), getPublicBaseUrl(), buildStudioLoginUrl() (+3 more)
+### Community 68 - "getEnv"
+Cohesion: 0.13
+Nodes (22): ApiEnvelope, assert(), call(), main(), PostShape, runSchedulerTick(), runSchedulerWorker(), getEnv() (+14 more)
 
-### Community 69 - "discovery-planner.ts"
-Cohesion: 0.29
-Nodes (9): buildPlanPrompt(), DiscoveryQueryPlan, EditorialDiscoveryContext, gatherEditorialContext(), parseDiscoveryPlan(), planDiscovery(), prisma, QUERY_CATEGORIES (+1 more)
+### Community 69 - "sitemap.ts"
+Cohesion: 0.25
+Nodes (13): DiscoveredSitemap, discoverSitemapsForSite(), fetchBounded(), normalizePageUrl(), parseRobotsTxt(), parseSitemapBody(), prisma, readLastmod() (+5 more)
 
 ### Community 70 - "Talkaris Product Architecture"
 Cohesion: 0.09
 Nodes (21): 1. Resumen ejecutivo, 2. Mapa real del repositorio, 3. Dominio actual, 4. Funcionalidades existentes y su representacion, 5. Auth architecture, 6. Resultado, Backend HTTP, Completamente representadas en UI (+13 more)
 
 ### Community 71 - "image.ts"
-Cohesion: 0.13
-Nodes (13): backoffDelay(), downloadBytesRobust(), getImageProvider(), ImageDownloadError, ImageDownloadErrorCode, ImageGenerationHandle, ImageGenerationInput, ImageGenerationResult (+5 more)
+Cohesion: 0.14
+Nodes (11): backoffDelay(), downloadBytesRobust(), ImageDownloadError, ImageDownloadErrorCode, ImageGenerationHandle, ImageGenerationInput, ImageGenerationResult, ImageProvider (+3 more)
 
 ### Community 72 - "registry.ts"
 Cohesion: 0.12
-Nodes (18): AuthMethodDescriptor, AuthMethodId, CapabilityId, ConfigSchemaField, connectorCapabilityView, ConnectorKind, GENERIC_REST_DESCRIPTOR, GENERIC_REST_FIELDS (+10 more)
+Nodes (19): AuthMethodDescriptor, AuthMethodId, CapabilityId, ConfigSchemaField, connectorCapabilityView, ConnectorDescriptor, ConnectorKind, GENERIC_REST_DESCRIPTOR (+11 more)
 
 ### Community 73 - "scripts"
 Cohesion: 0.10
 Nodes (20): scripts, bootstrap:studio-access, build, build:studio, dev:studio, serve:studio, start:api, start:worker:automation (+12 more)
 
+### Community 74 - "social-provider.ts"
+Cohesion: 0.09
+Nodes (15): IG_LIMIT, PLATFORM_MAP, X_LIMIT, CONNECTION_PROVIDERS, ConnectionProviderName, defaultConnectionProvider(), INSTAGRAM_CAPTION_LIMIT, INSTAGRAM_IMAGE_RATIOS (+7 more)
+
 ### Community 75 - "AppToastHostComponent"
 Cohesion: 0.40
 Nodes (3): AppToastHostComponent, Component, ToastItem
 
-### Community 76 - "web-discovery.ts"
-Cohesion: 0.06
-Nodes (42): DiscoveryTickResult, prisma, runDiscoveryTick(), runDiscoveryWorker(), scoreAndClusterItems(), scoreAndPromoteSourceItem(), applySourceFeedback(), AUTHORITY_TLDS (+34 more)
+### Community 76 - "source-quality.ts"
+Cohesion: 0.14
+Nodes (16): applySourceFeedback(), AUTHORITY_TLDS, detectSpamSignals(), DomainEvaluationContext, evaluateDomainQuality(), isPrimaryCandidate(), PRIMARY_HINTS, prisma (+8 more)
 
 ### Community 77 - "MarketingLocale"
 Cohesion: 0.16
@@ -513,32 +519,28 @@ Cohesion: 0.15
 Nodes (11): checkCostPolicy(), CostPolicyInput, CostPolicyResult, startOfDayUtc(), startOfMonthUtc(), toNumber(), CostPolicy, CostPolicyResult (+3 more)
 
 ### Community 80 - "social.ts"
-Cohesion: 0.13
-Nodes (17): buildSocialPrompt(), extractHashtags(), GeneratedSocialPiece, INSTAGRAM_CAPTION_LIMIT, listSocialContent(), parseGeneratedSocial(), prisma, regenerateSocial() (+9 more)
-
-### Community 81 - "PublishingPageComponent"
-Cohesion: 0.28
-Nodes (4): ProjectStatus, PublicationListItem, PublishingPageComponent, Component
-
-### Community 82 - "getPrismaClient"
 Cohesion: 0.10
-Nodes (24): hashApiKey(), main(), main(), ROLE_KEYS, main(), main(), hashApiKey(), main() (+16 more)
+Nodes (27): getTextProvider(), buildPlanPrompt(), DiscoveryQueryPlan, EditorialDiscoveryContext, gatherEditorialContext(), parseDiscoveryPlan(), planDiscovery(), prisma (+19 more)
+
+### Community 82 - "prisma.ts"
+Cohesion: 0.28
+Nodes (8): RepositoryError, isUniqueViolation(), contentImageRepository, contentTextRepository, factRepository, jobRepository, tenantRepository, topicRepository
 
 ### Community 83 - "MediaPageComponent"
 Cohesion: 0.18
 Nodes (3): StudioMediaItem, MediaPageComponent, Component
 
+### Community 84 - "AutomationPageComponent"
+Cohesion: 0.09
+Nodes (8): AutomationStatus, PublicationListItem, PublishingAccount, PublishingWindow, AutomationPageComponent, Component, PublishingPageComponent, Component
+
 ### Community 85 - "dependencies"
 Cohesion: 0.12
 Nodes (17): cheerio, fast-xml-parser, fastify, google-auth-library, nodemailer, dependencies, bullmq, cheerio (+9 more)
 
-### Community 86 - "structured.ts"
-Cohesion: 0.18
-Nodes (15): balanceJson(), extractJsonCandidate(), generateStructured(), parseJsonWithRepair(), repairJson(), stripFences(), StructuredGenerationAttempt, StructuredGenerationOptions (+7 more)
-
-### Community 87 - "internal-linking.ts"
-Cohesion: 0.36
-Nodes (7): anchorFromTitle(), InternalLinkSuggestion, prisma, slugTokens(), suggestInternalLinks(), tokenize(), prisma
+### Community 86 - "web-intelligence.ts"
+Cohesion: 0.29
+Nodes (7): hostnameOf(), isUrlReachable(), normalizeSearchItem(), WebClaim, WebExtraction, WebSearchOptions, WebSearchResult
 
 ### Community 88 - "app.config.ts"
 Cohesion: 0.47
@@ -548,13 +550,13 @@ Nodes (3): routes, ssrCookieInterceptor(), studioSiteInterceptor()
 Cohesion: 0.15
 Nodes (16): options, assets, browser, outputMode, polyfills, security, server, ssr (+8 more)
 
-### Community 90 - "getNumberEnv"
-Cohesion: 0.13
-Nodes (9): runAutomationWorker(), runSchedulerTick(), runSchedulerWorker(), getNumberEnv(), claimDuePublications(), enqueuePublication(), FirecrawlWebIntelligenceProvider, normalizeSearchItem() (+1 more)
-
 ### Community 92 - "Auctorio Studio — Design System (Phase 2)"
 Cohesion: 0.13
 Nodes (14): 10. State language, 11. CSS architecture, 1. Direction, 2. Color tokens, 3. Theming mechanism, 4. Typography, 5. Spacing / density, 6. Radii, borders, shadows, focus (+6 more)
+
+### Community 93 - "browser.ts"
+Cohesion: 0.40
+Nodes (4): BrowserFetchOptions, BrowserHandle, BrowserPage, fetchHtmlWithBrowser()
 
 ### Community 95 - "home-page.component.ts"
 Cohesion: 0.20
@@ -596,10 +598,6 @@ Nodes (11): 1. publisher-command-center, 2. search-led-newsroom, 3. multi-site-p
 Cohesion: 0.21
 Nodes (9): BRAND_DESCRIPTION, BRAND_DOMAIN_OBJECTIVE, MarketingShowcaseAsset, TECNORIA_LINKS, normalizeOrigin(), STUDIO_ORIGIN, MadeByTecnoriaPageComponent, Component (+1 more)
 
-### Community 105 - "SiteIntelligencePageComponent"
-Cohesion: 0.26
-Nodes (3): SiteIntelligenceOverview, SiteIntelligencePageComponent, Component
-
 ### Community 107 - "Auctorio Studio — Frontend Rebuild Audit (Phase 0)"
 Cohesion: 0.17
 Nodes (11): 10. Known constraints, 1. Current product architecture, 2. Current information architecture, 3. Functionality inventory (preserved, real), 4. Styling architecture — current state, 5. Application shell — current state, 6. Cross-cutting UX debt (measured), 7. Performance baseline (+3 more)
@@ -633,8 +631,8 @@ Cohesion: 0.29
 Nodes (4): AuctorioChatWidgetComponent, Component, Input, Inject
 
 ### Community 118 - "studio/auth.ts"
-Cohesion: 0.05
-Nodes (89): acceptStudioInvitation(), AccountWithMemberships, applyMappedRoles(), buildApiKeyStudioSession(), buildHumanSession(), buildPermissionList(), buildRoleKeyList(), completeGlobalAccountLogin() (+81 more)
+Cohesion: 0.06
+Nodes (75): main(), WORKSPACE_BOOTSTRAP, AccountWithMemberships, applyMappedRoles(), buildApiKeyStudioSession(), buildHumanSession(), buildPermissionList(), buildRoleKeyList() (+67 more)
 
 ### Community 122 - "development"
 Cohesion: 0.22
@@ -675,10 +673,6 @@ Nodes (8): scripts, build, dev:ssr, ng, serve:ssr, start, test, watch
 ### Community 132 - "Studio Web"
 Cohesion: 0.25
 Nodes (7): Comandos, Flujo soportado, Notas operativas, Que hace, Rutas principales, Studio Web, Variables necesarias
-
-### Community 133 - "ai/text.ts"
-Cohesion: 0.24
-Nodes (6): MockTextProvider, OpenAICompatibleTextProvider, TextGenerationInput, TextGenerationResult, TextProvider, TextUsage
 
 ### Community 134 - "shouldUseSecureCookie"
 Cohesion: 0.33
@@ -728,9 +722,9 @@ Nodes (5): cf_api(), require_env(), set_zone_setting(), cloudflare-cutover.sh sc
 Cohesion: 0.33
 Nodes (5): overflowRows, PAGES, report, THEMES, WIDTHS
 
-### Community 147 - "getRedisConnectionOptions"
-Cohesion: 0.20
-Nodes (17): getRedisConnectionOptions(), RedisConnectionOptions, eventHeartbeatMs(), eventRateLimitPerMinute(), getPublisher(), parseEvent(), publishEvent(), readEventsSince() (+9 more)
+### Community 147 - "events.ts"
+Cohesion: 0.24
+Nodes (15): eventHeartbeatMs(), eventRateLimitPerMinute(), getPublisher(), parseEvent(), publishEvent(), readEventsSince(), sanitizeEventPayload(), streamKey() (+7 more)
 
 ### Community 148 - "studio-ssr.test.ts"
 Cohesion: 0.47
@@ -741,8 +735,8 @@ Cohesion: 0.40
 Nodes (5): extract-i18n, test, builder, architect, builder
 
 ### Community 150 - "audit.ts"
-Cohesion: 0.20
-Nodes (12): Args, cleanupAccount(), cleanupInstallationDrafts(), main(), parseArgs(), prisma, reportCandidates(), resolveTargets() (+4 more)
+Cohesion: 0.13
+Nodes (19): Args, cleanupAccount(), cleanupInstallationDrafts(), main(), parseArgs(), prisma, reportCandidates(), resolveTargets() (+11 more)
 
 ### Community 152 - "smoke-editorial.cjs"
 Cohesion: 0.60
@@ -765,24 +759,24 @@ Cohesion: 0.39
 Nodes (7): asJson(), FIXTURE_SITES, hashApiKey(), main(), parseArgs(), provision(), ProvisionArgs
 
 ## Knowledge Gaps
-- **1070 isolated node(s):** `$schema`, `version`, `packageManager`, `analytics`, `newProjectRoot` (+1065 more)
+- **1079 isolated node(s):** `SiteType`, `VersionStatus`, `PublicationStatus`, `JsonRecord`, `StudioPermission` (+1074 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **14 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **18 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `getNumberEnv()` connect `getNumberEnv` to `ai/text.ts`, `worker-social.ts`, `planner.ts`, `getRedisConnectionOptions`, `fetchWithTimeout`, `social-publishers.ts`, `routes-discovery.ts`, `scraping/index.ts`, `worker-image.ts`, `topic-controller.ts`, `verification.ts`, `profile.ts`, `operations.ts`, `sources.ts`, `orchestration.ts`, `publication.ts`, `publishers.ts`, `getEnv`, `env.ts`, `image.ts`, `web-discovery.ts`, `deps.ts`, `structured.ts`?**
-  _High betweenness centrality (0.034) - this node is a cross-community bridge._
-- **Why does `getPrismaClient()` connect `getPrismaClient` to `routes.ts`, `repository.ts`, `notifications.ts`, `routes-editorial.ts`, `worker-social.ts`, `routes-connectors.ts`, `planner.ts`, `getRedisConnectionOptions`, `sha256`, `audit.ts`, `provision-linked-tenants.ts`, `routes-discovery.ts`, `scraping/index.ts`, `worker-image.ts`, `editorial-plan-v2.test.ts`, `profile.ts`, `operations.ts`, `sources.ts`, `editorial.ts`, `orchestration.ts`, `publication.ts`, `getEnv`, `discovery-planner.ts`, `web-discovery.ts`, `deps.ts`, `social.ts`, `internal-linking.ts`, `studio/auth.ts`?**
-  _High betweenness centrality (0.021) - this node is a cross-community bridge._
-- **Why does `StudioApiService` connect `StudioApiService` to `studio.models.ts`, `app.routes.ts`, `ContentWorkspacePageComponent`, `SourcesPageComponent`, `SiteIntelligencePageComponent`, `EditorialPlanPageComponent`, `InboxPageComponent`, `CalendarPageComponent`, `AppShellComponent`, `PublishingPageComponent`, `MediaPageComponent`, `ConnectionsPageComponent`, `SettingsPageComponent`, `SseService`, `StudioPublication`, `ActivityPageComponent`?**
-  _High betweenness centrality (0.019) - this node is a cross-community bridge._
-- **What connects `$schema`, `version`, `packageManager` to the rest of the system?**
-  _1070 weakly-connected nodes found - possible documentation gaps or missing edges._
+- **Why does `getPrismaClient()` connect `getPrismaClient` to `routes.ts`, `worker-publishing.ts`, `loginStudioAccountWithPassword`, `notifications.ts`, `routes-editorial.ts`, `worker-social.ts`, `routes-connectors.ts`, `planner.ts`, `sha256`, `crawler.ts`, `audit.ts`, `provision-linked-tenants.ts`, `http-utils.ts`, `profile.ts`, `structuredEvent`, `sources.ts`, `editorial.ts`, `editorial-plan.ts`, `orchestration.ts`, `publication.ts`, `web-discovery.ts`, `social-connections.ts`, `sitemap.ts`, `source-quality.ts`, `deps.ts`, `social.ts`, `prisma.ts`, `studio/auth.ts`?**
+  _High betweenness centrality (0.028) - this node is a cross-community bridge._
+- **Why does `getNumberEnv()` connect `getNumberEnv` to `worker-social.ts`, `planner.ts`, `events.ts`, `crawler.ts`, `fetchWithTimeout`, `topic.ts`, `social-publishers.ts`, `scraping/index.ts`, `getPrismaClient`, `AyrshareSocialProvider`, `fetchUrl`, `verification.ts`, `profile.ts`, `structuredEvent`, `sources.ts`, `editorial.ts`, `editorial-plan-schema.ts`, `orchestration.ts`, `publication.ts`, `web-discovery.ts`, `getEnv`, `sitemap.ts`, `image.ts`, `social-provider.ts`, `deps.ts`, `web-intelligence.ts`, `TavilyWebIntelligenceProvider`, `FirecrawlWebIntelligenceProvider`?**
+  _High betweenness centrality (0.027) - this node is a cross-community bridge._
+- **Why does `getEnv()` connect `getEnv` to `routes.ts`, `worker-publishing.ts`, `loginStudioAccountWithPassword`, `worker-social.ts`, `planner.ts`, `fetchWithTimeout`, `social-publishers.ts`, `http-utils.ts`, `scraping/index.ts`, `getPrismaClient`, `AyrshareSocialProvider`, `fetchUrl`, `structuredEvent`, `sources.ts`, `editorial.ts`, `editorial-plan-schema.ts`, `web-discovery.ts`, `getNumberEnv`, `social-connections.ts`, `image.ts`, `registry.ts`, `social-provider.ts`, `social.ts`, `web-intelligence.ts`, `TavilyWebIntelligenceProvider`, `FirecrawlWebIntelligenceProvider`, `studio/auth.ts`?**
+  _High betweenness centrality (0.024) - this node is a cross-community bridge._
+- **What connects `SiteType`, `VersionStatus`, `PublicationStatus` to the rest of the system?**
+  _1079 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `studio.models.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.0292192613370734 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.029453015427769985 - nodes in this community are weakly interconnected._
 - **Should `routes.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.07428571428571429 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.04667268894911172 - nodes in this community are weakly interconnected._
 - **Should `app.routes.ts` be split into smaller, more focused modules?**
-  _Cohesion score 0.08022333235380547 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.07860011474469306 - nodes in this community are weakly interconnected._
