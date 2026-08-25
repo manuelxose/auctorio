@@ -14,41 +14,41 @@ paths:
       tags: [topics]
       summary: Create a topic
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/TopicCreateInput'
+              $ref: "#/components/schemas/TopicCreateInput"
             examples:
               default:
                 value:
                   title: "Turismo en Chipiona"
                   description: "Ideas para contenido SEO y social"
       responses:
-        '201':
+        "201":
           description: Topic created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Topic'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/Topic"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/topics/{id}/facts:
     post:
       tags: [facts]
       summary: Add facts to a topic (manual or scraping source)
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/TopicId'
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TopicId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/FactCreateInput'
+              $ref: "#/components/schemas/FactCreateInput"
             examples:
               manual:
                 value:
@@ -59,34 +59,34 @@ paths:
                   source_type: rss
                   source_ref: "https://example.com/feed"
       responses:
-        '201':
+        "201":
           description: Fact stored (manual)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Fact'
-        '202':
+                $ref: "#/components/schemas/Fact"
+        "202":
           description: Fact accepted or scrape job enqueued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/JobAccepted'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/JobAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/topics/{id}/generate-text:
     post:
       tags: [content-text]
       summary: Generate text for a topic
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/TopicId'
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TopicId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GenerateTextInput'
+              $ref: "#/components/schemas/GenerateTextInput"
             examples:
               seo_es:
                 value:
@@ -103,34 +103,34 @@ paths:
                     tone: "casual"
                     hashtags: true
       responses:
-        '200':
+        "200":
           description: Content already exists (deduplicated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '202':
+                $ref: "#/components/schemas/ContentAccepted"
+        "202":
           description: Text job enqueued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ContentAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/topics/{id}/generate-image:
     post:
       tags: [content-image]
       summary: Generate an independent image for a topic
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/TopicId'
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TopicId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GenerateImageInput'
+              $ref: "#/components/schemas/GenerateImageInput"
             examples:
               independent:
                 value:
@@ -139,34 +139,34 @@ paths:
                     style: "photorealistic"
                     size: "1024x1024"
       responses:
-        '200':
+        "200":
           description: Content already exists (deduplicated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '202':
+                $ref: "#/components/schemas/ContentAccepted"
+        "202":
           description: Image job enqueued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ContentAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/text/{id}/generate-image:
     post:
       tags: [content-image]
       summary: Generate a contextual image from a text content
       parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
-        - $ref: '#/components/parameters/TextId'
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/TextId"
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/GenerateImageInput'
+              $ref: "#/components/schemas/GenerateImageInput"
             examples:
               contextual:
                 value:
@@ -175,99 +175,99 @@ paths:
                     style: "illustration"
                     size: "1024x1024"
       responses:
-        '200':
+        "200":
           description: Content already exists (deduplicated)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '202':
+                $ref: "#/components/schemas/ContentAccepted"
+        "202":
           description: Image job enqueued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentAccepted'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ContentAccepted"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/topics/{id}/results:
     get:
       tags: [topics]
       summary: Get all content for a topic
       parameters:
-        - $ref: '#/components/parameters/TopicId'
+        - $ref: "#/components/parameters/TopicId"
       responses:
-        '200':
+        "200":
           description: Topic results
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TopicResults'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/TopicResults"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/text/{id}:
     get:
       tags: [content-text]
       summary: Get generated text by id
       parameters:
-        - $ref: '#/components/parameters/TextId'
+        - $ref: "#/components/parameters/TextId"
       responses:
-        '200':
+        "200":
           description: Content text
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentText'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ContentText"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v1/images/{id}:
     get:
       tags: [content-image]
       summary: Get generated image by id
       parameters:
-        - $ref: '#/components/parameters/ImageId'
+        - $ref: "#/components/parameters/ImageId"
       responses:
-        '200':
+        "200":
           description: Content image metadata
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ContentImage'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ContentImage"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/session/me:
     get:
       tags: [studio]
       summary: Get tenant session summary for Studio clients
       responses:
-        '200':
+        "200":
           description: Session summary
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSession'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/StudioSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/sites:
     get:
       tags: [studio]
       summary: List sites for the authenticated tenant
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
       responses:
-        '200':
+        "200":
           description: Paginated site summaries
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedSites'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/PaginatedSites"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [studio]
       summary: Create a site
@@ -276,68 +276,68 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateSiteInput'
+              $ref: "#/components/schemas/CreateSiteInput"
       responses:
-        '201':
+        "201":
           description: Site created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSiteDetail'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/StudioSiteDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/sites/{id}:
     get:
       tags: [studio]
       summary: Get site detail
       parameters:
-        - $ref: '#/components/parameters/SiteId'
+        - $ref: "#/components/parameters/SiteId"
       responses:
-        '200':
+        "200":
           description: Site detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSiteDetail'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/StudioSiteDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
     put:
       tags: [studio]
       summary: Update a site
       parameters:
-        - $ref: '#/components/parameters/SiteId'
+        - $ref: "#/components/parameters/SiteId"
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/UpdateSiteInput'
+              $ref: "#/components/schemas/UpdateSiteInput"
       responses:
-        '200':
+        "200":
           description: Site updated
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSiteDetail'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/StudioSiteDetail"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /v2/projects:
     get:
       tags: [studio]
       summary: List projects
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
         - name: siteId
           in: query
           schema:
@@ -347,21 +347,32 @@ paths:
           in: query
           schema:
             type: string
-            enum: [draft, ai_generated, qa_failed, qa_passed, in_review, approved, publish_queued, published, publish_failed]
+            enum:
+              [
+                draft,
+                ai_generated,
+                qa_failed,
+                qa_passed,
+                in_review,
+                approved,
+                publish_queued,
+                published,
+                publish_failed,
+              ]
         - name: goal
           in: query
           schema:
             type: string
             enum: [article, landing, comparison, faq, newsletter, social_pack]
       responses:
-        '200':
+        "200":
           description: Paginated projects
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedProjects'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/PaginatedProjects"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
     post:
       tags: [studio]
       summary: Create a project
@@ -370,43 +381,43 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateProjectInput'
+              $ref: "#/components/schemas/CreateProjectInput"
       responses:
-        '201':
+        "201":
           description: Project created
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioProjectSummary'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/StudioProjectSummary"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/projects/{id}:
     get:
       tags: [studio]
       summary: Get enriched project detail
       parameters:
-        - $ref: '#/components/parameters/ProjectId'
+        - $ref: "#/components/parameters/ProjectId"
       responses:
-        '200':
+        "200":
           description: Project detail
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioProjectDetail'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
-        '404':
-          $ref: '#/components/responses/NotFound'
+                $ref: "#/components/schemas/StudioProjectDetail"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /v2/projects/{id}/generate:
     post:
       tags: [studio]
       summary: Generate a new AI version for the project
       parameters:
-        - $ref: '#/components/parameters/ProjectId'
+        - $ref: "#/components/parameters/ProjectId"
       requestBody:
         required: false
         content:
@@ -417,23 +428,23 @@ paths:
                 feedback:
                   type: string
       responses:
-        '202':
+        "202":
           description: Generation queued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QueuedGeneration'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/QueuedGeneration"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/projects/{id}/revise:
     post:
       tags: [studio]
       summary: Generate a revised version from manual feedback
       parameters:
-        - $ref: '#/components/parameters/ProjectId'
+        - $ref: "#/components/parameters/ProjectId"
       requestBody:
         required: true
         content:
@@ -445,80 +456,81 @@ paths:
                 feedback:
                   type: string
       responses:
-        '202':
+        "202":
           description: Revision queued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QueuedGeneration'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/QueuedGeneration"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/projects/{id}/approve:
     post:
       tags: [studio]
       summary: Approve the latest QA-passed version
       parameters:
-        - $ref: '#/components/parameters/ProjectId'
+        - $ref: "#/components/parameters/ProjectId"
       responses:
-        '200':
+        "200":
           description: Version approved
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ApprovalResponse'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/ApprovalResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/projects/{id}/publish:
     post:
       tags: [studio]
       summary: Queue publication, draft sync or unpublish for the latest version
       parameters:
-        - $ref: '#/components/parameters/ProjectId'
+        - $ref: "#/components/parameters/ProjectId"
       requestBody:
         required: false
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/PublicationPayload'
+              $ref: "#/components/schemas/PublicationPayload"
       responses:
-        '202':
+        "202":
           description: Publication queued
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/QueuedPublication'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/QueuedPublication"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/publication-jobs:
     get:
       tags: [studio]
       summary: List website publication execution jobs (attempts)
       parameters:
-        - $ref: '#/components/parameters/Page'
-        - $ref: '#/components/parameters/PageSize'
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
         - name: status
           in: query
           schema:
             type: string
-            enum: [queued, processing, draft_synced, published, failed, canceled]
+            enum:
+              [queued, processing, draft_synced, published, failed, canceled]
       responses:
-        '200':
+        "200":
           description: Paginated publication jobs
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedPublications'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/PaginatedPublications"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /studio/api/session/login:
     post:
@@ -536,14 +548,14 @@ paths:
                 apiKey:
                   type: string
       responses:
-        '200':
+        "200":
           description: Session started and cookie set
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSession'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/StudioSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /studio/api/session/logout:
     post:
@@ -551,7 +563,7 @@ paths:
       summary: Clear the Studio SSR session cookie
       security: []
       responses:
-        '200':
+        "200":
           description: Session cleared
           content:
             application/json:
@@ -568,14 +580,14 @@ paths:
       summary: Read the current Studio SSR session
       security: []
       responses:
-        '200':
+        "200":
           description: Current session
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StudioSession'
-        '401':
-          $ref: '#/components/responses/Unauthorized'
+                $ref: "#/components/schemas/StudioSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
 
   /v2/sources:
     get:
@@ -584,10 +596,15 @@ paths:
       parameters:
         - { name: page, in: query, schema: { type: integer } }
         - { name: pageSize, in: query, schema: { type: integer } }
-        - { name: type, in: query, schema: { type: string, enum: [rss, atom, html, sitemap, api, manual] } }
+        - {
+            name: type,
+            in: query,
+            schema:
+              { type: string, enum: [rss, atom, html, sitemap, api, manual] },
+          }
         - { name: enabled, in: query, schema: { type: boolean } }
       responses:
-        '200': { description: Paginated sources }
+        "200": { description: Paginated sources }
     post:
       tags: [sources]
       summary: Create a content source
@@ -600,7 +617,11 @@ paths:
               required: [name, type]
               properties:
                 name: { type: string }
-                type: { type: string, enum: [rss, atom, html, sitemap, api, manual] }
+                type:
+                  {
+                    type: string,
+                    enum: [rss, atom, html, sitemap, api, manual],
+                  }
                 url: { type: string }
                 siteId: { type: string, format: uuid }
                 priority: { type: integer }
@@ -609,37 +630,52 @@ paths:
                 categories: { type: array, items: { type: string } }
                 configuration: { type: object }
       responses:
-        '201': { description: Created source }
+        "201": { description: Created source }
   /v2/sources/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
       tags: [sources]
       summary: Get a source
-      responses: { '200': { description: Source } }
+      responses: { "200": { description: Source } }
     patch:
       tags: [sources]
       summary: Update a source
-      responses: { '200': { description: Updated source } }
+      responses: { "200": { description: Updated source } }
     delete:
       tags: [sources]
       summary: Delete a source
-      responses: { '200': { description: Deleted } }
+      responses: { "200": { description: Deleted } }
   /v2/sources/{id}/test:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [sources]
       summary: Test a source fetch
-      responses: { '200': { description: Fetch result } }
+      responses: { "200": { description: Fetch result } }
   /v2/sources/{id}/fetch:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [sources]
       summary: Fetch a source now
       responses:
-        '200':
+        "200":
           description: Fetch summary
           content:
             application/json:
@@ -663,33 +699,61 @@ paths:
         - { name: status, in: query, schema: { type: string } }
         - { name: search, in: query, schema: { type: string } }
         - { name: minScore, in: query, schema: { type: number } }
-        - { name: sort, in: query, schema: { type: string, enum: [discovered, score] } }
-        - { name: direction, in: query, schema: { type: string, enum: [asc, desc] } }
-      responses: { '200': { description: Paginated source items } }
+        - {
+            name: sort,
+            in: query,
+            schema: { type: string, enum: [discovered, score] },
+          }
+        - {
+            name: direction,
+            in: query,
+            schema: { type: string, enum: [asc, desc] },
+          }
+      responses: { "200": { description: Paginated source items } }
   /v2/source-items/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
       tags: [inbox]
       summary: Get source item detail including cluster and projects
-      responses: { '200': { description: Source item detail } }
+      responses: { "200": { description: Source item detail } }
   /v2/source-items/{id}/select:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [inbox]
       summary: Mark a source item as selected
-      responses: { '200': { description: Updated item } }
+      responses: { "200": { description: Updated item } }
   /v2/source-items/{id}/reject:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [inbox]
       summary: Reject/ignore a source item
-      responses: { '200': { description: Updated item } }
+      responses: { "200": { description: Updated item } }
   /v2/source-items/{id}/create-project:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [inbox]
       summary: Rewrite a source item as a news article project
@@ -705,8 +769,8 @@ paths:
                 goal: { type: string, enum: [news_article, article] }
                 allowUpdateExisting: { type: boolean }
       responses:
-        '201': { description: Project created (or updated) }
-        '409': { description: Story already covered }
+        "201": { description: Project created (or updated) }
+        "409": { description: Story already covered }
 
   /v2/story-clusters:
     get:
@@ -716,10 +780,15 @@ paths:
         - { name: page, in: query, schema: { type: integer } }
         - { name: pageSize, in: query, schema: { type: integer } }
         - { name: status, in: query, schema: { type: string } }
-      responses: { '200': { description: Paginated clusters } }
+      responses: { "200": { description: Paginated clusters } }
   /v2/story-clusters/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     patch:
       tags: [inbox]
       summary: Update cluster status
@@ -730,8 +799,12 @@ paths:
             schema:
               type: object
               properties:
-                status: { type: string, enum: [open, selected, covered, rejected, archived] }
-      responses: { '200': { description: Updated cluster } }
+                status:
+                  {
+                    type: string,
+                    enum: [open, selected, covered, rejected, archived],
+                  }
+      responses: { "200": { description: Updated cluster } }
 
   /v2/publications:
     get:
@@ -740,17 +813,49 @@ paths:
       parameters:
         - { name: page, in: query, schema: { type: integer } }
         - { name: pageSize, in: query, schema: { type: integer } }
-        - { name: channel, in: query, schema: { type: string, enum: [website, x, instagram] } }
-        - { name: status, in: query, schema: { type: string, enum: [draft, ready, scheduled, queued, publishing, published, failed, canceled, deleted, unpublished] } }
+        - {
+            name: channel,
+            in: query,
+            schema: { type: string, enum: [website, x, instagram] },
+          }
+        - {
+            name: status,
+            in: query,
+            schema:
+              {
+                type: string,
+                enum:
+                  [
+                    draft,
+                    ready,
+                    scheduled,
+                    queued,
+                    publishing,
+                    published,
+                    failed,
+                    canceled,
+                    deleted,
+                    unpublished,
+                  ],
+              },
+          }
         - { name: projectId, in: query, schema: { type: string, format: uuid } }
         - { name: siteId, in: query, schema: { type: string, format: uuid } }
         - { name: search, in: query, schema: { type: string } }
         - { name: dateFrom, in: query, schema: { type: string } }
         - { name: dateTo, in: query, schema: { type: string } }
-        - { name: sort, in: query, schema: { type: string, enum: [scheduled, created, updated] } }
-        - { name: direction, in: query, schema: { type: string, enum: [asc, desc] } }
+        - {
+            name: sort,
+            in: query,
+            schema: { type: string, enum: [scheduled, created, updated] },
+          }
+        - {
+            name: direction,
+            in: query,
+            schema: { type: string, enum: [asc, desc] },
+          }
         - { name: failed, in: query, schema: { type: boolean } }
-      responses: { '200': { description: Paginated publications } }
+      responses: { "200": { description: Paginated publications } }
     post:
       tags: [publications]
       summary: Create a publication (article or social)
@@ -769,25 +874,35 @@ paths:
                 siteId: { type: string, format: uuid }
                 socialContentId: { type: string, format: uuid }
                 scheduledFor: { type: string, format: date-time }
-      responses: { '201': { description: Created publication } }
+      responses: { "201": { description: Created publication } }
   /v2/publications/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
       tags: [publications]
       summary: Get publication with attempt history
-      responses: { '200': { description: Publication detail } }
+      responses: { "200": { description: Publication detail } }
     patch:
       tags: [publications]
       summary: Update schedule or account
-      responses: { '200': { description: Updated publication } }
+      responses: { "200": { description: Updated publication } }
     delete:
       tags: [publications]
       summary: Delete publication record
-      responses: { '200': { description: Deleted publication } }
+      responses: { "200": { description: Deleted publication } }
   /v2/publications/{id}/schedule:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Schedule publication
@@ -795,11 +910,21 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, properties: { scheduledFor: { type: string, format: date-time } } }
-      responses: { '200': { description: Scheduled } }
+            schema:
+              {
+                type: object,
+                properties:
+                  { scheduledFor: { type: string, format: date-time } },
+              }
+      responses: { "200": { description: Scheduled } }
   /v2/publications/{id}/reschedule:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Reschedule publication
@@ -807,58 +932,107 @@ paths:
         required: true
         content:
           application/json:
-            schema: { type: object, properties: { scheduledFor: { type: string, format: date-time } } }
-      responses: { '200': { description: Rescheduled } }
+            schema:
+              {
+                type: object,
+                properties:
+                  { scheduledFor: { type: string, format: date-time } },
+              }
+      responses: { "200": { description: Rescheduled } }
   /v2/publications/{id}/publish-now:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Publish now
-      responses: { '200': { description: Queued } }
+      responses: { "200": { description: Queued } }
   /v2/publications/{id}/cancel:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Cancel scheduled publication
-      responses: { '200': { description: Canceled } }
+      responses: { "200": { description: Canceled } }
   /v2/publications/{id}/retry:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Retry failed publication
-      responses: { '200': { description: Requeued } }
+      responses: { "200": { description: Requeued } }
   /v2/publications/{id}/unpublish:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [publications]
       summary: Unpublish/delete externally
-      responses: { '200': { description: Queued } }
+      responses: { "200": { description: Queued } }
 
   /v2/calendar:
     get:
       tags: [calendar]
       summary: Calendar events (publications) in a date range
       parameters:
-        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
-        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
-        - { name: channel, in: query, schema: { type: string, enum: [website, x, instagram] } }
+        - {
+            name: from,
+            in: query,
+            required: true,
+            schema: { type: string, format: date-time },
+          }
+        - {
+            name: to,
+            in: query,
+            required: true,
+            schema: { type: string, format: date-time },
+          }
+        - {
+            name: channel,
+            in: query,
+            schema: { type: string, enum: [website, x, instagram] },
+          }
         - { name: siteId, in: query, schema: { type: string, format: uuid } }
-      responses: { '200': { description: Calendar events } }
+      responses: { "200": { description: Calendar events } }
 
   /v2/projects/{id}/social:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     get:
       tags: [social]
       summary: List social derivatives for a project
-      responses: { '200': { description: Social content list } }
+      responses: { "200": { description: Social content list } }
   /v2/projects/{id}/social/generate:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [social]
       summary: Generate social derivatives (X/Instagram)
@@ -869,12 +1043,18 @@ paths:
             schema:
               type: object
               properties:
-                channels: { type: array, items: { type: string, enum: [x, instagram] } }
+                channels:
+                  { type: array, items: { type: string, enum: [x, instagram] } }
                 threadLength: { type: integer }
-      responses: { '202': { description: Generation queued } }
+      responses: { "202": { description: Generation queued } }
   /v2/social/{id}:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     patch:
       tags: [social]
       summary: Edit social content
@@ -886,23 +1066,33 @@ paths:
               properties:
                 body: { type: string }
                 hashtags: { type: array, items: { type: string } }
-                editorialStatus: { type: string, enum: [draft, approved, rejected] }
-      responses: { '200': { description: Updated social content } }
+                editorialStatus:
+                  { type: string, enum: [draft, approved, rejected] }
+      responses: { "200": { description: Updated social content } }
   /v2/social/{id}/regenerate:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [social]
       summary: Regenerate a social piece
-      responses: { '202': { description: Queued } }
+      responses: { "202": { description: Queued } }
 
   /v2/publishing-accounts:
     get:
       tags: [accounts]
       summary: List publishing accounts (credentials never exposed)
       parameters:
-        - { name: platform, in: query, schema: { type: string, enum: [website, x, instagram] } }
-      responses: { '200': { description: Account list } }
+        - {
+            name: platform,
+            in: query,
+            schema: { type: string, enum: [website, x, instagram] },
+          }
+      responses: { "200": { description: Account list } }
     post:
       tags: [accounts]
       summary: Create a publishing account
@@ -917,32 +1107,43 @@ paths:
                 platform: { type: string, enum: [website, x, instagram] }
                 displayName: { type: string }
                 externalAccountId: { type: string }
-                credentialsRef: { type: string, description: Environment variable name holding the credentials JSON }
-      responses: { '201': { description: Created account } }
+                credentialsRef:
+                  {
+                    type: string,
+                    description: Environment variable name holding the credentials JSON,
+                  }
+      responses: { "201": { description: Created account } }
   /v2/publishing-accounts/{id}/verify:
     parameters:
-      - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      - {
+          name: id,
+          in: path,
+          required: true,
+          schema: { type: string, format: uuid },
+        }
     post:
       tags: [accounts]
       summary: Verify platform credentials server-side
-      responses: { '200': { description: Verification result } }
+      responses: { "200": { description: Verification result } }
 
   /v2/automation:
     get:
       tags: [automation]
       summary: Get automation policy
-      parameters: [ { name: siteId, in: query, schema: { type: string, format: uuid } } ]
-      responses: { '200': { description: Policy } }
+      parameters:
+        [{ name: siteId, in: query, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: Policy } }
     patch:
       tags: [automation]
       summary: Update automation policy (volumes, windows, flags, limits)
-      responses: { '200': { description: Updated policy } }
+      responses: { "200": { description: Updated policy } }
   /v2/automation/status:
     get:
       tags: [automation]
       summary: Automation operational status (today counts, next slots, warnings)
-      parameters: [ { name: siteId, in: query, schema: { type: string, format: uuid } } ]
-      responses: { '200': { description: Status } }
+      parameters:
+        [{ name: siteId, in: query, schema: { type: string, format: uuid } }]
+      responses: { "200": { description: Status } }
   /v2/automation/pause:
     post:
       tags: [automation]
@@ -950,19 +1151,27 @@ paths:
       requestBody:
         content:
           application/json:
-            schema: { type: object, properties: { reason: { type: string }, siteId: { type: string, format: uuid } } }
-      responses: { '200': { description: Paused } }
+            schema:
+              {
+                type: object,
+                properties:
+                  {
+                    reason: { type: string },
+                    siteId: { type: string, format: uuid },
+                  },
+              }
+      responses: { "200": { description: Paused } }
   /v2/automation/resume:
     post:
       tags: [automation]
       summary: Resume automation
-      responses: { '200': { description: Resumed } }
+      responses: { "200": { description: Resumed } }
 
   /v2/overview:
     get:
       tags: [dashboard]
       summary: Operational dashboard data
-      responses: { '200': { description: Overview } }
+      responses: { "200": { description: Overview } }
   /v2/audit:
     get:
       tags: [audit]
@@ -972,31 +1181,42 @@ paths:
         - { name: pageSize, in: query, schema: { type: integer } }
         - { name: entityType, in: query, schema: { type: string } }
         - { name: entityId, in: query, schema: { type: string, format: uuid } }
-      responses: { '200': { description: Audit entries } }
+      responses: { "200": { description: Audit entries } }
   /v2/health/workers:
     get:
       tags: [operations]
       summary: Worker queue health
-      responses: { '200': { description: Queue counts } }
+      responses: { "200": { description: Queue counts } }
 
   /v2/campaigns:
     get:
       tags: [editorial]
       summary: List campaigns
-      responses: { '200': { description: Campaigns } }
+      responses: { "200": { description: Campaigns } }
     post:
       tags: [editorial]
       summary: Create campaign
       requestBody:
         content:
           application/json:
-            schema: { type: object, properties: { name: { type: string }, description: { type: string }, startAt: { type: string }, endAt: { type: string }, tags: { type: array, items: { type: string } } } }
-      responses: { '201': { description: Created campaign } }
+            schema:
+              {
+                type: object,
+                properties:
+                  {
+                    name: { type: string },
+                    description: { type: string },
+                    startAt: { type: string },
+                    endAt: { type: string },
+                    tags: { type: array, items: { type: string } },
+                  },
+              }
+      responses: { "201": { description: Created campaign } }
   /v2/briefs:
     get:
       tags: [editorial]
       summary: List editorial briefs
-      responses: { '200': { description: Briefs } }
+      responses: { "200": { description: Briefs } }
     post:
       tags: [editorial]
       summary: Create editorial brief
@@ -1011,7 +1231,7 @@ paths:
                 audience: { type: string }
                 tone: { type: string }
                 keywords: { type: array, items: { type: string } }
-      responses: { '201': { description: Created brief } }
+      responses: { "201": { description: Created brief } }
 
 components:
   securitySchemes:
@@ -1084,19 +1304,19 @@ components:
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
     BadRequest:
       description: Bad request
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
     NotFound:
       description: Resource not found
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
     TopicCreateInput:
@@ -1278,11 +1498,11 @@ components:
         texts:
           type: array
           items:
-            $ref: '#/components/schemas/ContentText'
+            $ref: "#/components/schemas/ContentText"
         images:
           type: array
           items:
-            $ref: '#/components/schemas/ContentImage'
+            $ref: "#/components/schemas/ContentImage"
 
     StudioSession:
       type: object
@@ -1324,18 +1544,18 @@ components:
           type: string
           nullable: true
         brandVoice:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         seoRules:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         taxonomyMap:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         publishingCredentialsRef:
           type: string
           nullable: true
 
     UpdateSiteInput:
       allOf:
-        - $ref: '#/components/schemas/CreateSiteInput'
+        - $ref: "#/components/schemas/CreateSiteInput"
 
     StudioSiteDetail:
       type: object
@@ -1356,11 +1576,11 @@ components:
           type: string
           nullable: true
         brandVoice:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         seoRules:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         taxonomyMap:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         publishingCredentialsRef:
           type: string
           nullable: true
@@ -1443,9 +1663,9 @@ components:
         derivativeCount:
           type: integer
         latestPublicationJob:
-          $ref: '#/components/schemas/PublicationExecutionState'
+          $ref: "#/components/schemas/PublicationExecutionState"
         qaReport:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
         createdAt:
           type: string
           format: date-time
@@ -1455,7 +1675,7 @@ components:
 
     StudioSiteSummary:
       allOf:
-        - $ref: '#/components/schemas/StudioSiteDetail'
+        - $ref: "#/components/schemas/StudioSiteDetail"
         - type: object
           properties:
             projectCount:
@@ -1463,7 +1683,7 @@ components:
             publishedProjectCount:
               type: integer
             latestPublicationJob:
-              $ref: '#/components/schemas/PublicationExecutionState'
+              $ref: "#/components/schemas/PublicationExecutionState"
 
     CreateProjectInput:
       type: object
@@ -1482,7 +1702,7 @@ components:
         primaryLanguage:
           type: string
         metadata:
-          $ref: '#/components/schemas/JsonRecord'
+          $ref: "#/components/schemas/JsonRecord"
 
     StudioProjectSummary:
       type: object
@@ -1502,7 +1722,18 @@ components:
           enum: [article, landing, comparison, faq, newsletter, social_pack]
         status:
           type: string
-          enum: [draft, ai_generated, qa_failed, qa_passed, in_review, approved, publish_queued, published, publish_failed]
+          enum:
+            [
+              draft,
+              ai_generated,
+              qa_failed,
+              qa_passed,
+              in_review,
+              approved,
+              publish_queued,
+              published,
+              publish_failed,
+            ]
         primaryLanguage:
           type: string
         createdAt:
@@ -1530,22 +1761,22 @@ components:
               type: string
               nullable: true
         latestVersion:
-          $ref: '#/components/schemas/VersionSummary'
+          $ref: "#/components/schemas/VersionSummary"
         latestPublicationJob:
-          $ref: '#/components/schemas/PublicationExecutionState'
+          $ref: "#/components/schemas/PublicationExecutionState"
 
     StudioProjectDetail:
       allOf:
-        - $ref: '#/components/schemas/StudioProjectSummary'
+        - $ref: "#/components/schemas/StudioProjectSummary"
         - type: object
           properties:
             metadata:
-              $ref: '#/components/schemas/JsonRecord'
+              $ref: "#/components/schemas/JsonRecord"
             latestAssetUrl:
               type: string
               nullable: true
             site:
-              $ref: '#/components/schemas/StudioSiteDetail'
+              $ref: "#/components/schemas/StudioSiteDetail"
             topic:
               type: object
               nullable: true
@@ -1557,15 +1788,15 @@ components:
                   type: string
                   nullable: true
             latestVersion:
-              $ref: '#/components/schemas/VersionSummary'
+              $ref: "#/components/schemas/VersionSummary"
             versions:
               type: array
               items:
-                $ref: '#/components/schemas/VersionSummary'
+                $ref: "#/components/schemas/VersionSummary"
             publicationJobs:
               type: array
               items:
-                $ref: '#/components/schemas/PublicationExecutionState'
+                $ref: "#/components/schemas/PublicationExecutionState"
 
     PublicationPayload:
       type: object
@@ -1628,7 +1859,7 @@ components:
 
     PublicationListItem:
       allOf:
-        - $ref: '#/components/schemas/PublicationExecutionState'
+        - $ref: "#/components/schemas/PublicationExecutionState"
         - type: object
           properties:
             site:
@@ -1674,7 +1905,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/StudioSiteSummary'
+            $ref: "#/components/schemas/StudioSiteSummary"
         page:
           type: integer
         pageSize:
@@ -1688,7 +1919,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/StudioProjectSummary'
+            $ref: "#/components/schemas/StudioProjectSummary"
         page:
           type: integer
         pageSize:
@@ -1702,7 +1933,7 @@ components:
         items:
           type: array
           items:
-            $ref: '#/components/schemas/PublicationListItem'
+            $ref: "#/components/schemas/PublicationListItem"
         page:
           type: integer
         pageSize:
@@ -1737,7 +1968,22 @@ components:
         canonicalUrl: { type: string, nullable: true }
         publishedAt: { type: string, nullable: true }
         discoveredAt: { type: string }
-        processingStatus: { type: string, enum: [discovered, fetched, parsed, duplicate, rejected, candidate, selected, processed, failed] }
+        processingStatus:
+          {
+            type: string,
+            enum:
+              [
+                discovered,
+                fetched,
+                parsed,
+                duplicate,
+                rejected,
+                candidate,
+                selected,
+                processed,
+                failed,
+              ],
+          }
         score: { type: number, nullable: true }
         scoreExplanation:
           type: array
@@ -1747,8 +1993,27 @@ components:
               signal: { type: string }
               points: { type: number }
               detail: { type: string }
-        source: { type: object, properties: { name: { type: string }, type: { type: string }, trustScore: { type: number } } }
-        cluster: { type: object, nullable: true, properties: { id: { type: string }, headline: { type: string, nullable: true }, sourceCount: { type: integer } } }
+        source:
+          {
+            type: object,
+            properties:
+              {
+                name: { type: string },
+                type: { type: string },
+                trustScore: { type: number },
+              },
+          }
+        cluster:
+          {
+            type: object,
+            nullable: true,
+            properties:
+              {
+                id: { type: string },
+                headline: { type: string, nullable: true },
+                sourceCount: { type: integer },
+              },
+          }
 
     Publication:
       type: object
@@ -1757,7 +2022,23 @@ components:
         projectId: { type: string, format: uuid }
         versionId: { type: string, format: uuid }
         channel: { type: string, enum: [website, x, instagram] }
-        status: { type: string, enum: [draft, ready, scheduled, queued, publishing, published, failed, canceled, deleted, unpublished] }
+        status:
+          {
+            type: string,
+            enum:
+              [
+                draft,
+                ready,
+                scheduled,
+                queued,
+                publishing,
+                published,
+                failed,
+                canceled,
+                deleted,
+                unpublished,
+              ],
+          }
         scheduledFor: { type: string, format: date-time, nullable: true }
         publishedAt: { type: string, format: date-time, nullable: true }
         externalId: { type: string, nullable: true }
@@ -1793,11 +2074,23 @@ components:
         projectId: { type: string, format: uuid }
         versionId: { type: string, format: uuid }
         channel: { type: string, enum: [x, instagram] }
-        contentType: { type: string, enum: [x_post, x_thread, instagram_caption, instagram_story, social_post] }
+        contentType:
+          {
+            type: string,
+            enum:
+              [
+                x_post,
+                x_thread,
+                instagram_caption,
+                instagram_story,
+                social_post,
+              ],
+          }
         body: { type: string }
         hashtags: { type: array, items: { type: string } }
         characterCount: { type: integer, nullable: true }
-        generationStatus: { type: string, enum: [queued, processing, done, failed] }
+        generationStatus:
+          { type: string, enum: [queued, processing, done, failed] }
         editorialStatus: { type: string, enum: [draft, approved, rejected] }
 
     AutomationPolicy:
@@ -1846,3 +2139,260 @@ components:
           type: string
         request_id:
           type: string
+
+  # ── Magic Installer / Activity / Notifications (v2, studio-scoped) ─────────
+
+  /v2/connectors/capabilities:
+    get:
+      summary: Connector capability metadata for the connection wizard
+      responses:
+        "200":
+          description: Capability-driven connector catalog (website, x, instagram)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  kinds:
+                    type: array
+                    items:
+                      type: object
+
+  /v2/connectors/discover-website:
+    post:
+      summary: SSRF-safe website discovery (never marks a destination as connected)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string }
+      responses:
+        "200":
+          description: Discovery result (origin, CMS, sitemaps, endpoints, auth options, capabilities)
+
+  /v2/connector-installations:
+    get:
+      summary: List connector installations for the tenant
+      responses:
+        "200":
+          description: Installation list
+    post:
+      summary: Create an installation draft (kind + provider)
+      responses:
+        "201":
+          description: Installation draft
+
+  /v2/connector-installations/{id}:
+    get:
+      summary: Installation detail with the versioned configuration schema
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Installation + descriptor
+
+  /v2/connector-installations/{id}/discover:
+    post:
+      summary: Run background website discovery (BullMQ, returns an operationId)
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "202":
+          description: Discovery queued
+
+  /v2/connector-installations/{id}/credentials:
+    post:
+      summary: Store write-only, encrypted credentials and configuration
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Credentials stored (never returned)
+
+  /v2/connector-installations/{id}/verify:
+    post:
+      summary: Run reversible capability probes (sandbox draft only)
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "202":
+          description: Verification queued
+
+  /v2/connector-installations/{id}/activate:
+    post:
+      summary: Activate a verified installation (creates/links the publishing site)
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Installation active
+
+  /v2/connector-installations/{id}/cancel:
+    post:
+      summary: Cancel an in-progress installation
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Installation cancelled
+
+  /v2/operations:
+    get:
+      summary: Durable background operation list with filters and status counts
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: status, in: query, schema: { type: string } }
+        - { name: type, in: query, schema: { type: string } }
+        - { name: siteId, in: query, schema: { type: string, format: uuid } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Paginated operations
+
+  /v2/operations/{id}:
+    get:
+      summary: Operation detail
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Operation detail
+
+  /v2/operations/{id}/retry:
+    post:
+      summary: Retry a retryable failed operation (requeues the correlated queue job)
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Operation marked retrying
+        "409":
+          description: Not retryable
+
+  /v2/operations/{id}/cancel:
+    post:
+      summary: Cancel a queued/running operation
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Operation cancelled
+        "409":
+          description: Not cancellable
+
+  /v2/events/stream:
+    get:
+      summary: Authenticated Server-Sent Events stream (tenant/site-scoped, Last-Event-ID replay)
+      responses:
+        "200":
+          description: text/event-stream
+
+  /v2/notifications:
+    get:
+      summary: Durable notification inbox with filters and unread count
+      parameters:
+        - { name: page, in: query, schema: { type: integer } }
+        - { name: pageSize, in: query, schema: { type: integer } }
+        - { name: unreadOnly, in: query, schema: { type: boolean } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: archived, in: query, schema: { type: boolean } }
+      responses:
+        "200":
+          description: Paginated notifications
+
+  /v2/notifications/{id}/read:
+    post:
+      summary: Mark a notification read or unread
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Updated notification
+
+  /v2/notifications/read-all:
+    post:
+      summary: Mark all (or a category of) notifications read
+      responses:
+        "200":
+          description: Count updated
+
+  /v2/notifications/{id}/archive:
+    post:
+      summary: Archive or restore a notification
+      parameters:
+        - {
+            name: id,
+            in: path,
+            required: true,
+            schema: { type: string, format: uuid },
+          }
+      responses:
+        "200":
+          description: Updated notification
+
+  /v2/notifications/preferences:
+    get:
+      summary: Per-user notification category preferences
+      responses:
+        "200":
+          description: Preferences
+    put:
+      summary: Enable or disable a notification category
+      responses:
+        "200":
+          description: Updated preference

@@ -11,6 +11,7 @@ const prisma_1 = require("../db/prisma");
 const text_1 = require("../ai/text");
 const prompts_1 = require("../../studio/prompts");
 const orchestration_1 = require("../../studio/orchestration");
+const operation_hooks_1 = require("./operation-hooks");
 function computeTextCost(usage) {
     const inputRate = (0, env_1.getNumberEnv)("TEXT_COST_PER_1K_INPUT_USD", 0);
     const outputRate = (0, env_1.getNumberEnv)("TEXT_COST_PER_1K_OUTPUT_USD", 0);
@@ -121,6 +122,7 @@ async function runTextWorker() {
             return;
         }
         await (0, jobs_1.markJobDone)(job.id.toString());
+        await (0, operation_hooks_1.completeOperationForJob)(job.data);
     });
     worker.on("failed", async (job, err) => {
         if (!job?.id) {
@@ -128,6 +130,7 @@ async function runTextWorker() {
         }
         const data = job.data;
         await (0, jobs_1.markJobFailed)(job.id.toString(), err.message);
+        await (0, operation_hooks_1.failOperationForJob)(job.data, err);
         if (data?.contentTextId) {
             await prisma.contentText.update({
                 where: { id: data.contentTextId },

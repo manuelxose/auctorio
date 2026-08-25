@@ -16,6 +16,7 @@ import { getEnv } from "../../shared/utils/env";
 import type { PublicationStatus } from "@prisma/client";
 import type { PublishResult, PublicationTargetStatus } from "../../studio/types";
 import { getPrismaClient } from "../db/prisma";
+import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 
 const prisma = getPrismaClient();
 
@@ -230,6 +231,9 @@ export async function runPublishingWorker() {
 
   worker.on("failed", async (job, err) => {
     const publicationJobId = String((job?.data as PublishingJobData | undefined)?.publicationJobId || "");
+    if (publicationJobId) {
+      await failOperationForJob(job?.data, err);
+    }
     if (!publicationJobId) {
       return;
     }
@@ -255,6 +259,10 @@ export async function runPublishingWorker() {
         nextRetryAt: new Date(Date.now() + 60_000),
       },
     });
+  });
+
+  worker.on("completed", async (job) => {
+    await completeOperationForJob(job?.data);
   });
 
   console.log("[worker:publishing] started", { queue: QUEUE_NAMES.publishing });

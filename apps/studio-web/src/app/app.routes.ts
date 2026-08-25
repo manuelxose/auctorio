@@ -99,6 +99,26 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Connections', title: 'Connections' } },
       },
       {
+        path: 'connections/wizard',
+        loadComponent: () => import('./pages/connection-wizard-page.component').then((m) => m.ConnectionWizardPageComponent),
+        data: { studioMeta: { section: 'Connections', title: 'Connect destination' } },
+      },
+      {
+        path: 'connections/wizard/:id',
+        loadComponent: () => import('./pages/connection-wizard-page.component').then((m) => m.ConnectionWizardPageComponent),
+        data: { studioMeta: { section: 'Connections', title: 'Connect destination' } },
+      },
+      {
+        path: 'activity',
+        loadComponent: () => import('./pages/activity-page.component').then((m) => m.ActivityPageComponent),
+        data: { studioMeta: { section: 'Activity', title: 'Background jobs' } },
+      },
+      {
+        path: 'notifications',
+        loadComponent: () => import('./pages/notifications-page.component').then((m) => m.NotificationsPageComponent),
+        data: { studioMeta: { section: 'Notifications', title: 'Notifications' } },
+      },
+      {
         path: 'settings',
         redirectTo: 'settings/profile',
         pathMatch: 'full',

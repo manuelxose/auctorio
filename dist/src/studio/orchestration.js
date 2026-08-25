@@ -17,6 +17,7 @@ const prisma_1 = require("../infrastructure/db/prisma");
 const env_1 = require("../shared/utils/env");
 const repository_1 = require("./repository");
 const qa_1 = require("./qa");
+const operations_1 = require("./operations");
 const prisma = (0, prisma_1.getPrismaClient)();
 function asRecord(value) {
     return value && typeof value === "object" ? value : {};
@@ -146,9 +147,21 @@ async function startProjectGeneration(projectId, tenantId, feedback, promptPrese
             status: "queued",
         },
     });
+    const operation = await (0, operations_1.createOperation)({
+        tenantId,
+        siteId: project.siteId,
+        type: "text_generation",
+        initiatorUserId: null,
+        entityType: "content_project",
+        entityId: projectId,
+        queueName: "queue_text",
+        jobKey: textJob.id,
+        metadata: { goal: project.goal },
+    });
     await (0, producer_1.enqueueTextJob)(textJob.id, {
         jobId: textJob.id,
         tenantId,
+        operationId: operation.id,
         topicId,
         contentTextId: contentText.id,
         type: "seo",
@@ -189,9 +202,21 @@ async function requestImageGenerationForVersion(tenantId, versionId, promptPrese
     const projectMetadata = version.project.metadata && typeof version.project.metadata === "object" && !Array.isArray(version.project.metadata)
         ? version.project.metadata
         : {};
+    const operation = await (0, operations_1.createOperation)({
+        tenantId,
+        siteId: version.project.siteId,
+        type: "image_generation",
+        initiatorUserId: null,
+        entityType: "content_version",
+        entityId: version.id,
+        queueName: "queue_image",
+        jobKey: imageJob.id,
+        metadata: { mode: textId ? "contextual" : "independent" },
+    });
     await (0, producer_1.enqueueImageJob)(imageJob.id, {
         jobId: imageJob.id,
         tenantId,
+        operationId: operation.id,
         topicId: version.project.topicId,
         contentImageId: contentImage.id,
         mode: textId ? "contextual" : "independent",
@@ -256,8 +281,25 @@ async function queuePublication(publicationJobId) {
     if (alreadyQueued) {
         return;
     }
-    await (0, producer_1.enqueuePublishingJob)(node_crypto_1.default.randomUUID(), {
+    const publicationJob = await prisma.publicationJob.findUnique({ where: { id: publicationJobId } });
+    let operationId = null;
+    if (publicationJob) {
+        const operation = await (0, operations_1.createOperation)({
+            tenantId: publicationJob.tenantId,
+            siteId: publicationJob.siteId ?? null,
+            type: publicationJob.action === "unpublish" ? "unpublish" : "publish",
+            initiatorUserId: null,
+            entityType: "publication_job",
+            entityId: publicationJobId,
+            queueName: "queue_publishing",
+            metadata: { action: publicationJob.action ?? null },
+        });
+        operationId = operation.id;
+    }
+    const jobId = node_crypto_1.default.randomUUID();
+    await (0, producer_1.enqueuePublishingJob)(jobId, {
         publicationJobId,
+        ...(operationId ? { operationId } : {}),
     });
 }
 async function retryImageGeneration(tenantId, contentImageId) {
@@ -291,9 +333,20 @@ async function retryImageGeneration(tenantId, contentImageId) {
             status: "queued",
         },
     });
+    const operation = await (0, operations_1.createOperation)({
+        tenantId,
+        siteId: version?.project.siteId ?? null,
+        type: "image_generation",
+        initiatorUserId: null,
+        entityType: "content_image",
+        entityId: contentImageId,
+        queueName: "queue_image",
+        jobKey: imageJob.id,
+    });
     await (0, producer_1.enqueueImageJob)(imageJob.id, {
         jobId: imageJob.id,
         tenantId,
+        operationId: operation.id,
         topicId: topic.id,
         contentImageId,
         mode: image.textId ? "contextual" : "independent",

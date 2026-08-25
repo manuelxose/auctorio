@@ -10,6 +10,7 @@ const publishers_1 = require("../../studio/publishers");
 const orchestration_1 = require("../../studio/orchestration");
 const env_1 = require("../../shared/utils/env");
 const prisma_1 = require("../db/prisma");
+const operation_hooks_1 = require("./operation-hooks");
 const prisma = (0, prisma_1.getPrismaClient)();
 const defaultDependencies = {
     getPublicationJobById: repository_1.getPublicationJobById,
@@ -146,6 +147,9 @@ async function runPublishingWorker() {
     });
     worker.on("failed", async (job, err) => {
         const publicationJobId = String(job?.data?.publicationJobId || "");
+        if (publicationJobId) {
+            await (0, operation_hooks_1.failOperationForJob)(job?.data, err);
+        }
         if (!publicationJobId) {
             return;
         }
@@ -168,6 +172,9 @@ async function runPublishingWorker() {
                 nextRetryAt: new Date(Date.now() + 60_000),
             },
         });
+    });
+    worker.on("completed", async (job) => {
+        await (0, operation_hooks_1.completeOperationForJob)(job?.data);
     });
     console.log("[worker:publishing] started", { queue: queues_1.QUEUE_NAMES.publishing });
 }

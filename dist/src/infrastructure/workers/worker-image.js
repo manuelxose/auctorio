@@ -13,6 +13,7 @@ const prompts_1 = require("../../studio/prompts");
 const local_storage_1 = require("../storage/local-storage");
 const image_processing_1 = require("../storage/image-processing");
 const orchestration_1 = require("../../studio/orchestration");
+const operation_hooks_1 = require("./operation-hooks");
 function parseSize(size) {
     if (!size) {
         return {};
@@ -193,6 +194,7 @@ async function runImageWorker() {
             return;
         }
         await (0, jobs_1.markJobDone)(job.id.toString());
+        await (0, operation_hooks_1.completeOperationForJob)(job.data);
     });
     worker.on("failed", async (job, err) => {
         if (!job?.id) {
@@ -200,6 +202,7 @@ async function runImageWorker() {
         }
         const data = job.data;
         await (0, jobs_1.markJobFailed)(job.id.toString(), err.message);
+        await (0, operation_hooks_1.failOperationForJob)(job.data, err);
         if (data?.contentImageId) {
             const retryable = err instanceof image_1.ImageDownloadError && err.retryable;
             await prisma.contentImage.update({

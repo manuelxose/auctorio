@@ -740,6 +740,8 @@ export type PublishingAccount = {
   status: 'pending' | 'active' | 'error' | 'disabled';
   lastVerifiedAt: string | null;
   hasCredentials: boolean;
+  provider?: string;
+  connectedAt?: string | null;
   site: { id: string; name: string; key: string } | null;
 };
 
@@ -1105,4 +1107,191 @@ export type WorkerHealth = {
     failed: number;
     completed: number;
   }>;
+};
+
+// ── Magic Installer, Activity Center and Notification models ───────────
+
+export type ConnectorKind = 'website' | 'x' | 'instagram';
+
+export type ConnectorAuthMethodView = {
+  id: string;
+  label: string;
+  description: string;
+  available: boolean;
+};
+
+export type ConnectorView = {
+  id: string;
+  name: string;
+  description: string;
+  capabilities: string[];
+  authMethods: ConnectorAuthMethodView[];
+  ready: boolean;
+  actionHint: string | null;
+  configSchemaVersion: number;
+};
+
+export type ConnectorCapabilitiesResponse = {
+  kinds: Array<{ kind: ConnectorKind; label: string; mark: string; connectors: ConnectorView[] }>;
+};
+
+export type ConfigSchemaField = {
+  key: string;
+  label: string;
+  kind: 'url' | 'text' | 'secret' | 'select' | 'boolean';
+  required: boolean;
+  placeholder?: string;
+  help?: string;
+  options?: Array<{ value: string; label: string }>;
+};
+
+export type WebsiteDiscoveryResult = {
+  inputUrl: string;
+  canonicalOrigin: string;
+  reachable: boolean;
+  httpStatus: number | null;
+  title: string | null;
+  locale: string | null;
+  faviconUrl: string | null;
+  cms: string | null;
+  cmsSignals: string[];
+  robotsTxtUrl: string | null;
+  robotsHasSitemap: boolean;
+  sitemapUrls: string[];
+  generators: string[];
+  endpoints: Array<{ url: string; kind: string; status: number | null; note: string | null }>;
+  authOptions: Array<{ id: string; label: string; available: boolean; detail: string | null }>;
+  publishingCapabilities: string[];
+  warnings: string[];
+  discoveredAt: string;
+};
+
+export type InstallationState =
+  | 'draft'
+  | 'discovering'
+  | 'credentials_required'
+  | 'verifying'
+  | 'ready'
+  | 'active'
+  | 'failed'
+  | 'expired'
+  | 'disabled'
+  | 'cancelled';
+
+export type ConnectorInstallation = {
+  id: string;
+  tenantId: string;
+  siteId: string | null;
+  kind: ConnectorKind;
+  provider: string;
+  state: InstallationState;
+  displayName: string | null;
+  externalAccountId: string | null;
+  config: Record<string, unknown> | null;
+  discovered: WebsiteDiscoveryResult | Record<string, unknown> | null;
+  capabilities: Record<string, unknown> | null;
+  hasCredentials: boolean;
+  credentialsRef: string | null;
+  lastError: string | null;
+  verifiedAt: string | null;
+  activatedAt: string | null;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type InstallationDetailResponse = {
+  installation: ConnectorInstallation;
+  descriptor: {
+    id: string;
+    name: string;
+    kind: ConnectorKind;
+    capabilities: string[];
+    configSchema: { type: 'object'; version: number; fields: ConfigSchemaField[] };
+    verification: {
+      probes: Array<{ probe: string; label: string; reversible: boolean }>;
+      reversible: boolean;
+      notes: string;
+    };
+  } | null;
+};
+
+export type OperationStatus =
+  | 'queued'
+  | 'running'
+  | 'retrying'
+  | 'succeeded'
+  | 'partial'
+  | 'failed'
+  | 'cancelled';
+
+export type OperationItem = {
+  id: string;
+  tenantId: string;
+  siteId: string | null;
+  type: string;
+  status: OperationStatus;
+  phase: string | null;
+  progress: number;
+  totalSteps: number;
+  completedSteps: number;
+  initiatorUserId: string | null;
+  entityType: string | null;
+  entityId: string | null;
+  retryCount: number;
+  errorSummary: string | null;
+  errorCode: string | null;
+  queueName: string | null;
+  jobKey: string | null;
+  metadata: Record<string, unknown> | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  cancelledAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type OperationListResponse = {
+  items: OperationItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  counts: Record<string, number>;
+};
+
+export type NotificationSeverity = 'info' | 'success' | 'warning' | 'error';
+
+export type StudioNotification = {
+  id: string;
+  tenantId: string;
+  userId: string | null;
+  siteId: string | null;
+  category: string;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  entityType: string | null;
+  entityId: string | null;
+  actionUrl: string | null;
+  readAt: string | null;
+  archivedAt: string | null;
+  createdAt: string;
+};
+
+export type NotificationListResponse = {
+  items: StudioNotification[];
+  page: number;
+  pageSize: number;
+  total: number;
+  unread: number;
+  counts: Record<string, number>;
+};
+
+export type NotificationPreference = { category: string; enabled: boolean };
+
+export type StudioEventMessage = {
+  type: string;
+  payload: Record<string, unknown>;
+  siteId: string | null;
+  emittedAt: string;
 };

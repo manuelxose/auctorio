@@ -4,4 +4,5 @@ export const QUEUE_NAMES = {
   image: "queue_image",
   publishing: "queue_publishing",
   social: "queue_social",
+  connection: "queue_connection",
 } as const;

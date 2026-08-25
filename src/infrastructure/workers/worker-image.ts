@@ -10,6 +10,7 @@ import { resolveImagePrompt } from "../../studio/prompts";
 import { saveImageAsset } from "../storage/local-storage";
 import { buildImageDerivatives } from "../storage/image-processing";
 import { syncImageResultToStudio } from "../../studio/orchestration";
+import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 
 type ImageJobData = {
   jobId: string;
@@ -228,6 +229,7 @@ export async function runImageWorker() {
       return;
     }
     await markJobDone(job.id.toString());
+    await completeOperationForJob(job.data);
   });
 
   worker.on("failed", async (job, err) => {
@@ -236,6 +238,7 @@ export async function runImageWorker() {
     }
     const data = job.data as ImageJobData | undefined;
     await markJobFailed(job.id.toString(), err.message);
+    await failOperationForJob(job.data, err);
     if (data?.contentImageId) {
       const retryable = err instanceof ImageDownloadError && err.retryable;
       await prisma.contentImage.update({

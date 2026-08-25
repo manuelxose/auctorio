@@ -54,6 +54,11 @@ export async function enqueueSocialJob(jobId: string, data: Record<string, unkno
   await queue.add("social", data, { jobId, ...retryOptions() });
 }
 
+export async function enqueueConnectionJob(jobId: string, data: Record<string, unknown>) {
+  const queue = getQueue(QUEUE_NAMES.connection);
+  await queue.add("connection", data, { jobId, ...retryOptions() });
+}
+
 export async function getPublishingQueue() {
   return getQueue(QUEUE_NAMES.publishing);
 }

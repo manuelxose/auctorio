@@ -9,6 +9,7 @@ import { buildDryRunResult, dryRunGate, getSocialPublisher, readSocialCredential
 import { socialAssetUrlForVersion } from "../../studio/social";
 import { writeAudit } from "../../studio/audit";
 import { structuredEvent } from "../../shared/utils/logger";
+import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { getSocialIntegrationProvider, type SocialPublishInput } from "../../studio/social-provider";
 import { resolveAccountCredentials, runConnectionHealthCheck } from "../../studio/social-connections";
 
@@ -223,6 +224,7 @@ export async function runSocialWorker() {
   );
 
   worker.on("failed", async (job, err) => {
+    await failOperationForJob(job?.data, err);
     const data = job?.data as SocialJobData | undefined;
     if (data && data.kind !== "generate" && data.attemptId) {
       const attempt = await prisma.publicationAttempt.findFirst({ where: { id: data.attemptId } });
@@ -231,6 +233,10 @@ export async function runSocialWorker() {
       }
       structuredEvent("social.publish.failed", { attemptId: data.attemptId, error: err.message }, "error");
     }
+  });
+
+  worker.on("completed", async (job) => {
+    await completeOperationForJob(job?.data);
   });
 
   // Periodic social connection health checks so broken tokens surface in the

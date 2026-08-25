@@ -7,9 +7,17 @@ import type {
   AutomationPolicy,
   AutomationStatus,
   CalendarEvent,
+  ConnectorCapabilitiesResponse,
+  ConnectorInstallation,
+  ConnectorKind,
   CreateProjectPayload,
   CreateSitePayload,
+  InstallationDetailResponse,
   ListProjectsFilters,
+  NotificationListResponse,
+  NotificationPreference,
+  OperationItem,
+  OperationListResponse,
   PaginatedResponse,
   PublicationChannel,
   PublicationListItem,
@@ -35,6 +43,7 @@ import type {
   StudioAuthProviders,
   StudioInvitationSummary,
   StudioMediaItem,
+  StudioNotification,
   StudioOverview,
   StudioProjectDetailView,
   StudioProjectSummary,
@@ -51,6 +60,7 @@ import type {
   StudioUserSummary,
   UpdateProjectPayload,
   UpdateSitePayload,
+  WebsiteDiscoveryResult,
   WorkerHealth,
 } from '../models/studio.models';
 
@@ -838,5 +848,133 @@ export class StudioApiService {
 
   restoreProject(projectId: string): Observable<{ ok: true }> {
     return this.http.post<{ ok: true }>(`${this.apiBase}/backend/v2/projects/${projectId}/restore`, {});
+  }
+
+  // ─── Magic Installer (connector registry + installations) ─────────────
+
+  getConnectorCapabilities(): Observable<ConnectorCapabilitiesResponse> {
+    return this.http.get<ConnectorCapabilitiesResponse>(`${this.apiBase}/backend/v2/connectors/capabilities`);
+  }
+
+  discoverWebsite(url: string): Observable<WebsiteDiscoveryResult> {
+    return this.http.post<WebsiteDiscoveryResult>(`${this.apiBase}/backend/v2/connectors/discover-website`, { url });
+  }
+
+  listConnectorInstallations(kind?: string, state?: string): Observable<{ items: ConnectorInstallation[] }> {
+    let params = new HttpParams();
+    if (kind) {
+      params = params.set('kind', kind);
+    }
+    if (state) {
+      params = params.set('state', state);
+    }
+    return this.http.get<{ items: ConnectorInstallation[] }>(`${this.apiBase}/backend/v2/connector-installations`, { params });
+  }
+
+  createConnectorInstallation(payload: { kind: ConnectorKind; provider: string; siteId?: string; displayName?: string }): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations`, payload);
+  }
+
+  getConnectorInstallation(id: string): Observable<InstallationDetailResponse> {
+    return this.http.get<InstallationDetailResponse>(`${this.apiBase}/backend/v2/connector-installations/${id}`);
+  }
+
+  startInstallationDiscovery(id: string, url: string): Observable<{ operationId: string; state: string }> {
+    return this.http.post<{ operationId: string; state: string }>(`${this.apiBase}/backend/v2/connector-installations/${id}/discover`, { url });
+  }
+
+  storeInstallationCredentials(id: string, payload: { secrets: Record<string, string>; config: Record<string, unknown> }): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/credentials`, payload);
+  }
+
+  startInstallationVerification(id: string): Observable<{ operationId: string; state: string }> {
+    return this.http.post<{ operationId: string; state: string }>(`${this.apiBase}/backend/v2/connector-installations/${id}/verify`, {});
+  }
+
+  startInstallationSocialSession(id: string): Observable<SocialConnectionSession> {
+    return this.http.post<SocialConnectionSession>(`${this.apiBase}/backend/v2/connector-installations/${id}/social-session`, {});
+  }
+
+  activateInstallation(id: string, payload: { socialAccountId?: string } = {}): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/activate`, payload);
+  }
+
+  cancelInstallation(id: string): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/cancel`, {});
+  }
+
+  resumeInstallation(id: string): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/resume`, {});
+  }
+
+  deleteConnectorInstallation(id: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/connector-installations/${id}`);
+  }
+
+  // ─── Activity Center (operations) ─────────────────────────────────────
+
+  listOperations(filters: { page?: number; pageSize?: number; status?: string; type?: string; siteId?: string; search?: string } = {}): Observable<OperationListResponse> {
+    let params = new HttpParams().set('page', filters.page ?? 1).set('pageSize', filters.pageSize ?? 20);
+    if (filters.status) {
+      params = params.set('status', filters.status);
+    }
+    if (filters.type) {
+      params = params.set('type', filters.type);
+    }
+    if (filters.siteId) {
+      params = params.set('siteId', filters.siteId);
+    }
+    if (filters.search) {
+      params = params.set('search', filters.search);
+    }
+    return this.http.get<OperationListResponse>(`${this.apiBase}/backend/v2/operations`, { params });
+  }
+
+  getOperation(id: string): Observable<OperationItem> {
+    return this.http.get<OperationItem>(`${this.apiBase}/backend/v2/operations/${id}`);
+  }
+
+  retryOperation(id: string): Observable<OperationItem & { requeued: boolean }> {
+    return this.http.post<OperationItem & { requeued: boolean }>(`${this.apiBase}/backend/v2/operations/${id}/retry`, {});
+  }
+
+  cancelOperation(id: string): Observable<OperationItem & { queueCancelled: boolean }> {
+    return this.http.post<OperationItem & { queueCancelled: boolean }>(`${this.apiBase}/backend/v2/operations/${id}/cancel`, {});
+  }
+
+  // ─── Notifications ────────────────────────────────────────────────────
+
+  listNotifications(filters: { page?: number; pageSize?: number; unreadOnly?: boolean; category?: string; archived?: boolean } = {}): Observable<NotificationListResponse> {
+    let params = new HttpParams().set('page', filters.page ?? 1).set('pageSize', filters.pageSize ?? 20);
+    if (filters.unreadOnly) {
+      params = params.set('unreadOnly', 'true');
+    }
+    if (filters.category) {
+      params = params.set('category', filters.category);
+    }
+    if (filters.archived) {
+      params = params.set('archived', 'true');
+    }
+    return this.http.get<NotificationListResponse>(`${this.apiBase}/backend/v2/notifications`, { params });
+  }
+
+  markNotificationRead(id: string, read: boolean): Observable<StudioNotification> {
+    return this.http.post<StudioNotification>(`${this.apiBase}/backend/v2/notifications/${id}/read`, { read });
+  }
+
+  markAllNotificationsRead(category?: string): Observable<{ updated: number }> {
+    return this.http.post<{ updated: number }>(`${this.apiBase}/backend/v2/notifications/read-all`, { category });
+  }
+
+  archiveNotification(id: string, archived: boolean): Observable<StudioNotification> {
+    return this.http.post<StudioNotification>(`${this.apiBase}/backend/v2/notifications/${id}/archive`, { archived });
+  }
+
+  getNotificationPreferences(): Observable<{ preferences: NotificationPreference[] }> {
+    return this.http.get<{ preferences: NotificationPreference[] }>(`${this.apiBase}/backend/v2/notifications/preferences`);
+  }
+
+  setNotificationPreference(category: string, enabled: boolean): Observable<NotificationPreference> {
+    return this.http.put<NotificationPreference>(`${this.apiBase}/backend/v2/notifications/preferences`, { category, enabled });
   }
 }

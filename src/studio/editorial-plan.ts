@@ -709,19 +709,39 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
  */
 export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPlanInput) {
   const { accounts, strategy, plan } = await prepareEditorialPlan(input);
-  void executeEditorialPlanGeneration(plan, input, strategy, accounts).catch((error) => {
-    structuredEvent(
-      "editorial_plan.generation.background_error",
-      {
-        tenantId: input.tenantId,
-        siteId: input.siteId,
-        planId: plan.id,
-        normalizedError: error instanceof Error ? error.message : String(error),
-      },
-      "error",
-    );
+  const { createOperation, startOperation, completeOperation, failOperation } = await import("./operations");
+  const operation = await createOperation({
+    tenantId: input.tenantId,
+    siteId: input.siteId ?? null,
+    type: "editorial_plan_generation",
+    initiatorUserId: input.userId ?? null,
+    entityType: "editorial_plan",
+    entityId: plan.id,
+    metadata: { strategy: input.strategy ?? null },
   });
-  return { planId: plan.id };
+  await startOperation(operation.id, "generating");
+  void executeEditorialPlanGeneration(plan, input, strategy, accounts)
+    .then(async () => {
+      await completeOperation(operation.id);
+    })
+    .catch(async (error) => {
+      await failOperation(operation.id, {
+        errorCode: "plan_generation_failed",
+        errorSummary: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      });
+      structuredEvent(
+        "editorial_plan.generation.background_error",
+        {
+          tenantId: input.tenantId,
+          siteId: input.siteId,
+          planId: plan.id,
+          normalizedError: error instanceof Error ? error.message : String(error),
+        },
+        "error",
+      );
+    });
+  return { planId: plan.id, operationId: operation.id };
 }
 
 async function recordGenerationAttempts(

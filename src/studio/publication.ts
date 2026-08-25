@@ -529,10 +529,24 @@ export async function enqueuePublication(publicationId: string): Promise<void> {
     },
   });
 
+  const { createOperation } = await import("./operations");
+  const operation = await createOperation({
+    tenantId: publication.tenantId,
+    siteId: publication.siteId,
+    type: "publish",
+    initiatorUserId: null,
+    entityType: "publication",
+    entityId: publication.id,
+    queueName: "queue_social",
+    jobKey: attempt.id,
+    metadata: { channel: publication.channel },
+  });
+
   await enqueueSocialJob(attempt.id, {
     kind: "publish",
     attemptId: attempt.id,
     publicationId: publication.id,
+    operationId: operation.id,
   });
 }
 

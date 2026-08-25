@@ -6,6 +6,7 @@ import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
 import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
+import { createOperation } from "./operations";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
 const prisma = getPrismaClient();
@@ -184,9 +185,22 @@ export async function startProjectGeneration(
     },
   });
 
+  const operation = await createOperation({
+    tenantId,
+    siteId: project.siteId,
+    type: "text_generation",
+    initiatorUserId: null,
+    entityType: "content_project",
+    entityId: projectId,
+    queueName: "queue_text",
+    jobKey: textJob.id,
+    metadata: { goal: project.goal },
+  });
+
   await enqueueTextJob(textJob.id, {
     jobId: textJob.id,
     tenantId,
+    operationId: operation.id,
     topicId,
     contentTextId: contentText.id,
     type: "seo",
@@ -238,9 +252,22 @@ export async function requestImageGenerationForVersion(
       ? (version.project.metadata as Record<string, unknown>)
       : {};
 
+  const operation = await createOperation({
+    tenantId,
+    siteId: version.project.siteId,
+    type: "image_generation",
+    initiatorUserId: null,
+    entityType: "content_version",
+    entityId: version.id,
+    queueName: "queue_image",
+    jobKey: imageJob.id,
+    metadata: { mode: textId ? "contextual" : "independent" },
+  });
+
   await enqueueImageJob(imageJob.id, {
     jobId: imageJob.id,
     tenantId,
+    operationId: operation.id,
     topicId: version.project.topicId,
     contentImageId: contentImage.id,
     mode: textId ? "contextual" : "independent",
@@ -332,8 +359,26 @@ export async function queuePublication(publicationJobId: string) {
     return;
   }
 
-  await enqueuePublishingJob(crypto.randomUUID(), {
+  const publicationJob = await prisma.publicationJob.findUnique({ where: { id: publicationJobId } });
+  let operationId: string | null = null;
+  if (publicationJob) {
+    const operation = await createOperation({
+      tenantId: publicationJob.tenantId,
+      siteId: publicationJob.siteId ?? null,
+      type: publicationJob.action === "unpublish" ? "unpublish" : "publish",
+      initiatorUserId: null,
+      entityType: "publication_job",
+      entityId: publicationJobId,
+      queueName: "queue_publishing",
+      metadata: { action: publicationJob.action ?? null },
+    });
+    operationId = operation.id;
+  }
+
+  const jobId = crypto.randomUUID();
+  await enqueuePublishingJob(jobId, {
     publicationJobId,
+    ...(operationId ? { operationId } : {}),
   });
 }
 
@@ -373,9 +418,21 @@ export async function retryImageGeneration(tenantId: string, contentImageId: str
     },
   });
 
+  const operation = await createOperation({
+    tenantId,
+    siteId: version?.project.siteId ?? null,
+    type: "image_generation",
+    initiatorUserId: null,
+    entityType: "content_image",
+    entityId: contentImageId,
+    queueName: "queue_image",
+    jobKey: imageJob.id,
+  });
+
   await enqueueImageJob(imageJob.id, {
     jobId: imageJob.id,
     tenantId,
+    operationId: operation.id,
     topicId: topic.id,
     contentImageId,
     mode: image.textId ? "contextual" : "independent",
