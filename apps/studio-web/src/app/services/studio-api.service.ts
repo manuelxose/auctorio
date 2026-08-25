@@ -26,6 +26,9 @@ import type {
   SocialSetupInfo,
   SourceRecommendation,
   EditorialPlan,
+  InternalLinkSuggestion,
+  SiteIndexedPageRow,
+  SiteIntelligenceOverview,
   PublishingWindow,
   SourceItemStatus,
   SourceType,
@@ -710,6 +713,17 @@ export class StudioApiService {
     audience?: string;
     topics?: string[];
     excludedTopics?: string[];
+    strategyMode?: string;
+    primaryIntent?: string;
+    contentFormats?: string[];
+    market?: string;
+    campaignName?: string;
+    existingCluster?: string;
+    newCluster?: boolean;
+    freeAiDiscovery?: boolean;
+    seasonalEvents?: string[];
+    brandsOrEntities?: string[];
+    keywordSeeds?: string[];
   }): Observable<EditorialPlan> {
     return this.http.post<EditorialPlan>(`${this.apiBase}/backend/v2/editorial-plans/generate`, payload);
   }
@@ -736,6 +750,38 @@ export class StudioApiService {
 
   deleteEditorialPlanItem(itemId: string): Observable<{ ok: true }> {
     return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}`);
+  }
+
+  // ── Site intelligence ────────────────────────────────────────────
+
+  getSiteIntelligence(siteId: string): Observable<SiteIntelligenceOverview> {
+    return this.http.get<SiteIntelligenceOverview>(`${this.apiBase}/backend/v2/site-intelligence/${siteId}`);
+  }
+
+  indexSite(
+    siteId: string,
+    options: { crawl?: boolean; budget?: number; changedOnly?: boolean; force?: boolean; wait?: boolean } = {},
+  ): Observable<{ started: boolean; indexing?: boolean; result?: unknown }> {
+    return this.http.post<{ started: boolean; indexing?: boolean; result?: unknown }>(`${this.apiBase}/backend/v2/site-intelligence/${siteId}/index`, options);
+  }
+
+  listSiteIntelligencePages(siteId: string, options: { q?: string; crawlState?: string; page?: number; pageSize?: number } = {}): Observable<PaginatedResponse<SiteIndexedPageRow>> {
+    let params = new HttpParams();
+    if (options.q) params = params.set('q', options.q);
+    if (options.crawlState) params = params.set('crawlState', options.crawlState);
+    if (options.page) params = params.set('page', options.page);
+    if (options.pageSize) params = params.set('pageSize', options.pageSize);
+    return this.http.get<PaginatedResponse<SiteIndexedPageRow>>(`${this.apiBase}/backend/v2/site-intelligence/${siteId}/pages`, { params });
+  }
+
+  suggestInternalLinks(siteId: string, options: { keyword?: string; topic?: string; q?: string; excludeUrl?: string; limit?: number } = {}): Observable<{ items: InternalLinkSuggestion[] }> {
+    let params = new HttpParams();
+    if (options.keyword) params = params.set('keyword', options.keyword);
+    if (options.topic) params = params.set('topic', options.topic);
+    if (options.q) params = params.set('q', options.q);
+    if (options.excludeUrl) params = params.set('excludeUrl', options.excludeUrl);
+    if (options.limit) params = params.set('limit', String(options.limit));
+    return this.http.get<{ items: InternalLinkSuggestion[] }>(`${this.apiBase}/backend/v2/site-intelligence/${siteId}/internal-links`, { params });
   }
 
   generateContentFromEditorialPlanItem(itemId: string): Observable<unknown> {

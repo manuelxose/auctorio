@@ -59,6 +59,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Editorial Plan', title: 'Editorial Plan' } },
       },
       {
+        path: 'site-intelligence',
+        loadComponent: () => import('./pages/site-intelligence-page.component').then((m) => m.SiteIntelligencePageComponent),
+        data: { studioMeta: { section: 'Site Intelligence', title: 'Site Intelligence' } },
+      },
+      {
         path: 'publications',
         loadComponent: () => import('./pages/publications-page.component').then((m) => m.PublicationsPageComponent),
         data: { studioMeta: { section: 'Publications', title: 'Publications' } },

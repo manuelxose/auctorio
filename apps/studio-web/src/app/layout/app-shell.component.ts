@@ -252,6 +252,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     {
       label: 'Operate',
       items: [
+        { label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan' },
         { label: 'Sources', path: '/studio/sources', icon: 'sources' },
         { label: 'Automation', path: '/studio/automation', icon: 'automation' },
       ],
