@@ -69,8 +69,13 @@ test('golden path 1: connector metadata has no hard-coded brands and the workspa
 
   const installations = await api.get('/studio/api/backend/v2/connector-installations');
   expect(installations.status()).toBe(200);
-  const installItems = ((await installations.json()) as { items: Array<{ displayName: string | null }> }).items;
-  expect(installItems.some((item) => /tecnoria|guiatv/i.test(item.displayName ?? ''))).toBe(false);
+  const installItems = ((await installations.json()) as { items: Array<{ provider: string; kind: string }> }).items;
+  // Every installation must use a generic registry connector — brand-specific
+  // connectors are never seeded by bootstrap or registered by default.
+  for (const item of installItems) {
+    expect(['generic_rest', 'generic_webhook', 'x_oauth', 'instagram_oauth']).toContain(item.provider);
+    expect(['website', 'x', 'instagram']).toContain(item.kind);
+  }
 
   // Social setup reports honestly whether a provider is configured.
   const setup = await api.get('/studio/api/backend/v2/social-connections/setup');

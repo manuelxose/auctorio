@@ -778,9 +778,39 @@ export async function listEditorialPlans(tenantId: string, page: number, pageSiz
   const where = { tenantId, status: { not: "archived" as const } };
   const [total, items] = await prisma.$transaction([
     prisma.editorialPlan.count({ where }),
-    prisma.editorialPlan.findMany({ where, orderBy: { createdAt: "desc" }, skip: (page - 1) * pageSize, take: pageSize, include: { _count: { select: { items: true } } } }),
+    prisma.editorialPlan.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * pageSize,
+      take: pageSize,
+      include: {
+        _count: { select: { items: true } },
+        site: { select: { id: true, name: true } },
+        items: { select: { channel: true, status: true } },
+      },
+    }),
   ]);
-  return { items, page, pageSize, total };
+
+  // Enrich each plan with channel and status rollups so the Studio can render
+  // meaningful cards without a per-plan detail request.
+  const enriched = items.map(({ items: itemRollups, ...plan }) => {
+    const channelCounts = { website: 0, x: 0, instagram: 0 } as Record<string, number>;
+    const statusCounts = {} as Record<string, number>;
+    for (const row of itemRollups) {
+      if (channelCounts[row.channel] !== undefined) {
+        channelCounts[row.channel] += 1;
+      }
+      statusCounts[row.status] = (statusCounts[row.status] ?? 0) + 1;
+    }
+    return {
+      ...plan,
+      siteName: plan.site?.name ?? null,
+      channelCounts,
+      statusCounts,
+    };
+  });
+
+  return { items: enriched, page, pageSize, total };
 }
 
 export async function getEditorialPlan(tenantId: string, planId: string) {

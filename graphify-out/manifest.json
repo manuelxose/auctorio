@@ -1746,9 +1746,9 @@
     "semantic_hash": ""
   },
   "scripts/cleanup-seeded-connections.ts": {
-    "mtime": 1787658592.8163428,
-    "seen": 1787660576.4376287,
-    "ast_hash": "c3a670383a7200a075a9b25a0c07629d",
+    "mtime": 1787660860.4194233,
+    "seen": 1787660950.9096665,
+    "ast_hash": "d2d10877dc6734ddd7c03289cf5d6d01",
     "semantic_hash": ""
   },
   "scripts/qa-visual-installer.mjs": {

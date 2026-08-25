@@ -4476,3 +4476,7 @@ html[data-theme='dark'] .au-channel-dot--x { background: #f3f4f6; }
   .au-table__actions { justify-content: flex-start; }
   .au-page__header--split { flex-direction: column; }
 }
+
+/* ── Editorial plan card styles live in the editorial-plan-page component
+   (scoped, lazy-loaded) to keep the initial bundle within budget. ── */
+

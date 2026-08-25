@@ -907,6 +907,11 @@ export type EditorialPlan = {
   model: string | null;
   error: string | null;
   strategyMode: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  siteName?: string | null;
+  channelCounts?: { website?: number; x?: number; instagram?: number };
+  statusCounts?: Record<string, number>;
   items?: EditorialPlanItem[];
   generatedOutput?: { items?: unknown[]; dropped?: Array<{ title: string; reason: string }>; warnings?: string[] } | null;
   _count?: { items: number };
