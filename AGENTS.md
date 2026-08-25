@@ -15,3 +15,5 @@ This project uses a role-based agent system to optimize development and reduce t
 - Use the **Smallest Model** appropriate for the task (e.g., Haiku for simple fixes, Sonnet for architecture).
 - **Batch Operations**: Perform multiple related file edits or command runs in a single turn.
 - **Context Management**: Use `grep_search` and `list_dir` to find relevant files instead of reading entire directories.
+
+Shared workspace skills are cataloged at `/var/www/.agents/skills/manifest.json`. Load them on demand; use Graphify for cross-cutting work and Vercel/Impeccable only for applicable frontend tasks.
