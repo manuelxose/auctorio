@@ -107,7 +107,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
             <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/content">Open content</a>
           </app-empty-state>
         } @else {
-          <div class="au-table-wrap">
+          <div class="au-table-wrap au-table-wrap--scrollable">
             <table class="au-table">
               <thead>
                 <tr>

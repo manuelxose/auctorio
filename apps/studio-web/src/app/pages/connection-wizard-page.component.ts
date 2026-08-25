@@ -23,6 +23,167 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
   selector: 'app-connection-wizard-page',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
+  styles: [
+    `
+/* Destination cards */
+.au-destination-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--au-s3);
+}
+
+.au-destination-card {
+  display: flex;
+  gap: var(--au-s3);
+  align-items: center;
+  border: 1px solid var(--au-border);
+  background: var(--au-surface);
+  border-radius: var(--au-r-md);
+  padding: var(--au-s3);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  color: var(--au-text);
+  transition: border-color var(--au-ease), box-shadow var(--au-ease);
+}
+
+.au-destination-card:hover { border-color: var(--au-border-strong); }
+.au-destination-card.is-selected { border-color: var(--au-brand); box-shadow: var(--au-focus-ring); }
+
+.au-destination-card__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--au-r-sm);
+  background: var(--au-brand-soft);
+  color: var(--au-brand);
+  font-weight: 800;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.au-destination-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.au-destination-card__name {
+  font-weight: 650;
+}
+
+.au-destination-card__hint {
+  color: var(--au-muted);
+  font-size: var(--au-fs-metadata);
+}
+
+/* Stepper */
+.au-stepper {
+  list-style: none;
+  display: flex;
+  gap: var(--au-s2);
+  padding: 0;
+  margin: 0 0 var(--au-s4);
+  overflow-x: auto;
+}
+
+.au-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.au-step__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--au-r-full);
+  background: var(--au-surface-2);
+  color: var(--au-muted);
+  font-size: var(--au-fs-caption);
+  font-weight: 650;
+  border: 1px solid var(--au-border);
+}
+
+.au-step.is-current .au-step__dot {
+  background: var(--au-brand);
+  color: var(--au-on-brand);
+  border-color: var(--au-brand);
+}
+
+.au-step.is-done .au-step__dot {
+  background: var(--au-success-soft);
+  color: var(--au-success);
+  border-color: var(--au-success);
+}
+
+.au-step__label {
+  font-size: var(--au-fs-body-sm);
+  color: var(--au-muted);
+  white-space: nowrap;
+}
+
+.au-step.is-current .au-step__label { color: var(--au-text); font-weight: 600; }
+
+/* Connection methods */
+.au-method-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--au-s2);
+}
+
+.au-method-card {
+  display: flex;
+  align-items: center;
+  gap: var(--au-s3);
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--au-border);
+  background: var(--au-surface);
+  border-radius: var(--au-r-md);
+  padding: var(--au-s3);
+  cursor: pointer;
+  font: inherit;
+  color: var(--au-text);
+  transition: border-color var(--au-ease);
+}
+
+.au-method-card:hover { border-color: var(--au-border-strong); }
+.au-method-card.is-selected { border-color: var(--au-brand); box-shadow: var(--au-focus-ring); }
+
+.au-method-card__desc {
+  color: var(--au-muted);
+  font-size: var(--au-fs-metadata);
+  margin: 2px 0 0;
+}
+
+/* Verification probes */
+.au-probe-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--au-s3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.au-probe {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--au-fs-body-sm);
+  color: var(--au-text-2);
+}
+
+.au-probe app-icon { color: var(--au-success); }
+    `,
+  ],
   template: `
     <section class="au-page au-page--narrow">
       <header class="au-page__header">

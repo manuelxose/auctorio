@@ -332,7 +332,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                             <p class="au-empty__text">Adjust the search or filters above.</p>
                           </div>
                         } @else {
-                          <div class="au-table-wrap">
+                          <div class="au-table-wrap au-table-wrap--scrollable">
                             <table class="au-table">
                               <thead>
                                 <tr>
@@ -350,7 +350,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                                 </tr>
                               </thead>
                               <tbody>
-                                <ng-container *ngFor="let item of filteredPlanRows">
+                                <ng-container *ngFor="let item of pagedPlanRows()">
                                   <tr [class.is-selected]="selectedIds.has(item.id)">
                                     <td>
                                       <input type="checkbox" [checked]="selectedIds.has(item.id)" (change)="toggleSelection(item.id)" [attr.aria-label]="'Select ' + item.title" />
@@ -473,6 +473,14 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                               </tbody>
                             </table>
                           </div>
+
+                          <div class="au-toolbar au-toolbar--panel" *ngIf="planRowTotalPages() > 1">
+                            <span class="au-muted">{{ filteredPlanRows.length }} rows</span>
+                            <div class="au-toolbar__spacer"></div>
+                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planRowPage <= 1" (click)="goPlanRowPage(planRowPage - 1)">Previous</button>
+                            <span class="au-muted">Page {{ planRowPage }} of {{ planRowTotalPages() }}</span>
+                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planRowPage >= planRowTotalPages()" (click)="goPlanRowPage(planRowPage + 1)">Next</button>
+                          </div>
                         }
                       </ng-container>
                     </div>
@@ -520,6 +528,8 @@ export class EditorialPlanPageComponent implements OnInit {
   planSearch = '';
   planChannelFilter = '';
   planStatusFilter = '';
+  planRowPage = 1;
+  planRowPageSize = 10;
   filteredPlanRows: Array<NonNullable<EditorialPlan['items']>[number]> = [];
   channels = { website: true, x: true, instagram: false };
   draft = { dateFrom: new Date().toISOString().slice(0, 10), dateTo: new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10), siteId: '', objective: '', audience: '', topics: '', excludedTopics: '', publicationCount: 7 };
@@ -688,6 +698,17 @@ export class EditorialPlanPageComponent implements OnInit {
       if (!query) return true;
       return [item.title, item.topic ?? '', item.primaryKeyword ?? '', item.seoTitle ?? ''].some((value) => value.toLowerCase().includes(query));
     });
+    this.planRowPage = 1;
+  }
+  planRowTotalPages(): number {
+    return Math.max(1, Math.ceil(this.filteredPlanRows.length / this.planRowPageSize));
+  }
+  pagedPlanRows(): Array<NonNullable<EditorialPlan['items']>[number]> {
+    const start = (this.planRowPage - 1) * this.planRowPageSize;
+    return this.filteredPlanRows.slice(start, start + this.planRowPageSize);
+  }
+  goPlanRowPage(page: number): void {
+    this.planRowPage = Math.min(Math.max(1, page), this.planRowTotalPages());
   }
   toggleSelection(itemId: string): void { this.selectedIds = new Set(this.selectedIds); this.selectedIds.has(itemId) ? this.selectedIds.delete(itemId) : this.selectedIds.add(itemId); }
   startEdit(item: NonNullable<EditorialPlan['items']>[number]): void { this.editingItemId = item.id; this.editDraft = { title: item.title, primaryKeyword: item.primaryKeyword || '', seoTitle: item.seoTitle || '', scheduledFor: item.scheduledFor ? new Date(item.scheduledFor).toISOString().slice(0, 16) : '' }; }

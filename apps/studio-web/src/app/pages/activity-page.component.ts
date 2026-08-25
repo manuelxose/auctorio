@@ -67,7 +67,7 @@ const STATUS_TABS: Array<{ id: OperationStatus | 'all'; label: string }> = [
 
       <app-empty-state *ngIf="!loading && !loadError && items.length === 0" icon="activity" title="No operations yet" text="Start an indexing, generation or publication job and it will appear here."></app-empty-state>
 
-      <div class="au-table-wrap" *ngIf="items.length > 0">
+      <div class="au-table-wrap au-table-wrap--scrollable" *ngIf="items.length > 0">
         <table class="au-table au-table--hover">
           <thead>
             <tr>

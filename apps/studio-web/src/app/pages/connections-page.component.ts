@@ -110,7 +110,7 @@ type ConnectionRow = {
         No connections match this view.
       </div>
 
-      <div class="au-table-wrap" *ngIf="filteredRows.length > 0">
+      <div class="au-table-wrap au-table-wrap--scrollable" *ngIf="filteredRows.length > 0">
         <table class="au-table au-table--hover">
           <thead>
             <tr>
