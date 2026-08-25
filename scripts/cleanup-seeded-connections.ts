@@ -29,10 +29,11 @@ type Args = {
   dryRun: boolean;
   accounts: string[];
   tenantSites: string[];
+  draftsOnly: boolean;
 };
 
 function parseArgs(): Args {
-  const args: Args = { dryRun: false, accounts: [], tenantSites: [] };
+  const args: Args = { dryRun: false, accounts: [], tenantSites: [], draftsOnly: false };
   const raw = process.argv.slice(2);
   for (let index = 0; index < raw.length; index += 1) {
     const flag = raw[index];
@@ -40,6 +41,10 @@ function parseArgs(): Args {
     switch (flag) {
       case "--dry-run":
         args.dryRun = true;
+        break;
+      case "--drafts-only":
+        // Clean only abandoned installation drafts (draft/failed/cancelled).
+        args.draftsOnly = true;
         break;
       case "--account":
         if (!next) {
@@ -209,9 +214,16 @@ async function main() {
   const args = parseArgs();
   const hasTargets = args.accounts.length > 0 || args.tenantSites.length > 0;
 
+  if (args.draftsOnly) {
+    console.log(`${args.dryRun ? "DRY RUN" : "CLEANUP"} — installation drafts only`);
+    await cleanupInstallationDrafts(args.dryRun);
+    await prisma.$disconnect();
+    return;
+  }
+
   if (!hasTargets) {
     if (!args.dryRun) {
-      console.error("Refusing to run without --dry-run or explicit targets.");
+      console.error("Refusing to run without --dry-run, --drafts-only or explicit targets.");
       process.exit(2);
     }
     await reportCandidates();
