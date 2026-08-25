@@ -138,9 +138,9 @@
     "semantic_hash": "35913c96a57fbd1e2374107b3cafe95c"
   },
   "apps/studio-web/src/app/layout/app-shell.component.ts": {
-    "mtime": 1787664510.1607707,
-    "seen": 1787665828.374004,
-    "ast_hash": "7e65ec7767a0d08ca55fdf9f089fe265",
+    "mtime": 1787669770.716431,
+    "seen": 1787670046.5706534,
+    "ast_hash": "18257673c8a0a37d6936ea2fc6f5d3f9",
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/layout/public-shell.component.ts": {
@@ -204,9 +204,9 @@
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/pages/editorial-plan-page.component.ts": {
-    "mtime": 1787664925.4072332,
-    "seen": 1787665828.3740373,
-    "ast_hash": "259796f1be6b4a0de2a503edd06b16d6",
+    "mtime": 1787669550.4340484,
+    "seen": 1787670046.5706868,
+    "ast_hash": "0ff746ce6a4d0e780816fccdd5c789d5",
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/pages/examples-page.component.ts": {
@@ -1135,7 +1135,7 @@
   },
   ".vscode/mcp.json": {
     "mtime": 1773257216.5235314,
-    "seen": 1787660664.3261452,
+    "seen": 1787670046.5705929,
     "ast_hash": "690f19f462da3192a98806fdb2377e72",
     "semantic_hash": ""
   },
@@ -1716,9 +1716,9 @@
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/pages/notifications-page.component.ts": {
-    "mtime": 1787664510.1897702,
-    "seen": 1787665828.3740592,
-    "ast_hash": "66b60d3ff7f7ddb184d58f2331bd76f2",
+    "mtime": 1787669617.0189536,
+    "seen": 1787670046.5707164,
+    "ast_hash": "c8041fcb603f8960851fe3b9712b0629",
     "semantic_hash": ""
   },
   "apps/studio-web/src/app/services/sse.service.ts": {
@@ -1896,9 +1896,9 @@
     "semantic_hash": ""
   },
   "e2e/specs/notifications-links.spec.ts": {
-    "mtime": 1787665281.9178538,
-    "seen": 1787665828.374128,
-    "ast_hash": "77c3aefe40ea0ba3cc269d614c67d966",
+    "mtime": 1787669836.8743465,
+    "seen": 1787670046.5707746,
+    "ast_hash": "986e66f62376db8ae32b39b1126bb6af",
     "semantic_hash": ""
   }
 }
