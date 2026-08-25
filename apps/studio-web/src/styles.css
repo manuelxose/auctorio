@@ -2441,10 +2441,14 @@ tr.is-selected {
 }
 
 .au-table__actions {
-  display: flex;
-  gap: 4px;
-  justify-content: flex-end;
+  /* Keep the cell a real table-cell: display:flex on td/th broke row stretching
+     and made the expand chevron drift to the top of the row. */
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
 }
+
+.au-table__actions app-icon { vertical-align: middle; }
 
 .au-table__empty {
   padding: 40px var(--au-s4);
