@@ -4,9 +4,10 @@ import { Prisma } from "@prisma/client";
 import type { ContentSource, ContentSourceType, SourceItemStatus } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { fetchUrl, validateScrapeUrl } from "../infrastructure/scraping";
+import { fetchHtmlWithBrowser } from "../infrastructure/scraping/browser";
 import { normalizeText } from "../shared/utils/text";
 import { sha256 } from "../shared/utils/hash";
-import { getNumberEnv } from "../shared/utils/env";
+import { getEnv, getNumberEnv } from "../shared/utils/env";
 import { scoreAndPromoteSourceItem } from "./editorial";
 import { writeAudit } from "./audit";
 import type { PaginatedResult } from "./types";
@@ -502,6 +503,331 @@ function resolvePath(input: unknown, path: string): unknown {
   return current;
 }
 
+// ────────────────────────────────────────────────────────────── Movie-database ingestion
+//
+// Two new source types for editorial ingestion from movie databases:
+//
+//   htmllist — configurable HTML listing adapter (cards → items). Works with
+//     plain HTTP for reachable sites (SensaCine) and with a headless-browser
+//     engine for WAF-protected sites (Filmaffinity/Cloudflare). Ships with
+//     per-domain default selectors; override via source.configuration.
+//
+//   imdb     — official IMDb public dataset (datasets.imdbws.com) TSV adapter.
+//     No scraping involved; streams the gzip archive to disk and ingests
+//     recent titles.
+
+export type ListingSourceConfig = {
+  /** "http" (default) or "browser" (headless Chromium for WAF-protected sites). */
+  engine?: "http" | "browser";
+  itemSelector?: string;
+  titleSelector?: string;
+  linkSelector?: string;
+  imageSelector?: string;
+  dateSelector?: string;
+  categoriesSelector?: string;
+  descriptionSelectors?: string[];
+  maxItems?: number;
+  waitMs?: number;
+  headers?: Record<string, string>;
+};
+
+const LISTING_DEFAULTS: Record<string, ListingSourceConfig> = {
+  "www.filmaffinity.com": {
+    engine: "browser",
+    itemSelector: "div.fa-card",
+    titleSelector: ".mc-title a",
+    linkSelector: ".mc-title a",
+    imageSelector: "img",
+    descriptionSelectors: [".mc-title"],
+    waitMs: 8000,
+  },
+  "www.sensacine.com": {
+    engine: "http",
+    itemSelector: "ul.item_lists_3 > li.mdl",
+    titleSelector: ".meta-title-link",
+    linkSelector: ".meta-title-link",
+    imageSelector: "img",
+    descriptionSelectors: [".meta-body"],
+    categoriesSelector: ".meta-body-info",
+    maxItems: 24,
+  },
+};
+
+function resolveListingConfig(sourceUrl: string, configuration: unknown): ListingSourceConfig {
+  let hostDefaults: ListingSourceConfig = {};
+  try {
+    const host = new URL(sourceUrl).hostname.replace(/^www\./, "");
+    hostDefaults = LISTING_DEFAULTS[host] ?? LISTING_DEFAULTS[`www.${host}`] ?? {};
+  } catch {
+    hostDefaults = {};
+  }
+  const configured = readConfigObject(configuration);
+  return { ...hostDefaults, ...configured };
+}
+
+export function extractListingItems(html: string, sourceUrl: string, config: ListingSourceConfig): ParsedSourceItem[] {
+  const maxItems = Math.max(1, Math.min(config.maxItems ?? getNumberEnv("SCRAPE_MAX_ITEMS", 20), 100));
+  const $ = load(html);
+
+  let itemNodes = config.itemSelector ? $(config.itemSelector) : $();
+  if (itemNodes.length === 0) {
+    itemNodes = $("article, li:has(h2, h3), tr:has(td a[href])");
+  }
+
+  const items: ParsedSourceItem[] = [];
+  itemNodes.each((_index, element) => {
+    if (items.length >= maxItems) {
+      return;
+    }
+    const node = $(element);
+
+    const linkElement = config.linkSelector ? node.find(config.linkSelector).first() : node.find("a[href]").first();
+    const rawHref = linkElement.attr("href") ?? node.find("a[href]").first().attr("href");
+    if (!rawHref || /^(javascript:|mailto:|#)/i.test(rawHref.trim())) {
+      return;
+    }
+    let canonicalUrl: string | null = null;
+    try {
+      canonicalUrl = normalizeCanonicalUrl(new URL(rawHref, sourceUrl).toString());
+    } catch {
+      return;
+    }
+    if (!canonicalUrl) {
+      return;
+    }
+
+    const title = compact(
+      (config.titleSelector ? node.find(config.titleSelector).first().text() : "") ||
+        linkElement.text() ||
+        node.find("h2, h3").first().text(),
+    );
+    if (!title) {
+      return;
+    }
+
+    const descriptionParts: string[] = [];
+    for (const selector of config.descriptionSelectors ?? []) {
+      const text = compact(node.find(selector).first().text());
+      if (text && !descriptionParts.includes(text)) {
+        descriptionParts.push(text);
+      }
+    }
+
+    let image: string | null = null;
+    if (config.imageSelector) {
+      const rawImage = node.find(config.imageSelector).first().attr("src") ?? node.find(config.imageSelector).first().attr("data-src");
+      if (rawImage) {
+        try {
+          image = normalizeCanonicalUrl(new URL(rawImage, sourceUrl).toString());
+        } catch {
+          image = null;
+        }
+      }
+    }
+
+    const categories: string[] = [];
+    if (config.categoriesSelector) {
+      const rawCategories = compact(node.find(config.categoriesSelector).first().text());
+      for (const part of rawCategories.split(/\s*\|\s*|,|·/)) {
+        const cleaned = part.replace(/^\d+\s*h\s*\d*\s*min$/, "").trim();
+        if (cleaned && cleaned.length <= 60 && !/^\d{1,2} de .* de \d{4}$/.test(cleaned) && !categories.includes(cleaned)) {
+          categories.push(cleaned);
+        }
+      }
+    }
+
+    items.push({
+      externalId: deriveExternalId(canonicalUrl, title),
+      canonicalUrl,
+      sourceUrl: canonicalUrl,
+      title: title.slice(0, 400),
+      description: descriptionParts.length > 0 ? descriptionParts.join(" · ") : null,
+      rawText: descriptionParts.join("\n") || null,
+      cleanedText: descriptionParts.join("\n") || null,
+      author: null,
+      publishedAt: config.dateSelector ? parseDate(compact(node.find(config.dateSelector).first().text())) : null,
+      sourceImageUrls: image ? [image] : [],
+      language: null,
+      categories,
+    });
+  });
+
+  return items;
+}
+
+class HtmlListingSourceAdapter implements SourceAdapter {
+  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
+    if (!source.url) {
+      throw new Error("source_url_required");
+    }
+    const url = new URL(source.url);
+    const config = resolveListingConfig(source.url, source.configuration);
+    await validateScrapeUrl(url);
+
+    let html: string;
+    if (config.engine === "browser") {
+      html = await fetchHtmlWithBrowser(url.toString(), { settleMs: config.waitMs });
+    } else {
+      const response = await fetchUrl(url, { accept: "text/html", headers: config.headers });
+      html = response.body;
+    }
+    return extractListingItems(html, url.toString(), config);
+  }
+}
+
+export type ImdbDatasetOptions = {
+  /** titleType values to keep (default: movie, tvMovie, tvSeries, tvMiniSeries). */
+  types?: string[];
+  /** Only titles with startYear >= this year (default: current year - 1). */
+  fromYear?: number;
+  maxItems?: number;
+};
+
+export function parseImdbTsvLines(lines: string[], options: ImdbDatasetOptions = {}): ParsedSourceItem[] {
+  const fromYear = options.fromYear ?? new Date().getFullYear() - 1;
+  const types = new Set(options.types ?? ["movie", "tvMovie", "tvSeries", "tvMiniSeries"]);
+  const maxItems = Math.max(1, Math.min(options.maxItems ?? 250, 1000));
+
+  const header = lines[0]?.trim().split("\t") ?? [];
+  const indexOf = (name: string) => header.indexOf(name);
+
+  const col = {
+    id: indexOf("tconst"),
+    type: indexOf("titleType"),
+    primary: indexOf("primaryTitle"),
+    original: indexOf("originalTitle"),
+    adult: indexOf("isAdult"),
+    startYear: indexOf("startYear"),
+    runtime: indexOf("runtimeMinutes"),
+    genres: indexOf("genres"),
+  };
+  if (col.id < 0 || col.primary < 0) {
+    return [];
+  }
+
+  const matches: ParsedSourceItem[] = [];
+  for (const line of lines.slice(1)) {
+    if (!line.trim()) {
+      continue;
+    }
+    const fields = line.split("\t");
+    const titleType = col.type >= 0 ? fields[col.type] : "";
+    if (!types.has(titleType)) {
+      continue;
+    }
+    if (col.adult >= 0 && fields[col.adult] === "1") {
+      continue;
+    }
+    const startYear = col.startYear >= 0 ? Number.parseInt(fields[col.startYear] ?? "0", 10) : 0;
+    if (Number.isFinite(startYear) && startYear > 0 && startYear < fromYear) {
+      continue;
+    }
+    const tconst = fields[col.id];
+    const title = (col.primary >= 0 ? fields[col.primary] : "") || (col.original >= 0 ? fields[col.original] : "");
+    if (!title) {
+      continue;
+    }
+    const originalTitle = col.original >= 0 && fields[col.original] && fields[col.original] !== fields[col.primary] ? fields[col.original] : null;
+    const runtime = col.runtime >= 0 && fields[col.runtime] && fields[col.runtime] !== "\\N" ? fields[col.runtime] : null;
+    const genres = col.genres >= 0 && fields[col.genres] && fields[col.genres] !== "\\N" ? fields[col.genres].split(",") : [];
+
+    const descriptionParts = [
+      `Año: ${startYear > 0 ? startYear : "—"}`,
+      runtime ? `Duración: ${runtime} min` : null,
+      genres.length > 0 ? `Géneros: ${genres.join(", ")}` : null,
+      originalTitle ? `Título original: ${originalTitle}` : null,
+    ].filter((part): part is string => Boolean(part));
+
+    matches.push({
+      externalId: tconst,
+      canonicalUrl: `https://www.imdb.com/title/${tconst}/`,
+      sourceUrl: `https://www.imdb.com/title/${tconst}/`,
+      title: title.slice(0, 400),
+      description: descriptionParts.join(" · ") || null,
+      rawText: descriptionParts.join("\n") || null,
+      cleanedText: descriptionParts.join("\n") || null,
+      author: null,
+      publishedAt: startYear > 0 ? `${startYear}-01-01T00:00:00.000Z` : null,
+      sourceImageUrls: [],
+      language: null,
+      categories: genres,
+    });
+
+    if (matches.length >= maxItems) {
+      break;
+    }
+  }
+  return matches;
+}
+
+class ImdbDatasetSourceAdapter implements SourceAdapter {
+  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
+    if (!source.url) {
+      throw new Error("source_url_required");
+    }
+    const url = new URL(source.url);
+    await validateScrapeUrl(url);
+    const configuration = readConfigObject(source.configuration);
+    const options: ImdbDatasetOptions = {
+      types: Array.isArray(configuration.types) ? configuration.types.map(String) : undefined,
+      fromYear: typeof configuration.fromYear === "number" ? configuration.fromYear : undefined,
+      maxItems: typeof configuration.maxItems === "number" ? configuration.maxItems : undefined,
+    };
+
+    // Stream + gunzip to a temp file instead of buffering the full archive in
+    // memory (the decompressed TSV is >1 GB).
+    const { Readable } = await import("node:stream");
+    const { pipeline } = await import("node:stream/promises");
+    const { createGunzip } = await import("node:zlib");
+    const { createWriteStream, mkdtempSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+
+    const response = await fetch(url.toString(), {
+      headers: { "user-agent": getEnv("SCRAPE_USER_AGENT", "auctorio-bot"), accept: "application/gzip" },
+    });
+    if (!response.ok || !response.body) {
+      throw new Error(`imdb_dataset_fetch_failed status=${response.status}`);
+    }
+
+    const dir = mkdtempSync(join(tmpdir(), "imdb-basics-"));
+    const filePath = join(dir, "title.basics.tsv");
+    try {
+      await pipeline(Readable.fromWeb(response.body as never), createGunzip(), createWriteStream(filePath));
+      // The dataset is ordered by insertion (tconst); newer titles live at the
+      // END of the file. Read the tail so recent releases are ingested first.
+      const tail = await readTailLines(filePath, 2_000_000);
+      return parseImdbTsvLines(tail, options);
+    } finally {
+      await import("node:fs/promises").then((fs) => fs.rm(dir, { recursive: true, force: true }).catch(() => undefined));
+    }
+  }
+}
+
+async function readTailLines(filePath: string, budgetChars: number): Promise<string[]> {
+  const { open } = await import("node:fs/promises");
+  const { statSync } = await import("node:fs");
+  const { createInterface } = await import("node:readline");
+
+  const handle = await open(filePath, "r");
+  try {
+    const size = statSync(filePath).size;
+    const readFrom = Math.max(0, size - budgetChars);
+    const buffer = Buffer.alloc(size - readFrom);
+    await handle.read(buffer, 0, buffer.length, readFrom);
+    const text = buffer.toString("utf8");
+    const lines = text.split("\n").filter((line) => line.trim());
+    // Drop the first partial line (cut mid-line by the byte offset).
+    if (readFrom > 0 && lines.length > 0 && !lines[0].startsWith("tconst")) {
+      lines.shift();
+    }
+    // Re-attach the header as the first line.
+    return ["tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres", ...lines];
+  } finally {
+    await handle.close();
+  }
+}
+
 class ManualSourceAdapter implements SourceAdapter {
   async fetch(): Promise<ParsedSourceItem[]> {
     return [];
@@ -520,6 +846,10 @@ export function getSourceAdapter(type: ContentSourceType): SourceAdapter {
       return new SitemapSourceAdapter();
     case "api":
       return new ApiSourceAdapter();
+    case "htmllist":
+      return new HtmlListingSourceAdapter();
+    case "imdb":
+      return new ImdbDatasetSourceAdapter();
     case "manual":
       return new ManualSourceAdapter();
     default:

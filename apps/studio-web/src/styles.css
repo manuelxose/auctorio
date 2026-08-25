@@ -2244,6 +2244,7 @@ html[data-theme='dark'] .au-channel--x { background: #1f2937; color: #f3f4f6; }
   gap: var(--au-s3);
 }
 .au-field-grid > * { min-width: 0; }
+.au-field--wide { grid-column: 1 / -1; }
 .au-form__actions {
   display: flex;
   gap: var(--au-s2);

@@ -76,7 +76,7 @@ import { CONTENT_FORMATS, SEARCH_INTENTS, STRATEGY_MODES } from "./editorial-pla
 
 const prisma = getPrismaClient();
 
-const SOURCE_TYPES = ["rss", "atom", "html", "sitemap", "api", "manual"] as const;
+const SOURCE_TYPES = ["rss", "atom", "html", "sitemap", "api", "htmllist", "imdb", "manual"] as const;
 const SOURCE_ITEM_STATUSES = [
   "discovered",
   "fetched",
