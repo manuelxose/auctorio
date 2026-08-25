@@ -33,6 +33,31 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
       .au-plan-summary__legend { display: flex; flex-wrap: wrap; gap: var(--au-s3); font-size: var(--au-fs-metadata); color: var(--au-muted); }
       .au-legend { display: inline-flex; align-items: center; gap: 6px; }
       .au-legend__dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; }
+      .au-table--static-head th { position: static; }
+      .au-brief { padding: var(--au-s3) var(--au-s4); }
+      .au-brief__grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: var(--au-s3); }
+      .au-brief__section, .au-brief__stats { grid-column: span 4; min-width: 0; background: var(--au-surface); border: 1px solid var(--au-border); border-radius: var(--au-r-md); padding: var(--au-s3); }
+      .au-brief__section--wide { grid-column: span 12; }
+      .au-brief__section--rationale { grid-column: span 8; }
+      .au-brief__section--title { grid-column: span 7; }
+      .au-brief__section--meta { grid-column: span 5; }
+      .au-brief__stats { display: flex; flex-direction: column; justify-content: center; gap: var(--au-s2); }
+      .au-brief__stat { display: flex; align-items: baseline; justify-content: space-between; gap: var(--au-s2); flex-wrap: wrap; }
+      .au-brief__stat .au-brief__label { margin-bottom: 0; }
+      .au-brief__stat strong { font-size: var(--au-fs-body); color: var(--au-text); }
+      .au-brief__label { display: block; font-size: var(--au-fs-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--au-muted); margin-bottom: var(--au-s1); }
+      .au-brief__text { margin: 0; font-size: var(--au-fs-body-sm); line-height: 1.6; color: var(--au-text-2); overflow-wrap: anywhere; }
+      .au-brief__text--strong { color: var(--au-text); font-weight: 600; }
+      .au-brief__list { margin: 0; padding-left: var(--au-s3); font-size: var(--au-fs-body-sm); line-height: 1.6; color: var(--au-text-2); }
+      .au-brief__list li { margin-bottom: var(--au-s1); overflow-wrap: anywhere; }
+      .au-brief__list--links li { word-break: break-all; }
+      .au-brief__none { font-size: var(--au-fs-body-sm); color: var(--au-muted); }
+      .au-brief__chips { display: flex; align-items: center; gap: var(--au-s2); flex-wrap: wrap; }
+      .au-brief__chip { display: inline-flex; align-items: center; max-width: 100%; background: var(--au-surface-2); border: 1px solid var(--au-border); border-radius: var(--au-r-full); padding: 3px 12px; font-size: var(--au-fs-body-sm); color: var(--au-text); overflow-wrap: anywhere; }
+      .au-brief__chip--muted { color: var(--au-muted); }
+      @media (max-width: 860px) {
+        .au-brief__section, .au-brief__section--wide, .au-brief__section--rationale, .au-brief__section--title, .au-brief__section--meta, .au-brief__stats { grid-column: span 12; }
+      }
     `,
   ],
   template: `
@@ -233,7 +258,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
           <span class="au-badge au-badge--neutral">{{ plans.length }} plan{{ plans.length === 1 ? '' : 's' }}</span>
         </header>
 
-        <div class="au-table-wrap">
+        <div class="au-table-wrap au-table-wrap--scrollable">
           <table class="au-table au-table--hover">
             <thead>
               <tr>
@@ -247,7 +272,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
               </tr>
             </thead>
             <tbody>
-              <ng-container *ngFor="let plan of plans">
+              <ng-container *ngFor="let plan of pagedPlans()">
                 <tr class="au-plan-row" [class.is-open]="isExpanded(plan.id)" (click)="togglePlan(plan)" (keydown.enter)="togglePlan(plan)" [attr.tabindex]="0" [attr.aria-expanded]="isExpanded(plan.id)">
                   <td data-label="Plan">
                     <span class="au-table__title">{{ plan.name }}</span>
@@ -332,8 +357,8 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                             <p class="au-empty__text">Adjust the search or filters above.</p>
                           </div>
                         } @else {
-                          <div class="au-table-wrap au-table-wrap--scrollable">
-                            <table class="au-table">
+                          <div class="au-table-wrap">
+                            <table class="au-table au-table--static-head">
                               <thead>
                                 <tr>
                                   <th style="width: 34px">
@@ -350,7 +375,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                                 </tr>
                               </thead>
                               <tbody>
-                                <ng-container *ngFor="let item of pagedPlanRows()">
+                                <ng-container *ngFor="let item of filteredPlanRows">
                                   <tr [class.is-selected]="selectedIds.has(item.id)">
                                     <td>
                                       <input type="checkbox" [checked]="selectedIds.has(item.id)" (change)="toggleSelection(item.id)" [attr.aria-label]="'Select ' + item.title" />
@@ -416,54 +441,70 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                                   <tr class="au-brief-row" *ngIf="expandedItemId === item.id && editingItemId !== item.id">
                                     <td colspan="9">
                                       <div class="au-brief">
-                                        <div class="au-field-grid">
-                                          <div class="au-meta">
-                                            <strong>Rationale</strong>
-                                            <p class="au-muted">{{ item.rationale || '—' }}</p>
+                                        <div class="au-brief__grid">
+                                          <div class="au-brief__section au-brief__section--rationale">
+                                            <span class="au-brief__label">Rationale</span>
+                                            <p class="au-brief__text">{{ item.rationale || '—' }}</p>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Word target</strong>
-                                            <p class="au-muted">{{ item.recommendedWordCountMin ?? '—' }}–{{ item.recommendedWordCountMax ?? '—' }} words</p>
+                                          <div class="au-brief__stats">
+                                            <div class="au-brief__stat">
+                                              <span class="au-brief__label">Word target</span>
+                                              <strong>{{ item.recommendedWordCountMin ?? '—' }}–{{ item.recommendedWordCountMax ?? '—' }} words</strong>
+                                            </div>
+                                            <div class="au-brief__stat">
+                                              <span class="au-brief__label">Opportunity</span>
+                                              <span class="au-score" [class.au-score--low]="(item.opportunityScore ?? 0) < 45" [class.au-score--good]="(item.opportunityScore ?? 0) >= 70">{{ item.opportunityScore ?? '—' }}</span>
+                                            </div>
+                                            <div class="au-brief__stat">
+                                              <span class="au-brief__label">Difficulty</span>
+                                              <span class="au-score">{{ item.difficultyEstimate ?? '—' }}</span>
+                                            </div>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Keyword</strong>
-                                            <p class="au-muted">{{ item.primaryKeyword || '—' }}</p>
+                                          <div class="au-brief__section au-brief__section--wide">
+                                            <span class="au-brief__label">Primary keyword</span>
+                                            <div class="au-brief__chips">
+                                              <span class="au-brief__chip">{{ item.primaryKeyword || '—' }}</span>
+                                              <span class="au-brief__chip au-brief__chip--muted" *ngIf="item.targetQuery">query: {{ item.targetQuery }}</span>
+                                            </div>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>SEO title</strong>
-                                            <p class="au-muted">{{ item.seoTitle || '—' }}</p>
+                                          <div class="au-brief__section au-brief__section--title">
+                                            <span class="au-brief__label">SEO title</span>
+                                            <p class="au-brief__text au-brief__text--strong">{{ item.seoTitle || '—' }}</p>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Meta description</strong>
-                                            <p class="au-muted">{{ item.metaDescription || '—' }}</p>
+                                          <div class="au-brief__section au-brief__section--meta">
+                                            <span class="au-brief__label">Meta description</span>
+                                            <p class="au-brief__text">{{ item.metaDescription || '—' }}</p>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Opportunity / difficulty</strong>
-                                            <p class="au-muted">{{ item.opportunityScore ?? '—' }} / {{ item.difficultyEstimate ?? '—' }}</p>
+                                          <div class="au-brief__section">
+                                            <span class="au-brief__label">Outline</span>
+                                            <ng-container *ngIf="outlineOf(item.outline).length > 0; else emptyOutline">
+                                              <ol class="au-brief__list">
+                                                <li *ngFor="let section of outlineOf(item.outline)">{{ section }}</li>
+                                              </ol>
+                                            </ng-container>
+                                            <ng-template #emptyOutline><span class="au-brief__none">—</span></ng-template>
                                           </div>
-                                        </div>
-                                        <div class="au-field-grid au-mt-2">
-                                          <div class="au-meta">
-                                            <strong>Outline</strong>
-                                            <ul class="au-muted">
-                                              <li *ngFor="let section of outlineOf(item.outline)">{{ section }}</li>
-                                            </ul>
+                                          <div class="au-brief__section">
+                                            <span class="au-brief__label">Internal links (site inventory)</span>
+                                            <ng-container *ngIf="listOf(item.suggestedInternalLinks).length > 0; else emptyLinks">
+                                              <ul class="au-brief__list au-brief__list--links">
+                                                <li *ngFor="let link of listOf(item.suggestedInternalLinks)">{{ link }}</li>
+                                              </ul>
+                                            </ng-container>
+                                            <ng-template #emptyLinks><span class="au-brief__none">—</span></ng-template>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Internal links (from site inventory)</strong>
-                                            <ul class="au-muted">
-                                              <li *ngFor="let link of listOf(item.suggestedInternalLinks)">{{ link }}</li>
-                                            </ul>
+                                          <div class="au-brief__section">
+                                            <span class="au-brief__label">Source evidence</span>
+                                            <ng-container *ngIf="evidenceOf(item.sourceEvidence).length > 0; else emptyEvidence">
+                                              <ul class="au-brief__list">
+                                                <li *ngFor="let evidence of evidenceOf(item.sourceEvidence)">{{ evidence }}</li>
+                                              </ul>
+                                            </ng-container>
+                                            <ng-template #emptyEvidence><span class="au-brief__none">—</span></ng-template>
                                           </div>
-                                          <div class="au-meta">
-                                            <strong>Source evidence</strong>
-                                            <ul class="au-muted">
-                                              <li *ngFor="let evidence of evidenceOf(item.sourceEvidence)">{{ evidence }}</li>
-                                            </ul>
-                                          </div>
-                                          <div class="au-meta">
-                                            <strong>Image brief</strong>
-                                            <p class="au-muted">{{ item.imageConcept || '—' }}</p>
+                                          <div class="au-brief__section au-brief__section--wide">
+                                            <span class="au-brief__label">Image brief</span>
+                                            <p class="au-brief__text">{{ item.imageConcept || '—' }}</p>
                                           </div>
                                         </div>
                                       </div>
@@ -474,13 +515,6 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                             </table>
                           </div>
 
-                          <div class="au-toolbar au-toolbar--panel" *ngIf="planRowTotalPages() > 1">
-                            <span class="au-muted">{{ filteredPlanRows.length }} rows</span>
-                            <div class="au-toolbar__spacer"></div>
-                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planRowPage <= 1" (click)="goPlanRowPage(planRowPage - 1)">Previous</button>
-                            <span class="au-muted">Page {{ planRowPage }} of {{ planRowTotalPages() }}</span>
-                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planRowPage >= planRowTotalPages()" (click)="goPlanRowPage(planRowPage + 1)">Next</button>
-                          </div>
                         }
                       </ng-container>
                     </div>
@@ -489,6 +523,14 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
               </ng-container>
             </tbody>
           </table>
+        </div>
+
+        <div class="au-toolbar au-toolbar--panel" *ngIf="planTotalPages() > 1">
+          <span class="au-muted">{{ plans.length }} plan{{ plans.length === 1 ? '' : 's' }}</span>
+          <div class="au-toolbar__spacer"></div>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planPage <= 1" (click)="goPlanPage(planPage - 1)">Previous</button>
+          <span class="au-muted">Page {{ planPage }} of {{ planTotalPages() }}</span>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="planPage >= planTotalPages()" (click)="goPlanPage(planPage + 1)">Next</button>
         </div>
       </section>
 
@@ -528,8 +570,8 @@ export class EditorialPlanPageComponent implements OnInit {
   planSearch = '';
   planChannelFilter = '';
   planStatusFilter = '';
-  planRowPage = 1;
-  planRowPageSize = 10;
+  planPage = 1;
+  planPageSize = 8;
   filteredPlanRows: Array<NonNullable<EditorialPlan['items']>[number]> = [];
   channels = { website: true, x: true, instagram: false };
   draft = { dateFrom: new Date().toISOString().slice(0, 10), dateTo: new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10), siteId: '', objective: '', audience: '', topics: '', excludedTopics: '', publicationCount: 7 };
@@ -628,6 +670,7 @@ export class EditorialPlanPageComponent implements OnInit {
   }
   load(): void {
     this.loading = true;
+    this.planPage = 1;
     this.api.listEditorialPlans().subscribe({ next: (response) => { this.plans = response.items; this.loading = false; }, error: () => { this.loadError = 'Editorial plans could not be loaded. Try again.'; this.loading = false; } });
   }
   isExpanded(planId: string): boolean {
@@ -698,17 +741,16 @@ export class EditorialPlanPageComponent implements OnInit {
       if (!query) return true;
       return [item.title, item.topic ?? '', item.primaryKeyword ?? '', item.seoTitle ?? ''].some((value) => value.toLowerCase().includes(query));
     });
-    this.planRowPage = 1;
   }
-  planRowTotalPages(): number {
-    return Math.max(1, Math.ceil(this.filteredPlanRows.length / this.planRowPageSize));
+  planTotalPages(): number {
+    return Math.max(1, Math.ceil(this.plans.length / this.planPageSize));
   }
-  pagedPlanRows(): Array<NonNullable<EditorialPlan['items']>[number]> {
-    const start = (this.planRowPage - 1) * this.planRowPageSize;
-    return this.filteredPlanRows.slice(start, start + this.planRowPageSize);
+  pagedPlans(): EditorialPlan[] {
+    const start = (this.planPage - 1) * this.planPageSize;
+    return this.plans.slice(start, start + this.planPageSize);
   }
-  goPlanRowPage(page: number): void {
-    this.planRowPage = Math.min(Math.max(1, page), this.planRowTotalPages());
+  goPlanPage(page: number): void {
+    this.planPage = Math.min(Math.max(1, page), this.planTotalPages());
   }
   toggleSelection(itemId: string): void { this.selectedIds = new Set(this.selectedIds); this.selectedIds.has(itemId) ? this.selectedIds.delete(itemId) : this.selectedIds.add(itemId); }
   startEdit(item: NonNullable<EditorialPlan['items']>[number]): void { this.editingItemId = item.id; this.editDraft = { title: item.title, primaryKeyword: item.primaryKeyword || '', seoTitle: item.seoTitle || '', scheduledFor: item.scheduledFor ? new Date(item.scheduledFor).toISOString().slice(0, 16) : '' }; }
@@ -791,6 +833,7 @@ export class EditorialPlanPageComponent implements OnInit {
         this.generating = false;
         this.progressIndex = -1;
         this.plans = [plan, ...this.plans];
+        this.planPage = 1;
         this.expandedPlanId = plan.id;
         this.selectedPlan = plan;
         this.planDetailLoading = false;
