@@ -191,6 +191,8 @@ enum ContentSourceType {
   html
   sitemap
   api
+  htmllist
+  imdb
   manual
 }
 

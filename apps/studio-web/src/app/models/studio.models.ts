@@ -553,7 +553,7 @@ export type StudioPromptPresetDetail = StudioPromptPresetSummary & {
 
 // ─── Editorial platform models ────────────────────────────────────────────
 
-export type SourceType = 'rss' | 'atom' | 'html' | 'sitemap' | 'api' | 'manual';
+export type SourceType = 'rss' | 'atom' | 'html' | 'sitemap' | 'api' | 'htmllist' | 'imdb' | 'manual';
 
 export type StudioSource = {
   id: string;

@@ -210,6 +210,11 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
             <span class="au-field__label">Categories (comma separated)</span>
             <input class="au-input" type="text" [(ngModel)]="form.categoriesText" placeholder="football, streaming, technology" />
           </label>
+          <label class="au-field au-field--wide">
+            <span class="au-field__label">Configuration (JSON, optional)</span>
+            <textarea class="au-input au-textarea" rows="4" [(ngModel)]="form.configurationText" placeholder='{"itemSelector": "div.fa-card", "engine": "browser"}'></textarea>
+            <span class="au-field__hint">Selectors for htmllist, filters for imdb. Leave empty to use per-site defaults.</span>
+          </label>
         </div>
         <div class="au-form__actions">
           <button class="au-btn au-btn--ghost" type="button" *ngIf="editingId" (click)="resetForm()">Cancel</button>
@@ -311,7 +316,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
 
-  sourceTypes: SourceType[] = ['rss', 'atom', 'html', 'sitemap', 'api', 'manual'];
+  sourceTypes: SourceType[] = ['rss', 'atom', 'html', 'sitemap', 'api', 'htmllist', 'imdb', 'manual'];
   sources: StudioSource[] = [];
   sites: StudioSite[] = [];
   showForm = false;
@@ -335,6 +340,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     trustScore: 0.5,
     language: 'es',
     categoriesText: '',
+    configurationText: '',
   };
   private refreshSubscription: Subscription | null = null;
 
@@ -466,6 +472,19 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       this.feedback = 'Name is required.';
       return;
     }
+    let configuration: Record<string, unknown> | undefined;
+    if (this.form.configurationText.trim()) {
+      try {
+        const parsed = JSON.parse(this.form.configurationText) as unknown;
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+          throw new Error('object expected');
+        }
+        configuration = parsed as Record<string, unknown>;
+      } catch {
+        this.feedback = 'Configuration must be valid JSON.';
+        return;
+      }
+    }
     const payload = {
       name: this.form.name.trim(),
       type: this.form.type,
@@ -476,6 +495,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       trustScore: this.form.trustScore,
       language: this.form.language || 'es',
       categories: this.form.categoriesText.split(',').map((item) => item.trim()).filter(Boolean),
+      configuration,
     };
     this.saving = true;
     const request = this.editingId
@@ -507,6 +527,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       trustScore: source.trustScore,
       language: source.language,
       categoriesText: (source.categories ?? []).join(', '),
+      configurationText: source.configuration ? JSON.stringify(source.configuration, null, 2) : '',
     };
     this.showForm = true;
   }
@@ -524,6 +545,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       trustScore: 0.5,
       language: 'es',
       categoriesText: '',
+      configurationText: '',
     };
   }
 

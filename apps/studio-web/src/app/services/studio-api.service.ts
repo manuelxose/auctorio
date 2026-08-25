@@ -365,6 +365,7 @@ export class StudioApiService {
     categories?: string[];
     tags?: string[];
     refreshIntervalMinutes?: number;
+    configuration?: Record<string, unknown>;
   }): Observable<StudioSource> {
     return this.http.post<StudioSource>(`${this.apiBase}/backend/v2/sources`, payload);
   }
