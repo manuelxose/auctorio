@@ -124,7 +124,7 @@ import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '.
             <h2 class="au-panel__title">Topic map</h2>
             <span class="au-badge au-badge--neutral">{{ overview.profile?.topicClusters?.length }} clusters</span>
           </header>
-          <div class="au-table-wrap">
+          <div class="au-table-wrap au-table-wrap--scrollable">
             <table class="au-table">
               <thead>
                 <tr><th>Cluster</th><th>Pages</th><th>Authority</th><th>Keywords</th></tr>
@@ -147,7 +147,7 @@ import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '.
             <h2 class="au-panel__title">Sitemaps</h2>
             <span class="au-badge au-badge--neutral">{{ overview.sitemaps.length }}</span>
           </header>
-          <div class="au-table-wrap">
+          <div class="au-table-wrap au-table-wrap--scrollable">
             <table class="au-table">
               <thead>
                 <tr><th>URL</th><th>Kind</th><th>Status</th><th>URLs</th><th>Last fetched</th></tr>
@@ -189,7 +189,7 @@ import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '.
             </select>
             <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="loadPages()">Apply</button>
           </div>
-          <div class="au-table-wrap">
+          <div class="au-table-wrap au-table-wrap--scrollable">
             <table class="au-table">
               <thead>
                 <tr><th>URL</th><th>Title</th><th>Type</th><th>Words</th><th>State</th><th>Last indexed</th></tr>

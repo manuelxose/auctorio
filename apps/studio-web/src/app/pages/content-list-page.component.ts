@@ -122,7 +122,7 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
             }
           </app-empty-state>
         } @else {
-          <div class="au-table-wrap">
+          <div class="au-table-wrap au-table-wrap--scrollable">
             <table class="au-table">
               <thead>
                 <tr>
