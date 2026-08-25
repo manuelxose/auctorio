@@ -184,6 +184,14 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'path', d: 'M7 21H5a2 2 0 0 1-2-2v-2' },
     { kind: 'path', d: 'M7 12h10' },
   ],
+  undo: [
+    { kind: 'path', d: 'M3 7v6h6' },
+    { kind: 'path', d: 'M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13' },
+  ],
+  redo: [
+    { kind: 'path', d: 'M21 7v6h-6' },
+    { kind: 'path', d: 'M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13' },
+  ],
   upload: [
     { kind: 'path', d: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4' },
     { kind: 'path', d: 'm17 8-5-5-5 5' },

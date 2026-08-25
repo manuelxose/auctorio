@@ -7,7 +7,9 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AuRichEditorComponent } from '../components/ui/au-rich-editor.component';
 import type {
+  InternalLinkSuggestion,
   ProjectVersionDetail,
   PublishingAccount,
   StudioProjectDetailView,
@@ -29,10 +31,14 @@ type ProjectPublication = {
   site: { id: string; key: string; name: string } | null;
 };
 
+function strOf(value: unknown): string {
+  return typeof value === 'string' ? value : '';
+}
+
 @Component({
   selector: 'app-content-workspace-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AuRichEditorComponent],
   template: `
     <section class="au-page" *ngIf="project; else loadingState">
       <a class="au-link au-mb-2" routerLink="/studio/content">
@@ -125,14 +131,15 @@ type ProjectPublication = {
                   <span class="au-field__label">Excerpt</span>
                   <textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea>
                 </label>
-                <label class="au-field">
+                <div class="au-field au-mb-2">
                   <span class="au-field__label">Article</span>
-                  <textarea class="au-textarea au-input--editor" rows="18" [(ngModel)]="draftBody"></textarea>
-                </label>
+                  <au-rich-editor [(ngModel)]="draftBody" (autosave)="onAutosave()"></au-rich-editor>
+                </div>
                 <div class="au-form__actions">
                   <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
                     {{ saving ? 'Saving…' : 'Save' }}
                   </button>
+                  <span class="au-muted" *ngIf="bodyDirty">Unsaved changes are autosaved periodically.</span>
                 </div>
               </ng-container>
 
@@ -177,23 +184,131 @@ type ProjectPublication = {
             </section>
 
             <section class="au-panel au-panel--padded" *ngSwitchCase="'seo'">
-              <ng-container *ngIf="project.latestVersion">
+              <ng-container *ngIf="project.latestVersion; else seoEmpty">
+                <!-- Explainable readiness score -->
+                <div class="au-seo-score">
+                  <div class="au-seo-score__value" [class.is-good]="seoScore >= 70" [class.is-mid]="seoScore >= 45 && seoScore < 70" [class.is-low]="seoScore < 45">
+                    {{ seoScore }}
+                    <span>/100</span>
+                  </div>
+                  <div class="au-seo-score__body">
+                    <strong>SEO readiness: {{ seoScore }}/100</strong>
+                    <p class="au-muted">{{ seoSummary }}</p>
+                  </div>
+                </div>
+
+                <!-- Metadata -->
+                <h3 class="au-panel__subtitle au-mb-1"><strong>Metadata</strong></h3>
+                <div class="au-field-grid">
+                  <label class="au-field">
+                    <span class="au-field__label">SEO title</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
+                    <span class="au-field__hint" [class.au-hint--over]="(draftSeoTitle || '').length > 70">{{ (draftSeoTitle || '').length }} / 70 characters</span>
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Slug</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftSlug" placeholder="suggested-slug" />
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Canonical URL</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftCanonicalUrl" placeholder="https://…" />
+                  </label>
+                </div>
                 <label class="au-field">
-                  <span class="au-field__label">SEO title</span>
-                  <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
-                  <span class="au-field__hint">{{ (draftSeoTitle || '').length }} / 65 characters</span>
-                </label>
-                <label class="au-field">
-                  <span class="au-field__label">SEO description</span>
+                  <span class="au-field__label">Meta description</span>
                   <textarea class="au-textarea" rows="3" [(ngModel)]="draftSeoDescription"></textarea>
-                  <span class="au-field__hint">{{ (draftSeoDescription || '').length }} / 165 characters</span>
+                  <span class="au-field__hint" [class.au-hint--over]="(draftSeoDescription || '').length > 165">{{ (draftSeoDescription || '').length }} / 165 characters</span>
                 </label>
+
+                <!-- Strategy -->
+                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Strategy</strong></h3>
+                <div class="au-field-grid">
+                  <label class="au-field">
+                    <span class="au-field__label">Primary search intent</span>
+                    <select class="au-select" [(ngModel)]="draftPrimaryIntent">
+                      <option value="">— none —</option>
+                      <option *ngFor="let intent of intentOptions" [value]="intent">{{ intent }}</option>
+                    </select>
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Content type</span>
+                    <select class="au-select" [(ngModel)]="draftContentType">
+                      <option value="">— none —</option>
+                      <option *ngFor="let format of formatOptions" [value]="format">{{ format }}</option>
+                    </select>
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Target query</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftTargetQuery" />
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Primary keyword</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftPrimaryKeyword" />
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Secondary keywords</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftSecondaryKeywords" placeholder="Comma-separated" />
+                  </label>
+                  <label class="au-field">
+                    <span class="au-field__label">Topic cluster</span>
+                    <input class="au-input" type="text" [(ngModel)]="draftTopicCluster" />
+                  </label>
+                </div>
+
                 <div class="au-form__actions">
                   <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
                     {{ saving ? 'Saving…' : 'Save SEO' }}
                   </button>
+                  <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('seoTitle')">
+                    <app-icon name="sparkles"></app-icon> Improve SEO title
+                  </button>
+                  <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('metaDescription')">
+                    <app-icon name="sparkles"></app-icon> Improve meta description
+                  </button>
                 </div>
+
+                <!-- SERP preview -->
+                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Search preview</strong></h3>
+                <div class="au-serp">
+                  <p class="au-serp__title">{{ draftSeoTitle || project.latestVersion?.title || 'SEO title' }}</p>
+                  <p class="au-serp__url">{{ serpUrl }}</p>
+                  <p class="au-serp__desc">{{ draftSeoDescription || 'Meta description appears here.' }}</p>
+                </div>
+
+                <!-- Content analysis -->
+                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Content analysis</strong></h3>
+                <ul class="au-seo-findings">
+                  <li *ngFor="let finding of seoFindings" [class.is-fail]="!finding.passed" [class.is-warn]="!finding.passed && finding.severity === 'warning'" [class.is-error]="!finding.passed && finding.severity === 'error'">
+                    <app-icon [name]="finding.passed ? 'circle-check' : 'warning'"></app-icon>
+                    <span><strong>{{ finding.label }}</strong> — {{ finding.message }}</span>
+                  </li>
+                </ul>
+
+                <!-- Internal links from real inventory -->
+                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Internal links (real site inventory)</strong></h3>
+                <div class="au-form__actions au-mt-1">
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="linksLoading" (click)="loadLinkSuggestions()">
+                    <app-icon name="connections"></app-icon>
+                    {{ linksLoading ? 'Looking up…' : 'Suggest internal links' }}
+                  </button>
+                </div>
+                <ul class="au-link-suggestions au-mt-1" *ngIf="linkSuggestions.length > 0">
+                  <li *ngFor="let suggestion of linkSuggestions">
+                    <div>
+                      <strong>{{ suggestion.title }}</strong>
+                      <span class="au-muted au-block">{{ suggestion.url }} · {{ suggestion.reason }} · score {{ suggestion.score }}</span>
+                    </div>
+                    <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="insertLinkSuggestion(suggestion)">Insert</button>
+                  </li>
+                </ul>
+                <p class="au-muted" *ngIf="linksChecked && linkSuggestions.length === 0">No matching pages in the site inventory for the current keyword. Index more pages or refine the keyword.</p>
               </ng-container>
+              <ng-template #seoEmpty>
+                <div class="au-empty">
+                  <p class="au-empty__title">No version to optimize yet</p>
+                  <p class="au-empty__text">Generate the article first; the SEO workspace analyzes the latest version.</p>
+                </div>
+              </ng-template>
             </section>
 
             <section class="au-panel au-panel--padded" *ngSwitchCase="'social'">
@@ -459,6 +574,73 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   draftBody = '';
   draftSeoTitle = '';
   draftSeoDescription = '';
+  draftSlug = '';
+  draftCanonicalUrl = '';
+  draftPrimaryIntent = '';
+  draftContentType = '';
+  draftTargetQuery = '';
+  draftPrimaryKeyword = '';
+  draftSecondaryKeywords = '';
+  draftTopicCluster = '';
+  bodyDirty = false;
+  linkSuggestions: InternalLinkSuggestion[] = [];
+  linksLoading = false;
+  linksChecked = false;
+  intentOptions = ['informational', 'navigational', 'commercial-investigation', 'transactional', 'comparison', 'news', 'entertainment-discovery', 'where-to-watch', 'sports-live', 'mixed'];
+  formatOptions = ['guide', 'news', 'ranking', 'comparison', 'analysis', 'explainer', 'tutorial', 'faq', 'review', 'preview', 'match-preview', 'match-report', 'schedule', 'where-to-watch', 'streaming-recommendation', 'evergreen-pillar', 'cluster-article'];
+
+  get seoScore(): number {
+    const report = this.project?.latestVersion?.qaReport as { score?: number; checks?: Array<{ passed: boolean; severity: string }> } | null;
+    if (typeof report?.score === 'number') {
+      return report.score;
+    }
+    if (!report?.checks?.length) {
+      return 0;
+    }
+    const passed = report.checks.filter((check) => check.passed).length;
+    return Math.round((passed / report.checks.length) * 100);
+  }
+
+  get seoFindings(): Array<{ key: string; label: string; passed: boolean; severity: string; message: string; group: string }> {
+    const report = this.project?.latestVersion?.qaReport as {
+      findings?: Array<{ key: string; label: string; passed: boolean; severity: string; message: string; group: string }>;
+      checks?: Array<{ key: string; passed: boolean; message: string; severity: string }>;
+    } | null;
+    if (report?.findings?.length) {
+      return report.findings.filter((finding) => finding.severity !== 'info');
+    }
+    return (report?.checks ?? []).map((check) => ({
+      key: check.key,
+      label: check.key,
+      passed: check.passed,
+      severity: check.severity,
+      message: check.message,
+      group: 'seo',
+    }));
+  }
+
+  get seoSummary(): string {
+    const findings = this.seoFindings;
+    if (findings.length === 0) {
+      return 'No analysis yet. Generate the article and save to refresh checks.';
+    }
+    const failures = findings.filter((finding) => !finding.passed);
+    if (failures.length === 0) {
+      return 'All checks passed.';
+    }
+    const errors = failures.filter((finding) => finding.severity === 'error').length;
+    const warnings = failures.length - errors;
+    const parts: string[] = [];
+    if (errors > 0) parts.push(`${errors} blocking issue${errors === 1 ? '' : 's'}`);
+    if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
+    return `${parts.join(' and ')} to resolve.`;
+  }
+
+  get serpUrl(): string {
+    const base = String(this.project?.site.baseUrl ?? 'https://example.com').replace(/\/$/, '');
+    const slug = this.draftSlug || (this.project?.title ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return `${base}/${slug}`;
+  }
 
   get published(): boolean {
     return this.project?.reviewGate.stage === 'published';
@@ -572,6 +754,16 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     this.draftBody = version?.bodyHtml ?? '';
     this.draftSeoTitle = version?.seoTitle ?? '';
     this.draftSeoDescription = version?.seoDescription ?? '';
+    const metadata = project.metadata ?? {};
+    this.draftSlug = strOf(metadata['slug']);
+    this.draftCanonicalUrl = strOf(metadata['canonicalUrl']);
+    this.draftPrimaryIntent = strOf(metadata['primaryIntent']);
+    this.draftContentType = strOf(metadata['contentType']);
+    this.draftTargetQuery = strOf(metadata['targetQuery']);
+    this.draftPrimaryKeyword = strOf(metadata['primaryKeyword']);
+    this.draftTopicCluster = strOf(metadata['topicCluster']);
+    this.draftSecondaryKeywords = Array.isArray(metadata['secondaryKeywords']) ? (metadata['secondaryKeywords'] as unknown[]).filter((entry): entry is string => typeof entry === 'string').join(', ') : strOf(metadata['secondaryKeywords']);
+    this.bodyDirty = false;
   }
 
   private isWorkInFlight(project: StudioProjectDetailView): boolean {
@@ -633,15 +825,104 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
       })
       .subscribe({
         next: () => {
-          this.saving = false;
-          this.notice = 'Saved. Quality checks refreshed.';
-          this.load();
+          this.saveStrategyMetadata();
         },
         error: (err) => {
           this.saving = false;
           this.error = this.describe(err);
         },
       });
+  }
+
+  private saveStrategyMetadata(): void {
+    const current = this.project?.metadata ?? {};
+    const merged = {
+      ...current,
+      slug: this.draftSlug || undefined,
+      canonicalUrl: this.draftCanonicalUrl || undefined,
+      primaryIntent: this.draftPrimaryIntent || undefined,
+      contentType: this.draftContentType || undefined,
+      targetQuery: this.draftTargetQuery || undefined,
+      primaryKeyword: this.draftPrimaryKeyword || undefined,
+      topicCluster: this.draftTopicCluster || undefined,
+      secondaryKeywords: this.draftSecondaryKeywords.split(',').map((keyword) => keyword.trim()).filter(Boolean),
+    };
+    this.api.updateProject(this.projectId, { metadata: merged }).subscribe({
+      next: () => {
+        this.saving = false;
+        this.bodyDirty = false;
+        this.notice = 'Saved. Quality checks refreshed.';
+        this.load();
+      },
+      error: (err) => {
+        this.saving = false;
+        this.error = this.describe(err);
+      },
+    });
+  }
+
+  onAutosave(): void {
+    if (!this.bodyDirty) return;
+    this.bodyDirty = false;
+    const version = this.project?.latestVersion;
+    if (!version) return;
+    this.api.updateVersionContent(version.id, {
+      title: this.draftTitle,
+      excerpt: this.draftExcerpt,
+      bodyHtml: this.draftBody,
+      seoTitle: this.draftSeoTitle,
+      seoDescription: this.draftSeoDescription,
+    }).subscribe({
+      next: () => {
+        this.notice = 'Autosaved.';
+      },
+      error: () => {
+        this.bodyDirty = true;
+      },
+    });
+  }
+
+  aiImprove(kind: 'seoTitle' | 'metaDescription' | 'outline' | 'introduction' | 'conclusion' | 'faqs' | 'readability' | 'internalLinks'): void {
+    const prompts: Record<string, string> = {
+      seoTitle: 'Improve the SEO title: make it compelling, under 70 characters, and include the primary keyword naturally.',
+      metaDescription: 'Improve the meta description: 110-165 characters, include the primary keyword and a clear value proposition.',
+      outline: 'Suggest a stronger H2/H3 outline that covers the target query and search intent, keeping the current angle.',
+      introduction: 'Improve the introduction: hook the reader, state the value and include the primary keyword naturally. Do not rewrite the rest of the article.',
+      conclusion: 'Improve the conclusion: summarize the main points and add a clear next step. Do not rewrite the rest of the article.',
+      faqs: 'Add a FAQ section with 4-5 relevant questions and concise answers, using only information present in the article.',
+      readability: 'Improve readability: shorten long paragraphs, add a list or table where useful, and avoid filler. Keep the meaning and structure.',
+      internalLinks: 'Add the suggested internal links from the SEO workspace with natural anchors, only where they fit contextually.',
+    };
+    this.feedback = prompts[kind];
+    this.revise();
+  }
+
+  loadLinkSuggestions(): void {
+    if (!this.project) return;
+    this.linksLoading = true;
+    this.linksChecked = true;
+    this.api.suggestInternalLinks(this.project.site.id, {
+      keyword: this.draftPrimaryKeyword || undefined,
+      topic: this.draftTopicCluster || undefined,
+      q: this.draftTargetQuery || undefined,
+      limit: 6,
+    }).subscribe({
+      next: (response) => {
+        this.linksLoading = false;
+        this.linkSuggestions = response.items;
+      },
+      error: () => {
+        this.linksLoading = false;
+        this.linkSuggestions = [];
+      },
+    });
+  }
+
+  insertLinkSuggestion(suggestion: InternalLinkSuggestion): void {
+    const linkHtml = `<p><a href="${suggestion.url}">${suggestion.anchor}</a></p>`;
+    this.draftBody = this.draftBody ? `${this.draftBody.trim()}\n${linkHtml}` : linkHtml;
+    this.bodyDirty = true;
+    this.notice = 'Link inserted. Remember to save.';
   }
 
   generate(): void {

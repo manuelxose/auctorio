@@ -185,11 +185,20 @@ export type VersionSummary = {
   latestPublicationJob: PublicationExecutionState | null;
   qaReport: {
     passed: boolean;
+    score?: number;
     checks: Array<{
       key: string;
       passed: boolean;
       message: string;
       severity: 'error' | 'warning';
+    }>;
+    findings?: Array<{
+      key: string;
+      label: string;
+      passed: boolean;
+      severity: 'error' | 'warning' | 'info';
+      message: string;
+      group: 'structural' | 'seo' | 'editorial' | 'evidence' | 'publishing';
     }>;
   } | null;
 };

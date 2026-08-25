@@ -3,6 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildGuiaTvPayload = buildGuiaTvPayload;
 exports.getPublisher = getPublisher;
 const node_crypto_1 = __importDefault(require("node:crypto"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -10,6 +11,40 @@ const http_1 = require("../shared/utils/http");
 const env_1 = require("../shared/utils/env");
 const orchestration_1 = require("./orchestration");
 const env_2 = require("../shared/utils/env");
+const html_sanitizer_1 = require("./html-sanitizer");
+/**
+ * Pure GuiaTV payload builder (exported for fidelity tests). Maps the approved
+ * SEO brief fields from project metadata into the destination contract.
+ */
+function buildGuiaTvPayload(context, assetUrl, status) {
+    const metadata = getMetadata(context.project);
+    const categories = getStringArray(metadata.categories);
+    const keywords = getStringArray(metadata.keywords);
+    return {
+        title: context.version.title || context.project.title,
+        slug: String(metadata.slug || "").trim() || undefined,
+        status,
+        excerpt: (0, html_sanitizer_1.sanitizeEditorialHtml)(context.version.excerpt || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
+        content: (0, html_sanitizer_1.sanitizeEditorialHtml)(context.version.bodyHtml || ""),
+        categories,
+        contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
+        featured: Boolean(metadata.featured),
+        primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
+        targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
+        relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
+        relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
+        faqItems: getFaqItems(context.project),
+        evergreen: metadata.evergreen !== false,
+        featuredImage: assetUrl ?? undefined,
+        coverImage: assetUrl ?? undefined,
+        metaTitle: context.version.seoTitle || undefined,
+        metaDescription: context.version.seoDescription || undefined,
+        keywords,
+        ogImage: assetUrl ?? undefined,
+        canonicalUrl: metadata.canonicalUrl ? String(metadata.canonicalUrl) : undefined,
+        publishedAt: new Date().toISOString(),
+    };
+}
 function asRecord(value) {
     return value && typeof value === "object" ? value : {};
 }
@@ -198,33 +233,7 @@ class GuiaTvPublisher {
         return buildDryRunResult(context, action, decision.reason, externalId);
     }
     buildPayload(context, assetUrl, status) {
-        const metadata = getMetadata(context.project);
-        const categories = getStringArray(metadata.categories);
-        const keywords = getStringArray(metadata.keywords);
-        return {
-            title: context.version.title || context.project.title,
-            slug: String(metadata.slug || "").trim() || undefined,
-            status,
-            excerpt: context.version.excerpt || "",
-            content: context.version.bodyHtml || "",
-            categories,
-            contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
-            featured: Boolean(metadata.featured),
-            primaryIntent: metadata.primaryIntent ? String(metadata.primaryIntent) : undefined,
-            targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
-            relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
-            relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
-            faqItems: getFaqItems(context.project),
-            evergreen: metadata.evergreen !== false,
-            featuredImage: assetUrl ?? undefined,
-            coverImage: assetUrl ?? undefined,
-            metaTitle: context.version.seoTitle || undefined,
-            metaDescription: context.version.seoDescription || undefined,
-            keywords,
-            ogImage: assetUrl ?? undefined,
-            canonicalUrl: metadata.canonicalUrl ? String(metadata.canonicalUrl) : undefined,
-            publishedAt: new Date().toISOString(),
-        };
+        return buildGuiaTvPayload(context, assetUrl, status);
     }
     async publishDraft(context) {
         const dryRun = await this.maybeDryRun(context, "publishDraft");

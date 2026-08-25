@@ -3827,3 +3827,85 @@ html[data-theme='dark'] .au-channel-dot--x { background: #f3f4f6; }
 .au-chip--brand { color: var(--au-brand); border-color: var(--au-brand); }
 
 .au-ellipsis { max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Rich editor (M20) ── */
+.au-rich-editor { border: 1px solid var(--au-border); border-radius: var(--au-radius); background: var(--au-surface); }
+.au-rich-editor__toolbar {
+  display: flex; flex-wrap: wrap; gap: 2px; align-items: center;
+  padding: var(--au-s1); border-bottom: 1px solid var(--au-border);
+  background: var(--au-surface-2);
+}
+.au-rich-editor__btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 28px; height: 28px; padding: 0 var(--au-s1);
+  border: 1px solid transparent; border-radius: var(--au-radius);
+  background: transparent; color: var(--au-muted); cursor: pointer;
+  font-size: var(--au-font-sm); font-weight: 600;
+}
+.au-rich-editor__btn:hover { background: var(--au-surface); color: var(--au-text); border-color: var(--au-border); }
+.au-rich-editor__sep { width: 1px; height: 20px; background: var(--au-border); margin: 0 var(--au-s1); }
+.au-rich-editor__surface {
+  min-height: 340px; padding: var(--au-s3);
+  outline: none; font-size: var(--au-font-md); line-height: 1.7;
+}
+.au-rich-editor__surface.is-empty:empty::before { content: attr(data-placeholder); color: var(--au-muted); }
+.au-rich-editor__surface:focus { box-shadow: inset 0 0 0 2px var(--au-brand); }
+.au-rich-editor__surface h2 { margin: 1.2em 0 0.5em; font-size: 1.35em; }
+.au-rich-editor__surface h3 { margin: 1em 0 0.4em; font-size: 1.15em; }
+.au-rich-editor__surface p { margin: 0.6em 0; }
+.au-rich-editor__surface blockquote { margin: 0.8em 0; padding: 0.4em var(--au-s2); border-left: 3px solid var(--au-brand); color: var(--au-muted); }
+.au-rich-editor__surface table { width: 100%; border-collapse: collapse; margin: 0.8em 0; }
+.au-rich-editor__surface th, .au-rich-editor__surface td { border: 1px solid var(--au-border); padding: var(--au-s1) var(--au-s2); }
+.au-rich-editor__surface ul, .au-rich-editor__surface ol { margin: 0.6em 0; padding-left: var(--au-s4); }
+.au-rich-editor__status {
+  display: flex; flex-wrap: wrap; gap: var(--au-s2);
+  padding: var(--au-s1) var(--au-s2); border-top: 1px solid var(--au-border);
+  color: var(--au-muted); font-size: var(--au-font-sm);
+}
+.au-rich-editor__dirty { color: var(--au-warning, var(--au-brand)); font-weight: 600; }
+@media (max-width: 640px) {
+  .au-rich-editor__surface { min-height: 240px; }
+}
+
+/* ── SEO workspace (M20) ── */
+.au-seo-score {
+  display: flex; gap: var(--au-s3); align-items: center;
+  padding: var(--au-s3); margin-bottom: var(--au-s3);
+  border: 1px solid var(--au-border); border-radius: var(--au-radius);
+  background: var(--au-surface-2);
+}
+.au-seo-score__value {
+  font-size: 2rem; font-weight: 700; line-height: 1;
+}
+.au-seo-score__value span { font-size: var(--au-font-sm); color: var(--au-muted); font-weight: 500; }
+.au-seo-score__value.is-good { color: var(--au-success); }
+.au-seo-score__value.is-mid { color: var(--au-warning, #b7791f); }
+.au-seo-score__value.is-low { color: var(--au-danger); }
+.au-seo-score__body strong { display: block; margin-bottom: 2px; }
+.au-seo-score__body p { margin: 0; }
+
+.au-serp {
+  padding: var(--au-s3); border: 1px solid var(--au-border);
+  border-radius: var(--au-radius); background: var(--au-surface-2);
+}
+.au-serp__title { margin: 0 0 2px; color: #1a0dab; font-size: 1.15rem; }
+.au-serp__url { margin: 0 0 4px; color: #0b8043; font-size: var(--au-font-sm); }
+.au-serp__desc { margin: 0; color: var(--au-muted); font-size: var(--au-font-sm); }
+
+.au-seo-findings { list-style: none; margin: 0; padding: 0; }
+.au-seo-findings li {
+  display: flex; gap: var(--au-s2); align-items: flex-start;
+  padding: var(--au-s1) 0; border-bottom: 1px solid var(--au-border);
+  font-size: var(--au-font-sm);
+}
+.au-seo-findings li.is-warn { color: var(--au-warning, #b7791f); }
+.au-seo-findings li.is-error { color: var(--au-danger); }
+
+.au-link-suggestions { list-style: none; margin: 0; padding: 0; }
+.au-link-suggestions li {
+  display: flex; justify-content: space-between; gap: var(--au-s2); align-items: center;
+  padding: var(--au-s2); border: 1px solid var(--au-border);
+  border-radius: var(--au-radius); margin-bottom: var(--au-s1);
+}
+.au-hint--over { color: var(--au-danger); }
+.au-block { display: block; }
