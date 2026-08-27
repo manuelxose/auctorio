@@ -314,12 +314,12 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                             <span class="au-legend"><span class="au-legend__dot" style="background: var(--au-danger)"></span>{{ planCount('rejected') }} rejected</span>
                           </div>
                           <div class="au-inline">
-                            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkApprove()" [disabled]="selectedIds.size === 0">
+                            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkApprove()" [disabled]="selectedIds.size === 0 || bulkPending">
                               <app-icon name="circle-check"></app-icon>
                               Approve selected
                             </button>
-                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="bulkStatus('rejected')" [disabled]="selectedIds.size === 0">Reject selected</button>
-                            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="bulkRemove()" [disabled]="selectedIds.size === 0">
+                            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="bulkStatus('rejected')" [disabled]="selectedIds.size === 0 || bulkPending">Reject selected</button>
+                            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="bulkRemove()" [disabled]="selectedIds.size === 0 || bulkPending">
                               <app-icon name="trash"></app-icon>
                               Delete selected
                             </button>
@@ -362,7 +362,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
                               <thead>
                                 <tr>
                                   <th style="width: 34px">
-                                    <input type="checkbox" aria-label="Select all proposed rows" (change)="selectAll($event)" />
+                                    <input type="checkbox" aria-label="Select all visible proposed rows" [checked]="allVisibleProposedSelected()" [disabled]="bulkPending" (change)="selectAll($event)" />
                                   </th>
                                   <th>Date</th>
                                   <th>Title</th>
@@ -564,6 +564,7 @@ export class EditorialPlanPageComponent implements OnInit {
   expandedPlanId = '';
   planDetailLoading = false;
   selectedIds = new Set<string>();
+  bulkPending = false;
   editingItemId = '';
   expandedItemId = '';
   editDraft = { title: '', primaryKeyword: '', seoTitle: '', scheduledFor: '' };
@@ -756,12 +757,14 @@ export class EditorialPlanPageComponent implements OnInit {
   startEdit(item: NonNullable<EditorialPlan['items']>[number]): void { this.editingItemId = item.id; this.editDraft = { title: item.title, primaryKeyword: item.primaryKeyword || '', seoTitle: item.seoTitle || '', scheduledFor: item.scheduledFor ? new Date(item.scheduledFor).toISOString().slice(0, 16) : '' }; }
   cancelEdit(): void { this.editingItemId = ''; }
   saveEdit(itemId: string): void { this.api.updateEditorialPlanItem(itemId, { title: this.editDraft.title, primaryKeyword: this.editDraft.primaryKeyword || null, seoTitle: this.editDraft.seoTitle || null, scheduledFor: this.editDraft.scheduledFor ? new Date(this.editDraft.scheduledFor).toISOString() : null }).subscribe({ next: () => { this.editingItemId = ''; this.refreshSelected(); }, error: () => { this.error = 'The planned row could not be saved.'; } }); }
-  selectAll(event: Event): void { const checked = (event.target as HTMLInputElement).checked; this.selectedIds = new Set(checked ? (this.selectedPlan?.items ?? []).filter((item) => item.status === 'proposed').map((item) => item.id) : []); }
+  selectAll(event: Event): void { const checked = (event.target as HTMLInputElement).checked; this.selectedIds = new Set(checked ? this.filteredPlanRows.filter((item) => item.status === 'proposed').map((item) => item.id) : []); }
+  allVisibleProposedSelected(): boolean { const visible = this.filteredPlanRows.filter((item) => item.status === 'proposed'); return visible.length > 0 && visible.every((item) => this.selectedIds.has(item.id)); }
   approve(itemId: string): void { this.api.approveEditorialPlanItem(itemId).subscribe({ next: () => this.refreshSelected(), error: () => { this.error = 'The row could not be approved.'; } }); }
-  bulkApprove(): void { this.api.bulkApproveEditorialPlanItems([...this.selectedIds]).subscribe({ next: () => { this.selectedIds.clear(); this.refreshSelected(); }, error: () => { this.error = 'Selected rows could not be approved.'; } }); }
-  bulkStatus(status: 'approved' | 'rejected' | 'proposed' | 'canceled'): void { this.api.bulkSetEditorialPlanItemStatus([...this.selectedIds], status).subscribe({ next: () => { this.selectedIds.clear(); this.refreshSelected(); }, error: () => { this.error = 'Selected rows could not be updated.'; } }); }
+  bulkApprove(): void { if (this.bulkPending) return; const ids = [...this.selectedIds]; this.bulkPending = true; this.error = ''; this.api.bulkApproveEditorialPlanItems(ids).subscribe({ next: ({ updatedCount }) => { this.bulkPending = false; this.selectedIds.clear(); this.toast.success(`${updatedCount} planned row${updatedCount === 1 ? '' : 's'} approved.`); this.refreshSelected(); }, error: () => { this.bulkPending = false; this.error = 'Selected rows could not be approved.'; } }); }
+  bulkStatus(status: 'approved' | 'rejected' | 'proposed' | 'canceled'): void { if (this.bulkPending) return; const ids = [...this.selectedIds]; this.bulkPending = true; this.error = ''; this.api.bulkSetEditorialPlanItemStatus(ids, status).subscribe({ next: ({ updatedCount }) => { this.bulkPending = false; this.selectedIds.clear(); this.toast.success(`${updatedCount} planned row${updatedCount === 1 ? '' : 's'} updated.`); this.refreshSelected(); }, error: () => { this.bulkPending = false; this.error = 'Selected rows could not be updated.'; } }); }
   bulkRemove(): void { void this.confirmBulkRemove(); }
   private async confirmBulkRemove(): Promise<void> {
+    if (this.bulkPending) return;
     const count = this.selectedIds.size;
     const confirmed = await this.confirm.confirm({
       title: `Delete ${count} planned row${count === 1 ? '' : 's'}?`,
@@ -770,7 +773,10 @@ export class EditorialPlanPageComponent implements OnInit {
       danger: true,
     });
     if (!confirmed) return;
-    this.api.bulkDeleteEditorialPlanItems([...this.selectedIds]).subscribe({ next: () => { this.selectedIds.clear(); this.refreshSelected(); this.toast.success('Planned rows deleted.'); }, error: (err) => { this.error = err?.error?.error?.message || 'Selected rows could not be deleted.'; } });
+    const ids = [...this.selectedIds];
+    this.bulkPending = true;
+    this.error = '';
+    this.api.bulkDeleteEditorialPlanItems(ids).subscribe({ next: ({ deletedCount }) => { this.bulkPending = false; this.selectedIds.clear(); this.refreshSelected(); this.toast.success(`${deletedCount} planned row${deletedCount === 1 ? '' : 's'} deleted.`); }, error: (err) => { this.bulkPending = false; this.error = err?.error?.error?.message || 'Selected rows could not be deleted.'; } });
   }
   remove(itemId: string): void { void this.confirmRemove(itemId); }
   private async confirmRemove(itemId: string): Promise<void> {

@@ -9,6 +9,7 @@ const fastify_1 = __importDefault(require("fastify"));
 const prisma_1 = require("../src/infrastructure/db/prisma");
 const hash_1 = require("../src/shared/utils/hash");
 const routes_1 = require("../src/studio/routes");
+const publication_1 = require("../src/studio/publication");
 const prisma = (0, prisma_1.getPrismaClient)();
 async function createFixture() {
     const seed = `studio-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
@@ -285,6 +286,34 @@ node_test_1.default.after(async () => {
         await server.close();
         await prisma.editorialPlanItem.deleteMany({ where: { tenantId: fixture.tenantId } });
         await prisma.editorialPlan.deleteMany({ where: { tenantId: fixture.tenantId } });
+        await cleanupFixture(fixture.tenantId);
+    }
+});
+(0, node_test_1.default)("Publication reschedule rolls back when its audit write fails", async () => {
+    const fixture = await createFixture();
+    const originalSchedule = new Date("2026-08-23T10:00:00.000Z");
+    const publication = await prisma.publication.create({
+        data: {
+            tenantId: fixture.tenantId,
+            projectId: fixture.projectId,
+            versionId: fixture.versionId,
+            siteId: fixture.siteId,
+            channel: "website",
+            status: "scheduled",
+            scheduledFor: originalSchedule,
+        },
+    });
+    try {
+        await strict_1.default.rejects((0, publication_1.updatePublicationSchedule)(fixture.tenantId, publication.id, { scheduledFor: new Date("2026-08-24T12:30:00.000Z") }, async () => {
+            throw new Error("forced_audit_failure");
+        }), /forced_audit_failure/);
+        const persisted = await prisma.publication.findUniqueOrThrow({ where: { id: publication.id } });
+        strict_1.default.equal(persisted.status, "scheduled");
+        strict_1.default.equal(persisted.scheduledFor?.toISOString(), originalSchedule.toISOString());
+        strict_1.default.equal(persisted.manualOverride, false);
+        strict_1.default.equal(persisted.scheduleLocked, false);
+    }
+    finally {
         await cleanupFixture(fixture.tenantId);
     }
 });

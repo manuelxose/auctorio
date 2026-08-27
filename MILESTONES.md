@@ -120,14 +120,20 @@ Code presence alone is never sufficient.
   (updated content re-enters scoring, clusters marked developing/updated).
 - **Remaining**: deep Inbox filters polish, mobile pass on editor.
 
-## M8 — Planning and Automation 🟡
+## M8 — Planning and Automation ✅
 
 - **Objective**: editorial plan, calendar, automation rules, scheduler, pause.
 - **Evidence**: editorial plans migration + UI, calendar, automation policies
   with per-day limits, scheduler worker, pause switch, reviewGate-driven
   scheduled page.
-- **Remaining**: plan-level bulk actions and drag-reschedule transactional
-  rollback validation.
+- **Bulk actions**: approve, reject/status change and safe delete are exposed in
+  the plan UI and tenant-scoped API; selection is limited to visible rows,
+  double submissions are blocked and affected-row counts are reported.
+- **Drag reschedule reliability**: publication update + audit now commit in one
+  database transaction. The calendar prevents concurrent moves for the same
+  publication, rolls optimistic state back on failure and always clears drag
+  state. Integration and Angular browser tests cover database rollback, UI
+  rollback and concurrent-drop suppression (206 backend + 4 frontend green).
 
 ## M9 — Analytics and Costs 🟡
 

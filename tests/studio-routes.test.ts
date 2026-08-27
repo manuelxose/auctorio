@@ -4,6 +4,7 @@ import Fastify from "fastify";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
 import { registerStudioRoutes } from "../src/studio/routes";
+import { updatePublicationSchedule } from "../src/studio/publication";
 
 const prisma = getPrismaClient();
 
@@ -344,6 +345,44 @@ test("Editorial plan bulk operations approve, reject and delete rows", async () 
     await server.close();
     await prisma.editorialPlanItem.deleteMany({ where: { tenantId: fixture.tenantId } });
     await prisma.editorialPlan.deleteMany({ where: { tenantId: fixture.tenantId } });
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("Publication reschedule rolls back when its audit write fails", async () => {
+  const fixture = await createFixture();
+  const originalSchedule = new Date("2026-08-23T10:00:00.000Z");
+  const publication = await prisma.publication.create({
+    data: {
+      tenantId: fixture.tenantId,
+      projectId: fixture.projectId,
+      versionId: fixture.versionId,
+      siteId: fixture.siteId,
+      channel: "website",
+      status: "scheduled",
+      scheduledFor: originalSchedule,
+    },
+  });
+
+  try {
+    await assert.rejects(
+      updatePublicationSchedule(
+        fixture.tenantId,
+        publication.id,
+        { scheduledFor: new Date("2026-08-24T12:30:00.000Z") },
+        async () => {
+          throw new Error("forced_audit_failure");
+        },
+      ),
+      /forced_audit_failure/,
+    );
+
+    const persisted = await prisma.publication.findUniqueOrThrow({ where: { id: publication.id } });
+    assert.equal(persisted.status, "scheduled");
+    assert.equal(persisted.scheduledFor?.toISOString(), originalSchedule.toISOString());
+    assert.equal(persisted.manualOverride, false);
+    assert.equal(persisted.scheduleLocked, false);
+  } finally {
     await cleanupFixture(fixture.tenantId);
   }
 });

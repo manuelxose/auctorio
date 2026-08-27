@@ -122,8 +122,9 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <h3 class="au-calendar-group__date">{{ group.label }}</h3>
           <div
             class="au-calendar-card"
-            draggable="true"
+            [draggable]="entry.item.status !== 'published' && !isRescheduling(entry.item.id)"
             (dragstart)="onDragStart($event, entry.item)"
+            (dragend)="onDragEnd($event)"
             (dragover)="$event.preventDefault()"
             (drop)="onDropOnCard($event, entry.item)"
             *ngFor="let entry of group.entries"
@@ -139,8 +140,9 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           (dragover)="$event.preventDefault()" (drop)="onDropOnDay($event, day.date)">
           <h3 class="au-calendar-group__date">{{ day.label }}</h3>
           <div class="au-calendar-card" *ngFor="let event of day.events"
-            draggable="true"
+            [draggable]="event.status !== 'published' && !isRescheduling(event.id)"
             (dragstart)="onDragStart($event, event)"
+            (dragend)="onDragEnd($event)"
             (dragover)="$event.preventDefault()"
             (drop)="onDropOnCard($event, event)"
           >
@@ -238,6 +240,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   private draggedEvent: CalendarEvent | null = null;
+  private readonly reschedulingIds = new Set<string>();
   private refreshSubscription: Subscription | null = null;
 
   get rangeLabel(): string {
@@ -412,6 +415,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   // ── Drag & drop rescheduling with optimistic UI ──
 
   onDragStart(event: DragEvent, item: CalendarEvent): void {
+    if (item.status === 'published' || this.reschedulingIds.has(item.id)) {
+      event.preventDefault();
+      return;
+    }
     this.draggedEvent = item;
     this.dragHint = true;
     event.dataTransfer?.setData('text/plain', item.id);
@@ -419,6 +426,16 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       event.dataTransfer.effectAllowed = 'move';
     }
     (event.currentTarget as HTMLElement)?.classList.add('is-dragging');
+  }
+
+  onDragEnd(event: DragEvent): void {
+    (event.currentTarget as HTMLElement)?.classList.remove('is-dragging');
+    this.draggedEvent = null;
+    this.dragHint = false;
+  }
+
+  isRescheduling(publicationId: string): boolean {
+    return this.reschedulingIds.has(publicationId);
   }
 
   onDropOnCard(event: DragEvent, target: CalendarEvent): void {
@@ -445,21 +462,26 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   private reschedule(eventItem: CalendarEvent, target: Date): void {
+    if (this.reschedulingIds.has(eventItem.id)) return;
     if (eventItem.status === 'published') {
       this.error = 'Published items cannot be rescheduled.';
       return;
     }
     this.dragHint = false;
     const previous = eventItem.scheduledFor;
+    const optimisticSchedule = target.toISOString();
+    this.reschedulingIds.add(eventItem.id);
     // Optimistic update.
-    eventItem.scheduledFor = target.toISOString();
-    this.api.reschedulePublication(eventItem.id, target.toISOString()).subscribe({
+    eventItem.scheduledFor = optimisticSchedule;
+    this.api.reschedulePublication(eventItem.id, optimisticSchedule).subscribe({
       next: () => {
+        this.reschedulingIds.delete(eventItem.id);
         this.toast.success('Publication rescheduled.');
         this.load(true);
       },
       error: () => {
-        eventItem.scheduledFor = previous; // rollback
+        if (eventItem.scheduledFor === optimisticSchedule) eventItem.scheduledFor = previous;
+        this.reschedulingIds.delete(eventItem.id);
         this.error = 'The publication could not be rescheduled.';
         this.load(true);
       },
