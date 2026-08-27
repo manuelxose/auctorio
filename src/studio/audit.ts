@@ -15,8 +15,11 @@ export type AuditEntryInput = {
   metadata?: Record<string, unknown> | null;
 };
 
-export async function writeAudit(input: AuditEntryInput): Promise<void> {
-  await prisma.auditLog.create({
+export async function writeAudit(
+  input: AuditEntryInput,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<void> {
+  await client.auditLog.create({
     data: {
       tenantId: input.tenantId,
       actorType: input.actorType ?? "system",

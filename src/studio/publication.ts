@@ -11,7 +11,7 @@ import {
   updateProjectStatus,
 } from "./repository";
 import { queuePublication } from "./orchestration";
-import { writeAudit } from "./audit";
+import { writeAudit, type AuditEntryInput } from "./audit";
 
 const prisma = getPrismaClient();
 
@@ -328,22 +328,24 @@ export async function updatePublicationSchedule(
     accountId?: string | null;
     cancel?: boolean;
   },
+  auditWriter: (input: AuditEntryInput, client: Prisma.TransactionClient) => Promise<void> = writeAudit,
 ): Promise<Publication | null> {
-  const publication = await prisma.publication.findFirst({ where: { id: publicationId, tenantId } });
-  if (!publication) {
-    return null;
-  }
+  return prisma.$transaction(async (tx) => {
+    const publication = await tx.publication.findFirst({ where: { id: publicationId, tenantId } });
+    if (!publication) {
+      return null;
+    }
 
-  if (["publishing", "published", "deleted"].includes(publication.status)) {
-    throw new Error("publication_not_editable");
-  }
+    if (["publishing", "published", "deleted"].includes(publication.status)) {
+      throw new Error("publication_not_editable");
+    }
 
-  const targetState = input.cancel ? "canceled" : "scheduled";
-  transitionPublication(publication.status, targetState);
+    const targetState = input.cancel ? "canceled" : "scheduled";
+    transitionPublication(publication.status, targetState);
 
-  const updated = await prisma.publication.update({
-    where: { id: publication.id },
-    data: {
+    const updated = await tx.publication.update({
+      where: { id: publication.id },
+      data: {
       status: targetState,
       ...(input.cancel
         ? {}
@@ -363,19 +365,20 @@ export async function updatePublicationSchedule(
       nextRetryAt: input.cancel ? null : publication.nextRetryAt,
       failureReason: input.cancel ? null : publication.failureReason,
       failureClass: input.cancel ? null : publication.failureClass,
-    },
-  });
+      },
+    });
 
-  await writeAudit({
-    tenantId,
-    action: input.cancel ? "publication.canceled" : "publication.rescheduled",
-    entityType: "publication",
-    entityId: publication.id,
-    actorType: "user",
-    metadata: { scheduledFor: updated.scheduledFor?.toISOString() ?? null },
-  });
+    await auditWriter({
+      tenantId,
+      action: input.cancel ? "publication.canceled" : "publication.rescheduled",
+      entityType: "publication",
+      entityId: publication.id,
+      actorType: "user",
+      metadata: { scheduledFor: updated.scheduledFor?.toISOString() ?? null },
+    }, tx);
 
-  return updated;
+    return updated;
+  });
 }
 
 export async function retryPublication(tenantId: string, publicationId: string): Promise<Publication | null> {
