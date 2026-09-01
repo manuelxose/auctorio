@@ -47,7 +47,26 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   td: [],
 };
 
-const DANGEROUS_URL_PATTERN = /^\s*(javascript|data|vbscript):/i;
+/**
+ * Scheme check for href/src values. Normalizes embedded control characters
+ * (tabs, CR/LF, NUL) that browsers strip but naive regexes miss — e.g.
+ * `java&#x09;script:` — and only allows http(s), mailto, tel or relative URLs.
+ */
+function isSafeUrl(value: string): boolean {
+  // Strip ASCII control characters and whitespace that browsers ignore when
+  // parsing URL schemes (URL spec removes tabs/CR/LF from the string).
+  const normalized = value.replace(/[\u0000-\u0020\u007f]/g, "");
+  if (!normalized) {
+    return false;
+  }
+  const schemeMatch = normalized.match(/^([a-z][a-z0-9+.-]*):/i);
+  if (schemeMatch) {
+    const scheme = schemeMatch[1].toLowerCase();
+    return scheme === "http" || scheme === "https" || scheme === "mailto" || scheme === "tel";
+  }
+  // Relative URLs (path, protocol-relative, anchors, query strings).
+  return !normalized.startsWith("//") || /^\/\/[a-z0-9.-]+\//i.test(normalized);
+}
 
 export function sanitizeEditorialHtml(html: string | null | undefined): string {
   if (!html) {
@@ -81,7 +100,7 @@ export function sanitizeEditorialHtml(html: string | null | undefined): string {
 
       if (tagName === "a") {
         const href = node.attr("href");
-        if (!href || DANGEROUS_URL_PATTERN.test(href)) {
+        if (!href || !isSafeUrl(href)) {
           node.removeAttr("href");
         } else {
           node.attr("rel", "noopener noreferrer");
@@ -89,7 +108,7 @@ export function sanitizeEditorialHtml(html: string | null | undefined): string {
       }
       if (tagName === "img") {
         const src = node.attr("src");
-        if (src && DANGEROUS_URL_PATTERN.test(src)) {
+        if (src && !isSafeUrl(src)) {
           node.removeAttr("src");
         }
         if (!node.attr("alt")) {

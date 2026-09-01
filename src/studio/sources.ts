@@ -1,881 +1,99 @@
-import { XMLParser } from "fast-xml-parser";
-import { load } from "cheerio";
+// Source management service: creation, discovery orchestration, upsert with
+// multi-signal deduplication, health tracking and run tracing.
+//
+// Adapters live in ./adapters (registry + contract); this module is the
+// business-facing façade and keeps compatibility exports for older callers.
+
 import { Prisma } from "@prisma/client";
 import type { ContentSource, ContentSourceType, SourceItemStatus } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import { fetchUrl, validateScrapeUrl } from "../infrastructure/scraping";
-import { fetchHtmlWithBrowser } from "../infrastructure/scraping/browser";
-import { normalizeText } from "../shared/utils/text";
-import { sha256 } from "../shared/utils/hash";
-import { getEnv, getNumberEnv } from "../shared/utils/env";
 import { scoreAndPromoteSourceItem } from "./editorial";
 import { writeAudit } from "./audit";
 import type { PaginatedResult } from "./types";
+import type { DiscoveredSourceItem, DiscoveryContext, SourceAdapter } from "./adapters/types";
+import {
+  buildCanonicalUrlHash,
+  buildItemContentHash,
+  buildNormalizedTitleHash,
+  deriveExternalId,
+  normalizeCanonicalUrl,
+  stripHtmlToText,
+} from "./adapters/normalize";
+import { getSourceAdapter } from "./adapters/registry";
+import { extractListingItems, type ListingSourceConfig } from "./adapters/htmllist";
+import { parseImdbTsvLines, type ImdbDatasetOptions } from "./adapters/imdb";
+import { evaluateDedup } from "./deduplication";
+import { getSourceBreaker, recordFetchOutcome } from "./source-health";
+import { SourceRateLimiter, type SourceRateLimitPolicy } from "./resilience/limiter";
+import { SourceHttpError } from "./adapters/http";
+import { beginDiscoveryRun, failDiscoveryRun, finishDiscoveryRun, logDiscoveryEvent, newRunKey, skipDiscoveryRun } from "./discovery-run";
+import { buildProvenance, mergeProvenance } from "./provenance";
+import { getNumberEnv } from "../shared/utils/env";
+import { runIntelligencePipelineForItem, mergeCountersIntoDiscoveryRun } from "./intelligence/pipeline";
+import { getIntelligenceSettings } from "./intelligence/intelligence-settings";
+import { createLevelBudget, createCostCounters, mergeCostCounters } from "./intelligence/cost-control";
 
 const prisma = getPrismaClient();
-
-// ────────────────────────────────────────────────────────────── Types
-
-export type ParsedSourceItem = {
-  externalId: string;
-  canonicalUrl: string | null;
-  sourceUrl: string | null;
-  title: string;
-  description: string | null;
-  rawText: string | null;
-  cleanedText: string | null;
-  author: string | null;
-  publishedAt: string | null;
-  sourceImageUrls: string[];
-  language: string | null;
-  categories: string[];
-};
-
-export interface SourceAdapter {
-  fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]>;
-}
-
-// ────────────────────────────────────────────────────────────── Helpers
-
-function compact(value: string): string {
-  return value.replace(/\s+/g, " ").trim();
-}
-
-function toText(value: unknown): string | null {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value === "object") {
-    const nested = (value as Record<string, unknown>)["#text"];
-    return typeof nested === "string" ? compact(nested) : null;
-  }
-  const text = String(value).trim();
-  return text ? text : null;
-}
-
-function extractLink(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value.trim() || null;
-  }
-  if (typeof value === "object" && value !== null) {
-    const record = value as Record<string, unknown>;
-    const href = record.href;
-    if (typeof href === "string") {
-      return href.trim() || null;
-    }
-    const nested = (record as Record<string, unknown>)["#text"];
-    if (typeof nested === "string") {
-      return nested.trim() || null;
-    }
-  }
-  return null;
-}
-
-function firstOf(...values: Array<string | null | undefined>): string | null {
-  for (const value of values) {
-    if (value && value.trim()) {
-      return compact(value);
-    }
-  }
-  return null;
-}
-
-export function normalizeCanonicalUrl(raw: string | null | undefined): string | null {
-  if (!raw) {
-    return null;
-  }
-  try {
-    const url = new URL(raw.trim());
-    url.hash = "";
-    url.protocol = url.protocol.toLowerCase();
-    url.hostname = url.hostname.toLowerCase();
-    const tracked = new Set([
-      "utm_source",
-      "utm_medium",
-      "utm_campaign",
-      "utm_term",
-      "utm_content",
-      "fbclid",
-      "gclid",
-      "ref",
-    ]);
-    for (const key of tracked) {
-      url.searchParams.delete(key);
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
-}
-
-export function deriveExternalId(sourceUrl: string | null, title: string): string {
-  const normalizedUrl = normalizeCanonicalUrl(sourceUrl);
-  if (normalizedUrl) {
-    return sha256(normalizedUrl).slice(0, 32);
-  }
-  return sha256(`${normalizeText(title)}`).slice(0, 32);
-}
-
-export function buildItemContentHash(title: string, text: string | null): string {
-  const seed = normalizeText(`${title}\n${text ?? ""}`).slice(0, 4000);
-  return sha256(seed);
-}
-
-export function stripHtmlToText(html: string | null | undefined): string | null {
-  if (!html) {
-    return null;
-  }
-  const withBreaks = html
-    .replace(/<\/(p|div|h1|h2|h3|h4|h5|h6|li|blockquote|section|article)>/gi, "\n")
-    .replace(/<br\s*\/?>/gi, "\n");
-  const $ = load(withBreaks);
-  $("script, style, noscript, iframe, form").remove();
-  const text = compact($("body").text() || $.text());
-  return text || null;
-}
-
-function parseDate(value: string | null | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-  return parsed.toISOString();
-}
-
-function asStringArray(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return value.map((item) => String(item)).filter(Boolean);
-  }
-  if (typeof value === "string" && value.trim()) {
-    return [value.trim()];
-  }
-  return [];
-}
-
-function readConfigObject(configuration: unknown): Record<string, unknown> {
-  return configuration && typeof configuration === "object"
-    ? (configuration as Record<string, unknown>)
-    : {};
-}
-
-// ────────────────────────────────────────────────────────────── Adapters
-
-class RssSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const response = await fetchUrl(url, { accept: "application/rss+xml,application/xml,text/xml" });
-    const maxItems = getNumberEnv("SCRAPE_MAX_ITEMS", 20);
-
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const parsed = parser.parse(response.body) as Record<string, unknown>;
-    const channel = readChannel(parsed);
-    const rawItems = Array.isArray(channel?.item) ? channel.item : channel?.item ? [channel.item] : [];
-    const language = toText(channel?.language) ?? null;
-
-    const items: ParsedSourceItem[] = [];
-    for (const raw of rawItems) {
-      if (items.length >= maxItems) {
-        break;
-      }
-      const record = (raw ?? {}) as Record<string, unknown>;
-      const title = toText(record.title) ?? "";
-      if (!title) {
-        continue;
-      }
-      const sourceUrl = extractLink(record.link);
-      const media = extractMedia(record);
-      const descriptionHtml = toText(record.description) ?? toText(record["content:encoded"]) ?? null;
-
-      items.push({
-        externalId: deriveExternalId(sourceUrl, title),
-        canonicalUrl: normalizeCanonicalUrl(sourceUrl),
-        sourceUrl: normalizeCanonicalUrl(sourceUrl),
-        title,
-        description: stripHtmlToText(descriptionHtml),
-        rawText: descriptionHtml,
-        cleanedText: stripHtmlToText(descriptionHtml),
-        author: toText(record["dc:creator"]) ?? toText(record.author) ?? null,
-        publishedAt: parseDate(toText(record.pubDate) ?? toText(record.published)),
-        sourceImageUrls: media,
-        language,
-        categories: asStringArray(record.category),
-      });
-    }
-
-    return items;
-  }
-}
-
-function readChannel(parsed: Record<string, unknown>): Record<string, unknown> | null {
-  const rss = parsed.rss ?? parsed["rdf:RDF"];
-  if (rss && typeof rss === "object") {
-    const record = rss as Record<string, unknown>;
-    return typeof record.channel === "object" ? (record.channel as Record<string, unknown>) : null;
-  }
-  return null;
-}
-
-function extractMedia(record: Record<string, unknown>): string[] {
-  const urls = new Set<string>();
-  const add = (value: unknown) => {
-    if (typeof value === "string") {
-      const normalized = normalizeCanonicalUrl(value);
-      if (normalized) {
-        urls.add(normalized);
-      }
-    }
-  };
-
-  const enclosure = record.enclosure;
-  if (enclosure && typeof enclosure === "object") {
-    add((enclosure as Record<string, unknown>)["@_url"]);
-  }
-  const media = record["media:content"];
-  if (media && typeof media === "object") {
-    if (Array.isArray(media)) {
-      for (const entry of media) {
-        add(typeof entry === "object" ? (entry as Record<string, unknown>)["@_url"] : entry);
-      }
-    } else {
-      add((media as Record<string, unknown>)["@_url"]);
-    }
-  }
-  const thumbnail = record["media:thumbnail"];
-  if (thumbnail && typeof thumbnail === "object") {
-    add((thumbnail as Record<string, unknown>)["@_url"]);
-  }
-
-  return Array.from(urls);
-}
-
-class AtomSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const response = await fetchUrl(url, { accept: "application/atom+xml,application/xml,text/xml" });
-    const maxItems = getNumberEnv("SCRAPE_MAX_ITEMS", 20);
-
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const parsed = parser.parse(response.body) as Record<string, unknown>;
-    const feed = (parsed.feed ?? {}) as Record<string, unknown>;
-    const rawEntries = Array.isArray(feed.entry) ? feed.entry : feed.entry ? [feed.entry] : [];
-
-    const items: ParsedSourceItem[] = [];
-    for (const raw of rawEntries) {
-      if (items.length >= maxItems) {
-        break;
-      }
-      const record = (raw ?? {}) as Record<string, unknown>;
-      const title = toText(record.title) ?? "";
-      if (!title) {
-        continue;
-      }
-      const linkValue = extractLink(record.link);
-      const contentHtml = toText(record.content) ?? toText(record.summary) ?? null;
-      const authorRaw = record.author;
-      const author =
-        typeof authorRaw === "object"
-          ? toText((authorRaw as Record<string, unknown>).name)
-          : toText(authorRaw);
-
-      items.push({
-        externalId: deriveExternalId(linkValue, title),
-        canonicalUrl: normalizeCanonicalUrl(linkValue),
-        sourceUrl: normalizeCanonicalUrl(linkValue),
-        title,
-        description: stripHtmlToText(contentHtml),
-        rawText: contentHtml,
-        cleanedText: stripHtmlToText(contentHtml),
-        author,
-        publishedAt: parseDate(toText(record.published) ?? toText(record.updated)),
-        sourceImageUrls: extractMedia(record),
-        language: null,
-        categories: asStringArray(record.category),
-      });
-    }
-
-    return items;
-  }
-}
-
-class HtmlSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const response = await fetchUrl(url, { accept: "text/html" });
-    const $ = load(response.body);
-    $("script, style, noscript, iframe, form, nav, footer, header, aside").remove();
-
-    const title =
-      $('meta[property="og:title"]').attr("content") ||
-      $("head title").text() ||
-      $("h1").first().text() ||
-      url.hostname;
-    const description =
-      $('meta[property="og:description"]').attr("content") ||
-      $('meta[name="description"]').attr("content") ||
-      null;
-    const images = new Set<string>();
-    const addImage = (value: string | undefined) => {
-      const normalized = normalizeCanonicalUrl(value);
-      if (normalized) {
-        images.add(normalized);
-      }
-    };
-    addImage($('meta[property="og:image"]').attr("content"));
-    addImage($('meta[name="twitter:image"]').attr("content"));
-    $("article img").each((_index, element) => addImage($(element).attr("src")));
-
-    const bodyText = compact($("article").text() || $("main").text() || $("body").text());
-
-    return [
-      {
-        externalId: deriveExternalId(source.url, compact(title)),
-        canonicalUrl: normalizeCanonicalUrl(
-          $('link[rel="canonical"]').attr("href") ?? source.url,
-        ),
-        sourceUrl: normalizeCanonicalUrl(source.url),
-        title: compact(title),
-        description: compact(description ?? bodyText.slice(0, 300)) || null,
-        rawText: bodyText || null,
-        cleanedText: bodyText || null,
-        author: $('meta[name="author"]').attr("content") ?? null,
-        publishedAt: parseDate(
-          $('meta[property="article:published_time"]').attr("content") ??
-            $('time[datetime]').first().attr("datetime"),
-        ),
-        sourceImageUrls: Array.from(images),
-        language: $("html").attr("lang") ?? null,
-        categories: [],
-      },
-    ];
-  }
-}
-
-class SitemapSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const response = await fetchUrl(url, { accept: "application/xml,text/xml" });
-    const maxItems = getNumberEnv("SCRAPE_MAX_ITEMS", 20);
-
-    const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
-    const parsed = parser.parse(response.body) as Record<string, unknown>;
-    const urlset = (parsed.urlset ?? {}) as Record<string, unknown>;
-    const rawUrls = Array.isArray(urlset.url) ? urlset.url : urlset.url ? [urlset.url] : [];
-
-    const items: ParsedSourceItem[] = [];
-    for (const raw of rawUrls) {
-      if (items.length >= maxItems) {
-        break;
-      }
-      const record = (raw ?? {}) as Record<string, unknown>;
-      const loc = toText(record.loc);
-      if (!loc) {
-        continue;
-      }
-      const canonical = normalizeCanonicalUrl(loc);
-      const pathParts = new URL(loc).pathname.split("/").filter(Boolean);
-      const title = pathParts
-        .slice(-1)[0]
-        ?.replace(/[-_]+/g, " ")
-        .replace(/\.html?$/, "")
-        .trim() || loc;
-
-      items.push({
-        externalId: deriveExternalId(loc, title),
-        canonicalUrl: canonical,
-        sourceUrl: canonical,
-        title,
-        description: null,
-        rawText: null,
-        cleanedText: null,
-        author: null,
-        publishedAt: parseDate(toText(record.lastmod)),
-        sourceImageUrls: [],
-        language: null,
-        categories: [],
-      });
-    }
-
-    return items;
-  }
-}
-
-class ApiSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const configuration = readConfigObject(source.configuration);
-    const headers = configuration.headers && typeof configuration.headers === "object"
-      ? (configuration.headers as Record<string, string>)
-      : undefined;
-
-    const response = await fetchUrl(url, {
-      accept: "application/json",
-      headers,
-    });
-
-    let json: unknown;
-    try {
-      json = JSON.parse(response.body) as unknown;
-    } catch {
-      throw new Error("source_api_invalid_json");
-    }
-
-    const maxItems = getNumberEnv("SCRAPE_MAX_ITEMS", 20);
-    const itemsPath = typeof configuration.itemsPath === "string" ? configuration.itemsPath : "";
-    const entries = resolvePath(json, itemsPath);
-    const list = Array.isArray(entries) ? entries : [entries];
-    const fieldMap = configuration.fields && typeof configuration.fields === "object"
-      ? (configuration.fields as Record<string, string>)
-      : { title: "title", url: "url" };
-
-    const items: ParsedSourceItem[] = [];
-    for (const entry of list) {
-      if (items.length >= maxItems) {
-        break;
-      }
-      const record = entry && typeof entry === "object" ? (entry as Record<string, unknown>) : {};
-      const title = readField(record, fieldMap.title ?? "title") ?? "";
-      if (!title) {
-        continue;
-      }
-      const sourceUrl = readField(record, fieldMap.url ?? "url") ?? readField(record, "link") ?? null;
-      const description = readField(record, fieldMap.description ?? "description") ?? null;
-
-      items.push({
-        externalId: deriveExternalId(sourceUrl, title),
-        canonicalUrl: normalizeCanonicalUrl(sourceUrl),
-        sourceUrl: normalizeCanonicalUrl(sourceUrl),
-        title,
-        description,
-        rawText: description,
-        cleanedText: description,
-        author: readField(record, fieldMap.author ?? "author"),
-        publishedAt: parseDate(readField(record, fieldMap.publishedAt ?? "published_at")),
-        sourceImageUrls: asStringArray(readField(record, fieldMap.image ?? "image")),
-        language: readField(record, "language"),
-        categories: asStringArray(readField(record, fieldMap.categories ?? "categories")),
-      });
-    }
-
-    return items;
-  }
-}
-
-function readField(record: Record<string, unknown>, path: string): string | null {
-  const value = resolvePath(record, path);
-  return typeof value === "string" ? value.trim() || null : value === undefined || value === null ? null : String(value);
-}
-
-function resolvePath(input: unknown, path: string): unknown {
-  if (!path) {
-    return input;
-  }
-  const parts = path.split(".").map((part) => part.trim()).filter(Boolean);
-  let current: unknown = input;
-  for (const part of parts) {
-    if (current === null || typeof current !== "object") {
-      return undefined;
-    }
-    current = (current as Record<string, unknown>)[part];
-  }
-  return current;
-}
-
-// ────────────────────────────────────────────────────────────── Movie-database ingestion
-//
-// Two new source types for editorial ingestion from movie databases:
-//
-//   htmllist — configurable HTML listing adapter (cards → items). Works with
-//     plain HTTP for reachable sites (SensaCine) and with a headless-browser
-//     engine for WAF-protected sites (Filmaffinity/Cloudflare). Ships with
-//     per-domain default selectors; override via source.configuration.
-//
-//   imdb     — official IMDb public dataset (datasets.imdbws.com) TSV adapter.
-//     No scraping involved; streams the gzip archive to disk and ingests
-//     recent titles.
-
-export type ListingSourceConfig = {
-  /** "http" (default) or "browser" (headless Chromium for WAF-protected sites). */
-  engine?: "http" | "browser";
-  itemSelector?: string;
-  titleSelector?: string;
-  linkSelector?: string;
-  imageSelector?: string;
-  dateSelector?: string;
-  categoriesSelector?: string;
-  descriptionSelectors?: string[];
-  maxItems?: number;
-  waitMs?: number;
-  headers?: Record<string, string>;
-};
-
-const LISTING_DEFAULTS: Record<string, ListingSourceConfig> = {
-  "www.filmaffinity.com": {
-    engine: "browser",
-    itemSelector: "div.fa-card",
-    titleSelector: ".mc-title a",
-    linkSelector: ".mc-title a",
-    imageSelector: "img",
-    descriptionSelectors: [".mc-title"],
-    waitMs: 8000,
-  },
-  "www.sensacine.com": {
-    engine: "http",
-    itemSelector: "ul.item_lists_3 > li.mdl",
-    titleSelector: ".meta-title-link",
-    linkSelector: ".meta-title-link",
-    imageSelector: "img",
-    descriptionSelectors: [".meta-body"],
-    categoriesSelector: ".meta-body-info",
-    maxItems: 24,
-  },
-};
-
-function resolveListingConfig(sourceUrl: string, configuration: unknown): ListingSourceConfig {
-  let hostDefaults: ListingSourceConfig = {};
-  try {
-    const host = new URL(sourceUrl).hostname.replace(/^www\./, "");
-    hostDefaults = LISTING_DEFAULTS[host] ?? LISTING_DEFAULTS[`www.${host}`] ?? {};
-  } catch {
-    hostDefaults = {};
-  }
-  const configured = readConfigObject(configuration);
-  return { ...hostDefaults, ...configured };
-}
-
-export function extractListingItems(html: string, sourceUrl: string, config: ListingSourceConfig): ParsedSourceItem[] {
-  const maxItems = Math.max(1, Math.min(config.maxItems ?? getNumberEnv("SCRAPE_MAX_ITEMS", 20), 100));
-  const $ = load(html);
-
-  let itemNodes = config.itemSelector ? $(config.itemSelector) : $();
-  if (itemNodes.length === 0) {
-    itemNodes = $("article, li:has(h2, h3), tr:has(td a[href])");
-  }
-
-  const items: ParsedSourceItem[] = [];
-  itemNodes.each((_index, element) => {
-    if (items.length >= maxItems) {
-      return;
-    }
-    const node = $(element);
-
-    const linkElement = config.linkSelector ? node.find(config.linkSelector).first() : node.find("a[href]").first();
-    const rawHref = linkElement.attr("href") ?? node.find("a[href]").first().attr("href");
-    if (!rawHref || /^(javascript:|mailto:|#)/i.test(rawHref.trim())) {
-      return;
-    }
-    let canonicalUrl: string | null = null;
-    try {
-      canonicalUrl = normalizeCanonicalUrl(new URL(rawHref, sourceUrl).toString());
-    } catch {
-      return;
-    }
-    if (!canonicalUrl) {
-      return;
-    }
-
-    const title = compact(
-      (config.titleSelector ? node.find(config.titleSelector).first().text() : "") ||
-        linkElement.text() ||
-        node.find("h2, h3").first().text(),
-    );
-    if (!title) {
-      return;
-    }
-
-    const descriptionParts: string[] = [];
-    for (const selector of config.descriptionSelectors ?? []) {
-      const text = compact(node.find(selector).first().text());
-      if (text && !descriptionParts.includes(text)) {
-        descriptionParts.push(text);
-      }
-    }
-
-    let image: string | null = null;
-    if (config.imageSelector) {
-      const rawImage = node.find(config.imageSelector).first().attr("src") ?? node.find(config.imageSelector).first().attr("data-src");
-      if (rawImage) {
-        try {
-          image = normalizeCanonicalUrl(new URL(rawImage, sourceUrl).toString());
-        } catch {
-          image = null;
-        }
-      }
-    }
-
-    const categories: string[] = [];
-    if (config.categoriesSelector) {
-      const rawCategories = compact(node.find(config.categoriesSelector).first().text());
-      for (const part of rawCategories.split(/\s*\|\s*|,|·/)) {
-        const cleaned = part.replace(/^\d+\s*h\s*\d*\s*min$/, "").trim();
-        if (cleaned && cleaned.length <= 60 && !/^\d{1,2} de .* de \d{4}$/.test(cleaned) && !categories.includes(cleaned)) {
-          categories.push(cleaned);
-        }
-      }
-    }
-
-    items.push({
-      externalId: deriveExternalId(canonicalUrl, title),
-      canonicalUrl,
-      sourceUrl: canonicalUrl,
-      title: title.slice(0, 400),
-      description: descriptionParts.length > 0 ? descriptionParts.join(" · ") : null,
-      rawText: descriptionParts.join("\n") || null,
-      cleanedText: descriptionParts.join("\n") || null,
-      author: null,
-      publishedAt: config.dateSelector ? parseDate(compact(node.find(config.dateSelector).first().text())) : null,
-      sourceImageUrls: image ? [image] : [],
-      language: null,
-      categories,
-    });
-  });
-
-  return items;
-}
-
-class HtmlListingSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    const config = resolveListingConfig(source.url, source.configuration);
-    await validateScrapeUrl(url);
-
-    let html: string;
-    if (config.engine === "browser") {
-      html = await fetchHtmlWithBrowser(url.toString(), { settleMs: config.waitMs });
-    } else {
-      const response = await fetchUrl(url, { accept: "text/html", headers: config.headers });
-      html = response.body;
-    }
-    return extractListingItems(html, url.toString(), config);
-  }
-}
-
-export type ImdbDatasetOptions = {
-  /** titleType values to keep (default: movie, tvMovie, tvSeries, tvMiniSeries). */
-  types?: string[];
-  /** Only titles with startYear >= this year (default: current year - 1). */
-  fromYear?: number;
-  maxItems?: number;
-};
-
-export function parseImdbTsvLines(lines: string[], options: ImdbDatasetOptions = {}): ParsedSourceItem[] {
-  const fromYear = options.fromYear ?? new Date().getFullYear() - 1;
-  const types = new Set(options.types ?? ["movie", "tvMovie", "tvSeries", "tvMiniSeries"]);
-  const maxItems = Math.max(1, Math.min(options.maxItems ?? 250, 1000));
-
-  const header = lines[0]?.trim().split("\t") ?? [];
-  const indexOf = (name: string) => header.indexOf(name);
-
-  const col = {
-    id: indexOf("tconst"),
-    type: indexOf("titleType"),
-    primary: indexOf("primaryTitle"),
-    original: indexOf("originalTitle"),
-    adult: indexOf("isAdult"),
-    startYear: indexOf("startYear"),
-    runtime: indexOf("runtimeMinutes"),
-    genres: indexOf("genres"),
-  };
-  if (col.id < 0 || col.primary < 0) {
-    return [];
-  }
-
-  const matches: ParsedSourceItem[] = [];
-  for (const line of lines.slice(1)) {
-    if (!line.trim()) {
-      continue;
-    }
-    const fields = line.split("\t");
-    const titleType = col.type >= 0 ? fields[col.type] : "";
-    if (!types.has(titleType)) {
-      continue;
-    }
-    if (col.adult >= 0 && fields[col.adult] === "1") {
-      continue;
-    }
-    const startYear = col.startYear >= 0 ? Number.parseInt(fields[col.startYear] ?? "0", 10) : 0;
-    if (Number.isFinite(startYear) && startYear > 0 && startYear < fromYear) {
-      continue;
-    }
-    const tconst = fields[col.id];
-    const title = (col.primary >= 0 ? fields[col.primary] : "") || (col.original >= 0 ? fields[col.original] : "");
-    if (!title) {
-      continue;
-    }
-    const originalTitle = col.original >= 0 && fields[col.original] && fields[col.original] !== fields[col.primary] ? fields[col.original] : null;
-    const runtime = col.runtime >= 0 && fields[col.runtime] && fields[col.runtime] !== "\\N" ? fields[col.runtime] : null;
-    const genres = col.genres >= 0 && fields[col.genres] && fields[col.genres] !== "\\N" ? fields[col.genres].split(",") : [];
-
-    const descriptionParts = [
-      `Año: ${startYear > 0 ? startYear : "—"}`,
-      runtime ? `Duración: ${runtime} min` : null,
-      genres.length > 0 ? `Géneros: ${genres.join(", ")}` : null,
-      originalTitle ? `Título original: ${originalTitle}` : null,
-    ].filter((part): part is string => Boolean(part));
-
-    matches.push({
-      externalId: tconst,
-      canonicalUrl: `https://www.imdb.com/title/${tconst}/`,
-      sourceUrl: `https://www.imdb.com/title/${tconst}/`,
-      title: title.slice(0, 400),
-      description: descriptionParts.join(" · ") || null,
-      rawText: descriptionParts.join("\n") || null,
-      cleanedText: descriptionParts.join("\n") || null,
-      author: null,
-      publishedAt: startYear > 0 ? `${startYear}-01-01T00:00:00.000Z` : null,
-      sourceImageUrls: [],
-      language: null,
-      categories: genres,
-    });
-
-    if (matches.length >= maxItems) {
-      break;
-    }
-  }
-  return matches;
-}
-
-class ImdbDatasetSourceAdapter implements SourceAdapter {
-  async fetch(source: Pick<ContentSource, "url" | "configuration">): Promise<ParsedSourceItem[]> {
-    if (!source.url) {
-      throw new Error("source_url_required");
-    }
-    const url = new URL(source.url);
-    await validateScrapeUrl(url);
-    const configuration = readConfigObject(source.configuration);
-    const options: ImdbDatasetOptions = {
-      types: Array.isArray(configuration.types) ? configuration.types.map(String) : undefined,
-      fromYear: typeof configuration.fromYear === "number" ? configuration.fromYear : undefined,
-      maxItems: typeof configuration.maxItems === "number" ? configuration.maxItems : undefined,
-    };
-
-    // Stream + gunzip to a temp file instead of buffering the full archive in
-    // memory (the decompressed TSV is >1 GB).
-    const { Readable } = await import("node:stream");
-    const { pipeline } = await import("node:stream/promises");
-    const { createGunzip } = await import("node:zlib");
-    const { createWriteStream, mkdtempSync } = await import("node:fs");
-    const { tmpdir } = await import("node:os");
-    const { join } = await import("node:path");
-
-    const response = await fetch(url.toString(), {
-      headers: { "user-agent": getEnv("SCRAPE_USER_AGENT", "auctorio-bot"), accept: "application/gzip" },
-    });
-    if (!response.ok || !response.body) {
-      throw new Error(`imdb_dataset_fetch_failed status=${response.status}`);
-    }
-
-    const dir = mkdtempSync(join(tmpdir(), "imdb-basics-"));
-    const filePath = join(dir, "title.basics.tsv");
-    try {
-      await pipeline(Readable.fromWeb(response.body as never), createGunzip(), createWriteStream(filePath));
-      // The dataset is ordered by insertion (tconst); newer titles live at the
-      // END of the file. Read the tail so recent releases are ingested first.
-      const tail = await readTailLines(filePath, 2_000_000);
-      return parseImdbTsvLines(tail, options);
-    } finally {
-      await import("node:fs/promises").then((fs) => fs.rm(dir, { recursive: true, force: true }).catch(() => undefined));
-    }
-  }
-}
-
-async function readTailLines(filePath: string, budgetChars: number): Promise<string[]> {
-  const { open } = await import("node:fs/promises");
-  const { statSync } = await import("node:fs");
-  const { createInterface } = await import("node:readline");
-
-  const handle = await open(filePath, "r");
-  try {
-    const size = statSync(filePath).size;
-    const readFrom = Math.max(0, size - budgetChars);
-    const buffer = Buffer.alloc(size - readFrom);
-    await handle.read(buffer, 0, buffer.length, readFrom);
-    const text = buffer.toString("utf8");
-    const lines = text.split("\n").filter((line) => line.trim());
-    // Drop the first partial line (cut mid-line by the byte offset).
-    if (readFrom > 0 && lines.length > 0 && !lines[0].startsWith("tconst")) {
-      lines.shift();
-    }
-    // Re-attach the header as the first line.
-    return ["tconst\ttitleType\tprimaryTitle\toriginalTitle\tisAdult\tstartYear\tendYear\truntimeMinutes\tgenres", ...lines];
-  } finally {
-    await handle.close();
-  }
-}
-
-class ManualSourceAdapter implements SourceAdapter {
-  async fetch(): Promise<ParsedSourceItem[]> {
-    return [];
-  }
-}
-
-export function getSourceAdapter(type: ContentSourceType): SourceAdapter {
-  switch (type) {
-    case "rss":
-      return new RssSourceAdapter();
-    case "atom":
-      return new AtomSourceAdapter();
-    case "html":
-      return new HtmlSourceAdapter();
-    case "sitemap":
-      return new SitemapSourceAdapter();
-    case "api":
-      return new ApiSourceAdapter();
-    case "htmllist":
-      return new HtmlListingSourceAdapter();
-    case "imdb":
-      return new ImdbDatasetSourceAdapter();
-    case "manual":
-      return new ManualSourceAdapter();
-    default:
-      throw new Error(`unsupported_source_type ${type}`);
-  }
-}
-
-// ────────────────────────────────────────────────────────────── Service
+const sourceRateLimiter = new SourceRateLimiter();
+
+// ── Compatibility exports (previous module layout)
+
+export { extractListingItems, parseImdbTsvLines };
+export { getSourceAdapter, registerSourceAdapter } from "./adapters/registry";
+export {
+  buildCanonicalUrlHash,
+  buildItemContentHash,
+  buildNormalizedTitleHash,
+  deriveExternalId,
+  normalizeCanonicalUrl,
+  normalizeTitleForFingerprint,
+  stripHtmlToText,
+} from "./adapters/normalize";
+export type { ListingSourceConfig, ImdbDatasetOptions };
+export type { SourceAdapter, DiscoveredSourceItem, DiscoveryContext, SourceDocument, SourceHealthCheck } from "./adapters/types";
+
+/** Back-compat alias: the legacy parsed-item shape is the normalized item. */
+export type ParsedSourceItem = DiscoveredSourceItem;
+
+// ────────────────────────────────────────────────────────────── Sources
 
 export type CreateSourceInput = {
   siteId?: string | null;
   name: string;
   type: ContentSourceType;
   url?: string | null;
+  domain?: string | null;
+  endpoint?: string | null;
   enabled?: boolean;
   priority?: number;
   trustScore?: number;
+  authorityScore?: number;
+  freshnessWeight?: number;
   language?: string;
   country?: string | null;
+  timezone?: string | null;
   categories?: string[] | null;
   tags?: string[] | null;
+  credentialsRef?: string | null;
   refreshIntervalMinutes?: number;
+  rateLimitPolicy?: Record<string, unknown> | null;
+  robotsPolicy?: Record<string, unknown> | null;
+  extractionPolicy?: Record<string, unknown> | null;
+  enrichmentPolicy?: Record<string, unknown> | null;
+  copyrightPolicy?: Record<string, unknown> | null;
   configuration?: Record<string, unknown> | null;
+  packKey?: string | null;
+  discoveryMethod?: string | null;
+  restrictionsNote?: string | null;
+  verificationStatus?: string | null;
+  archivedAt?: Date | null;
 };
 
 export type UpdateSourceInput = Partial<CreateSourceInput>;
+
+function jsonOrNull(value: unknown): Prisma.InputJsonValue | typeof Prisma.JsonNull {
+  return value ? (value as Prisma.InputJsonValue) : Prisma.JsonNull;
+}
 
 export async function createSource(tenantId: string, input: CreateSourceInput) {
   const source = await prisma.contentSource.create({
@@ -885,15 +103,31 @@ export async function createSource(tenantId: string, input: CreateSourceInput) {
       name: input.name,
       type: input.type,
       url: input.url ?? null,
+      domain: input.domain ?? deriveDomain(input.url),
+      endpoint: input.endpoint ?? null,
       enabled: input.enabled ?? true,
       priority: input.priority ?? 0,
       trustScore: input.trustScore ?? 0.5,
+      authorityScore: input.authorityScore ?? 0.5,
+      freshnessWeight: input.freshnessWeight ?? 1.0,
       language: input.language ?? "es",
       country: input.country ?? null,
-      categories: input.categories ? (input.categories as Prisma.InputJsonValue) : Prisma.JsonNull,
-      tags: input.tags ? (input.tags as Prisma.InputJsonValue) : Prisma.JsonNull,
+      timezone: input.timezone ?? null,
+      categories: jsonOrNull(input.categories),
+      tags: jsonOrNull(input.tags),
+      credentialsRef: input.credentialsRef ?? null,
       refreshIntervalMinutes: input.refreshIntervalMinutes ?? 30,
-      configuration: input.configuration ? (input.configuration as Prisma.InputJsonObject) : Prisma.JsonNull,
+      rateLimitPolicy: jsonOrNull(input.rateLimitPolicy),
+      robotsPolicy: jsonOrNull(input.robotsPolicy),
+      extractionPolicy: jsonOrNull(input.extractionPolicy),
+      enrichmentPolicy: jsonOrNull(input.enrichmentPolicy),
+      copyrightPolicy: jsonOrNull(input.copyrightPolicy),
+      configuration: jsonOrNull(input.configuration),
+      packKey: input.packKey ?? null,
+      discoveryMethod: input.discoveryMethod ?? null,
+      restrictionsNote: input.restrictionsNote ?? null,
+      verificationStatus: input.verificationStatus ?? "unverified",
+      archivedAt: input.archivedAt ?? null,
     },
   });
 
@@ -909,6 +143,52 @@ export async function createSource(tenantId: string, input: CreateSourceInput) {
   return source;
 }
 
+function deriveDomain(url: string | null | undefined): string | null {
+  if (!url) {
+    return null;
+  }
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** Redact secret-shaped configuration keys (headers/auth blocks) in a source
+ *  configuration before it is returned to the browser. */
+export function redactSourceConfiguration(configuration: unknown): Record<string, unknown> {
+  if (!configuration || typeof configuration !== "object" || Array.isArray(configuration)) {
+    return configuration as Record<string, unknown>;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(configuration as Record<string, unknown>)) {
+    if (key.toLowerCase() === "headers" && value && typeof value === "object") {
+      out[key] = Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([headerKey]) => [headerKey, "[redacted]"]),
+      );
+    } else if (/(authorization|bearer|token|secret|api_?key|password|credential)/i.test(key)) {
+      out[key] = "[redacted]";
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/** Remove credential references and redact configuration before a source row
+ *  leaves the server. API keys are never returned to the browser. */
+export function sanitizeSourceForClient<T>(source: T): T {
+  if (!source || typeof source !== "object") {
+    return source;
+  }
+  const record: Record<string, unknown> = { ...(source as Record<string, unknown>) };
+  delete record.credentialsRef;
+  if (record.configuration && typeof record.configuration === "object") {
+    record.configuration = redactSourceConfiguration(record.configuration);
+  }
+  return record as unknown as T;
+}
+
 export async function updateSource(tenantId: string, sourceId: string, input: UpdateSourceInput) {
   const existing = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId } });
   if (!existing) {
@@ -922,15 +202,31 @@ export async function updateSource(tenantId: string, sourceId: string, input: Up
       name: input.name?.trim() || undefined,
       type: input.type,
       url: input.url === undefined ? undefined : input.url,
+      domain: input.domain === undefined ? undefined : input.domain,
+      endpoint: input.endpoint === undefined ? undefined : input.endpoint,
       enabled: input.enabled,
       priority: input.priority,
       trustScore: input.trustScore,
+      authorityScore: input.authorityScore,
+      freshnessWeight: input.freshnessWeight,
       language: input.language,
       country: input.country === undefined ? undefined : input.country,
-      categories: input.categories === undefined ? undefined : input.categories ? (input.categories as Prisma.InputJsonValue) : Prisma.JsonNull,
-      tags: input.tags === undefined ? undefined : input.tags ? (input.tags as Prisma.InputJsonValue) : Prisma.JsonNull,
+      timezone: input.timezone === undefined ? undefined : input.timezone,
+      categories: input.categories === undefined ? undefined : jsonOrNull(input.categories),
+      tags: input.tags === undefined ? undefined : jsonOrNull(input.tags),
+      credentialsRef: input.credentialsRef === undefined ? undefined : input.credentialsRef,
       refreshIntervalMinutes: input.refreshIntervalMinutes,
-      configuration: input.configuration === undefined ? undefined : input.configuration ? (input.configuration as Prisma.InputJsonObject) : Prisma.JsonNull,
+      rateLimitPolicy: input.rateLimitPolicy === undefined ? undefined : jsonOrNull(input.rateLimitPolicy),
+      robotsPolicy: input.robotsPolicy === undefined ? undefined : jsonOrNull(input.robotsPolicy),
+      extractionPolicy: input.extractionPolicy === undefined ? undefined : jsonOrNull(input.extractionPolicy),
+      enrichmentPolicy: input.enrichmentPolicy === undefined ? undefined : jsonOrNull(input.enrichmentPolicy),
+      copyrightPolicy: input.copyrightPolicy === undefined ? undefined : jsonOrNull(input.copyrightPolicy),
+      configuration: input.configuration === undefined ? undefined : jsonOrNull(input.configuration),
+      packKey: input.packKey === undefined ? undefined : input.packKey,
+      discoveryMethod: input.discoveryMethod === undefined ? undefined : input.discoveryMethod,
+      restrictionsNote: input.restrictionsNote === undefined ? undefined : input.restrictionsNote,
+      verificationStatus: input.verificationStatus === undefined ? undefined : input.verificationStatus,
+      archivedAt: input.archivedAt === undefined ? undefined : input.archivedAt,
     },
   });
 
@@ -963,10 +259,14 @@ export async function deleteSource(tenantId: string, sourceId: string) {
 }
 
 export async function getSource(tenantId: string, sourceId: string) {
-  return prisma.contentSource.findFirst({
+  const source = await prisma.contentSource.findFirst({
     where: { id: sourceId, tenantId },
-    include: { site: { select: { id: true, name: true, key: true } } },
+    include: {
+      site: { select: { id: true, name: true, key: true } },
+      health: true,
+    },
   });
+  return source ? sanitizeSourceForClient(source) : null;
 }
 
 export async function listSources(
@@ -990,16 +290,19 @@ export async function listSources(
       include: {
         _count: { select: { items: true } },
         site: { select: { id: true, name: true, key: true } },
+        health: true,
       },
     }),
   ]);
 
   return {
-    items: sources.map((source) => ({
-      ...source,
-      discoveredCount: source._count.items,
-      site: source.site,
-    })),
+    items: sources.map((source) =>
+      sanitizeSourceForClient({
+        ...source,
+        discoveredCount: source._count.items,
+        site: source.site,
+      }),
+    ),
     page: input.page,
     pageSize: input.pageSize,
     total,
@@ -1011,7 +314,7 @@ export async function listDueSources(tenantId: string, now: Date = new Date()) {
     where: {
       tenantId,
       enabled: true,
-      type: { not: "manual" },
+      type: { notIn: ["manual", "webhook"] },
       OR: [
         { lastFetchedAt: null },
         { lastFetchedAt: { lte: new Date(now.getTime() - 60_000) } },
@@ -1020,182 +323,459 @@ export async function listDueSources(tenantId: string, now: Date = new Date()) {
     orderBy: { priority: "desc" },
   });
 
-  return sources.filter((source) => {
+  const due = sources.filter((source) => {
     if (!source.lastFetchedAt) {
       return true;
     }
     const intervalMs = Math.max(5, source.refreshIntervalMinutes) * 60_000;
     return now.getTime() - source.lastFetchedAt.getTime() >= intervalMs;
   });
+
+  // A broken publisher must never destabilize discovery for others: sources
+  // with an open circuit breaker are skipped until the cooldown allows a
+  // half-open probe.
+  const skippable = await Promise.all(
+    due.map(async (source) => {
+      const breaker = getSourceBreaker(tenantId, source.id, source.configuration);
+      const canAttempt = await breaker.canAttempt(`${tenantId}:${source.id}`);
+      return { source, canAttempt };
+    }),
+  );
+  return skippable.filter(({ canAttempt }) => canAttempt).map(({ source }) => source);
 }
 
-export type FetchSourceResult = {
-  sourceId: string;
-  fetched: number;
-  created: number;
-  duplicates: number;
-  failed: boolean;
-  error: string | null;
+// ────────────────────────────────────────────────────────────── Upsert
+
+export type UpsertSourceItemResult = {
+  created: boolean;
+  updated: boolean;
+  sourceItemId: string | null;
+  dedupReason: string | null;
+  clusterLinkId: string | null;
 };
 
 export async function upsertSourceItem(
   tenantId: string,
   sourceId: string,
-  item: ParsedSourceItem,
-): Promise<{ created: boolean; updated: boolean; sourceItemId: string | null }> {
+  item: DiscoveredSourceItem,
+  options: {
+    discoveryRunId?: string | null;
+    /** Publisher identity for the provenance chain (avoids a per-item query). */
+    sourceInfo?: { name: string; domain: string | null; url: string | null };
+  } = {},
+): Promise<UpsertSourceItemResult> {
   const contentHash = buildItemContentHash(item.title, item.cleanedText ?? item.description);
-  const data = {
+  const normalizedTitleHash = buildNormalizedTitleHash(item.title);
+  const canonicalUrlHash = buildCanonicalUrlHash(item.canonicalUrl ?? item.sourceUrl);
+
+  const sourceInfo = options.sourceInfo ?? (await prisma.contentSource.findFirst({
+    where: { id: sourceId, tenantId },
+    select: { name: true, domain: true, url: true },
+  }));
+  const provenance = sourceInfo
+    ? buildProvenance(sourceInfo, item)
+    : null;
+
+  const decision = await evaluateDedup({
+    tenantId,
+    sourceId,
+    item,
+    contentHash,
+    normalizedTitleHash,
+    canonicalUrlHash,
+  });
+
+  if (decision.outcome === "duplicate") {
+    const existingId = decision.sourceItemId;
+    if (decision.updated && existingId) {
+      // Developing story: same identity, changed content. Rewrite the item so
+      // it re-enters scoring and bump the cluster update counter.
+      const existing = await prisma.sourceItem.findUnique({ where: { id: existingId } });
+      if (existing) {
+        const previousMetadata =
+          existing.metadata && typeof existing.metadata === "object" && !Array.isArray(existing.metadata)
+            ? (existing.metadata as Record<string, unknown>)
+            : {};
+        const updated = await prisma.sourceItem.update({
+          where: { id: existingId },
+          data: {
+            title: item.title.slice(0, 400),
+            description: item.description,
+            rawText: item.rawText,
+            cleanedText: item.cleanedText,
+            author: item.author,
+            canonicalUrl: item.canonicalUrl,
+            sourceUrl: item.sourceUrl,
+            ...(item.publishedAt ? { publishedAt: new Date(item.publishedAt) } : {}),
+            ...(item.modifiedAt ? { modifiedAt: new Date(item.modifiedAt) } : {}),
+            sourceImageUrls: item.sourceImageUrls.length ? (item.sourceImageUrls as Prisma.InputJsonValue) : Prisma.JsonNull,
+            language: item.language,
+            categories: item.categories.length ? (item.categories as Prisma.InputJsonValue) : Prisma.JsonNull,
+            contentHash,
+            normalizedTitleHash,
+            canonicalUrlHash,
+            confidence: item.confidence,
+            attribution: provenance
+              ? (mergeProvenance(
+                  existing.attribution && typeof existing.attribution === "object" && !Array.isArray(existing.attribution)
+                    ? (existing.attribution as Record<string, unknown>)
+                    : item.attribution,
+                  provenance,
+                ) as Prisma.InputJsonValue)
+              : item.attribution
+                ? (item.attribution as Prisma.InputJsonValue)
+                : undefined,
+            extractionStatus: "updated",
+            processingStatus: "parsed",
+            updatedAt: new Date(),
+            metadata: {
+              ...previousMetadata,
+              contentUpdatedAt: new Date().toISOString(),
+              previousContentHash: existing.contentHash,
+            } as Prisma.InputJsonObject,
+          },
+        });
+        if (existing.clusterId) {
+          const cluster = await prisma.storyCluster.findUnique({
+            where: { id: existing.clusterId },
+            select: { status: true },
+          });
+          if (cluster) {
+            const newStatus =
+              cluster.status === "selected" || cluster.status === "covered" ? "updated" : "developing";
+            await prisma.storyCluster.update({
+              where: { id: existing.clusterId },
+              data: {
+                updateCount: { increment: 1 },
+                lastUpdateAt: new Date(),
+                lastSeenAt: new Date(),
+                status: newStatus,
+              },
+            });
+          }
+        }
+        return { created: false, updated: true, sourceItemId: updated.id, dedupReason: decision.reason, clusterLinkId: null };
+      }
+    }
+    return { created: false, updated: false, sourceItemId: existingId, dedupReason: decision.reason, clusterLinkId: null };
+  }
+
+  // NEW ITEM — "same story from another publisher" keeps the item and links it
+  // to the existing story cluster (never discarded).
+  const data: Prisma.SourceItemUncheckedCreateInput = {
     tenantId,
     sourceId,
     externalId: item.externalId,
     canonicalUrl: item.canonicalUrl,
+    canonicalUrlHash,
     sourceUrl: item.sourceUrl,
     title: item.title.slice(0, 400),
+    normalizedTitleHash,
     description: item.description,
     rawText: item.rawText,
     cleanedText: item.cleanedText,
     author: item.author,
     publishedAt: item.publishedAt ? new Date(item.publishedAt) : null,
+    modifiedAt: item.modifiedAt ? new Date(item.modifiedAt) : null,
     sourceImageUrls: item.sourceImageUrls.length ? (item.sourceImageUrls as Prisma.InputJsonValue) : Prisma.JsonNull,
     language: item.language,
     categories: item.categories.length ? (item.categories as Prisma.InputJsonValue) : Prisma.JsonNull,
     contentHash,
-    metadata: Prisma.JsonNull,
+    metadata: item.rawMetadata ? (item.rawMetadata as Prisma.InputJsonValue) : Prisma.JsonNull,
+    attribution: provenance
+      ? (mergeProvenance(item.attribution, provenance) as Prisma.InputJsonValue)
+      : item.attribution
+        ? (item.attribution as Prisma.InputJsonValue)
+        : Prisma.JsonNull,
+    confidence: item.confidence,
+    extractionStatus: "normalized",
+    clusterId: decision.clusterLinkId,
+    discoveryRunId: options.discoveryRunId ?? null,
   };
-
-  const existing = await prisma.sourceItem.findFirst({
-    where: {
-      tenantId,
-      OR: [
-        { sourceId, externalId: item.externalId },
-        { contentHash },
-      ],
-    },
-  });
-
-  if (existing) {
-    // Developing story detection: same item with changed content is an update,
-    // not a new story. Rewrite the item so it re-enters scoring and bump the
-    // cluster update counter.
-    if (existing.contentHash !== contentHash) {
-      const updated = await prisma.sourceItem.update({
-        where: { id: existing.id },
-        data: {
-          title: data.title,
-          description: data.description,
-          rawText: data.rawText,
-          cleanedText: data.cleanedText,
-          author: data.author,
-          publishedAt: data.publishedAt,
-          sourceImageUrls: data.sourceImageUrls,
-          language: data.language,
-          categories: data.categories,
-          contentHash,
-          processingStatus: "parsed",
-          updatedAt: new Date(),
-          metadata: {
-            contentUpdatedAt: new Date().toISOString(),
-            previousContentHash: existing.contentHash,
-          } as Prisma.InputJsonObject,
-        },
-      });
-      if (existing.clusterId) {
-        const cluster = await prisma.storyCluster.findUnique({
-          where: { id: existing.clusterId },
-          select: { status: true },
-        });
-        if (cluster) {
-          const newStatus =
-            cluster.status === "selected" || cluster.status === "covered" ? "updated" : "developing";
-          await prisma.storyCluster.update({
-            where: { id: existing.clusterId },
-            data: {
-              updateCount: { increment: 1 },
-              lastUpdateAt: new Date(),
-              lastSeenAt: new Date(),
-              status: newStatus,
-            },
-          });
-        }
-      }
-      return { created: false, updated: true, sourceItemId: updated.id };
-    }
-    return { created: false, updated: false, sourceItemId: existing.id };
-  }
 
   try {
     const created = await prisma.sourceItem.create({ data });
-    return { created: true, updated: false, sourceItemId: created.id };
+    return { created: true, updated: false, sourceItemId: created.id, dedupReason: decision.reason, clusterLinkId: decision.clusterLinkId };
   } catch (error) {
+    // Concurrent insert race (unique source+externalId): treat as duplicate.
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      return { created: false, updated: false, sourceItemId: null };
+      return { created: false, updated: false, sourceItemId: null, dedupReason: "source_external_id", clusterLinkId: null };
     }
     throw error;
   }
 }
 
-export async function fetchSourceNow(tenantId: string, sourceId: string): Promise<FetchSourceResult> {
+// ────────────────────────────────────────────────────────────── Fetch
+
+export type FetchSourceResult = {
+  sourceId: string;
+  runId: string;
+  fetched: number;
+  created: number;
+  duplicates: number;
+  clustersCreated: number;
+  failed: boolean;
+  skipped?: boolean;
+  notModified?: boolean;
+  error: string | null;
+  circuitState?: string;
+};
+
+function resolveSourceRateLimitPolicy(policy: unknown): SourceRateLimitPolicy | null {
+  if (!policy || typeof policy !== "object") {
+    return null;
+  }
+  const record = policy as Record<string, unknown>;
+  return {
+    maxRequests: typeof record.maxRequestsPerMinute === "number" ? record.maxRequestsPerMinute : undefined,
+    windowMs: 60_000,
+    minIntervalMs: typeof record.minIntervalMs === "number" ? record.minIntervalMs : undefined,
+  };
+}
+
+function isParseError(message: string): boolean {
+  return /parse|invalid_json|missing_channel|xml|json/i.test(message);
+}
+
+export async function fetchSourceNow(
+  tenantId: string,
+  sourceId: string,
+  options: { runKey?: string; signal?: AbortSignal } = {},
+): Promise<FetchSourceResult> {
   const source = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId } });
   if (!source) {
     throw new Error("source_not_found");
   }
 
+  const started = Date.now();
+  const runKey = options.runKey ?? newRunKey("source");
+  const runId = await beginDiscoveryRun({ tenantId, sourceId: source.id, adapterType: source.type, runKey });
+  const counters = { itemsFound: 0, itemsCreated: 0, itemsDuplicated: 0, clustersCreated: 0, parseErrors: 0, sourceFailures: 0 };
+
   const result: FetchSourceResult = {
     sourceId,
+    runId,
     fetched: 0,
     created: 0,
     duplicates: 0,
+    clustersCreated: 0,
     failed: false,
     error: null,
   };
 
+  const breakerKey = `${tenantId}:${source.id}`;
+  const breaker = getSourceBreaker(tenantId, source.id, source.configuration);
+  result.circuitState = await breaker.state(breakerKey);
+
+  // Circuit breaker gate: a broken publisher is skipped until cooldown.
+  if (!(await breaker.canAttempt(breakerKey))) {
+    result.skipped = true;
+    result.error = "circuit_open";
+    logDiscoveryEvent(runId, "source.discovery.circuit_open", { sourceId: source.id, sourceName: source.name }, "warn");
+    await skipDiscoveryRun(runId, counters, "circuit_open");
+    return result;
+  }
+
+  // Per-source rate limiting (configured via rateLimitPolicy).
+  const ratePolicy = resolveSourceRateLimitPolicy(source.rateLimitPolicy);
+  const rateOk = await sourceRateLimiter.waitForSlot(source.id, ratePolicy, getNumberEnv("SOURCE_RATE_LIMIT_WAIT_MS", 30_000));
+  if (!rateOk) {
+    result.skipped = true;
+    result.error = "rate_limited";
+    logDiscoveryEvent(runId, "source.discovery.rate_limited", { sourceId: source.id, sourceName: source.name }, "warn");
+    await recordFetchOutcome(
+      tenantId,
+      source.id,
+      {
+        ok: false,
+        latencyMs: Date.now() - started,
+        httpStatus: null,
+        itemsFound: 0,
+        itemsCreated: 0,
+        duplicates: 0,
+        parseError: false,
+        emptyFeed: false,
+        rateLimited: true,
+        notModified: false,
+        consecutiveFailures: source.consecutiveFailures,
+        error: "rate_limited",
+      },
+      source.configuration,
+    );
+    await skipDiscoveryRun(runId, counters, "rate_limited");
+    return result;
+  }
+
+  const context: DiscoveryContext = {
+    runId: runKey,
+    tenantId,
+    limits: {},
+    signal: options.signal,
+  };
+
   try {
     const adapter = getSourceAdapter(source.type);
-    const items = await adapter.fetch(source);
+    logDiscoveryEvent(runId, "source.discovery.started", { sourceId: source.id, sourceName: source.name, adapterType: source.type });
+    const items = await adapter.discover(source, context);
+    counters.itemsFound = items.length;
     result.fetched = items.length;
 
-    const createdItemIds: string[] = [];
+    // Conditional request: HTTP 304 means the publisher confirmed nothing
+    // changed — record it without re-downloading or re-processing the feed.
+    const observed = context.observed;
+    if (observed?.notModified) {
+      result.notModified = true;
+      await prisma.contentSource.update({
+        where: { id: source.id },
+        data: {
+          lastFetchedAt: new Date(),
+          consecutiveFailures: 0,
+          notModifiedCount: { increment: 1 },
+          ...(observed.etag ? { lastEtag: observed.etag } : {}),
+          lastHttpStatus: 304,
+          lastError: null,
+          lastErrorAt: null,
+        },
+      });
+      await recordFetchOutcome(
+        tenantId,
+        source.id,
+        {
+          ok: true,
+          latencyMs: Date.now() - started,
+          httpStatus: 304,
+          itemsFound: 0,
+          itemsCreated: 0,
+          duplicates: 0,
+          parseError: false,
+          emptyFeed: false,
+          rateLimited: false,
+          notModified: true,
+          consecutiveFailures: 0,
+          error: null,
+        },
+        source.configuration,
+      );
+      await finishDiscoveryRun(runId, counters, { notModified: true });
+      logDiscoveryEvent(runId, "source.discovery.not_modified", { sourceId: source.id, sourceName: source.name });
+      return result;
+    }
+
+    const processedIds: string[] = [];
+    const sourceInfo = { name: source.name, domain: source.domain, url: source.url };
     for (const item of items) {
-      const upserted = await upsertSourceItem(tenantId, source.id, item);
+      const upserted = await upsertSourceItem(tenantId, source.id, item, { discoveryRunId: runId, sourceInfo });
       if (upserted.created) {
         result.created += 1;
+        counters.itemsCreated += 1;
         if (upserted.sourceItemId) {
-          createdItemIds.push(upserted.sourceItemId);
+          processedIds.push(upserted.sourceItemId);
         }
       } else if (upserted.updated) {
-        // A previously covered story changed: re-score the updated item so the
-        // inbox surfaces it as a developing story.
+        // A previously covered story changed: re-score the updated item.
+        counters.itemsCreated += 1;
         if (upserted.sourceItemId) {
-          createdItemIds.push(upserted.sourceItemId);
+          processedIds.push(upserted.sourceItemId);
         }
       } else {
         result.duplicates += 1;
+        counters.itemsDuplicated += 1;
       }
     }
 
-    await prisma.contentSource.update({
+    const updatedSource = await prisma.contentSource.update({
       where: { id: source.id },
       data: {
         lastFetchedAt: new Date(),
         lastSuccessAt: new Date(),
+        lastDiscoveryAt: new Date(),
         consecutiveFailures: 0,
+        lastError: null,
+        lastErrorAt: null,
+        ...(observed?.etag !== undefined && observed?.etag !== null ? { lastEtag: observed.etag } : {}),
+        ...(observed?.lastModified !== undefined && observed?.lastModified !== null ? { lastModifiedHeader: observed.lastModified } : {}),
+        ...(observed?.status !== undefined && observed?.status !== null ? { lastHttpStatus: observed.status } : {}),
       },
     });
 
     // Score, cluster and promote freshly discovered items immediately so the
     // inbox is useful right after a fetch.
-    const context = { sourceTrustScore: source.trustScore, sourcePriority: source.priority };
-    for (const itemId of createdItemIds) {
+    const contextScore = { sourceTrustScore: source.trustScore, sourcePriority: source.priority };
+    for (const itemId of processedIds) {
       const item = await prisma.sourceItem.findFirst({ where: { id: itemId, tenantId } });
       if (!item) {
         continue;
       }
       try {
-        await scoreAndPromoteSourceItem(tenantId, item, context);
+        const scored = await scoreAndPromoteSourceItem(tenantId, item, contextScore);
+        if (scored.clusterCreated) {
+          counters.clustersCreated += 1;
+        }
       } catch (error) {
+        counters.parseErrors += 1;
         result.error = error instanceof Error ? error.message : String(error);
+        logDiscoveryEvent(runId, "source.discovery.scoring_failed", { itemId, error: result.error }, "warn");
       }
     }
+    result.clustersCreated = counters.clustersCreated;
+
+    // Phase 3: intelligence pipeline for candidate items (entities, facts,
+    // verification, enrichment, transparent candidate scoring). One shared
+    // budget per run caps provider and AI calls.
+    const intelligenceSettings = await getIntelligenceSettings(tenantId).catch(() => null);
+    const intelligenceBudget = createLevelBudget(intelligenceSettings?.levelPolicy);
+    const runCounters = createCostCounters();
+    for (const itemId of processedIds) {
+      const item = await prisma.sourceItem.findFirst({
+        where: { id: itemId, tenantId },
+        select: { score: true, processingStatus: true, intelligenceProcessedAt: true },
+      });
+      if (!item || item.intelligenceProcessedAt || (item.score ?? 0) < 0.4) {
+        continue;
+      }
+      try {
+        const pipelineResult = await runIntelligencePipelineForItem(tenantId, itemId, { budget: intelligenceBudget });
+        mergeCostCounters(runCounters, pipelineResult.counters);
+      } catch (error) {
+        logDiscoveryEvent(
+          runId,
+          "source.discovery.intelligence_failed",
+          { itemId, error: error instanceof Error ? error.message : String(error) },
+          "warn",
+        );
+      }
+    }
+    if (runCounters.itemsSeen > 0) {
+      await mergeCountersIntoDiscoveryRun(runId, runCounters).catch(() => undefined);
+    }
+    logDiscoveryEvent(runId, "source.discovery.intelligence", {
+      itemsSeen: runCounters.itemsSeen,
+      aiCalls: runCounters.aiCalls,
+      enrichmentCalls: runCounters.enrichmentCalls,
+      cacheHits: runCounters.cacheHits,
+    });
+
+    await recordFetchOutcome(
+      tenantId,
+      source.id,
+      {
+        ok: true,
+        latencyMs: Date.now() - started,
+        httpStatus: observed?.status ?? null,
+        itemsFound: counters.itemsFound,
+        itemsCreated: result.created,
+        duplicates: result.duplicates,
+        parseError: false,
+        emptyFeed: counters.itemsFound === 0,
+        rateLimited: false,
+        notModified: false,
+        consecutiveFailures: updatedSource.consecutiveFailures,
+        error: null,
+      },
+      source.configuration,
+    );
+    await finishDiscoveryRun(runId, counters);
+    logDiscoveryEvent(runId, "source.discovery.completed", { sourceId: source.id, sourceName: source.name, ...counters });
 
     await writeAudit({
       tenantId,
@@ -1203,30 +783,87 @@ export async function fetchSourceNow(tenantId: string, sourceId: string): Promis
       entityType: "content_source",
       entityId: source.id,
       actorType: source.enabled ? "automation" : "user",
-      metadata: { created: result.created, duplicates: result.duplicates },
+      metadata: { created: result.created, duplicates: result.duplicates, runId: runKey },
     });
   } catch (error) {
     result.failed = true;
     result.error = error instanceof Error ? error.message : String(error);
-    await prisma.contentSource.update({
+    const parseError = isParseError(result.error);
+    const httpError = error instanceof SourceHttpError ? error : null;
+    const isRateLimited = httpError?.status === 429;
+    if (parseError) {
+      counters.parseErrors += 1;
+    }
+    const updatedSource = await prisma.contentSource.update({
       where: { id: source.id },
       data: {
         lastFetchedAt: new Date(),
         consecutiveFailures: { increment: 1 },
+        lastError: result.error.slice(0, 500),
+        lastErrorAt: new Date(),
+        ...(httpError?.status ? { lastHttpStatus: httpError.status } : {}),
       },
     });
+    await recordFetchOutcome(
+      tenantId,
+      source.id,
+      {
+        ok: false,
+        latencyMs: Date.now() - started,
+        httpStatus: httpError?.status ?? null,
+        itemsFound: counters.itemsFound,
+        itemsCreated: result.created,
+        duplicates: result.duplicates,
+        parseError,
+        emptyFeed: false,
+        rateLimited: isRateLimited,
+        notModified: false,
+        consecutiveFailures: updatedSource.consecutiveFailures,
+        error: result.error,
+      },
+      source.configuration,
+    );
+    await failDiscoveryRun(runId, counters, result.error);
+    logDiscoveryEvent(runId, "source.discovery.failed", { sourceId: source.id, sourceName: source.name, error: result.error }, "error");
   }
 
   return result;
 }
 
-export async function testSourceFetch(tenantId: string, input: { type: ContentSourceType; url?: string | null; configuration?: Record<string, unknown> | null }) {
+export async function testSourceFetch(
+  tenantId: string,
+  input: { type: ContentSourceType; url?: string | null; configuration?: Record<string, unknown> | null },
+) {
   const adapter = getSourceAdapter(input.type);
-  const items = await adapter.fetch({
-    url: input.url ?? null,
-    configuration: (input.configuration ?? null) as Prisma.JsonValue,
-  });
-  return { ok: true, itemCount: items.length, sample: items.slice(0, 3) };
+  const items = await adapter.discover(
+    {
+      id: "test",
+      type: input.type,
+      url: input.url ?? null,
+      endpoint: null,
+      configuration: (input.configuration ?? null) as Prisma.JsonValue,
+      rateLimitPolicy: null,
+      robotsPolicy: null,
+      extractionPolicy: null,
+      timezone: null,
+      language: "es",
+      domain: null,
+      lastEtag: null,
+      lastModifiedHeader: null,
+    },
+    { runId: newRunKey("test"), tenantId, limits: {} },
+  );
+  // Never leak raw payloads to the Studio: return a sanitized sample only.
+  const sample = items.slice(0, 3).map((item) => ({
+    title: item.title,
+    canonicalUrl: item.canonicalUrl,
+    description: item.description,
+    publishedAt: item.publishedAt,
+    language: item.language,
+    categories: item.categories,
+    confidence: item.confidence,
+  }));
+  return { ok: true, itemCount: items.length, sample };
 }
 
 // ────────────────────────────────────────────────────────────── Source items
@@ -1304,6 +941,8 @@ export async function listSourceItems(
       language: item.language,
       categories: item.categories,
       processingStatus: item.processingStatus,
+      extractionStatus: item.extractionStatus,
+      confidence: item.confidence,
       score: item.score,
       scoreExplanation: item.scoreExplanation,
       source: item.source,

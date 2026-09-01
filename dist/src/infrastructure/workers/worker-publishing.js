@@ -11,6 +11,9 @@ const orchestration_1 = require("../../studio/orchestration");
 const env_1 = require("../../shared/utils/env");
 const prisma_1 = require("../db/prisma");
 const operation_hooks_1 = require("./operation-hooks");
+const worker_runtime_1 = require("./worker-runtime");
+const metrics_1 = require("../../studio/metrics");
+const publication_1 = require("../../studio/publication");
 const prisma = (0, prisma_1.getPrismaClient)();
 const defaultDependencies = {
     getPublicationJobById: repository_1.getPublicationJobById,
@@ -144,6 +147,7 @@ async function runPublishingWorker() {
         await processPublishingJob(data.publicationJobId);
     }, {
         connection: (0, redis_1.getRedisConnectionOptions)(),
+        ...(0, worker_runtime_1.bullWorkerOptions)("publishing", 1),
     });
     worker.on("failed", async (job, err) => {
         const publicationJobId = String(job?.data?.publicationJobId || "");
@@ -159,22 +163,39 @@ async function runPublishingWorker() {
         }
         await (0, repository_1.updatePublicationJob)(publication.id, {
             status: "failed",
-            error: err.message,
+            error: err.message.slice(0, 500),
         });
         await (0, repository_1.updateProjectStatus)(publication.tenantId, publication.projectId, "publish_failed");
-        await prisma.publication.updateMany({
-            where: { publicationJobId },
-            data: {
-                status: "failed",
-                lastError: err.message,
-                failureClass: "transient",
-                failureReason: "website_publish_failed",
-                nextRetryAt: new Date(Date.now() + 60_000),
-            },
-        });
+        // Bounded retry with classification (same ladder as social publications):
+        // transient errors retry with exponential backoff until maxPublicationRetries,
+        // permanent errors and exhausted retries terminate.
+        const durable = await prisma.publication.findFirst({ where: { publicationJobId } });
+        if (durable) {
+            const failureClass = (0, publication_1.classifyPublicationError)(err.message);
+            const retryCount = durable.retryCount + 1;
+            const terminal = failureClass === "permanent" || retryCount > (0, publication_1.maxPublicationRetries)();
+            await prisma.publication.update({
+                where: { id: durable.id },
+                data: {
+                    status: "failed",
+                    retryCount,
+                    lastError: err.message.slice(0, 500),
+                    failureClass,
+                    failureReason: terminal
+                        ? failureClass === "permanent"
+                            ? "permanent_failure"
+                            : "retries_exhausted"
+                        : "awaiting_retry",
+                    nextRetryAt: terminal ? null : new Date(Date.now() + (0, publication_1.nextRetryDelay)(retryCount)),
+                },
+            });
+        }
+        (0, metrics_1.incrementCounter)("publications_failed_total", 1);
     });
     worker.on("completed", async (job) => {
         await (0, operation_hooks_1.completeOperationForJob)(job?.data);
+        (0, metrics_1.incrementCounter)("publications_published_total", 1);
     });
+    (0, worker_runtime_1.registerBullWorkerShutdown)(worker, "publishing");
     console.log("[worker:publishing] started", { queue: queues_1.QUEUE_NAMES.publishing });
 }

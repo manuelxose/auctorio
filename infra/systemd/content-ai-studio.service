@@ -12,6 +12,9 @@ EnvironmentFile=/etc/content-ai-platform/studio.env
 ExecStart=/var/www/bin/run-release-entry.sh /var/www/content-ai-platform/apps/studio-web/releases/current/server/server.mjs
 Restart=always
 RestartSec=2
+TimeoutStopSec=30
+KillSignal=SIGTERM
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

@@ -1,5 +1,7 @@
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
 import { runAutomationTick } from "../../studio/planner";
+import { runIntervalWorker } from "./worker-runtime";
+import { structuredEvent } from "../../shared/utils/logger";
 
 export async function runAutomationWorker() {
   const redisUrl = getEnv("REDIS_URL", "");
@@ -8,16 +10,10 @@ export async function runAutomationWorker() {
     return;
   }
 
-  const intervalMs = Math.max(30_000, getNumberEnv("AUTOMATION_INTERVAL_MS", 120_000));
-  let running = false;
-  let shuttingDown = false;
-
-  const tick = async () => {
-    if (running || shuttingDown) {
-      return;
-    }
-    running = true;
-    try {
+  await runIntervalWorker({
+    name: "automation",
+    intervalMs: Math.max(30_000, getNumberEnv("AUTOMATION_INTERVAL_MS", 120_000)),
+    tick: async () => {
       const result = await runAutomationTick();
       if (
         result.candidatesSelected > 0 ||
@@ -25,23 +21,8 @@ export async function runAutomationWorker() {
         result.socialJobsCreated > 0 ||
         result.publicationsCreated > 0
       ) {
-        console.log("[worker:automation] tick", result);
+        structuredEvent("automation.tick", { ...result });
       }
-    } catch (error) {
-      console.error("[worker:automation] tick failed", error);
-    } finally {
-      running = false;
-    }
-  };
-
-  const timer = setInterval(() => void tick(), intervalMs);
-  const stop = () => {
-    shuttingDown = true;
-    clearInterval(timer);
-  };
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-
-  void tick();
-  console.log("[worker:automation] started", { intervalMs });
+    },
+  });
 }

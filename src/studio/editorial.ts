@@ -184,9 +184,9 @@ export function scoreSourceItem(item: Pick<SourceItem, "title" | "description" |
 
 export async function scoreAndPromoteSourceItem(
   tenantId: string,
-  item: Pick<SourceItem, "id" | "title" | "description" | "publishedAt" | "discoveredAt" | "categories" | "sourceId">,
+  item: Pick<SourceItem, "id" | "title" | "description" | "publishedAt" | "discoveredAt" | "categories" | "sourceId" | "clusterId">,
   context: ScoringContext,
-): Promise<{ score: number; processingStatus: SourceItemStatus }> {
+): Promise<{ score: number; processingStatus: SourceItemStatus; clusterCreated: boolean }> {
   const scored = scoreSourceItem(item, context);
   await prisma.sourceItem.update({
     where: { id: item.id },
@@ -195,28 +195,194 @@ export async function scoreAndPromoteSourceItem(
       scoreExplanation: scored.explanation as unknown as Prisma.InputJsonValue,
     },
   });
-  await assignSourceItemToCluster(tenantId, item);
+  const assignment = await assignSourceItemToCluster(tenantId, item);
   const processingStatus: SourceItemStatus = scored.score >= 0.4 ? "candidate" : "parsed";
   await prisma.sourceItem.update({
     where: { id: item.id },
     data: { processingStatus },
   });
-  return { score: scored.score, processingStatus };
+  return { score: scored.score, processingStatus, clusterCreated: assignment.created };
 }
 
 // ────────────────────────────────────────────────────────────── Story clustering
+//
+// A cluster represents an EVENT, not merely similar titles. Members are the
+// normalized source items; aggregates (languages, categories, entities,
+// source diversity, confidence, scores, verification state) are recomputed
+// from members after every change.
+
+export const CLUSTER_WINDOW_HOURS = 7 * 24;
+export const CLUSTER_SIMILARITY_THRESHOLD = 0.55;
+const MAX_CLUSTER_CANDIDATES = 200;
+const MAX_CLUSTER_MEMBERS_FOR_SCAN = 40;
+
+const ENTITY_STOPWORDS = new Set([
+  "the", "a", "an", "de", "la", "el", "los", "las", "del", "y", "e", "o", "u",
+  "en", "con", "para", "por", "que", "news", "report", "how", "why", "what",
+  "when", "who", "after", "before", "says", "new", "first", "against", "over",
+  "this", "that", "with", "from", "for", "and", "per", "via",
+]);
+
+/** Generic capitalized-phrase extraction (no domain assumptions). */
+export function extractEntityCandidates(titles: string[]): string[] {
+  const phraseCounts = new Map<string, number>();
+  for (const rawTitle of titles) {
+    const tokens = String(rawTitle ?? "").split(/\s+/).filter(Boolean);
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index].replace(/[^\p{L}\p{N}]/gu, "");
+      const isCapitalized = /^\p{Lu}/u.test(token) && !/^\p{Lu}{2,}$/u.test(token);
+      if (token.length < 2 || !isCapitalized || ENTITY_STOPWORDS.has(token.toLowerCase())) {
+        continue;
+      }
+      phraseCounts.set(token, (phraseCounts.get(token) ?? 0) + 1);
+      // Runs of 2-3 capitalized words → phrase.
+      let phrase = token;
+      let run = 0;
+      for (let next = index + 1; next < tokens.length && run < 2; next += 1) {
+        const nextToken = tokens[next].replace(/[^\p{L}\p{N}]/gu, "");
+        if (!/^\p{Lu}/u.test(nextToken) || ENTITY_STOPWORDS.has(nextToken.toLowerCase())) {
+          break;
+        }
+        phrase += ` ${nextToken}`;
+        run += 1;
+      }
+      if (run > 0) {
+        phraseCounts.set(phrase, (phraseCounts.get(phrase) ?? 0) + 1);
+      }
+    }
+  }
+  return Array.from(phraseCounts.entries())
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .slice(0, 10)
+    .map(([entity]) => entity);
+}
+
+function clamp01(value: number): number {
+  return Math.max(0, Math.min(1, Math.round(value * 100) / 100));
+}
+
+type ClusterMember = {
+  id: string;
+  title: string;
+  language: string | null;
+  categories: Prisma.JsonValue | null;
+  score: number | null;
+  discoveredAt: Date;
+  sourceId: string;
+  source?: { trustScore: number } | null;
+};
+
+/** Recompute event aggregates from the cluster's current members. */
+export async function refreshClusterAggregates(clusterId: string): Promise<void> {
+  const cluster = await prisma.storyCluster.findUnique({
+    where: { id: clusterId },
+    include: {
+      items: {
+        orderBy: { discoveredAt: "asc" },
+        take: MAX_CLUSTER_MEMBERS_FOR_SCAN,
+        include: { source: { select: { trustScore: true, authorityScore: true } } },
+      },
+    },
+  });
+  if (!cluster) {
+    return;
+  }
+  const items = cluster.items as ClusterMember[];
+  if (items.length === 0) {
+    return;
+  }
+
+  const sourceIds = new Set(items.map((item) => item.sourceId));
+  const languages = Array.from(new Set(items.map((item) => item.language).filter((value): value is string => Boolean(value)))).slice(0, 10);
+  const categoryCounts = new Map<string, number>();
+  for (const item of items) {
+    for (const category of Array.isArray(item.categories) ? item.categories.map(String) : []) {
+      categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+    }
+  }
+  const categories = Array.from(categoryCounts.entries())
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 20)
+    .map(([category]) => category);
+
+  // Confidence: strongest headline similarity between any two members.
+  let confidence = 0;
+  const titles = items.map((item) => item.title);
+  for (let left = 0; left < titles.length && left < 30; left += 1) {
+    for (let right = left + 1; right < titles.length && right < 30; right += 1) {
+      confidence = Math.max(confidence, titleSimilarity(titles[left], titles[right]));
+    }
+  }
+  if (items.length === 1) {
+    confidence = 1;
+  }
+
+  const ageHours = Math.max(0, (Date.now() - cluster.lastSeenAt.getTime()) / 3_600_000);
+  const freshnessScore = clamp01(Math.max(0, 1 - ageHours / 48));
+  const authority = items.map((item) => item.source?.trustScore ?? 0.5);
+  const authorityScore = authority.length ? clamp01(authority.reduce((sum, value) => sum + value, 0) / authority.length) : 0.5;
+  const relevanceScore = clamp01(Math.max(0, ...items.map((item) => item.score ?? 0)));
+  const sourceDiversity = sourceIds.size;
+  const editorialValue = clamp01(
+    0.4 * relevanceScore + 0.3 * authorityScore + 0.2 * freshnessScore + 0.1 * Math.min(1, Math.max(0, (sourceDiversity - 1) / 2)),
+  );
+  // Phase 3: never downgrade a richer verification state produced by the
+  // intelligence pipeline (corroborated/high_confidence/disputed/developing)
+  // back to a cruder phase-1 computation.
+  const computedVerification = sourceDiversity >= 2 ? "corroborated" : "unverified";
+  const currentState = cluster.verificationState;
+  const richStates = new Set(["corroborated", "high_confidence", "disputed", "developing"]);
+  const verificationState =
+    richStates.has(currentState) && computedVerification === "unverified" ? currentState : computedVerification;
+  const primarySourceId = items[0].sourceId;
+
+  await prisma.storyCluster.update({
+    where: { id: clusterId },
+    data: {
+      primarySourceId,
+      entityCandidates: extractEntityCandidates(titles) as unknown as Prisma.InputJsonValue,
+      categories: categories as unknown as Prisma.InputJsonValue,
+      languages: languages as unknown as Prisma.InputJsonValue,
+      confidence: clamp01(confidence),
+      freshnessScore,
+      authorityScore,
+      relevanceScore,
+      editorialValue,
+      verificationState,
+      sourceCount: sourceDiversity,
+      score: cluster.score ?? relevanceScore,
+    },
+  });
+}
+
+export type ClusterAssignment = { cluster: StoryCluster | null; created: boolean };
 
 export async function assignSourceItemToCluster(
   tenantId: string,
-  item: Pick<SourceItem, "id" | "title" | "description" | "sourceId">,
-): Promise<StoryCluster | null> {
+  item: Pick<SourceItem, "id" | "title" | "description" | "sourceId" | "clusterId">,
+): Promise<ClusterAssignment> {
+  // Items pre-linked by cross-publisher dedup: refresh the event and return.
+  if (item.clusterId) {
+    await refreshClusterAggregates(item.clusterId);
+    const existing = await prisma.storyCluster.findUnique({ where: { id: item.clusterId } });
+    return { cluster: existing, created: false };
+  }
+
   const existingClusters = await prisma.storyCluster.findMany({
     where: {
       tenantId,
-      status: { in: ["open", "selected"] },
-      lastSeenAt: { gte: new Date(Date.now() - 48 * 3_600_000) },
+      status: { in: ["open", "selected", "developing", "updated"] },
+      lastSeenAt: { gte: new Date(Date.now() - CLUSTER_WINDOW_HOURS * 3_600_000) },
     },
-    include: { items: { select: { id: true, title: true } } },
+    orderBy: { lastSeenAt: "desc" },
+    take: MAX_CLUSTER_CANDIDATES,
+    include: {
+      items: {
+        orderBy: { discoveredAt: "desc" },
+        take: MAX_CLUSTER_MEMBERS_FOR_SCAN,
+        select: { id: true, title: true },
+      },
+    },
   });
 
   let bestCluster: StoryCluster | null = null;
@@ -230,17 +396,24 @@ export async function assignSourceItemToCluster(
     }
   }
 
-  const threshold = 0.55;
-  if (!bestCluster || bestSimilarity < threshold) {
+  if (!bestCluster || bestSimilarity < CLUSTER_SIMILARITY_THRESHOLD) {
     const created = await prisma.storyCluster.create({
       data: {
         tenantId,
         headline: item.title.slice(0, 300),
         summary: String(item.description ?? "").slice(0, 500) || null,
+        primarySourceId: item.sourceId,
         firstSeenAt: new Date(),
         lastSeenAt: new Date(),
         sourceCount: 1,
         status: "open",
+        entityCandidates: extractEntityCandidates([item.title]) as unknown as Prisma.InputJsonValue,
+        confidence: 1,
+        freshnessScore: 1,
+        authorityScore: 0.5,
+        relevanceScore: 0,
+        editorialValue: 0,
+        verificationState: "unverified",
         metadata: Prisma.JsonNull,
       },
     });
@@ -248,21 +421,16 @@ export async function assignSourceItemToCluster(
       where: { id: item.id },
       data: { clusterId: created.id },
     });
-    return created;
+    await refreshClusterAggregates(created.id);
+    return { cluster: created, created: true };
   }
 
-  const updated = await prisma.storyCluster.update({
-    where: { id: bestCluster.id },
-    data: {
-      lastSeenAt: new Date(),
-      sourceCount: { increment: 1 },
-    },
-  });
   await prisma.sourceItem.update({
     where: { id: item.id },
-    data: { clusterId: updated.id },
+    data: { clusterId: bestCluster.id },
   });
-  return updated;
+  await refreshClusterAggregates(bestCluster.id);
+  return { cluster: bestCluster, created: false };
 }
 
 // ────────────────────────────────────────────────────────────── Coverage protection
@@ -351,6 +519,24 @@ export async function listStoryClusters(
       sourceCount: cluster.sourceCount,
       itemCount: cluster._count.items,
       projectCount: cluster._count.projects,
+      entityCandidates: cluster.entityCandidates,
+      categories: cluster.categories,
+      languages: cluster.languages,
+      confidence: cluster.confidence,
+      freshnessScore: cluster.freshnessScore,
+      authorityScore: cluster.authorityScore,
+      relevanceScore: cluster.relevanceScore,
+      editorialValue: cluster.editorialValue,
+      verificationState: cluster.verificationState,
+      verificationDetail: cluster.verificationDetail,
+      sourceDiversity: cluster.sourceDiversity,
+      diversityDetail: cluster.diversityDetail,
+      candidateScore: cluster.candidateScore,
+      scoreComponents: cluster.scoreComponents,
+      siteFitScore: cluster.siteFitScore,
+      contentGapScore: cluster.contentGapScore,
+      reasonSelected: cluster.reasonSelected,
+      enrichedAt: cluster.enrichedAt,
       items: cluster.items,
     })),
     page: input.page,

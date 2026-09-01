@@ -9,6 +9,8 @@
     "test": "npx prisma migrate deploy && npm run build && npm run build:studio && node --test dist/tests/**/*.test.js",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "test:live:guiatv": "ts-node scripts/live-guiatv-contract.ts",
+    "report:intelligence": "ts-node scripts/intelligence-report.ts",
+    "verify:sources:live": "ts-node scripts/live-source-verification.ts",
     "verify:platforms": "ts-node scripts/verify-platform-credentials.ts",
     "dev:studio": "npm --prefix apps/studio-web run dev:ssr",
     "serve:studio": "npm --prefix apps/studio-web run serve:ssr",
@@ -21,7 +23,9 @@
     "start:worker:discovery": "ts-node scripts/start-worker-discovery.ts",
     "start:worker:scheduler": "ts-node scripts/start-worker-scheduler.ts",
     "start:worker:automation": "ts-node scripts/start-worker-automation.ts",
-    "start:worker:social": "ts-node scripts/start-worker-social.ts"
+    "start:worker:social": "ts-node scripts/start-worker-social.ts",
+    "report:editorial-engine": "ts-node scripts/editorial-engine-fixtures.ts",
+    "ops:queue": "ts-node scripts/queue-ops.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

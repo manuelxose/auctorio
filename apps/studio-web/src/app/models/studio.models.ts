@@ -555,15 +555,32 @@ export type StudioPromptPresetDetail = StudioPromptPresetSummary & {
 
 export type SourceType = 'rss' | 'atom' | 'html' | 'sitemap' | 'api' | 'htmllist' | 'imdb' | 'manual';
 
+export type SourceUiHealthState =
+  | 'healthy'
+  | 'delayed'
+  | 'degraded'
+  | 'rate_limited'
+  | 'broken'
+  | 'disabled'
+  | 'archived'
+  | 'unknown';
+
+export type SourceUiHealth = {
+  state: SourceUiHealthState;
+  diagnostics: string[];
+};
+
 export type StudioSource = {
   id: string;
   siteId: string | null;
   name: string;
   type: SourceType;
   url: string | null;
+  domain: string | null;
   enabled: boolean;
   priority: number;
   trustScore: number;
+  authorityScore: number;
   language: string;
   country: string | null;
   categories: string[] | null;
@@ -573,10 +590,133 @@ export type StudioSource = {
   lastSuccessAt: string | null;
   consecutiveFailures: number;
   configuration: Record<string, unknown> | null;
+  packKey: string | null;
+  verifiedAt: string | null;
+  verificationStatus: string | null;
+  discoveryMethod: string | null;
+  restrictionsNote: string | null;
+  archivedAt: string | null;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  lastHttpStatus: number | null;
+  notModifiedCount: number;
   createdAt: string;
   updatedAt: string;
   discoveredCount: number;
+  lastNewItemAt?: string | null;
+  uiHealth?: SourceUiHealth;
   site: { id: string; name: string; key: string } | null;
+  health?: {
+    id: string;
+    healthStatus: string;
+    lastHttpStatus: number | null;
+    fetchLatencyMs: number | null;
+    totalFetches: number;
+    successfulFetches: number;
+    failedFetches: number;
+    parseFailures: number;
+    emptyFeeds: number;
+    itemsDiscovered: number;
+    duplicateRate: number | null;
+    lastNewItemAt: string | null;
+    rateLimitEvents: number;
+    notModifiedFetches: number;
+    lastError: string | null;
+    circuitState: string;
+    lastHealthCheckAt: string | null;
+  } | null;
+};
+
+export type StudioDiscoveryRun = {
+  id: string;
+  runKey: string;
+  adapterType: string | null;
+  status: string;
+  startedAt: string;
+  finishedAt: string | null;
+  durationMs: number | null;
+  itemsFound: number;
+  itemsCreated: number;
+  itemsDuplicated: number;
+  clustersCreated: number;
+  parseErrors: number;
+  sourceFailures: number;
+  errorMessage: string | null;
+  metrics: Record<string, unknown> | null;
+};
+
+export type StudioSourcePackEntry = {
+  id: string;
+  name: string;
+  domain: string;
+  adapter: SourceType;
+  endpoint: string;
+  discoveryMethod: string;
+  enabled: boolean;
+  notes: string | null;
+  restrictions: string | null;
+};
+
+export type StudioSourcePack = {
+  key: string;
+  name: string;
+  description: string;
+  category: string;
+  language: string;
+  country: string;
+  optional: boolean;
+  entryCount: number;
+  providerCount: number;
+  importCount: number;
+  importedSourceCount: number;
+  entries: StudioSourcePackEntry[];
+};
+
+export type StudioFeedCandidate = {
+  url: string;
+  type: 'rss' | 'atom' | 'sitemap' | 'news_sitemap' | 'feed';
+  method: string;
+  title: string | null;
+  verified: boolean;
+  status: number | null;
+  contentType: string | null;
+  itemCount: number | null;
+  note: string | null;
+};
+
+export type StudioFeedDiscoveryResult = {
+  pageUrl: string;
+  hostname: string;
+  robotsChecked: boolean;
+  candidates: StudioFeedCandidate[];
+  errors: string[];
+};
+
+export type StudioEnrichmentProvider = {
+  id: string;
+  key: string;
+  name: string;
+  providerType: string;
+  baseUrl: string | null;
+  endpoint: string | null;
+  credentialsRef: string | null;
+  credentialsConfigured: boolean;
+  enabled: boolean;
+  priority: number;
+  category: string | null;
+  language: string;
+  country: string | null;
+  refreshIntervalMinutes: number;
+  configuration: Record<string, unknown> | null;
+  lastFetchedAt: string | null;
+  lastSuccessAt: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+  lastErrorAt: string | null;
+  verifiedAt: string | null;
+  verificationStatus: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type SourceItemStatus =
@@ -627,7 +767,143 @@ export type StudioStoryCluster = {
   sourceCount: number;
   itemCount: number;
   projectCount: number;
+  entityCandidates?: string[] | null;
+  categories?: string[] | null;
+  languages?: string[] | null;
+  confidence?: number | null;
+  freshnessScore?: number | null;
+  authorityScore?: number | null;
+  relevanceScore?: number | null;
+  editorialValue?: number | null;
+  verificationState?: string | null;
+  verificationDetail?: { reasons?: string[]; asOf?: string } | null;
+  sourceDiversity?: number | null;
+  diversityDetail?: unknown;
+  candidateScore?: number | null;
+  scoreComponents?: Array<{ key: string; weight: number; value: number; detail: string }> | null;
+  siteFitScore?: number | null;
+  contentGapScore?: number | null;
+  reasonSelected?: string[] | null;
+  enrichedAt?: string | null;
   items: Array<{ id: string; title: string; source: { name: string }; discoveredAt: string }>;
+};
+
+export type StudioStoryDetail = {
+  id: string;
+  headline: string | null;
+  summary: string | null;
+  status: string;
+  verificationState: string;
+  verificationDetail: { reasons?: string[]; asOf?: string } | null;
+  sourceDiversity: number;
+  diversityDetail: unknown;
+  candidateScore: number | null;
+  scoreComponents: Array<{ key: string; weight: number; value: number; detail: string }> | null;
+  siteFitScore: number | null;
+  contentGapScore: number | null;
+  reasonSelected: string[] | null;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  freshnessScore: number | null;
+  authorityScore: number | null;
+  confidence: number | null;
+  sources: Array<{
+    itemId: string;
+    title: string;
+    url: string | null;
+    publisher: string;
+    domain: string | null;
+    trustScore: number;
+    discoveredAt: string;
+    publishedAt: string | null;
+    modifiedAt: string | null;
+    score: number | null;
+    status: string;
+  }>;
+  facts: Array<{
+    id: string;
+    itemId: string;
+    factKey: string;
+    statement: string;
+    sourceUrl: string | null;
+    publisher: string | null;
+    evidenceRef: string | null;
+    confidence: number;
+    extractedAt: string;
+    verificationStatus: string;
+    conflictingFacts: unknown;
+  }>;
+  entities: Array<{
+    id: string;
+    domain: string;
+    type: string;
+    name: string;
+    externalIds: unknown;
+    metadata: unknown;
+    enrichments: Array<{
+      id: string;
+      providerKey: string;
+      providerEntityId: string | null;
+      resourceType: string;
+      title: string | null;
+      originalTitle: string | null;
+      releaseDate: string | null;
+      matchMethod: string;
+      confidence: number;
+      data: {
+        genres?: string[];
+        popularity?: number | null;
+        rating?: number | null;
+        votes?: number | null;
+        cast?: string[];
+        crew?: string[];
+        studios?: string[];
+        franchise?: string | null;
+        overview?: string | null;
+        posterUrl?: string | null;
+        backdropUrl?: string | null;
+        watchProviders?: string[];
+        attribution?: unknown;
+        alternatives?: unknown;
+        category?: string;
+      } | null;
+    }>;
+  }>;
+  relatedContent: Array<{ title: string; similarity: number }>;
+  siteId: string | null;
+};
+
+export type StudioMuteRule = {
+  id: string;
+  kind: string;
+  value: string;
+  active: boolean;
+  createdAt: string;
+};
+
+export type StudioIntelligenceSettings = {
+  enabledDomains: string[];
+  domainsAuto: boolean;
+  providerPrecedence: { identity: string[]; rating: string[]; metadata: string[] };
+  aiJudge: { enabled: boolean; model: string | null; maxCallsPerItem: number };
+  levelPolicy: Record<string, number>;
+};
+
+export type StudioEditorialProfile = {
+  siteId: string;
+  profileVersion: number;
+  builtAt: string;
+  topics: string[];
+  categories: string[];
+  taxonomy: string[];
+  audience: string[];
+  language: string | null;
+  location: string[];
+  editorialDescription: string | null;
+  contentGaps: Array<{ topic: string; score: number; reason: string }>;
+  existingTitles: string[];
+  sitemapUrl: string | null;
+  articleStats: { articleCount: number; avgTitleTokens: number } | null;
 };
 
 export type SocialChannel = 'x' | 'instagram';
@@ -1114,6 +1390,71 @@ export type WorkerHealth = {
   }>;
 };
 
+// ── Phase 5 operations models ──────────────────────────────────────────
+
+export type OperationsWorkerHeartbeat = {
+  name: string;
+  pid: number;
+  status: string;
+  currentTask: string | null;
+  startedAt: string | null;
+  lastBeatAt: string;
+  stoppedAt: string | null;
+  stale: boolean;
+};
+
+export type OperationsHealth = {
+  status: 'ok' | 'degraded';
+  checkedAt: string;
+  tenantId: string;
+  db: string;
+  redis: string;
+  queues: Array<{ queue: string; counts: Record<string, number> }>;
+  workers: OperationsWorkerHeartbeat[];
+  sources: { broken: number | null; rateLimited: number | null };
+  throughput: { sourceItems24h: number | null };
+  failures: { operations24h: number | null; publicationsFailed: number | null };
+  aiCost: { dailyUsd: number | null; monthlyUsd: number | null };
+  recentErrors: Array<{
+    id: string;
+    type: string;
+    errorCode: string | null;
+    errorSummary: string | null;
+    queueName: string | null;
+    updatedAt: string;
+  }>;
+  automation: Array<{ siteId: string | null; enabled: boolean; state: string; pausedReason: string | null }>;
+};
+
+export type MetricsSnapshot = {
+  startedAt: string;
+  uptimeMs: number;
+  counters: Record<string, number>;
+  gauges: Record<string, number>;
+};
+
+export type CostBudgetView = {
+  id: string;
+  siteId: string | null;
+  contentType: string | null;
+  period: 'daily' | 'monthly' | string;
+  limitUsd: number;
+  hardLimitUsd: number | null;
+  action: 'warn' | 'degrade' | 'delay' | 'pause' | string;
+  degradeModel: string | null;
+  enabled: boolean;
+};
+
+export type CostControlsView = {
+  budgets: CostBudgetView[];
+  spend: {
+    dailyUsd: number;
+    dailyEvents: number;
+    monthlyUsd: number;
+    monthlyEvents: number;
+  };
+};
+
 // ── Magic Installer, Activity Center and Notification models ───────────
 
 export type ConnectorKind = 'website' | 'x' | 'instagram';
@@ -1299,4 +1640,165 @@ export type StudioEventMessage = {
   payload: Record<string, unknown>;
   siteId: string | null;
   emittedAt: string;
+};
+
+// ─── Editorial Engine (Phase 4) ───────────────────────────────────────
+
+export type StudioGenerationSummary = {
+  id: string;
+  status: string;
+  decision: string;
+  decisionReason: string | null;
+  articleType: string | null;
+  searchIntent: string | null;
+  clusterId: string | null;
+  projectId: string | null;
+  versionId: string | null;
+  siteId: string | null;
+  provider: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+  qaScore: number | null;
+  publicationOutcome: string | null;
+  title: string | null;
+};
+
+export type StudioFactLicense = {
+  factKey: string;
+  statement: string;
+  usage: string;
+  sensitivity: string;
+  reasons: string[];
+  phrasingHint: string;
+  sources: Array<{ publisher: string | null; url: string | null; group: string | null }>;
+  alternatives: string[];
+};
+
+export type StudioProvenanceEntry = {
+  factKey: string;
+  statement: string;
+  usage: string;
+  sensitivity: string;
+  sources: Array<{ publisher: string | null; url: string | null; group: string | null }>;
+  claims: string[];
+  inlineAttributed: boolean;
+};
+
+export type StudioQaFinding = {
+  key: string;
+  dimension: string;
+  severity: 'error' | 'warning' | 'info';
+  passed: boolean;
+  message: string;
+};
+
+export type StudioQaDimension = {
+  dimension: string;
+  score: number;
+  findings: StudioQaFinding[];
+};
+
+export type StudioGenerationDetail = {
+  id: string;
+  status: string;
+  decision: string;
+  decisionReason: string | null;
+  articleType: string | null;
+  searchIntent: string | null;
+  site: { id: string; name: string; type: string; baseUrl: string | null } | null;
+  cluster: {
+    id: string;
+    headline: string | null;
+    summary: string | null;
+    status: string;
+    verificationState: string;
+    verificationDetail: { reasons?: string[]; asOf?: string } | null;
+    sourceDiversity: number;
+    candidateScore: number | null;
+    siteFitScore: number | null;
+    firstSeenAt: string;
+    lastSeenAt: string;
+  } | null;
+  project: { id: string; title: string; status: string } | null;
+  version: { id: string; versionNumber: number; status: string; title: string | null; approvedAt: string | null } | null;
+  brief: {
+    storyAngle?: string;
+    primaryKeyword?: string;
+    secondaryKeywords?: string[];
+    searchIntent?: string;
+    articleType?: string;
+    audience?: string;
+    targetLengthRange?: { min: number; max: number };
+    verifiedFacts?: Array<{ factKey: string; statement: string }>;
+    unresolvedFacts?: Array<{ factKey: string; statements: string[] }>;
+    requiredAttribution?: Array<{ publisher: string | null; url: string | null; reason: string }>;
+    internalLinkOpportunities?: Array<{ url: string; title: string; anchor: string; reason: string; score: number }>;
+    relatedSiteContent?: string[];
+    uniqueValueProposition?: string;
+    freshnessConstraints?: string[];
+    contentWarnings?: string[];
+    entities?: Array<{ name: string; type: string }>;
+  } | null;
+  factPanel: {
+    ledger: Array<{
+      id: string;
+      factKey: string;
+      statement: string;
+      publisher: string | null;
+      sourceUrl: string | null;
+      verificationStatus: string;
+      confidence: number;
+      conflictingFacts: unknown;
+    }>;
+    licenses: StudioFactLicense[] | null;
+  };
+  sources: Array<{ url: string | null; publisher: string | null; factKey: string }>;
+  provenance: StudioProvenanceEntry[] | null;
+  enrichment: Array<Record<string, unknown>>;
+  article: {
+    title: string;
+    h1: string;
+    excerpt: string;
+    bodyHtml: string;
+    seoTitle: string;
+    seoDescription: string;
+  } | null;
+  seo: {
+    seoTitle: string;
+    h1: string;
+    slug: string;
+    metaDescription: string;
+    excerpt: string;
+    primaryKeyword: string;
+    secondaryKeywords: string[];
+    entityCoverage: Array<{ name: string; type: string; occurrences: number; covered: boolean }>;
+    internalLinks: Array<{ url: string; title: string; anchor: string; reason: string; score: number }>;
+    externalAttributionLinks: Array<{ url: string; publisher: string | null }>;
+    openGraph: { title: string; description: string };
+    socialTitle: string;
+    structuredDataRecommendation: string;
+    keywordDensity: { keyword: string; occurrences: number; densityPercent: number; stuffingRisk: boolean };
+    searchVolumeDisclaimer: string;
+  } | null;
+  socialPreview: { title: string | null; description: string | null } | null;
+  qaReport: {
+    score: number;
+    passed: boolean;
+    criticalUnsupportedClaims: Array<{ claim: string; reason: string }>;
+    dimensions: StudioQaDimension[];
+    findings: StudioQaFinding[];
+  } | null;
+  publicationDecision: {
+    decision: string;
+    gates: Array<{ key: string; label: string; passed: boolean; detail: string }>;
+    config: Record<string, unknown>;
+    reasons: string[];
+  } | null;
+  updateDelta: Record<string, unknown> | null;
+  provider: string | null;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+  error: string | null;
 };

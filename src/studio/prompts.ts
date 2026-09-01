@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient, type StudioPromptSurface } from "@prisma/client";
 import { buildImagePrompt, buildTextPrompt, type ImagePromptInput, type TextPromptInput } from "../application/services/prompt";
+import { SOURCE_DATA_RULES, wrapUntrustedContent } from "./prompt-injection";
 import type {
   AssignStudioPromptInput,
   CreateStudioPromptPresetInput,
@@ -44,7 +45,7 @@ const DEFAULT_PROMPT_DEFINITIONS: PromptSeedDefinition[] = [
     surface: "text_seo",
     scope: "global",
     description: "Prompt base para generación de artículos SEO listos para revisión editorial.",
-    systemTemplate: "You are a senior SEO and editorial writer. Respond in {{languageLabel}}.",
+    systemTemplate: "You are a senior SEO and editorial writer. Respond in {{languageLabel}}. " + SOURCE_DATA_RULES,
     userTemplate: [
       "Topic: {{topicTitle}}",
       "{{topicDescriptionLine}}",
@@ -84,7 +85,7 @@ const DEFAULT_PROMPT_DEFINITIONS: PromptSeedDefinition[] = [
     surface: "text_instagram",
     scope: "global",
     description: "Prompt base para captions sociales ligados al circuito editorial.",
-    systemTemplate: "You are a senior social media copywriter for Instagram. Respond in {{languageLabel}}.",
+    systemTemplate: "You are a senior social media copywriter for Instagram. Respond in {{languageLabel}}. " + SOURCE_DATA_RULES,
     userTemplate: [
       "Topic: {{topicTitle}}",
       "{{topicDescriptionLine}}",
@@ -305,10 +306,10 @@ function jsonLine(label: string, value: unknown): string {
 
 function buildTextContext(input: TextPromptInput): Record<string, string> {
   const languageLabel = input.language === "es" ? "espanol" : "english";
-  const factsBlock =
-    input.facts.length > 0
-      ? input.facts.map((fact) => `- ${fact}`).join("\n")
-      : "- (no facts provided)";
+  const factsBlock = wrapUntrustedContent(
+    "source-facts",
+    input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)",
+  );
 
   return {
     languageLabel,

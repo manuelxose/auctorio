@@ -62,3 +62,12 @@ export async function enqueueConnectionJob(jobId: string, data: Record<string, u
 export async function getPublishingQueue() {
   return getQueue(QUEUE_NAMES.publishing);
 }
+
+/** Close every cached producer Queue connection. Tests and short-lived
+ *  scripts call this so lingering Redis sockets do not keep the process
+ *  alive; long-running workers never need it. */
+export async function closeProducerQueues(): Promise<void> {
+  const open = [...queues.values()];
+  queues.clear();
+  await Promise.all(open.map((queue) => queue.close().catch(() => undefined)));
+}

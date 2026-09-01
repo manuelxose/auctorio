@@ -470,29 +470,41 @@ export async function unpublishPublication(tenantId: string, publicationId: stri
 // ────────────────────────────────────────────────────────────── Scheduler
 
 export async function claimDuePublications(batchSize = 20): Promise<string[]> {
-  const rows = await prisma.$queryRaw<Array<{ id: string }>>`
-    SELECT id FROM publications
-    WHERE status IN ('scheduled', 'failed')
-      AND (
-        (status = 'scheduled' AND scheduled_for <= now())
-        OR (status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= now())
-      )
-    ORDER BY scheduled_for ASC
-    LIMIT ${batchSize}
-    FOR UPDATE SKIP LOCKED
-  `;
+  // Claim + status transition must be atomic: the FOR UPDATE SKIP LOCKED row
+  // locks only protect concurrent schedulers while the transaction is open.
+  // Running the UPDATE inside the same transaction guarantees that two
+  // scheduler processes can never enqueue the same publication twice
+  // (Phase 5 hardening).
+  return prisma.$transaction(async (tx) => {
+    // scheduled_for / next_retry_at are TIMESTAMP WITHOUT TIME ZONE columns
+    // that Prisma writes as naive UTC. Comparing them directly against now()
+    // (timestamptz) makes Postgres reinterpret the naive value in the session
+    // timezone (Europe/Madrid → +2h in summer), firing publications hours
+    // early. Cast now() to naive UTC so both sides are on the same clock.
+    const rows = await tx.$queryRaw<Array<{ id: string }>>`
+      SELECT id FROM publications
+      WHERE status IN ('scheduled', 'failed')
+        AND (
+          (status = 'scheduled' AND scheduled_for <= (now() AT TIME ZONE 'UTC'))
+          OR (status = 'failed' AND next_retry_at IS NOT NULL AND next_retry_at <= (now() AT TIME ZONE 'UTC'))
+        )
+      ORDER BY scheduled_for ASC NULLS LAST
+      LIMIT ${batchSize}
+      FOR UPDATE SKIP LOCKED
+    `;
 
-  const ids = rows.map((row) => row.id);
-  if (ids.length === 0) {
-    return [];
-  }
+    const ids = rows.map((row) => row.id);
+    if (ids.length === 0) {
+      return [];
+    }
 
-  await prisma.publication.updateMany({
-    where: { id: { in: ids } },
-    data: { status: "queued" },
+    await tx.publication.updateMany({
+      where: { id: { in: ids } },
+      data: { status: "queued" },
+    });
+
+    return ids;
   });
-
-  return ids;
 }
 
 export async function enqueuePublication(publicationId: string): Promise<void> {
@@ -502,6 +514,12 @@ export async function enqueuePublication(publicationId: string): Promise<void> {
   });
   if (!publication) {
     throw new Error("publication_not_found");
+  }
+
+  // Idempotency guard: an attempt already in flight must not be enqueued
+  // again (defense against duplicate scheduler claims or manual double-fire).
+  if (publication.status === "publishing") {
+    return;
   }
 
   if (publication.channel === "website") {

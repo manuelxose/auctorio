@@ -438,8 +438,122 @@ Graphify scoped the audit (see `docs/auctorio-magic-installer-implementation-map
 - OpenAPI updated (`docs/openapi.yaml`), architecture doc
   `docs/auctorio-installer-activity-notifications-architecture.md`, Graphify refreshed.
 
+## M32 — Source registry, feed discovery and publisher integration ✅
+
+- **Objective**: operate a large catalog of real editorial sources in
+  production, configuration-driven, without publisher-specific code.
+- **Evidence (2026-08-31)**:
+  - Source registry: `ContentSource` registry fields (packKey, verification,
+    discoveryMethod, restrictions, archive, lastError, conditional-fetch state
+    `last_etag`/`last_modified_header`/`last_http_status`/`not_modified_count`),
+    new `source_packs`, `source_pack_imports`, `enrichment_providers` tables
+    (migration `20260831000100_source_registry_phase2`). Database is the runtime
+    source of truth; packs are bootstrap only.
+  - `movie-tv-en` pack: 17 editorial RSS sources (Deadline, Variety, THR,
+    IndieWire, Collider, ScreenRant, MovieWeb, ComingSoon, Bloody Disgusting,
+    Slashfilm, Den of Geek, CinemaBlend, The Playlist, Empire, BFI, Film
+    Comment, RogerEbert.com) + 5 news-sitemap entries + TMDB/OMDb/YouTube/IMDb
+    provider seeds. Every endpoint verified live 2026-08-31 (HTTP 200 + parsed).
+  - Fetching policies: descriptive UA, connect/headers/body timeouts (undici
+    Agent), body-size cap, bounded redirects (5, SSRF-checked per hop),
+    compression (undici), conditional requests (ETag/Last-Modified/304),
+    retry-only-retryable + exponential backoff + jitter, per-domain concurrency,
+    rate-limit header capture (x-ratelimit-*, retry-after).
+  - Feed parsing: RSS 2.0/Atom namespaces, CDATA, media:content/thumbnail,
+    enclosure, content:encoded, multi-author, categories, broken RFC 822 dates,
+    GUID variants, relative URL resolution, news sitemaps.
+  - Enrichment providers: editorial sources vs enrichment providers separated;
+    credentials are server-side env-var references only; sources/providers
+    redacted before leaving the server.
+  - Studio: sources page upgraded (packs, enrichment providers, auto-discover,
+    test/preview, bulk enable/disable/refresh/category/site/archive/delete,
+    health badges Healthy/Delayed/Degraded/Rate limited/Broken/Disabled, runs,
+    verify, mark-unsupported).
+  - Validation: `npm run typecheck` ✅ · `npm test` 265/265 ✅ · `npm run
+    build:studio` ✅ · `npx prisma validate` ✅ · live verification
+    `npm run verify:sources:live -- --max 8` → 8/8 verified ✅.
+- **Docs**: `docs/source-support-matrix.md`,
+  `docs/auctorio-source-registry-architecture.md`, `.env.example` provider
+  credentials block.
+
 ## Known non-blocking residuals (unchanged)
 - No X/Meta/Ayrshare credentials in prod env — live social OAuth blocked; sandbox contract
   coverage + honest capability reporting in place.
 - `talkaris-blog` destination unreachable from VPS.
 - DeepSeek plan-quantity variance (bounded top-up documented; retried green).
+
+## Phase 5 — Production hardening, operations, observability and release ✅
+
+Final productionization phase (2026-08-31). No new product capabilities; the
+objective was to make the platform observable, resilient, secure,
+cost-controlled and deployable.
+
+- **Worker resilience**: shared runtime `src/infrastructure/workers/worker-runtime.ts`
+  — SIGTERM/SIGINT graceful shutdown, in-flight drain or safe release, forced exit
+  after `WORKER_SHUTDOWN_TIMEOUT_MS`, heartbeats into `worker_heartbeats`, bounded
+  configurable concurrency (`WORKER_<NAME>_CONCURRENCY`), BullMQ lock/stalled-job
+  detection. All 9 workers run through it; one failing provider never crashes a loop.
+- **Scheduler correctness**: `claimDuePublications` runs `SELECT … FOR UPDATE SKIP
+  LOCKED` + status UPDATE in one transaction (claim atomicity across concurrent
+  scheduler processes). **Fixed a real timezone bug**: `scheduled_for` is naive-UTC
+  TIMESTAMP; comparing against `now()` made Postgres interpret it in the session
+  timezone (Europe/Madrid, +2h) and fire publications up to 2h early. Predicate now
+  uses `now() AT TIME ZONE 'UTC'`; regression tests cover due/future/retry rows.
+- **Backpressure**: `src/infrastructure/queue/backpressure.ts` — queue depth gauges,
+  capacity assertion, scheduler defers enqueues above `QUEUE_MAX_DEPTH` (durable DB
+  rows stay `scheduled`/`failed`; nothing lost or duplicated) + deduplicated alert.
+  Existing limits retained: per-domain fetch concurrency, automation hard caps,
+  bounded batches, publishing retry policy.
+- **Redis/BullMQ**: uniform producer retry options (`WORKER_MAX_ATTEMPTS`,
+  `WORKER_BACKOFF_MS` exponential), `removeOnComplete/removeOnFail` retention,
+  deterministic job IDs. Operational CLI `npm run ops:queue`
+  (`scripts/queue-ops.ts`): health/depths/retry-failed/clean/inspect/pause/resume.
+- **Observability**: lightweight in-process metrics registry
+  (`src/studio/metrics.ts` — ingestion/intelligence/generation/publishing/
+  infrastructure counters + gauges, structured `metrics.snapshot` logs), worker
+  health (`GET /v2/health/workers`), ops endpoints
+  (`GET /v2/operations/{health,metrics}`), `GET /v2/cost-controls` CRUD.
+- **Studio Operations page** (`operations-page.component.ts`): health, workers,
+  queue depth, broken sources, rate-limited providers, failed jobs/publications,
+  automation state, throughput, AI cost, recent critical errors — drill-down, not
+  giant tables.
+- **Notifications**: dedupe cooldown windows (`dedupeKey` + `dedupeWindowMs`) on
+  `notify()` for operational alerts (broken source, queue congestion, budget
+  threshold, repeated publication failure) — no spam.
+- **Cost controls**: `cost_budgets` (daily/monthly × tenant/site/content-type, soft
+  + hard limits, action ladder warn → degrade → delay → pause) + append-only
+  `ai_spend_events` ledger; hard limits are never silently exceeded.
+- **Security**: publish-destination SSRF guard (private/loopback blocked in
+  production; explicit `PUBLISH_ALLOW_PRIVATE_TARGETS` escape hatch for tests),
+  enrichment credential env allowlist, API rate limiting, token/secret redaction of
+  remote error bodies, allowlist HTML sanitizer; prompt-injection defense in ALL
+  three prompt builders — source material fenced as inert `<<<UNTRUSTED SOURCE
+  DATA>>>` data with explicit system rules (malicious "Ignore previous instructions"
+  treated as quoted data).
+- **Systemd**: all 11 units hardened with `TimeoutStopSec=30`, `KillSignal=SIGTERM`,
+  `LimitNOFILE=65536` (on top of Restart/User/WorkingDirectory/EnvironmentFile/
+  After= ordering). No Docker — VPS/systemd model preserved.
+- **E2E**: `e2e/specs/production-journey.spec.ts` — full 13-step journey
+  (source → test → discovery → items → cluster → enrich → brief → generate → QA →
+  approve → schedule → publish → result) plus failure paths (broken RSS, provider
+  failure, AI failure, publisher failure). Publishing-safe by default
+  (schedule + verify + cancel; real publish only with `E2E_ALLOW_REAL_PUBLISH=1`).
+- **Migrations**: `20260831000400_operations_phase5` — `worker_heartbeats`,
+  `cost_budgets`, `ai_spend_events` + indexes. Additive only; `prisma validate` ✅,
+  `migrate deploy` applied with zero data loss.
+- **Bugs found & fixed by the phase** (with regression tests):
+  1. Scheduler fired future publications early (naive-UTC vs session-timezone
+     comparison) — fixed and regression-tested.
+  2. Producer queue ioredis connections never closed → `node --test` processes
+     hung on exit; added `closeProducerQueues()` + test teardown.
+  3. Phase-5 publish-destination SSRF guard broke publisher integration tests that
+     exercise production-mode code against loopback mock servers; added the explicit
+     escape hatch + a dedicated guard test.
+  4. `ops:queue` script existed but wasn't registered in `package.json`; registered.
+- **Validation**: `npm run typecheck` ✅ · `npx prisma validate` ✅ ·
+  `npm test` 333/333 ✅ · `npm run build:studio` ✅ (part of `npm test`) ·
+  `npx playwright test --list` → 20 e2e tests in 5 files including the new
+  production journey (live execution opt-in, requires credentials).
+- **Docs**: `docs/PHASE5_PRODUCTION_REPORT.md` (architecture, database, sources,
+  intelligence, AI, costs, security, observability, tests, deployment, rollback,
+  known limitations, production status: READY WITH EXPLICIT LIMITATIONS).

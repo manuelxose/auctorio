@@ -14,6 +14,7 @@ import {
   isDayActive,
   startOfLocalDay,
 } from "./automation";
+import { countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
 
 const prisma = getPrismaClient();
 
@@ -319,6 +320,41 @@ type ProgressResult = {
   approvals: number;
 };
 
+type AutomaticApprovalCandidate = {
+  status: string;
+  bodyHtml: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
+  qaReport: unknown;
+  contentImage: {
+    status: string | null;
+    storagePath: string | null;
+    assetVariants: Array<{ kind: string }>;
+  } | null;
+};
+
+/**
+ * A scheduled auto-publication must meet a stricter threshold than a merely
+ * QA-passed draft. This keeps the legacy automation path aligned with the
+ * editorial-engine gates and avoids publishing thin, unillustrated or
+ * warning-bearing content when the human approval step is enabled remotely.
+ */
+export function isAutomaticApprovalQualityReady(
+  version: AutomaticApprovalCandidate,
+  minimumQaScore = 90,
+): boolean {
+  if (version.status !== "qa_passed") return false;
+  if (!isHeroImageReady(version.contentImage)) return false;
+  if (countWordsFromHtml(version.bodyHtml) < 500) return false;
+  if (!version.seoTitle?.trim() || !version.seoDescription?.trim()) return false;
+  if (countQaWarnings(version.qaReport) > 0) return false;
+
+  const qa = version.qaReport && typeof version.qaReport === "object"
+    ? version.qaReport as { passed?: unknown; score?: unknown }
+    : null;
+  return qa?.passed === true && typeof qa.score === "number" && qa.score >= minimumQaScore;
+}
+
 async function progressAutoProjects(policy: AutomationPolicy, tenantId: string): Promise<ProgressResult> {
   const progress: ProgressResult = {
     projectsAdvanced: 0,
@@ -339,7 +375,7 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       versions: {
         orderBy: { versionNumber: "desc" },
         take: 1,
-        include: { contentImage: true },
+        include: { contentImage: { include: { assetVariants: true } } },
       },
       socialContents: true,
       publications: { where: { status: { not: "deleted" } } },
@@ -359,8 +395,9 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       continue;
     }
 
-    // Auto approval after QA passes.
-    if (policy.autoApprove && latestVersion.status === "qa_passed") {
+    // Auto approval requires stricter quality than an ordinary QA-passed
+    // version. Failures remain in QA/review and are never scheduled.
+    if (policy.autoApprove && isAutomaticApprovalQualityReady(latestVersion)) {
       await approveVersion(tenantId, project.id, latestVersion.id, "automation", null);
       progress.approvals += 1;
       continue;

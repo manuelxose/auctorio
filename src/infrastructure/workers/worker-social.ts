@@ -10,6 +10,7 @@ import { socialAssetUrlForVersion } from "../../studio/social";
 import { writeAudit } from "../../studio/audit";
 import { structuredEvent } from "../../shared/utils/logger";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { getSocialIntegrationProvider, type SocialPublishInput } from "../../studio/social-provider";
 import { resolveAccountCredentials, runConnectionHealthCheck } from "../../studio/social-connections";
 
@@ -220,6 +221,7 @@ export async function runSocialWorker() {
     },
     {
       connection: getRedisConnectionOptions(),
+      ...bullWorkerOptions("social", 1),
     },
   );
 
@@ -259,14 +261,14 @@ export async function runSocialWorker() {
   const healthTimer = setInterval(() => void runHealthCheck(), healthIntervalMs);
   setTimeout(() => void runHealthCheck(), 30_000);
 
-  const shutdown = async () => {
-    clearInterval(healthTimer);
-    await worker.close();
-    await prisma.$disconnect();
-    process.exit(0);
-  };
-  process.on("SIGTERM", () => void shutdown());
-  process.on("SIGINT", () => void shutdown());
+  // Shared graceful shutdown: close the BullMQ worker (finish or release the
+  // in-flight job), clear the health timer, then exit.
+  registerBullWorkerShutdown(worker, "social");
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.on(signal, () => {
+      clearInterval(healthTimer);
+    });
+  }
 
   console.log("[worker:social] started", { queue: QUEUE_NAMES.social, healthIntervalMs });
 }

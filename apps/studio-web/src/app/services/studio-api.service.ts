@@ -57,11 +57,25 @@ import type {
   StudioSource,
   StudioSourceItem,
   StudioStoryCluster,
+  StudioStoryDetail,
+  StudioMuteRule,
+  StudioIntelligenceSettings,
+  StudioEditorialProfile,
+  StudioGenerationDetail,
+  StudioGenerationSummary,
   StudioUserSummary,
+  StudioDiscoveryRun,
+  StudioSourcePack,
+  StudioFeedDiscoveryResult,
+  StudioEnrichmentProvider,
   UpdateProjectPayload,
   UpdateSitePayload,
   WebsiteDiscoveryResult,
   WorkerHealth,
+  OperationsHealth,
+  MetricsSnapshot,
+  CostControlsView,
+  CostBudgetView,
 } from '../models/studio.models';
 
 @Injectable({ providedIn: 'root' })
@@ -358,14 +372,21 @@ export class StudioApiService {
     name: string;
     type: SourceType;
     url?: string;
+    domain?: string;
     siteId?: string;
     priority?: number;
     trustScore?: number;
+    authorityScore?: number;
     language?: string;
+    country?: string;
     categories?: string[];
     tags?: string[];
     refreshIntervalMinutes?: number;
     configuration?: Record<string, unknown>;
+    rateLimitPolicy?: Record<string, unknown>;
+    robotsPolicy?: Record<string, unknown>;
+    extractionPolicy?: Record<string, unknown>;
+    discoveryMethod?: string;
   }): Observable<StudioSource> {
     return this.http.post<StudioSource>(`${this.apiBase}/backend/v2/sources`, payload);
   }
@@ -385,9 +406,88 @@ export class StudioApiService {
     );
   }
 
-  fetchSource(sourceId: string): Observable<{ fetched: number; created: number; duplicates: number; failed: boolean; error: string | null }> {
-    return this.http.post<{ fetched: number; created: number; duplicates: number; failed: boolean; error: string | null }>(
+  fetchSource(sourceId: string): Observable<{ fetched: number; created: number; duplicates: number; failed: boolean; notModified?: boolean; error: string | null }> {
+    return this.http.post<{ fetched: number; created: number; duplicates: number; failed: boolean; notModified?: boolean; error: string | null }>(
       `${this.apiBase}/backend/v2/sources/${sourceId}/fetch`,
+      {},
+    );
+  }
+
+  // ─── Source registry: packs, discovery, bulk, runs, verification ──────
+
+  listSourcesWithHealth(page = 1, pageSize = 100, includeArchived = false): Observable<PaginatedResponse<StudioSource>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    params = params.set('includeArchived', includeArchived);
+    return this.http.get<PaginatedResponse<StudioSource>>(`${this.apiBase}/backend/v2/sources-health`, { params });
+  }
+
+  listSourcePacks(): Observable<{ items: StudioSourcePack[] }> {
+    return this.http.get<{ items: StudioSourcePack[] }>(`${this.apiBase}/backend/v2/source-packs`);
+  }
+
+  importSourcePack(packKey: string, enabled: boolean, withProviders: boolean): Observable<{ imported: number; skipped: number; failed: number; errors: string[]; importedProviders: number }> {
+    return this.http.post<{ imported: number; skipped: number; failed: number; errors: string[]; importedProviders: number }>(
+      `${this.apiBase}/backend/v2/source-packs/${packKey}/import`,
+      { enabled, withProviders },
+    );
+  }
+
+  discoverFeeds(url: string): Observable<StudioFeedDiscoveryResult> {
+    return this.http.post<StudioFeedDiscoveryResult>(`${this.apiBase}/backend/v2/feed-discovery/discover`, { url });
+  }
+
+  testSourceDraft(type: string, url: string, configuration?: Record<string, unknown>): Observable<{ ok: boolean; itemCount?: number; sample?: Array<Record<string, unknown>>; message?: string }> {
+    return this.http.post<{ ok: boolean; itemCount?: number; sample?: Array<Record<string, unknown>>; message?: string }>(
+      `${this.apiBase}/backend/v2/sources/test-draft`,
+      { type, url, configuration },
+    );
+  }
+
+  bulkSources(payload: { ids: string[]; action: string; category?: string; siteId?: string; language?: string; refreshIntervalMinutes?: number }): Observable<{ total: number; succeeded: number; failed: number; results: Array<{ id: string; ok: boolean; error: string | null }> }> {
+    return this.http.post<{ total: number; succeeded: number; failed: number; results: Array<{ id: string; ok: boolean; error: string | null }> }>(
+      `${this.apiBase}/backend/v2/sources/bulk`,
+      payload,
+    );
+  }
+
+  listSourceRuns(sourceId: string, page = 1, pageSize = 10): Observable<PaginatedResponse<StudioDiscoveryRun>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    return this.http.get<PaginatedResponse<StudioDiscoveryRun>>(`${this.apiBase}/backend/v2/sources/${sourceId}/runs`, { params });
+  }
+
+  verifySource(sourceId: string): Observable<{ ok: boolean; status: number | null; itemCount: number | null; latencyMs: number; error: string | null; verificationStatus: string | null }> {
+    return this.http.post<{ ok: boolean; status: number | null; itemCount: number | null; latencyMs: number; error: string | null; verificationStatus: string | null }>(
+      `${this.apiBase}/backend/v2/sources/${sourceId}/verify`,
+      {},
+    );
+  }
+
+  markSourceUnsupported(sourceId: string, note: string): Observable<{ ok: true }> {
+    return this.http.post<{ ok: true }>(`${this.apiBase}/backend/v2/sources/${sourceId}/mark-unsupported`, { note });
+  }
+
+  // ─── Enrichment providers ──────────────────────────────────────────────
+
+  listEnrichmentProviders(page = 1, pageSize = 50): Observable<PaginatedResponse<StudioEnrichmentProvider>> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    return this.http.get<PaginatedResponse<StudioEnrichmentProvider>>(`${this.apiBase}/backend/v2/enrichment-providers`, { params });
+  }
+
+  createEnrichmentProvider(payload: { key: string; name: string; providerType: string; baseUrl?: string; endpoint?: string; credentialsRef?: string; enabled?: boolean; category?: string }): Observable<StudioEnrichmentProvider> {
+    return this.http.post<StudioEnrichmentProvider>(`${this.apiBase}/backend/v2/enrichment-providers`, payload);
+  }
+
+  updateEnrichmentProvider(providerId: string, payload: Record<string, unknown>): Observable<StudioEnrichmentProvider> {
+    return this.http.patch<StudioEnrichmentProvider>(`${this.apiBase}/backend/v2/enrichment-providers/${providerId}`, payload);
+  }
+
+  deleteEnrichmentProvider(providerId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.apiBase}/backend/v2/enrichment-providers/${providerId}`);
+  }
+
+  testEnrichmentProvider(providerId: string): Observable<{ ok: boolean; status?: number | null; latencyMs?: number; itemCount?: number; credentialsConfigured: boolean; message?: string; sample?: Array<Record<string, unknown>> }> {
+    return this.http.post<{ ok: boolean; status?: number | null; latencyMs?: number; itemCount?: number; credentialsConfigured: boolean; message?: string; sample?: Array<Record<string, unknown>> }>(
+      `${this.apiBase}/backend/v2/enrichment-providers/${providerId}/test`,
       {},
     );
   }
@@ -461,6 +561,66 @@ export class StudioApiService {
       params = params.set('status', status);
     }
     return this.http.get<PaginatedResponse<StudioStoryCluster>>(`${this.apiBase}/backend/v2/story-clusters`, { params });
+  }
+
+  setClusterStatus(clusterId: string, status: string): Observable<StudioStoryCluster> {
+    return this.http.patch<StudioStoryCluster>(`${this.apiBase}/backend/v2/story-clusters/${clusterId}`, { status });
+  }
+
+  // ─── Intelligence (Phase 3) ────────────────────────────────────────────
+
+  getStoryDetail(clusterId: string): Observable<StudioStoryDetail> {
+    return this.http.get<StudioStoryDetail>(`${this.apiBase}/backend/v2/intelligence/story-clusters/${clusterId}/story`);
+  }
+
+  mergeClusters(clusterId: string, targetClusterId: string): Observable<{ merged: boolean; movedItems: number }> {
+    return this.http.post<{ merged: boolean; movedItems: number }>(
+      `${this.apiBase}/backend/v2/intelligence/story-clusters/${clusterId}/merge`,
+      { targetClusterId },
+    );
+  }
+
+  splitCluster(clusterId: string, itemIds: string[]): Observable<{ split: boolean; newClusterId: string; movedItems: number }> {
+    return this.http.post<{ split: boolean; newClusterId: string; movedItems: number }>(
+      `${this.apiBase}/backend/v2/intelligence/story-clusters/${clusterId}/split`,
+      { itemIds },
+    );
+  }
+
+  listMutes(): Observable<{ items: StudioMuteRule[]; total: number }> {
+    return this.http.get<{ items: StudioMuteRule[]; total: number }>(`${this.apiBase}/backend/v2/intelligence/mutes`);
+  }
+
+  createMute(kind: 'topic' | 'source', value: string): Observable<StudioMuteRule> {
+    return this.http.post<StudioMuteRule>(`${this.apiBase}/backend/v2/intelligence/mutes`, { kind, value });
+  }
+
+  deleteMute(muteId: string): Observable<{ unmuted: boolean }> {
+    return this.http.delete<{ unmuted: boolean }>(`${this.apiBase}/backend/v2/intelligence/mutes/${muteId}`);
+  }
+
+  runItemEnrichment(itemId: string): Observable<unknown> {
+    return this.http.post(`${this.apiBase}/backend/v2/intelligence/source-items/${itemId}/enrich`, {});
+  }
+
+  getIntelligenceReport(hours = 24): Observable<unknown> {
+    return this.http.get(`${this.apiBase}/backend/v2/intelligence/report`, { params: new HttpParams().set('hours', hours) });
+  }
+
+  getIntelligenceSettings(): Observable<StudioIntelligenceSettings> {
+    return this.http.get<StudioIntelligenceSettings>(`${this.apiBase}/backend/v2/intelligence/settings`);
+  }
+
+  updateIntelligenceSettings(payload: Partial<StudioIntelligenceSettings>): Observable<StudioIntelligenceSettings> {
+    return this.http.patch<StudioIntelligenceSettings>(`${this.apiBase}/backend/v2/intelligence/settings`, payload);
+  }
+
+  getEditorialProfile(siteId: string): Observable<StudioEditorialProfile> {
+    return this.http.get<StudioEditorialProfile>(`${this.apiBase}/backend/v2/sites/${siteId}/editorial-profile`);
+  }
+
+  rebuildEditorialProfile(siteId: string): Observable<StudioEditorialProfile> {
+    return this.http.post<StudioEditorialProfile>(`${this.apiBase}/backend/v2/sites/${siteId}/editorial-profile/rebuild`, {});
   }
 
   // ─── Editorial platform: publications & calendar ──────────────────────
@@ -841,6 +1001,37 @@ export class StudioApiService {
     return this.http.get<WorkerHealth>(`${this.apiBase}/backend/v2/health/workers`);
   }
 
+  // ─── Phase 5 operations ───────────────────────────────────────────────
+
+  getOperationsHealth(): Observable<OperationsHealth> {
+    return this.http.get<OperationsHealth>(`${this.apiBase}/backend/v2/operations/health`);
+  }
+
+  getOperationsMetrics(): Observable<MetricsSnapshot> {
+    return this.http.get<MetricsSnapshot>(`${this.apiBase}/backend/v2/operations/metrics`);
+  }
+
+  getCostControls(): Observable<CostControlsView> {
+    return this.http.get<CostControlsView>(`${this.apiBase}/backend/v2/cost-controls`);
+  }
+
+  upsertCostBudget(payload: {
+    siteId?: string | null;
+    contentType?: string | null;
+    period: string;
+    limitUsd: number;
+    hardLimitUsd?: number | null;
+    action: string;
+    degradeModel?: string | null;
+    enabled?: boolean;
+  }): Observable<CostBudgetView> {
+    return this.http.put<CostBudgetView>(`${this.apiBase}/backend/v2/cost-controls`, payload);
+  }
+
+  deleteCostBudget(id: string): Observable<{ ok: boolean }> {
+    return this.http.delete<{ ok: boolean }>(`${this.apiBase}/backend/v2/cost-controls/${id}`);
+  }
+
   deleteProject(projectId: string, payload: { reason?: string; mode?: 'archive' | 'unpublish_delete' }): Observable<{ archived: boolean }> {
     return this.http.delete<{ archived: boolean }>(`${this.apiBase}/backend/v2/projects/${projectId}`, {
       body: payload,
@@ -977,5 +1168,37 @@ export class StudioApiService {
 
   setNotificationPreference(category: string, enabled: boolean): Observable<NotificationPreference> {
     return this.http.put<NotificationPreference>(`${this.apiBase}/backend/v2/notifications/preferences`, { category, enabled });
+  }
+
+  // ─── Editorial Engine (Phase 4) ─────────────────────────────────────
+
+  listGenerations(page = 1, pageSize = 20, filters: { siteId?: string; clusterId?: string } = {}): Observable<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }> {
+    let params = new HttpParams().set('page', page).set('pageSize', pageSize);
+    if (filters.siteId) {
+      params = params.set('siteId', filters.siteId);
+    }
+    if (filters.clusterId) {
+      params = params.set('clusterId', filters.clusterId);
+    }
+    return this.http.get<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }>(
+      `${this.apiBase}/backend/v2/editorial-engine/generations`,
+      { params },
+    );
+  }
+
+  getGeneration(generationId: string): Observable<StudioGenerationDetail> {
+    return this.http.get<StudioGenerationDetail>(`${this.apiBase}/backend/v2/editorial-engine/generations/${generationId}`);
+  }
+
+  generateFromCluster(clusterId: string, body: { siteId?: string; language?: 'es' | 'en' } = {}): Observable<StudioGenerationDetail> {
+    return this.http.post<StudioGenerationDetail>(`${this.apiBase}/backend/v2/editorial-engine/clusters/${clusterId}/generate`, body);
+  }
+
+  approveGeneration(generationId: string): Observable<{ id: string; status: string }> {
+    return this.http.post<{ id: string; status: string }>(`${this.apiBase}/backend/v2/editorial-engine/generations/${generationId}/approve`, {});
+  }
+
+  rejectGeneration(generationId: string, reason?: string): Observable<{ id: string; status: string }> {
+    return this.http.post<{ id: string; status: string }>(`${this.apiBase}/backend/v2/editorial-engine/generations/${generationId}/reject`, { reason });
   }
 }

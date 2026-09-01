@@ -1,0 +1,65 @@
+{
+  "version": "1.0.0",
+  "type": "fullstack-web",
+  "languages": [
+    "javascript",
+    "typescript"
+  ],
+  "frameworks": [
+    "angular"
+  ],
+  "databases": [
+    "redis"
+  ],
+  "packageManager": "npm",
+  "monorepo": true,
+  "tests": [
+    "app.spec.ts",
+    "calendar-page.component.spec.ts",
+    "connection-discovery.test.js",
+    "connection-discovery.test.ts",
+    "connection-installer.spec.ts",
+    "connector-registry.test.js",
+    "connector-registry.test.ts",
+    "connector-routes.test.js",
+    "connector-routes.test.ts",
+    "editorial-plan-v2.test.js"
+  ],
+  "ui": true,
+  "seo": false,
+  "docker": false,
+  "graphify": true,
+  "approximateFiles": 1607,
+  "skills": [
+    "accessibility",
+    "angular",
+    "api-design",
+    "cicd",
+    "code-review",
+    "e2e-testing",
+    "frontend-architecture",
+    "graphify-first-analysis",
+    "javascript",
+    "nodejs",
+    "observability",
+    "performance-engineering",
+    "redis",
+    "repository-discovery",
+    "security-review",
+    "testing",
+    "typescript",
+    "ux-ui-engineering"
+  ],
+  "agents": [
+    "architect",
+    "backend",
+    "database",
+    "devops",
+    "frontend",
+    "performance",
+    "qa",
+    "reviewer",
+    "security",
+    "ux-ui"
+  ]
+}

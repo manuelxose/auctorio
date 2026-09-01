@@ -14,6 +14,7 @@ import { notify } from "../../studio/notifications";
 import { publishEvent } from "../../studio/events";
 import { structuredEvent } from "../../shared/utils/logger";
 import { getNumberEnv } from "../../shared/utils/env";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 
 const prisma = getPrismaClient();
 
@@ -155,7 +156,7 @@ export async function runConnectionWorker(): Promise<void> {
     },
     {
       connection: getRedisConnectionOptions(),
-      concurrency: getNumberEnv("WORKER_CONNECTION_CONCURRENCY", 2),
+      ...bullWorkerOptions("connection", 2),
     },
   );
 
@@ -198,6 +199,7 @@ export async function runConnectionWorker(): Promise<void> {
     })();
   });
 
+  registerBullWorkerShutdown(worker, "connection");
   // eslint-disable-next-line no-console
   console.log("connection worker running");
 }

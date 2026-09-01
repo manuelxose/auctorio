@@ -7,6 +7,7 @@ exports.enqueuePublishingJob = enqueuePublishingJob;
 exports.enqueueSocialJob = enqueueSocialJob;
 exports.enqueueConnectionJob = enqueueConnectionJob;
 exports.getPublishingQueue = getPublishingQueue;
+exports.closeProducerQueues = closeProducerQueues;
 const bullmq_1 = require("bullmq");
 const redis_1 = require("./redis");
 const queues_1 = require("./queues");
@@ -59,4 +60,12 @@ async function enqueueConnectionJob(jobId, data) {
 }
 async function getPublishingQueue() {
     return getQueue(queues_1.QUEUE_NAMES.publishing);
+}
+/** Close every cached producer Queue connection. Tests and short-lived
+ *  scripts call this so lingering Redis sockets do not keep the process
+ *  alive; long-running workers never need it. */
+async function closeProducerQueues() {
+    const open = [...queues.values()];
+    queues.clear();
+    await Promise.all(open.map((queue) => queue.close().catch(() => undefined)));
 }

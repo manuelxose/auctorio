@@ -14,10 +14,15 @@ const ENV_KEYS = [
     "PUBLISH_TIMEOUT_MS",
     "IMAGE_DOWNLOAD_TIMEOUT_MS",
     "GUIATV_TEST_KEY",
+    "AUCTORIO_EDITORIAL_REVIEW_KEY",
+    "AUCTORIO_EDITORIAL_REVIEWER",
+    "GUIATV_EDITORIAL_AUTHOR_NAME",
+    "GUIATV_EDITORIAL_AUTHOR_ID",
     "TECNORIA_TEST_TOKEN",
     "TECNORIA_TEST_CREDS",
     "TALKARIS_TEST_TOKEN",
     "WEBHOOK_SECRET",
+    "PUBLISH_ALLOW_PRIVATE_TARGETS",
 ];
 const originalEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 function restoreEnv() {
@@ -91,6 +96,7 @@ function buildContext(siteType, overrides) {
         seoRules: null,
         taxonomyMap: null,
         publishingCredentialsRef: null,
+        siteValueConfig: null,
         createdAt: now,
         updatedAt: now,
     };
@@ -131,7 +137,7 @@ function buildContext(siteType, overrides) {
         status: "approved",
         title: "Titulo",
         excerpt: "Resumen",
-        bodyHtml: "<p>Contenido</p>",
+        bodyHtml: `<p>${"Contenido editorial verificado ".repeat(260)}</p>`,
         seoTitle: "SEO Titulo",
         seoDescription: "SEO Descripcion",
         qaReport: null,
@@ -208,6 +214,10 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
     process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
+    process.env["AUCTORIO_EDITORIAL_REVIEW_KEY"] = "review-secret";
+    process.env["AUCTORIO_EDITORIAL_REVIEWER"] = "auctorio-quality-gate";
+    process.env["GUIATV_EDITORIAL_AUTHOR_NAME"] = "Equipo editorial GuíaTV";
+    process.env["GUIATV_EDITORIAL_AUTHOR_ID"] = "guiatv-editorial";
     const server = await createMockServer((req, res, bodyText) => {
         if (req.url === "/v2/blog" && req.method === "POST") {
             const body = JSON.parse(bodyText);
@@ -226,10 +236,12 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
             }));
             return;
         }
-        if (req.url === "/v2/blog/post-1" && req.method === "PUT") {
+        if (req.url === "/v2/blog/post-1/approve" && req.method === "POST") {
             const body = JSON.parse(bodyText);
             strict_1.default.equal(req.headers["x-admin-key"], "guiatv-secret");
-            strict_1.default.equal(body.status, "publish");
+            strict_1.default.equal(req.headers["x-editorial-review-key"], "review-secret");
+            strict_1.default.equal(req.headers["x-editorial-reviewer"], "auctorio-quality-gate");
+            strict_1.default.match(String(body.notes), /maximum quality gates/i);
             res.statusCode = 200;
             res.setHeader("content-type", "application/json");
             res.end(JSON.stringify({
@@ -264,6 +276,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
                 baseUrl: server.url,
                 publishingCredentialsRef: "GUIATV_TEST_KEY",
             },
+            assetUrl: "https://assets.example.test/guiatv-cover.webp",
         });
         const publisher = (0, publishers_1.getPublisher)(context.site);
         const draft = await publisher.publishDraft(context);
@@ -279,6 +292,35 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     finally {
         await server.close();
     }
+});
+(0, node_test_1.default)("guiatv refuses automatic publication without an image or editorial approval identity", async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
+    const context = buildContext("guiatv", {
+        site: {
+            ...buildContext("guiatv").site,
+            publishingCredentialsRef: "GUIATV_TEST_KEY",
+        },
+    });
+    await strict_1.default.rejects(() => (0, publishers_1.getPublisher)(context.site).publish(context), /guiatv_publish_requires_image/);
+});
+(0, node_test_1.default)("guiatv validates the approval identity before creating its draft", async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
+    process.env["GUIATV_EDITORIAL_AUTHOR_NAME"] = "Equipo editorial GuíaTV";
+    process.env["GUIATV_EDITORIAL_AUTHOR_ID"] = "guiatv-editorial";
+    const context = buildContext("guiatv", {
+        site: {
+            ...buildContext("guiatv").site,
+            publishingCredentialsRef: "GUIATV_TEST_KEY",
+        },
+        assetUrl: "https://assets.example.test/guiatv-cover.webp",
+    });
+    await strict_1.default.rejects(() => (0, publishers_1.getPublisher)(context.site).publish(context), /guiatv_editorial_review_credentials_missing/);
 });
 (0, node_test_1.default)("guiatv surfaces upstream validation/conflict failures", async () => {
     process.env["APP_ENV"] = "production";
@@ -308,6 +350,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
     process.env["IMAGE_DOWNLOAD_TIMEOUT_MS"] = "1000";
     const server = await createMockServer((req, res, bodyText) => {
@@ -362,6 +405,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
     const server = await createMockServer((req, res, bodyText) => {
         if (req.url === "/api/v1/blog/42" && req.method === "PUT") {
@@ -395,6 +439,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TECNORIA_TEST_CREDS"] = JSON.stringify({
         email: "admin@example.test",
         password: "secret",
@@ -421,6 +466,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
     const server = await createMockServer((req, res) => {
         if (req.url === "/assets/generated.png" && req.method === "GET") {
@@ -457,6 +503,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TALKARIS_TEST_TOKEN"] = "talkaris-token";
     const server = await createMockServer((req, res, bodyText) => {
         if (req.url === "/api/v1/ops/blog" && req.method === "POST") {
@@ -496,6 +543,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TALKARIS_TEST_TOKEN"] = "talkaris-token";
     const seen = [];
     const server = await createMockServer((req, res, bodyText) => {
@@ -536,6 +584,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["WEBHOOK_SECRET"] = "super-secret";
     const server = await createMockServer((req, res, bodyText) => {
         const body = JSON.parse(bodyText);
@@ -567,6 +616,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["PUBLISH_TIMEOUT_MS"] = "25";
     process.env["WEBHOOK_SECRET"] = "super-secret";
     const server = await createMockServer(async (_req, res) => {
@@ -593,6 +643,7 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
     process.env["APP_ENV"] = "production";
     process.env["NODE_ENV"] = "production";
     process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
     process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
     const seenHeaders = [];
     const server = await createMockServer((req, res, bodyText) => {
@@ -643,6 +694,49 @@ for (const siteType of ["guiatv", "tecnoria", "talkaris", "webhook"]) {
         for (const headers of seenHeaders) {
             strict_1.default.match(String(headers["content-type"] ?? ""), /application\/json/);
         }
+    }
+    finally {
+        await server.close();
+    }
+});
+(0, node_test_1.default)("production blocks private/loopback publish destinations (SSRF guard)", async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
+    delete process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"];
+    const context = buildContext("tecnoria", {
+        site: {
+            ...buildContext("tecnoria").site,
+            baseUrl: "http://127.0.0.1:3999",
+            publishingCredentialsRef: "TECNORIA_TEST_TOKEN",
+        },
+    });
+    // Without the escape hatch, a loopback destination must be rejected before
+    // any network I/O happens.
+    await strict_1.default.rejects(() => (0, publishers_1.getPublisher)(context.site).publish(context), /site_base_url_blocked/);
+});
+(0, node_test_1.default)("PUBLISH_ALLOW_PRIVATE_TARGETS escape hatch re-enables loopback targets", async () => {
+    process.env["APP_ENV"] = "production";
+    process.env["NODE_ENV"] = "production";
+    process.env["PUBLISH_DRY_RUN"] = "false";
+    process.env["PUBLISH_ALLOW_PRIVATE_TARGETS"] = "true";
+    process.env["TECNORIA_TEST_TOKEN"] = "tecnoria-token";
+    const server = await createMockServer((_req, res) => {
+        res.statusCode = 201;
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({ id: "42", slug: "proyecto-test", status: "publish" }));
+    });
+    try {
+        const context = buildContext("tecnoria", {
+            site: {
+                ...buildContext("tecnoria").site,
+                baseUrl: server.url,
+                publishingCredentialsRef: "TECNORIA_TEST_TOKEN",
+            },
+        });
+        const result = await (0, publishers_1.getPublisher)(context.site).publish(context);
+        strict_1.default.equal(result.externalId, "42");
     }
     finally {
         await server.close();
