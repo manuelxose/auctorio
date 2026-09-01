@@ -399,6 +399,7 @@ export async function runWebDiscoveryForTenant(tenantId: string): Promise<Discov
 
       try {
         const sourceId = await ensureDomainSource(tenantId, domain, plan.language);
+        const author = extraction.author;
         const item = {
           externalId: deriveExternalId(candidate.url, extraction.title ?? candidate.title),
           canonicalUrl: normalizeCanonicalUrl(candidate.url),
@@ -407,11 +408,17 @@ export async function runWebDiscoveryForTenant(tenantId: string): Promise<Discov
           description: extraction.description ?? candidate.description,
           rawText: extraction.articleText,
           cleanedText: extraction.articleText,
-          author: extraction.author,
+          author,
+          authors: author ? [author] : [],
           publishedAt: extraction.publishedAt ?? candidate.publishedAt,
+          modifiedAt: null,
           sourceImageUrls: extraction.images,
           language: extraction.language ?? plan.language,
           categories: plan.topics,
+          tags: [],
+          rawMetadata: { provider: provider.name, publisher: extraction.publisher },
+          attribution: null,
+          confidence: 0.8,
         };
         const upserted = await upsertSourceItem(tenantId, sourceId, item);
         if (upserted.created) {

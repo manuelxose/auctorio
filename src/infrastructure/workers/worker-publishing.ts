@@ -17,6 +17,9 @@ import type { PublicationStatus } from "@prisma/client";
 import type { PublishResult, PublicationTargetStatus } from "../../studio/types";
 import { getPrismaClient } from "../db/prisma";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
+import { incrementCounter } from "../../studio/metrics";
+import { classifyPublicationError, maxPublicationRetries, nextRetryDelay } from "../../studio/publication";
 
 const prisma = getPrismaClient();
 
@@ -226,6 +229,7 @@ export async function runPublishingWorker() {
     },
     {
       connection: getRedisConnectionOptions(),
+      ...bullWorkerOptions("publishing", 1),
     },
   );
 
@@ -245,25 +249,43 @@ export async function runPublishingWorker() {
 
     await updatePublicationJob(publication.id, {
       status: "failed",
-      error: err.message,
+      error: err.message.slice(0, 500),
     });
     await updateProjectStatus(publication.tenantId, publication.projectId, "publish_failed");
 
-    await prisma.publication.updateMany({
-      where: { publicationJobId },
-      data: {
-        status: "failed",
-        lastError: err.message,
-        failureClass: "transient",
-        failureReason: "website_publish_failed",
-        nextRetryAt: new Date(Date.now() + 60_000),
-      },
-    });
+    // Bounded retry with classification (same ladder as social publications):
+    // transient errors retry with exponential backoff until maxPublicationRetries,
+    // permanent errors and exhausted retries terminate.
+    const durable = await prisma.publication.findFirst({ where: { publicationJobId } });
+    if (durable) {
+      const failureClass = classifyPublicationError(err.message);
+      const retryCount = durable.retryCount + 1;
+      const terminal = failureClass === "permanent" || retryCount > maxPublicationRetries();
+      await prisma.publication.update({
+        where: { id: durable.id },
+        data: {
+          status: "failed",
+          retryCount,
+          lastError: err.message.slice(0, 500),
+          failureClass,
+          failureReason: terminal
+            ? failureClass === "permanent"
+              ? "permanent_failure"
+              : "retries_exhausted"
+            : "awaiting_retry",
+          nextRetryAt: terminal ? null : new Date(Date.now() + nextRetryDelay(retryCount)),
+        },
+      });
+    }
+
+    incrementCounter("publications_failed_total", 1);
   });
 
   worker.on("completed", async (job) => {
     await completeOperationForJob(job?.data);
+    incrementCounter("publications_published_total", 1);
   });
 
+  registerBullWorkerShutdown(worker, "publishing");
   console.log("[worker:publishing] started", { queue: QUEUE_NAMES.publishing });
 }

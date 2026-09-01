@@ -1,3 +1,5 @@
+import { SOURCE_DATA_RULES, wrapUntrustedContent } from "../../studio/prompt-injection";
+
 export type TextPromptInput = {
   topicTitle: string;
   topicDescription?: string | null;
@@ -170,6 +172,7 @@ export function buildTextPrompt(input: TextPromptInput): TextPromptOutput {
   const systemPrompt =
     goal === "news_article"
       ? `You are a senior newsroom editor and original writer. Respond in ${languageLabel}.
+${SOURCE_DATA_RULES}
 Strict rules:
 - Preserve factual accuracy: never fabricate facts, quotes, statistics or names.
 - Only use facts present in the provided source material.
@@ -181,10 +184,15 @@ Strict rules:
 - Use proper H2 headings.
 - Follow the site tone and SEO rules when provided.`
       : input.type === "seo"
-        ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}`
-        : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.`;
+        ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}
+${SOURCE_DATA_RULES}`
+        : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.
+${SOURCE_DATA_RULES}`;
 
-  const facts = input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)";
+  const facts = wrapUntrustedContent(
+    "source-facts",
+    input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)",
+  );
 
   const newsInstructions =
     goal === "news_article"

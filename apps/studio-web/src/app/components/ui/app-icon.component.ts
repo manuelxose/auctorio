@@ -118,6 +118,11 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'path', d: 'M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8' },
     { kind: 'path', d: 'M21 3v5h-5' },
   ],
+  // Gauge-style operations icon (lucide "gauge").
+  operations: [
+    { kind: 'path', d: 'm12 14 4-4' },
+    { kind: 'path', d: 'M3.34 19a10 10 0 1 1 17.32 0' },
+  ],
   clock: [
     { kind: 'circle', cx: 12, cy: 12, r: 10 },
     { kind: 'path', d: 'M12 6v6l4 2' },

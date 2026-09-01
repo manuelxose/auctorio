@@ -8,6 +8,7 @@ import { getRedisConnectionOptions } from "../queue/redis";
 import { markJobDone, markJobFailed, markJobProcessing } from "../db/jobs";
 import { getPrismaClient } from "../db/prisma";
 import { scrapeSource, type ScrapeSourceType } from "../scraping";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 
 type ScrapeJobData = {
   jobId: string;
@@ -78,6 +79,7 @@ export async function runScrapingWorker() {
     },
     {
       connection: getRedisConnectionOptions(),
+      ...bullWorkerOptions("scraping", 2),
     },
   );
 
@@ -95,5 +97,6 @@ export async function runScrapingWorker() {
     await markJobFailed(job.id.toString(), err.message);
   });
 
+  registerBullWorkerShutdown(worker, "scraping");
   console.log("[worker:scraping] started", { queue: QUEUE_NAMES.scraping });
 }

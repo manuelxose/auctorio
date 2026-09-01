@@ -24,11 +24,13 @@ import {
   listSourceItems,
   listSources,
   markSourceItemsStatus,
+  sanitizeSourceForClient,
   setSourceItemStatus,
   testSourceFetch,
   updateSource,
 } from "./sources";
 import { listStoryClusters, setClusterStatus } from "./editorial";
+import { getSourceHealth } from "./source-health";
 import { createProjectFromSourceItem } from "./planner";
 import {
   createPublication,
@@ -151,15 +153,23 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       name?: string;
       type?: string;
       url?: string;
+      domain?: string;
       enabled?: boolean;
       priority?: number;
       trustScore?: number;
+      authorityScore?: number;
       language?: string;
       country?: string;
       categories?: string[];
       tags?: string[];
       refreshIntervalMinutes?: number;
       configuration?: Record<string, unknown>;
+      rateLimitPolicy?: Record<string, unknown>;
+      robotsPolicy?: Record<string, unknown>;
+      extractionPolicy?: Record<string, unknown>;
+      credentialsRef?: string;
+      discoveryMethod?: string;
+      restrictionsNote?: string;
     }>(request);
 
     if (!body.name?.trim() || !body.type) {
@@ -178,17 +188,25 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         name: body.name.trim(),
         type: body.type as (typeof SOURCE_TYPES)[number],
         url: parseOptionalString(body.url),
+        domain: parseOptionalString(body.domain),
         enabled: body.enabled ?? true,
         priority: body.priority ?? 0,
         trustScore: body.trustScore ?? 0.5,
+        authorityScore: body.authorityScore ?? 0.5,
         language: body.language ?? "es",
         country: parseOptionalString(body.country),
         categories: body.categories ?? null,
         tags: body.tags ?? null,
         refreshIntervalMinutes: body.refreshIntervalMinutes ?? 30,
         configuration: body.configuration ?? null,
+        rateLimitPolicy: body.rateLimitPolicy ?? null,
+        robotsPolicy: body.robotsPolicy ?? null,
+        extractionPolicy: body.extractionPolicy ?? null,
+        credentialsRef: parseOptionalString(body.credentialsRef),
+        discoveryMethod: parseOptionalString(body.discoveryMethod),
+        restrictionsNote: parseOptionalString(body.restrictionsNote),
       });
-      return reply.code(201).send(source);
+      return reply.code(201).send(sanitizeSourceForClient(source));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/unique constraint|Unique constraint/i.test(message)) {
@@ -228,15 +246,24 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       name?: string;
       type?: string;
       url?: string;
+      domain?: string;
       enabled?: boolean;
       priority?: number;
       trustScore?: number;
+      authorityScore?: number;
       language?: string;
       country?: string;
       categories?: string[];
       tags?: string[];
       refreshIntervalMinutes?: number;
       configuration?: Record<string, unknown>;
+      rateLimitPolicy?: Record<string, unknown>;
+      robotsPolicy?: Record<string, unknown>;
+      extractionPolicy?: Record<string, unknown>;
+      credentialsRef?: string;
+      discoveryMethod?: string;
+      restrictionsNote?: string;
+      archived?: boolean;
     }>(request);
     if (body.type && !isOneOf(body.type, SOURCE_TYPES)) {
       return badRequest(reply, `type must be one of: ${SOURCE_TYPES.join(", ")}`);
@@ -247,20 +274,29 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       name: body.name?.trim(),
       type: body.type as (typeof SOURCE_TYPES)[number] | undefined,
       url: parseOptionalString(body.url),
+      domain: parseOptionalString(body.domain),
       enabled: body.enabled,
       priority: body.priority,
       trustScore: body.trustScore,
+      authorityScore: body.authorityScore,
       language: body.language,
       country: parseOptionalString(body.country),
       categories: body.categories,
       tags: body.tags,
       refreshIntervalMinutes: body.refreshIntervalMinutes,
       configuration: body.configuration,
+      rateLimitPolicy: body.rateLimitPolicy,
+      robotsPolicy: body.robotsPolicy,
+      extractionPolicy: body.extractionPolicy,
+      credentialsRef: body.credentialsRef === undefined ? undefined : parseOptionalString(body.credentialsRef),
+      discoveryMethod: parseOptionalString(body.discoveryMethod),
+      restrictionsNote: parseOptionalString(body.restrictionsNote),
+      archivedAt: body.archived === undefined ? undefined : body.archived ? new Date() : null,
     });
     if (!source) {
       return notFound(reply, "source not found");
     }
-    return reply.send(source);
+    return reply.send(sanitizeSourceForClient(source));
   });
 
   fastify.delete("/v2/sources/:id", async (request, reply) => {
@@ -326,6 +362,22 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       }
       return badRequest(reply, message);
     }
+  });
+
+  fastify.get("/v2/sources/:id/health", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const sourceId = (request.params as { id: string }).id;
+    if (!isUuid(sourceId)) {
+      return badRequest(reply, "invalid source id");
+    }
+    const health = await getSourceHealth(context.tenantId, sourceId);
+    if (!health) {
+      return notFound(reply, "source health not available");
+    }
+    return reply.send(health);
   });
 
   // ──────────────────────────────────────────────────────────── Inbox
@@ -1016,9 +1068,31 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     });
     return reply.send({
       items: accounts.map((account) => ({
-        ...account,
+        id: account.id,
+        tenantId: account.tenantId,
+        siteId: account.siteId,
+        site: account.site,
+        platform: account.platform,
+        displayName: account.displayName,
+        externalAccountId: account.externalAccountId,
+        provider: account.provider,
+        providerProfileId: account.providerProfileId,
+        providerAccountId: account.providerAccountId,
+        username: account.username,
+        avatarUrl: account.avatarUrl,
+        connectionStatus: account.connectionStatus,
+        connectionMetadata: account.connectionMetadata,
+        connectedAt: account.connectedAt,
+        lastError: account.lastError,
+        enabled: account.enabled,
+        status: account.status,
+        configuration: account.configuration,
+        lastVerifiedAt: account.lastVerifiedAt,
+        createdAt: account.createdAt,
+        updatedAt: account.updatedAt,
         hasCredentials: Boolean(account.credentialsRef),
-        credentialsRef: undefined,
+        // credentialsRef and credentialsCiphertext are intentionally never
+        // serialized to the client (Phase 5 security hardening).
       })),
     });
   });
@@ -1067,7 +1141,23 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       entityId: account.id,
       metadata: { platform: account.platform, siteId: account.siteId, hasCredentials: Boolean(account.credentialsRef) },
     });
-    return reply.code(201).send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
+    return reply.code(201).send({
+      id: account.id,
+      tenantId: account.tenantId,
+      siteId: account.siteId,
+      platform: account.platform,
+      displayName: account.displayName,
+      externalAccountId: account.externalAccountId,
+      provider: account.provider,
+      username: account.username,
+      connectionStatus: account.connectionStatus,
+      enabled: account.enabled,
+      status: account.status,
+      configuration: account.configuration,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      hasCredentials: Boolean(account.credentialsRef),
+    });
   });
 
   fastify.patch("/v2/publishing-accounts/:id", async (request, reply) => {
@@ -1114,7 +1204,23 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       entityId: account.id,
       metadata: { platform: account.platform, enabled: account.enabled, hasCredentials: Boolean(account.credentialsRef) },
     });
-    return reply.send({ ...account, hasCredentials: Boolean(account.credentialsRef), credentialsRef: undefined });
+    return reply.send({
+      id: account.id,
+      tenantId: account.tenantId,
+      siteId: account.siteId,
+      platform: account.platform,
+      displayName: account.displayName,
+      externalAccountId: account.externalAccountId,
+      provider: account.provider,
+      username: account.username,
+      connectionStatus: account.connectionStatus,
+      enabled: account.enabled,
+      status: account.status,
+      configuration: account.configuration,
+      createdAt: account.createdAt,
+      updatedAt: account.updatedAt,
+      hasCredentials: Boolean(account.credentialsRef),
+    });
   });
 
   fastify.delete("/v2/publishing-accounts/:id", async (request, reply) => {

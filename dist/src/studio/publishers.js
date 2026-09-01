@@ -13,6 +13,45 @@ const orchestration_1 = require("./orchestration");
 const env_2 = require("../shared/utils/env");
 const html_sanitizer_1 = require("./html-sanitizer");
 const installation_1 = require("./connectors/installation");
+const scraping_1 = require("../infrastructure/scraping");
+/**
+ * Phase 5 SSRF guard: destination base URLs are tenant-controlled and must
+ * never point at private/loopback hosts in production. Local publishers
+ * remain usable in dev/test for integration tests. `PUBLISH_ALLOW_PRIVATE_
+ * TARGETS=true` is an explicit operator escape hatch (default off) used by
+ * integration tests that exercise production-mode code paths against
+ * loopback mock servers.
+ */
+async function assertSafeSiteBaseUrl(siteBaseUrl) {
+    if (!(0, env_2.isProductionEnv)() || (0, env_1.getBooleanEnv)("PUBLISH_ALLOW_PRIVATE_TARGETS", false)) {
+        return;
+    }
+    if (!siteBaseUrl) {
+        throw new Error("site_missing_base_url");
+    }
+    let parsed;
+    try {
+        parsed = new URL(siteBaseUrl);
+    }
+    catch {
+        throw new Error("site_invalid_base_url");
+    }
+    try {
+        await (0, scraping_1.validateScrapeUrl)(parsed);
+    }
+    catch {
+        throw new Error("site_base_url_blocked");
+    }
+}
+/** Remote bodies are untrusted: truncate and strip anything token-shaped
+ *  before they land in error strings, lastError columns or log events. */
+function redactRemoteBody(text) {
+    return text
+        .replace(/eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}/g, "[token]")
+        .replace(/(bearer\s+)[a-z0-9._~+/=-]+/gi, "$1[redacted]")
+        .replace(/((api[_-]?key|token|secret|password)\s*[:=]\s*)[^\s,"']+/gi, "$1[redacted]")
+        .slice(0, 200);
+}
 /**
  * Pure GuiaTV payload builder (exported for fidelity tests). Maps the approved
  * SEO brief fields from project metadata into the destination contract.
@@ -38,6 +77,9 @@ function buildGuiaTvPayload(context, assetUrl, status) {
         evergreen: metadata.evergreen !== false,
         featuredImage: assetUrl ?? undefined,
         coverImage: assetUrl ?? undefined,
+        origin: "ai-assisted",
+        authorName: (0, env_1.getEnv)("GUIATV_EDITORIAL_AUTHOR_NAME", "").trim() || undefined,
+        authorId: (0, env_1.getEnv)("GUIATV_EDITORIAL_AUTHOR_ID", "").trim() || undefined,
         metaTitle: context.version.seoTitle || undefined,
         metaDescription: context.version.seoDescription || undefined,
         keywords,
@@ -226,6 +268,29 @@ class GuiaTvPublisher {
             "x-admin-key": adminKey,
         };
     }
+    getApprovalHeaders(site) {
+        const reviewKey = (0, env_1.getEnv)("AUCTORIO_EDITORIAL_REVIEW_KEY", "").trim();
+        const reviewer = (0, env_1.getEnv)("AUCTORIO_EDITORIAL_REVIEWER", "").trim();
+        if (!reviewKey || !reviewer) {
+            throw new Error("guiatv_editorial_review_credentials_missing");
+        }
+        return {
+            ...this.getHeaders(site),
+            "x-editorial-review-key": reviewKey,
+            "x-editorial-reviewer": reviewer,
+        };
+    }
+    assertAutomaticPublicationReady(context) {
+        if (!String(context.assetUrl || "").trim()) {
+            throw new Error("guiatv_publish_requires_image");
+        }
+        if (!(0, env_1.getEnv)("GUIATV_EDITORIAL_AUTHOR_NAME", "").trim() || !(0, env_1.getEnv)("GUIATV_EDITORIAL_AUTHOR_ID", "").trim()) {
+            throw new Error("guiatv_publish_requires_accountable_author");
+        }
+        if (!String(context.version.seoTitle || "").trim() || !String(context.version.seoDescription || "").trim()) {
+            throw new Error("guiatv_publish_requires_seo_metadata");
+        }
+    }
     async maybeDryRun(context, action, externalId) {
         const decision = getDryRunDecision(Boolean(this.getAdminKey(context.site)));
         if (!decision.enabled || !decision.reason) {
@@ -300,29 +365,27 @@ class GuiaTvPublisher {
         if (dryRun) {
             return dryRun;
         }
-        if (externalId) {
-            const assetUrl = await resolveAssetUrl(context);
-            const payload = this.buildPayload(context, assetUrl, "publish");
-            const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-            const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/v2/blog/${externalId}`, {
-                method: "PUT",
-                headers: this.getHeaders(context.site),
-                body: payload,
-                timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
-                retries: 1,
-            });
-            return {
-                externalId,
-                externalUrl: response.data?.post?.link || null,
-                effectiveTargetStatus: "publish",
-                responsePayload: response,
-            };
-        }
-        const draft = await this.publishDraft(context);
-        if (!draft.externalId) {
+        this.assertAutomaticPublicationReady(context);
+        // Validate the approval identity before creating a remote draft, so a
+        // missing credential cannot leave orphaned unpublished records in GuiaTV.
+        const approvalHeaders = this.getApprovalHeaders(context.site);
+        const draft = externalId ? { externalId } : await this.publishDraft(context);
+        if (!draft.externalId)
             return draft;
-        }
-        return this.publish(context, draft.externalId);
+        const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
+        const response = await (0, http_1.fetchJson)(`${siteBaseUrl}/v2/blog/${draft.externalId}/approve`, {
+            method: "POST",
+            headers: approvalHeaders,
+            body: { notes: "Automatically approved after Auctorio maximum quality gates." },
+            timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
+            retries: 1,
+        });
+        return {
+            externalId: draft.externalId,
+            externalUrl: response.data?.post?.link || null,
+            effectiveTargetStatus: "publish",
+            responsePayload: response,
+        };
     }
     async unpublish(context, externalId) {
         const dryRun = await this.maybeDryRun(context, "unpublish", externalId);
@@ -377,6 +440,7 @@ class TecnoriaPublisher {
             throw new Error("tecnoria_missing_credentials");
         }
         const siteBaseUrl = String(site.baseUrl || "").replace(/\/$/, "");
+        await assertSafeSiteBaseUrl(siteBaseUrl);
         const response = await (0, http_1.fetchWithTimeout)(`${siteBaseUrl}/api/v1/auth/login`, {
             method: "POST",
             headers: { "content-type": "application/json" },
@@ -389,7 +453,7 @@ class TecnoriaPublisher {
         });
         if (!response.ok) {
             const body = await response.text();
-            throw new Error(`tecnoria_login_failed status=${response.status} body=${body}`);
+            throw new Error(`tecnoria_login_failed status=${response.status} body=${redactRemoteBody(body)}`);
         }
         const setCookie = response.headers.get("set-cookie");
         if (!setCookie) {
@@ -426,11 +490,12 @@ class TecnoriaPublisher {
         });
         if (!assetResponse.ok) {
             const body = await assetResponse.text();
-            throw new Error(`asset_download_failed status=${assetResponse.status} body=${body}`);
+            throw new Error(`asset_download_failed status=${assetResponse.status} body=${redactRemoteBody(body)}`);
         }
         const buffer = Buffer.from(await assetResponse.arrayBuffer());
         const formData = new FormData();
         formData.append("file", new Blob([buffer]), imageFileName(assetUrl));
+        await assertSafeSiteBaseUrl(siteBaseUrl);
         const upload = await (0, http_1.fetchJson)(`${siteBaseUrl}/api/v1/blog/upload-image`, {
             method: "POST",
             headers: await this.getAuthHeaders(context.site),
@@ -487,6 +552,7 @@ class TecnoriaPublisher {
         const uploadedImage = await this.uploadAsset(context);
         const payload = this.buildPayload(context, uploadedImage, status);
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
+        await assertSafeSiteBaseUrl(siteBaseUrl);
         const method = externalId ? "PUT" : "POST";
         const url = externalId ? `${siteBaseUrl}/api/v1/blog/${externalId}` : `${siteBaseUrl}/api/v1/blog`;
         const response = await (0, http_1.fetchWithTimeout)(url, {
@@ -498,7 +564,7 @@ class TecnoriaPublisher {
         });
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`tecnoria_publish_failed status=${response.status} body=${text}`);
+            throw new Error(`tecnoria_publish_failed status=${response.status} body=${redactRemoteBody(text)}`);
         }
         const parsed = text ? JSON.parse(text) : {};
         const resolvedExternalId = externalId ?? (parsed.id ? String(parsed.id) : null);
@@ -568,6 +634,7 @@ class TalkarisPublisher {
     }
     async dispatch(context, status, externalId) {
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
+        await assertSafeSiteBaseUrl(siteBaseUrl);
         const payload = this.buildPayload(context, status, externalId);
         const method = externalId ? "PUT" : "POST";
         const url = externalId
@@ -582,7 +649,7 @@ class TalkarisPublisher {
         });
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`talkaris_publish_failed status=${response.status} body=${text}`);
+            throw new Error(`talkaris_publish_failed status=${response.status} body=${redactRemoteBody(text)}`);
         }
         const parsed = text ? JSON.parse(text) : {};
         const resolvedExternalId = externalId ?? (parsed.id ? String(parsed.id) : null);
@@ -692,6 +759,7 @@ class GenericWebhookPublisher {
     }
     async dispatch(context, action, targetStatus, externalId) {
         const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
+        await assertSafeSiteBaseUrl(siteBaseUrl);
         const payload = this.buildPayload(context, action, targetStatus, externalId);
         const body = JSON.stringify(payload);
         const signature = node_crypto_1.default
@@ -710,7 +778,7 @@ class GenericWebhookPublisher {
         });
         const text = await response.text();
         if (!response.ok) {
-            throw new Error(`webhook_publish_failed status=${response.status} body=${text}`);
+            throw new Error(`webhook_publish_failed status=${response.status} body=${redactRemoteBody(text)}`);
         }
         const parsed = text ? JSON.parse(text) : {};
         return {
@@ -775,6 +843,7 @@ class GenericRestPublisher {
     async restBase(site) {
         const config = await this.resolveConfig(site);
         const baseUrl = String(config.baseUrl || "").replace(/\/$/, "");
+        await assertSafeSiteBaseUrl(baseUrl);
         const rest = String(config.restBasePath || "/wp-json/wp/v2").replace(/^\/+/, "");
         return `${baseUrl}/${rest}`;
     }
@@ -820,7 +889,7 @@ class GenericRestPublisher {
         });
         if (!assetResponse.ok) {
             const body = await assetResponse.text();
-            throw new Error(`asset_download_failed status=${assetResponse.status} body=${body}`);
+            throw new Error(`asset_download_failed status=${assetResponse.status} body=${redactRemoteBody(body)}`);
         }
         const buffer = Buffer.from(await assetResponse.arrayBuffer());
         const formData = new FormData();

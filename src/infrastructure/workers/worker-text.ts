@@ -9,6 +9,9 @@ import { getTextProvider } from "../ai/text";
 import { resolveTextPrompt } from "../../studio/prompts";
 import { syncTextResultToStudio } from "../../studio/orchestration";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
+import { incrementCounter, observeLatencyMs } from "../../studio/metrics";
+import { evaluateAiSpend, recordAiSpend } from "../../studio/cost-budgets";
 
 type TextJobData = {
   jobId: string;
@@ -58,6 +61,18 @@ export async function runTextWorker() {
         throw new Error("topic_not_found");
       }
 
+      // Cost control gate: never exceed hard AI budget limits.
+      const budget = await evaluateAiSpend({
+        tenantId: data.tenantId,
+        siteId: typeof data.options?.site_id === "string" ? data.options.site_id : null,
+        contentType: "text_generation",
+        kind: "text_generation",
+      });
+      if (!budget.allowed) {
+        const error = new Error(`budget_exceeded: ${budget.reason}`);
+        throw error;
+      }
+
       const facts = await prisma.fact.findMany({
         where: { tenantId: data.tenantId, topicId: data.topicId },
         orderBy: { createdAt: "desc" },
@@ -103,12 +118,27 @@ export async function runTextWorker() {
         prompt: promptData.userPrompt,
         systemPrompt: promptData.systemPrompt,
         ...(maxTokens ? { maxTokens } : {}),
+        ...(budget.modelOverride ? { model: budget.modelOverride } : {}),
       });
 
       const costUsd = computeTextCost({
         promptTokens: result.usage?.promptTokens,
         completionTokens: result.usage?.completionTokens,
       });
+
+      await recordAiSpend({
+        tenantId: data.tenantId,
+        siteId: typeof data.options?.site_id === "string" ? data.options.site_id : null,
+        contentType: "text_generation",
+        kind: "text_generation",
+        provider: result.provider,
+        model: result.model,
+        costUsd,
+        tokensInput: result.usage?.promptTokens ?? null,
+        tokensOutput: result.usage?.completionTokens ?? null,
+      });
+      incrementCounter("ai_calls_total", 1);
+      incrementCounter("ai_cost_usd_total", Math.round(costUsd * 1_000_000) / 1_000_000);
 
       await prisma.contentText.update({
         where: { id: data.contentTextId },
@@ -143,6 +173,7 @@ export async function runTextWorker() {
     },
     {
       connection: getRedisConnectionOptions(),
+      ...bullWorkerOptions("text", 1),
     },
   );
 
@@ -150,6 +181,7 @@ export async function runTextWorker() {
     if (!job?.id) {
       return;
     }
+    observeLatencyMs("text_generation_ms", job.processedOn && job.finishedOn ? job.finishedOn - job.processedOn : 0);
     await markJobDone(job.id.toString());
     await completeOperationForJob(job.data);
   });
@@ -164,10 +196,11 @@ export async function runTextWorker() {
     if (data?.contentTextId) {
       await prisma.contentText.update({
         where: { id: data.contentTextId },
-        data: { status: "failed", error: err.message },
+        data: { status: "failed", error: err.message.slice(0, 500) },
       });
     }
   });
 
+  registerBullWorkerShutdown(worker, "text");
   console.log("[worker:text] started", { queue: QUEUE_NAMES.text });
 }

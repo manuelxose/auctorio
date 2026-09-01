@@ -15,6 +15,7 @@ exports.approveStudioPromptVersion = approveStudioPromptVersion;
 exports.assignStudioPromptVersion = assignStudioPromptVersion;
 const client_1 = require("@prisma/client");
 const prompt_1 = require("../application/services/prompt");
+const prompt_injection_1 = require("./prompt-injection");
 const DEFAULT_PROMPT_DEFINITIONS = [
     {
         key: "text-seo-default",
@@ -22,7 +23,7 @@ const DEFAULT_PROMPT_DEFINITIONS = [
         surface: "text_seo",
         scope: "global",
         description: "Prompt base para generación de artículos SEO listos para revisión editorial.",
-        systemTemplate: "You are a senior SEO and editorial writer. Respond in {{languageLabel}}.",
+        systemTemplate: "You are a senior SEO and editorial writer. Respond in {{languageLabel}}. " + prompt_injection_1.SOURCE_DATA_RULES,
         userTemplate: [
             "Topic: {{topicTitle}}",
             "{{topicDescriptionLine}}",
@@ -62,7 +63,7 @@ const DEFAULT_PROMPT_DEFINITIONS = [
         surface: "text_instagram",
         scope: "global",
         description: "Prompt base para captions sociales ligados al circuito editorial.",
-        systemTemplate: "You are a senior social media copywriter for Instagram. Respond in {{languageLabel}}.",
+        systemTemplate: "You are a senior social media copywriter for Instagram. Respond in {{languageLabel}}. " + prompt_injection_1.SOURCE_DATA_RULES,
         userTemplate: [
             "Topic: {{topicTitle}}",
             "{{topicDescriptionLine}}",
@@ -262,9 +263,7 @@ function jsonLine(label, value) {
 }
 function buildTextContext(input) {
     const languageLabel = input.language === "es" ? "espanol" : "english";
-    const factsBlock = input.facts.length > 0
-        ? input.facts.map((fact) => `- ${fact}`).join("\n")
-        : "- (no facts provided)";
+    const factsBlock = (0, prompt_injection_1.wrapUntrustedContent)("source-facts", input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)");
     return {
         languageLabel,
         topicTitle: input.topicTitle.trim(),

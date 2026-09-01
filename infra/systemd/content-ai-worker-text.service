@@ -12,6 +12,9 @@ EnvironmentFile=/etc/content-ai-platform/app.env
 ExecStart=/usr/bin/node /var/www/content-ai-platform/dist/scripts/start-worker-text.js
 Restart=always
 RestartSec=2
+TimeoutStopSec=30
+KillSignal=SIGTERM
+LimitNOFILE=65536
 
 [Install]
 WantedBy=multi-user.target

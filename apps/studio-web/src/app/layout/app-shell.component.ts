@@ -286,6 +286,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
       items: [
         { label: 'Overview', path: '/studio/overview', icon: 'overview' },
         { label: 'Inbox', path: '/studio/inbox', icon: 'inbox' },
+        { label: 'Editorial Engine', path: '/studio/editorial-engine', icon: 'sparkles' },
         { label: 'Editorial Plan', path: '/studio/editorial-plan', icon: 'plan' },
         { label: 'Content', path: '/studio/content', icon: 'content' },
         { label: 'Calendar', path: '/studio/calendar', icon: 'calendar' },
@@ -306,6 +307,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
         { label: 'Sources', path: '/studio/sources', icon: 'sources' },
         { label: 'Automation', path: '/studio/automation', icon: 'automation' },
         { label: 'Activity', path: '/studio/activity', icon: 'activity' },
+      { label: 'Operations', path: '/studio/operations', icon: 'operations' },
       ],
     },
   ];

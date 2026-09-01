@@ -10,6 +10,7 @@ export type NotificationCategory =
   | "generation"
   | "editorial"
   | "automation"
+  | "operations"
   | "system";
 
 export type NotificationInput = {
@@ -24,6 +25,12 @@ export type NotificationInput = {
   entityId?: string | null;
   actionUrl?: string | null;
   dedupeKey?: string | null;
+  /**
+   * Alert cooldown: when set, repeated notify() calls for the same dedupeKey
+   * inside this window are silently suppressed (the existing notification is
+   * NOT re-marked unread). Prevents operational alert spam (Phase 5).
+   */
+  dedupeWindowMs?: number | null;
 };
 
 export type NotificationView = {
@@ -94,6 +101,15 @@ export async function notify(input: NotificationInput): Promise<NotificationView
       where: { tenantId_dedupeKey: { tenantId: input.tenantId, dedupeKey: input.dedupeKey } },
     });
     if (existing) {
+      // Alert cooldown: suppress repeated alerts inside the dedupe window
+      // instead of re-surfacing the same notification every tick.
+      if (input.dedupeWindowMs) {
+        const since = Date.now() - input.dedupeWindowMs;
+        if (existing.createdAt.getTime() >= since) {
+          structuredEvent("notification.suppressed", { dedupeKey: input.dedupeKey, notificationId: existing.id });
+          return null;
+        }
+      }
       const updated = await prisma.notification.update({
         where: { id: existing.id },
         data: { ...data, readAt: null },
@@ -113,6 +129,27 @@ export async function notify(input: NotificationInput): Promise<NotificationView
     severity: created.severity,
   });
   return toView(created);
+}
+
+/**
+ * Notify the tenants affected by an operational event (queue congestion,
+ * broken sources, budget thresholds). Callers pass explicit tenant IDs so
+ * alerts are never sprayed across unrelated tenants.
+ */
+export async function notifyOperators(
+  tenantIds: string[],
+  input: Omit<NotificationInput, "tenantId">,
+): Promise<number> {
+  let delivered = 0;
+  for (const tenantId of tenantIds) {
+    try {
+      await notify({ ...input, tenantId });
+      delivered += 1;
+    } catch (error) {
+      structuredEvent("notification.operator_delivery_failed", { tenantId, error: error instanceof Error ? error.message : String(error) }, "warn");
+    }
+  }
+  return delivered;
 }
 
 export async function listNotifications(

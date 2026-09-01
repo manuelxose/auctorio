@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -30,10 +63,14 @@ const routes_editorial_1 = require("./routes-editorial");
 const routes_connections_1 = require("./routes-connections");
 const routes_connectors_1 = require("./routes-connectors");
 const routes_operations_1 = require("./routes-operations");
+const routes_phase5_ops_1 = require("./routes-phase5-ops");
 const routes_notifications_1 = require("./routes-notifications");
 const routes_events_1 = require("./routes-events");
 const routes_discovery_1 = require("./routes-discovery");
 const routes_site_intelligence_1 = require("./routes-site-intelligence");
+const routes_source_registry_1 = require("./routes-source-registry");
+const routes_intelligence_1 = require("./routes-intelligence");
+const routes_editorial_engine_1 = require("./routes-editorial-engine");
 const SITE_TYPES = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS = [
     "article",
@@ -180,26 +217,90 @@ async function serveAsset(request, reply) {
     const storageRoot = node_path_1.default.resolve((0, env_1.getEnv)("STORAGE_ROOT", "/var/www/auctorio/storage"));
     const rawPath = String(params["*"] || "").replace(/^\/+/, "");
     const absolutePath = node_path_1.default.resolve(storageRoot, rawPath);
-    if (!absolutePath.startsWith(storageRoot)) {
+    // Path-traversal guard: the resolved path must live strictly inside the
+    // storage root (relative path must not start with ".." or be absolute).
+    const relative = node_path_1.default.relative(storageRoot, absolutePath);
+    if (relative.startsWith("..") || node_path_1.default.isAbsolute(relative) || absolutePath === storageRoot) {
         return reply.code(400).send({ error: "bad_request", message: "Invalid asset path" });
     }
     try {
         const file = await node_fs_1.promises.readFile(absolutePath);
         reply.header("content-type", (0, mime_1.getContentTypeFromPath)(absolutePath));
         reply.header("cache-control", "public, max-age=86400");
+        reply.header("x-content-type-options", "nosniff");
         return reply.send(file);
     }
     catch {
         return (0, http_utils_1.notFound)(reply, "asset not found");
     }
 }
+function isLoopbackAddress(ip) {
+    return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+}
+/**
+ * Validate a tenant-supplied site baseUrl: must be a well-formed http(s) URL
+ * and, in production, must not resolve to loopback/private hosts (SSRF).
+ */
+async function validateSiteBaseUrlInput(value) {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === null || value.trim() === "") {
+        return null;
+    }
+    let parsed;
+    try {
+        parsed = new URL(value);
+    }
+    catch {
+        throw new Error("invalid baseUrl");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("baseUrl must use http or https");
+    }
+    if ((0, env_1.isProductionEnv)()) {
+        try {
+            const { validateScrapeUrl } = await Promise.resolve().then(() => __importStar(require("../infrastructure/scraping")));
+            await validateScrapeUrl(parsed);
+        }
+        catch {
+            throw new Error("baseUrl resolves to a blocked address");
+        }
+    }
+    return value;
+}
+/**
+ * Phase 5: operational health endpoints are reachable from loopback (for
+ * local monitoring) and with the ops token header; everything else gets 401.
+ * This closes unauthenticated SSRF-amplification via /health/destinations.
+ */
+function requireOpsHealthAccess(request, reply) {
+    const clientIp = request.ip ?? "";
+    if (isLoopbackAddress(clientIp)) {
+        return true;
+    }
+    const configuredToken = (0, env_1.getEnv)("OPS_HEALTH_TOKEN", "");
+    if (configuredToken && (0, http_utils_1.readSingleHeader)(request, "x-ops-health-token") === configuredToken) {
+        return true;
+    }
+    const secret = (0, http_utils_1.readSingleHeader)(request, http_utils_1.INTERNAL_SECRET_HEADER);
+    if (secret && secret === (0, http_utils_1.getInternalSharedSecret)()) {
+        return true;
+    }
+    reply.code(401).send({ error: "unauthorized", message: "health endpoints require loopback or ops token" });
+    return false;
+}
 function registerStudioRoutes(fastify) {
     (0, routes_editorial_1.registerEditorialRoutes)(fastify);
     (0, routes_connections_1.registerConnectionRoutes)(fastify);
     (0, routes_discovery_1.registerDiscoveryRoutes)(fastify);
     (0, routes_site_intelligence_1.registerSiteIntelligenceRoutes)(fastify);
+    (0, routes_source_registry_1.registerSourceRegistryRoutes)(fastify);
+    (0, routes_intelligence_1.registerIntelligenceRoutes)(fastify);
+    (0, routes_editorial_engine_1.registerEditorialEngineRoutes)(fastify);
     (0, routes_connectors_1.registerConnectorRoutes)(fastify);
     (0, routes_operations_1.registerOperationRoutes)(fastify);
+    (0, routes_phase5_ops_1.registerPhase5OpsRoutes)(fastify);
     (0, routes_notifications_1.registerNotificationRoutes)(fastify);
     (0, routes_events_1.registerEventRoutes)(fastify);
     fastify.get("/health/live", async () => ({ status: "ok" }));
@@ -215,7 +316,10 @@ function registerStudioRoutes(fastify) {
             });
         }
     });
-    fastify.get("/health/queues", async (_request, reply) => {
+    fastify.get("/health/queues", async (request, reply) => {
+        if (!requireOpsHealthAccess(request, reply)) {
+            return;
+        }
         const entries = await Promise.all(Object.entries(queues_1.QUEUE_NAMES).map(async ([key, queueName]) => {
             const queue = new bullmq_1.Queue(queueName, { connection: (0, redis_1.getRedisConnectionOptions)() });
             try {
@@ -250,7 +354,10 @@ function registerStudioRoutes(fastify) {
             queues: entries,
         });
     });
-    fastify.get("/health/destinations", async (_request, reply) => {
+    fastify.get("/health/destinations", async (request, reply) => {
+        if (!requireOpsHealthAccess(request, reply)) {
+            return;
+        }
         try {
             return reply.send({
                 status: "ok",
@@ -628,7 +735,7 @@ function registerStudioRoutes(fastify) {
                 name: body.name.trim(),
                 type: body.type,
                 locale: body.locale,
-                baseUrl: (0, http_utils_1.parseOptionalString)(body.baseUrl) ?? null,
+                baseUrl: await validateSiteBaseUrlInput((0, http_utils_1.parseOptionalString)(body.baseUrl)),
                 brandVoice: (0, http_utils_1.parseJsonObjectField)(body.brandVoice, "brandVoice") ?? null,
                 seoRules: (0, http_utils_1.parseJsonObjectField)(body.seoRules, "seoRules") ?? null,
                 taxonomyMap: (0, http_utils_1.parseJsonObjectField)(body.taxonomyMap, "taxonomyMap") ?? null,
@@ -673,7 +780,7 @@ function registerStudioRoutes(fastify) {
                 name: body.name?.trim(),
                 type: body.type,
                 locale: body.locale?.trim(),
-                baseUrl: (0, http_utils_1.parseOptionalString)(body.baseUrl),
+                baseUrl: await validateSiteBaseUrlInput((0, http_utils_1.parseOptionalString)(body.baseUrl)),
                 brandVoice: (0, http_utils_1.parseJsonObjectField)(body.brandVoice, "brandVoice"),
                 seoRules: (0, http_utils_1.parseJsonObjectField)(body.seoRules, "seoRules"),
                 taxonomyMap: (0, http_utils_1.parseJsonObjectField)(body.taxonomyMap, "taxonomyMap"),
@@ -1481,6 +1588,16 @@ function registerStudioRoutes(fastify) {
             return (0, http_utils_1.badRequest)(reply, "issuer is required");
         }
         try {
+            // SSRF guard: the issuer URL is tenant-controlled and must never
+            // resolve to loopback/private addresses (Phase 5).
+            const { validateScrapeUrl } = await Promise.resolve().then(() => __importStar(require("../infrastructure/scraping")));
+            const issuerUrl = new URL(candidate.issuer);
+            try {
+                await validateScrapeUrl(issuerUrl);
+            }
+            catch {
+                return (0, http_utils_1.badRequest)(reply, "issuer URL points to a blocked address");
+            }
             const wellKnownUrl = new URL("/.well-known/openid-configuration", candidate.issuer.endsWith("/") ? candidate.issuer : `${candidate.issuer}/`);
             const response = await fetch(wellKnownUrl, {
                 headers: {

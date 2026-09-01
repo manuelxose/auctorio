@@ -11,6 +11,8 @@ import { saveImageAsset } from "../storage/local-storage";
 import { buildImageDerivatives } from "../storage/image-processing";
 import { syncImageResultToStudio } from "../../studio/orchestration";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
+import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
+import { evaluateAiSpend, recordAiSpend } from "../../studio/cost-budgets";
 
 type ImageJobData = {
   jobId: string;
@@ -89,6 +91,17 @@ export async function runImageWorker() {
         throw new Error("topic_not_found");
       }
 
+      // Cost control gate: never exceed hard AI budget limits.
+      const budget = await evaluateAiSpend({
+        tenantId: data.tenantId,
+        siteId: typeof data.options?.site_id === "string" ? data.options.site_id : null,
+        contentType: "image_generation",
+        kind: "image_generation",
+      });
+      if (!budget.allowed) {
+        throw new Error(`budget_exceeded: ${budget.reason}`);
+      }
+
       let textOutput: string | null = null;
       if (data.textId) {
         const text = await prisma.contentText.findFirst({
@@ -154,6 +167,16 @@ export async function runImageWorker() {
 
       const parsed = parseSize(size);
       const costUsd = computeImageCost();
+
+      await recordAiSpend({
+        tenantId: data.tenantId,
+        siteId: typeof data.options?.site_id === "string" ? data.options.site_id : null,
+        contentType: "image_generation",
+        kind: "image_generation",
+        provider: result.provider,
+        model: result.model,
+        costUsd,
+      });
 
       const width = processed.width || (parsed.width ?? null);
       const height = processed.height || (parsed.height ?? null);
@@ -221,6 +244,7 @@ export async function runImageWorker() {
     },
     {
       connection: getRedisConnectionOptions(),
+      ...bullWorkerOptions("image", 1),
     },
   );
 
@@ -245,7 +269,7 @@ export async function runImageWorker() {
         where: { id: data.contentImageId },
         data: {
           status: retryable ? "retryable" : "failed",
-          error: err.message,
+          error: err.message.slice(0, 500),
         },
       });
       if (!retryable && data.tenantId) {
@@ -259,5 +283,6 @@ export async function runImageWorker() {
     }
   });
 
+  registerBullWorkerShutdown(worker, "image");
   console.log("[worker:image] started", { queue: QUEUE_NAMES.image });
 }

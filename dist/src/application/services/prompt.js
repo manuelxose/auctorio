@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.buildTextPrompt = buildTextPrompt;
 exports.buildImagePrompt = buildImagePrompt;
+const prompt_injection_1 = require("../../studio/prompt-injection");
 function buildTextPrompt(input) {
     const languageLabel = input.language === "es" ? "espanol" : "english";
     const tone = typeof input.options?.tone === "string" ? input.options.tone : undefined;
@@ -132,6 +133,7 @@ function buildTextPrompt(input) {
         "Short paragraphs. No keyword stuffing. No invented statistics, quotes or prices. No generic AI filler phrases.");
     const systemPrompt = goal === "news_article"
         ? `You are a senior newsroom editor and original writer. Respond in ${languageLabel}.
+${prompt_injection_1.SOURCE_DATA_RULES}
 Strict rules:
 - Preserve factual accuracy: never fabricate facts, quotes, statistics or names.
 - Only use facts present in the provided source material.
@@ -143,9 +145,11 @@ Strict rules:
 - Use proper H2 headings.
 - Follow the site tone and SEO rules when provided.`
         : input.type === "seo"
-            ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}`
-            : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.`;
-    const facts = input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)";
+            ? `You are a senior SEO and editorial writer. Respond in ${languageLabel}.${siteType === "guiatv" ? " You write for a TV programming and streaming guide destination." : ""}
+${prompt_injection_1.SOURCE_DATA_RULES}`
+            : `You are a senior social media copywriter for Instagram. Respond in ${languageLabel}.
+${prompt_injection_1.SOURCE_DATA_RULES}`;
+    const facts = (0, prompt_injection_1.wrapUntrustedContent)("source-facts", input.facts.length > 0 ? input.facts.map((fact) => `- ${fact}`).join("\n") : "- (no facts provided)");
     const newsInstructions = goal === "news_article"
         ? [
             "Originality requirement: do not reuse the source sentence structure or phrasing. The article must read as an original piece, not a rewrite.",

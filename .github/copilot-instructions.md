@@ -7,3 +7,7 @@ Default behavior:
 - Use one of these sizes unless the task demands a different supported aspect ratio: `1024x576`, `1024x768`, `768x1024`, `576x1024`, `512x512`.
 - Save generated images under the workspace-root `generated-assets/` folder first, then also publish to the final app asset path when the image is adopted.
 - Never expose, duplicate, or hardcode the SiliconFlow API key in tracked files, prompts, logs, or responses.
+
+<!-- BEGIN AGENTIC-ENGINEERING-PLATFORM -->
+Use repository evidence before assumptions. When `graphify-out/graph.json` exists, query Graphify before broad exploration; read only the impacted source files. For non-trivial work: understand → graph discovery → plan → implement narrowly → test → review → verify. Preserve unrelated behavior, never hardcode secrets, and report only executed validation. For UI work verify responsive behavior, accessibility, and interaction states.
+<!-- END AGENTIC-ENGINEERING-PLATFORM -->

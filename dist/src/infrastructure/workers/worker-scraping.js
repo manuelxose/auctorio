@@ -10,6 +10,7 @@ const redis_1 = require("../queue/redis");
 const jobs_1 = require("../db/jobs");
 const prisma_1 = require("../db/prisma");
 const scraping_1 = require("../scraping");
+const worker_runtime_1 = require("./worker-runtime");
 async function runScrapingWorker() {
     const redisUrl = (0, env_1.getEnv)("REDIS_URL", "");
     if (!redisUrl) {
@@ -59,6 +60,7 @@ async function runScrapingWorker() {
         return { created: facts.length };
     }, {
         connection: (0, redis_1.getRedisConnectionOptions)(),
+        ...(0, worker_runtime_1.bullWorkerOptions)("scraping", 2),
     });
     worker.on("completed", async (job) => {
         if (!job?.id) {
@@ -72,5 +74,6 @@ async function runScrapingWorker() {
         }
         await (0, jobs_1.markJobFailed)(job.id.toString(), err.message);
     });
+    (0, worker_runtime_1.registerBullWorkerShutdown)(worker, "scraping");
     console.log("[worker:scraping] started", { queue: queues_1.QUEUE_NAMES.scraping });
 }

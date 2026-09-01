@@ -74,6 +74,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Inbox', title: 'Inbox' } },
       },
       {
+        path: 'editorial-engine',
+        loadComponent: () => import('./pages/editorial-engine-page.component').then((m) => m.EditorialEnginePageComponent),
+        data: { studioMeta: { section: 'Editorial Engine', title: 'Editorial Engine' } },
+      },
+      {
         path: 'sources',
         loadComponent: () => import('./pages/sources-page.component').then((m) => m.SourcesPageComponent),
         data: { studioMeta: { section: 'Sources', title: 'Sources' } },
@@ -112,6 +117,11 @@ export const routes: Routes = [
         path: 'activity',
         loadComponent: () => import('./pages/activity-page.component').then((m) => m.ActivityPageComponent),
         data: { studioMeta: { section: 'Activity', title: 'Background jobs' } },
+      },
+      {
+        path: 'operations',
+        loadComponent: () => import('./pages/operations-page.component').then((m) => m.OperationsPageComponent),
+        data: { studioMeta: { section: 'Operations', title: 'System health' } },
       },
       {
         path: 'notifications',

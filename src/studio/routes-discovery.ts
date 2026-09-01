@@ -27,6 +27,7 @@ import {
   unblockDomain,
 } from "./source-quality";
 import { webIntelligenceAvailability } from "./web-intelligence";
+import { getDiscoveryMetrics } from "./discovery-run";
 
 const prisma = getPrismaClient();
 
@@ -244,5 +245,19 @@ export function registerDiscoveryRoutes(fastify: FastifyInstance) {
         maxDiscoveryCostPerDay: Number(config.maxDiscoveryCostPerDay ?? 0),
       },
     });
+  });
+
+  // ── Operational metrics (discovery pipeline)
+
+  fastify.get("/v2/discovery/metrics", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const query = request.query as { windowHours?: string };
+    const windowHours = query.windowHours ? Number.parseInt(query.windowHours, 10) : 24;
+    const safeWindow = Number.isFinite(windowHours) && windowHours > 0 && windowHours <= 24 * 30 ? windowHours : 24;
+    const metrics = await getDiscoveryMetrics(context.tenantId, safeWindow);
+    return reply.send({ ...metrics, generatedAt: new Date().toISOString() });
   });
 }

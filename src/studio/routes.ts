@@ -8,7 +8,7 @@ import Redis from "ioredis";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
-import { getEnv } from "../shared/utils/env";
+import { getEnv, isProductionEnv } from "../shared/utils/env";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { writeAudit } from "./audit";
 import {
@@ -119,6 +119,8 @@ import {
   requireInternalSecret,
   requireStudioContext,
   requireStudioPermission,
+  getInternalSharedSecret,
+  INTERNAL_SECRET_HEADER,
   STUDIO_TENANT_HEADER,
   STUDIO_USER_HEADER,
   STUDIO_SESSION_HEADER,
@@ -140,10 +142,14 @@ import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
 import { registerConnectorRoutes } from "./routes-connectors";
 import { registerOperationRoutes } from "./routes-operations";
+import { registerPhase5OpsRoutes } from "./routes-phase5-ops";
 import { registerNotificationRoutes } from "./routes-notifications";
 import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
 import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
+import { registerSourceRegistryRoutes } from "./routes-source-registry";
+import { registerIntelligenceRoutes } from "./routes-intelligence";
+import { registerEditorialEngineRoutes } from "./routes-editorial-engine";
 
 const SITE_TYPES: SiteType[] = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS: ProjectGoal[] = [
@@ -320,7 +326,10 @@ async function serveAsset(request: FastifyRequest, reply: FastifyReply) {
   const rawPath = String(params["*"] || "").replace(/^\/+/, "");
   const absolutePath = path.resolve(storageRoot, rawPath);
 
-  if (!absolutePath.startsWith(storageRoot)) {
+  // Path-traversal guard: the resolved path must live strictly inside the
+  // storage root (relative path must not start with ".." or be absolute).
+  const relative = path.relative(storageRoot, absolutePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || absolutePath === storageRoot) {
     return reply.code(400).send({ error: "bad_request", message: "Invalid asset path" });
   }
 
@@ -328,10 +337,68 @@ async function serveAsset(request: FastifyRequest, reply: FastifyReply) {
     const file = await fs.readFile(absolutePath);
     reply.header("content-type", getContentTypeFromPath(absolutePath));
     reply.header("cache-control", "public, max-age=86400");
+    reply.header("x-content-type-options", "nosniff");
     return reply.send(file);
   } catch {
     return notFound(reply, "asset not found");
   }
+}
+
+function isLoopbackAddress(ip: string): boolean {
+  return ip === "127.0.0.1" || ip === "::1" || ip === "::ffff:127.0.0.1";
+}
+
+/**
+ * Validate a tenant-supplied site baseUrl: must be a well-formed http(s) URL
+ * and, in production, must not resolve to loopback/private hosts (SSRF).
+ */
+async function validateSiteBaseUrlInput(value: string | null | undefined): Promise<string | null | undefined> {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || value.trim() === "") {
+    return null;
+  }
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error("invalid baseUrl");
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error("baseUrl must use http or https");
+  }
+  if (isProductionEnv()) {
+    try {
+      const { validateScrapeUrl } = await import("../infrastructure/scraping");
+      await validateScrapeUrl(parsed);
+    } catch {
+      throw new Error("baseUrl resolves to a blocked address");
+    }
+  }
+  return value;
+}
+
+/**
+ * Phase 5: operational health endpoints are reachable from loopback (for
+ * local monitoring) and with the ops token header; everything else gets 401.
+ * This closes unauthenticated SSRF-amplification via /health/destinations.
+ */
+function requireOpsHealthAccess(request: FastifyRequest, reply: FastifyReply): boolean {
+  const clientIp = request.ip ?? "";
+  if (isLoopbackAddress(clientIp)) {
+    return true;
+  }
+  const configuredToken = getEnv("OPS_HEALTH_TOKEN", "");
+  if (configuredToken && readSingleHeader(request, "x-ops-health-token") === configuredToken) {
+    return true;
+  }
+  const secret = readSingleHeader(request, INTERNAL_SECRET_HEADER);
+  if (secret && secret === getInternalSharedSecret()) {
+    return true;
+  }
+  reply.code(401).send({ error: "unauthorized", message: "health endpoints require loopback or ops token" });
+  return false;
 }
 
 export function registerStudioRoutes(fastify: FastifyInstance) {
@@ -339,8 +406,12 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerConnectionRoutes(fastify);
   registerDiscoveryRoutes(fastify);
   registerSiteIntelligenceRoutes(fastify);
+  registerSourceRegistryRoutes(fastify);
+  registerIntelligenceRoutes(fastify);
+  registerEditorialEngineRoutes(fastify);
   registerConnectorRoutes(fastify);
   registerOperationRoutes(fastify);
+  registerPhase5OpsRoutes(fastify);
   registerNotificationRoutes(fastify);
   registerEventRoutes(fastify);
 
@@ -358,7 +429,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
   });
 
-  fastify.get("/health/queues", async (_request, reply) => {
+  fastify.get("/health/queues", async (request, reply) => {
+    if (!requireOpsHealthAccess(request, reply)) {
+      return;
+    }
     const entries = await Promise.all(
       Object.entries(QUEUE_NAMES).map(async ([key, queueName]) => {
         const queue = new Queue(queueName, { connection: getRedisConnectionOptions() });
@@ -394,7 +468,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     });
   });
 
-  fastify.get("/health/destinations", async (_request, reply) => {
+  fastify.get("/health/destinations", async (request, reply) => {
+    if (!requireOpsHealthAccess(request, reply)) {
+      return;
+    }
     try {
       return reply.send({
         status: "ok",
@@ -856,7 +933,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         name: body.name.trim(),
         type: body.type,
         locale: body.locale,
-        baseUrl: parseOptionalString(body.baseUrl) ?? null,
+        baseUrl: await validateSiteBaseUrlInput(parseOptionalString(body.baseUrl)),
         brandVoice: parseJsonObjectField(body.brandVoice, "brandVoice") ?? null,
         seoRules: parseJsonObjectField(body.seoRules, "seoRules") ?? null,
         taxonomyMap: parseJsonObjectField(body.taxonomyMap, "taxonomyMap") ?? null,
@@ -909,7 +986,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         name: body.name?.trim(),
         type: body.type,
         locale: body.locale?.trim(),
-        baseUrl: parseOptionalString(body.baseUrl),
+        baseUrl: await validateSiteBaseUrlInput(parseOptionalString(body.baseUrl)),
         brandVoice: parseJsonObjectField(body.brandVoice, "brandVoice"),
         seoRules: parseJsonObjectField(body.seoRules, "seoRules"),
         taxonomyMap: parseJsonObjectField(body.taxonomyMap, "taxonomyMap"),
@@ -1903,6 +1980,16 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     try {
+      // SSRF guard: the issuer URL is tenant-controlled and must never
+      // resolve to loopback/private addresses (Phase 5).
+      const { validateScrapeUrl } = await import("../infrastructure/scraping");
+      const issuerUrl = new URL(candidate.issuer);
+      try {
+        await validateScrapeUrl(issuerUrl);
+      } catch {
+        return badRequest(reply, "issuer URL points to a blocked address");
+      }
+
       const wellKnownUrl = new URL(
         "/.well-known/openid-configuration",
         candidate.issuer.endsWith("/") ? candidate.issuer : `${candidate.issuer}/`,

@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { extractJsonObject } from "./social";
+import { SOURCE_DATA_RULES, wrapUntrustedContent } from "./prompt-injection";
 
 const prisma = getPrismaClient();
 
@@ -93,8 +94,20 @@ export async function gatherEditorialContext(tenantId: string, siteId: string | 
 
 function buildPlanPrompt(context: EditorialDiscoveryContext): { systemPrompt: string; userPrompt: string } {
   const locale = context.language === "en" ? "English" : "Spanish";
+  const dataBlock = wrapUntrustedContent(
+    "editorial-context",
+    [
+      `Publication: ${context.siteName} (${context.siteKey}), locale ${context.locale}`,
+      `Known topics: ${context.topics.join(", ") || "none recorded"}`,
+      `Priority topics: ${context.priorityTopics.join(", ") || "none"}`,
+      `Excluded subjects: ${context.excludedCategories.join(", ") || "none"}`,
+      `Existing sources: ${context.existingSources.slice(0, 15).join(", ") || "none"}`,
+      `Recently covered (avoid duplicates): ${context.recentTitles.slice(0, 15).join(" | ") || "none"}`,
+    ].join("\n"),
+  );
   return {
     systemPrompt: `You are the editorial discovery planner for ${context.siteName}, an editorial publication. You decide what the live web should be monitored for, and produce several independent, concrete web-search queries.
+${SOURCE_DATA_RULES}
 You return ONLY valid JSON with exactly this shape:
 {
   "queries": [{"queryText": string, "category": "breaking"|"latest"|"official_announcement"|"primary_source"|"industry"|"local"|"expert"|"followup"}],
@@ -113,12 +126,7 @@ Rules:
 - Exclude subjects listed as excluded. Do not repeat coverage already produced.
 - Respect the publication niche. Prefer queries that surface primary sources and official announcements.`,
     userPrompt: [
-      `Publication: ${context.siteName} (${context.siteKey}), locale ${context.locale}`,
-      `Known topics: ${context.topics.join(", ") || "none recorded"}`,
-      `Priority topics: ${context.priorityTopics.join(", ") || "none"}`,
-      `Excluded subjects: ${context.excludedCategories.join(", ") || "none"}`,
-      `Existing sources: ${context.existingSources.slice(0, 15).join(", ") || "none"}`,
-      `Recently covered (avoid duplicates): ${context.recentTitles.slice(0, 15).join(" | ") || "none"}`,
+      dataBlock,
       ``,
       `Produce the discovery plan JSON now.`,
     ].join("\n"),

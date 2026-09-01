@@ -194,6 +194,8 @@ enum ContentSourceType {
   htmllist
   imdb
   manual
+  graphql
+  webhook
 }
 
 enum SourceItemStatus {
@@ -345,6 +347,10 @@ model Tenant {
   contentSources                 ContentSource[]
   sourceItems                    SourceItem[]
   storyClusters                  StoryCluster[]
+  sourceHealth                   SourceHealth[]
+  discoveryRuns                  DiscoveryRun[]
+  sourcePackImports              SourcePackImport[]
+  enrichmentProviders            EnrichmentProvider[]
   socialContents                 SocialContent[]
   publishingAccounts             PublishingAccount[]
   publications                   Publication[]
@@ -376,6 +382,17 @@ model Tenant {
   operations                     Operation[]
   notifications                  Notification[]
   notificationPreferences        NotificationPreference[]
+  entities                       Entity[]
+  sourceItemEntities             SourceItemEntity[]
+  storyFacts                     StoryFact[]
+  providerCacheEntries           ProviderCacheEntry[]
+  providerEnrichments            ProviderEnrichment[]
+  siteEditorialProfiles          SiteEditorialProfile[]
+  muteRules                      MuteRule[]
+  intelligenceSettings           IntelligenceSettings?
+  articleGenerations             ArticleGeneration[]
+  costBudgets                    CostBudget[]
+  aiSpendEvents                  AiSpendEvent[]
 
   @@map("tenants")
 }
@@ -539,31 +556,36 @@ model Site {
   seoRules                 Json?    @map("seo_rules")
   taxonomyMap              Json?    @map("taxonomy_map")
   publishingCredentialsRef String?  @map("publishing_credentials_ref")
+  siteValueConfig          Json?    @map("site_value_config")
   createdAt                DateTime @default(now()) @map("created_at")
   updatedAt                DateTime @updatedAt @map("updated_at")
 
-  tenant              Tenant                   @relation(fields: [tenantId], references: [id])
-  projects            ContentProject[]
-  publicationJobs     PublicationJob[]
-  assetVariants       AssetVariant[]
-  promptPresets       StudioPromptPreset[]
-  promptAssignments   StudioPromptAssignment[]
-  contentSources      ContentSource[]
-  publishingAccounts  PublishingAccount[]
-  automationPolicies  AutomationPolicy[]
-  publications        Publication[]
-  editorialPlans      EditorialPlan[]
-  editorialPlanItems  EditorialPlanItem[]
-  sitemaps            SiteSitemap[]
-  indexedPages        SiteIndexedPage[]
-  topicClusters       SiteTopicCluster[]
-  entities            SiteEntity[]
-  intelligenceProfile SiteIntelligenceProfile?
-  searchTargets       SearchTarget[]
-  SiteInternalLink    SiteInternalLink[]
+  tenant                 Tenant                   @relation(fields: [tenantId], references: [id])
+  projects               ContentProject[]
+  publicationJobs        PublicationJob[]
+  assetVariants          AssetVariant[]
+  promptPresets          StudioPromptPreset[]
+  promptAssignments      StudioPromptAssignment[]
+  contentSources         ContentSource[]
+  publishingAccounts     PublishingAccount[]
+  automationPolicies     AutomationPolicy[]
+  publications           Publication[]
+  editorialPlans         EditorialPlan[]
+  editorialPlanItems     EditorialPlanItem[]
+  sitemaps               SiteSitemap[]
+  indexedPages           SiteIndexedPage[]
+  topicClusters          SiteTopicCluster[]
+  entities               SiteEntity[]
+  intelligenceProfile    SiteIntelligenceProfile?
+  editorialProfile       SiteEditorialProfile?
+  searchTargets          SearchTarget[]
+  SiteInternalLink       SiteInternalLink[]
   connectorInstallations ConnectorInstallation[]
-  operations          Operation[]
-  notifications       Notification[]
+  operations             Operation[]
+  notifications          Notification[]
+  articleGenerations     ArticleGeneration[]
+  costBudgets            CostBudget[]
+  aiSpendEvents          AiSpendEvent[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -600,6 +622,7 @@ model ContentProject {
   cluster            StoryCluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
   campaign           Campaign?           @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   editorialBrief     EditorialBrief?     @relation(fields: [briefId], references: [id], onDelete: SetNull)
+  articleGenerations ArticleGeneration[]
   versions           ContentVersion[]
   derivatives        ContentDerivative[]
   publicationJobs    PublicationJob[]
@@ -644,6 +667,7 @@ model ContentVersion {
   publicationJobs      PublicationJob[]
   publications         Publication[]
   socialContents       SocialContent[]
+  articleGenerations   ArticleGeneration[]
   approvedByStudioUser StudioUser?         @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, versionNumber])
@@ -1016,13 +1040,19 @@ model ContentSource {
   name                   String
   type                   ContentSourceType
   url                    String?
+  domain                 String?
+  endpoint               String?
   enabled                Boolean           @default(true)
   priority               Int               @default(0)
   trustScore             Float             @default(0.5) @map("trust_score")
+  authorityScore         Float             @default(0.5) @map("authority_score")
+  freshnessWeight        Float             @default(1.0) @map("freshness_weight")
   language               String            @default("es")
   country                String?
+  timezone               String?
   categories             Json?
   tags                   Json?
+  credentialsRef         String?           @map("credentials_ref")
   refreshIntervalMinutes Int               @default(30) @map("refresh_interval_minutes")
   lastFetchedAt          DateTime?         @map("last_fetched_at")
   lastSuccessAt          DateTime?         @map("last_success_at")
@@ -1030,84 +1060,532 @@ model ContentSource {
   qualityScore           Float?            @map("quality_score")
   qualityTier            String?           @map("quality_tier")
   lastDiscoveryAt        DateTime?         @map("last_discovery_at")
+  rateLimitPolicy        Json?             @map("rate_limit_policy")
+  robotsPolicy           Json?             @map("robots_policy")
+  extractionPolicy       Json?             @map("extraction_policy")
+  enrichmentPolicy       Json?             @map("enrichment_policy")
+  copyrightPolicy        Json?             @map("copyright_policy")
   configuration          Json?
+  packKey                String?           @map("pack_key")
+  verifiedAt             DateTime?         @map("verified_at")
+  verificationStatus     String?           @map("verification_status")
+  discoveryMethod        String?           @map("discovery_method")
+  restrictionsNote       String?           @map("restrictions_note")
+  archivedAt             DateTime?         @map("archived_at")
+  lastError              String?           @map("last_error")
+  lastErrorAt            DateTime?         @map("last_error_at")
+  lastEtag               String?           @map("last_etag")
+  lastModifiedHeader     String?           @map("last_modified_header")
+  lastHttpStatus         Int?              @map("last_http_status")
+  notModifiedCount       Int               @default(0) @map("not_modified_count")
   createdAt              DateTime          @default(now()) @map("created_at")
   updatedAt              DateTime          @updatedAt @map("updated_at")
 
-  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site   Site?        @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  items  SourceItem[]
+  tenant             Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site               Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  items              SourceItem[]
+  health             SourceHealth?
+  runs               DiscoveryRun[]
+  primaryForClusters StoryCluster[]
 
   @@unique([tenantId, name])
   @@index([tenantId, enabled, lastFetchedAt])
+  @@index([tenantId, packKey])
   @@map("content_sources")
 }
 
 model SourceItem {
-  id               String           @id @default(uuid()) @db.Uuid
-  tenantId         String           @map("tenant_id") @db.Uuid
-  sourceId         String           @map("source_id") @db.Uuid
-  clusterId        String?          @map("cluster_id") @db.Uuid
-  externalId       String           @map("external_id")
-  canonicalUrl     String?          @map("canonical_url")
-  sourceUrl        String?          @map("source_url")
-  title            String
-  description      String?          @db.Text
-  rawText          String?          @map("raw_text") @db.Text
-  cleanedText      String?          @map("cleaned_text") @db.Text
-  author           String?
-  publishedAt      DateTime?        @map("published_at")
-  discoveredAt     DateTime         @default(now()) @map("discovered_at")
-  updatedAt        DateTime         @updatedAt @map("updated_at")
-  sourceImageUrls  Json?            @map("source_image_urls")
-  language         String?
-  categories       Json?
-  entities         Json?
-  contentHash      String           @map("content_hash")
-  semanticHash     String?          @map("semantic_hash")
-  metadata         Json?
-  processingStatus SourceItemStatus @default(discovered) @map("processing_status")
-  score            Float?
-  scoreExplanation Json?            @map("score_explanation")
-  createdAt        DateTime         @default(now()) @map("created_at")
+  id                  String           @id @default(uuid()) @db.Uuid
+  tenantId            String           @map("tenant_id") @db.Uuid
+  sourceId            String           @map("source_id") @db.Uuid
+  clusterId           String?          @map("cluster_id") @db.Uuid
+  discoveryRunId      String?          @map("discovery_run_id") @db.Uuid
+  externalId          String           @map("external_id")
+  canonicalUrl        String?          @map("canonical_url")
+  canonicalUrlHash    String?          @map("canonical_url_hash")
+  sourceUrl           String?          @map("source_url")
+  title               String
+  normalizedTitleHash String?          @map("normalized_title_hash")
+  description         String?          @db.Text
+  rawText             String?          @map("raw_text") @db.Text
+  cleanedText         String?          @map("cleaned_text") @db.Text
+  author              String?
+  publishedAt         DateTime?        @map("published_at")
+  modifiedAt          DateTime?        @map("modified_at")
+  discoveredAt        DateTime         @default(now()) @map("discovered_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  sourceImageUrls     Json?            @map("source_image_urls")
+  language            String?
+  categories          Json?
+  entities            Json?
+  contentHash         String           @map("content_hash")
+  semanticHash        String?          @map("semantic_hash")
+  metadata            Json?
+  processingStatus    SourceItemStatus @default(discovered) @map("processing_status")
+  extractionStatus    String           @default("discovered") @map("extraction_status")
+  confidence          Float?
+  attribution         Json?
+  score               Float?
+  scoreExplanation    Json?            @map("score_explanation")
+  intelligenceProcessedAt DateTime?    @map("intelligence_processed_at")
+  createdAt           DateTime         @default(now()) @map("created_at")
 
   tenant             Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   source             ContentSource       @relation(fields: [sourceId], references: [id], onDelete: Cascade)
   cluster            StoryCluster?       @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  discoveryRun       DiscoveryRun?       @relation(fields: [discoveryRunId], references: [id], onDelete: SetNull)
   projects           ContentProject[]
   editorialPlanItems EditorialPlanItem[]
   webRetrievals      WebRetrieval[]
+  entityLinks        SourceItemEntity[]
+  facts              StoryFact[]
 
   @@unique([tenantId, sourceId, externalId])
-  @@unique([tenantId, contentHash])
+  @@index([tenantId, contentHash])
+  @@index([tenantId, canonicalUrlHash])
+  @@index([tenantId, normalizedTitleHash])
+  @@index([tenantId, publishedAt])
   @@index([tenantId, processingStatus, discoveredAt])
+  @@index([tenantId, intelligenceProcessedAt])
   @@index([tenantId, clusterId])
   @@map("source_items")
 }
 
 model StoryCluster {
-  id           String             @id @default(uuid()) @db.Uuid
-  tenantId     String             @map("tenant_id") @db.Uuid
-  primaryTopic String?            @map("primary_topic")
-  headline     String?
-  summary      String?            @db.Text
-  firstSeenAt  DateTime           @default(now()) @map("first_seen_at")
-  lastSeenAt   DateTime           @default(now()) @map("last_seen_at")
-  score        Float?
-  status       StoryClusterStatus @default(open)
-  sourceCount  Int                @default(0) @map("source_count")
-  updateCount  Int                @default(0) @map("update_count")
-  lastUpdateAt DateTime?          @map("last_update_at")
-  metadata     Json?
-  createdAt    DateTime           @default(now()) @map("created_at")
-  updatedAt    DateTime           @updatedAt @map("updated_at")
+  id                String             @id @default(uuid()) @db.Uuid
+  tenantId          String             @map("tenant_id") @db.Uuid
+  primarySourceId   String?            @map("primary_source_id") @db.Uuid
+  primaryTopic      String?            @map("primary_topic")
+  headline          String?
+  summary           String?            @db.Text
+  firstSeenAt       DateTime           @default(now()) @map("first_seen_at")
+  lastSeenAt        DateTime           @default(now()) @map("last_seen_at")
+  score             Float?
+  status            StoryClusterStatus @default(open)
+  sourceCount       Int                @default(0) @map("source_count")
+  updateCount       Int                @default(0) @map("update_count")
+  lastUpdateAt      DateTime?          @map("last_update_at")
+  entityCandidates  Json?              @map("entity_candidates")
+  categories        Json?
+  languages         Json?
+  confidence        Float?
+  freshnessScore    Float?             @map("freshness_score")
+  authorityScore    Float?             @map("authority_score")
+  relevanceScore    Float?             @map("relevance_score")
+  editorialValue    Float?             @map("editorial_value")
+  verificationState String             @default("unverified") @map("verification_state")
+  verificationDetail Json?             @map("verification_detail")
+  sourceDiversity   Int                @default(0) @map("source_diversity")
+  diversityDetail   Json?              @map("diversity_detail")
+  candidateScore    Float?             @map("candidate_score")
+  scoreComponents   Json?              @map("score_components")
+  siteFitScore      Float?             @map("site_fit_score")
+  contentGapScore   Float?             @map("content_gap_score")
+  reasonSelected    Json?              @map("reason_selected")
+  enrichedAt        DateTime?          @map("enriched_at")
+  metadata          Json?
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  items    SourceItem[]
-  projects ContentProject[]
+  tenant        Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  primarySource ContentSource?   @relation(fields: [primarySourceId], references: [id], onDelete: SetNull)
+  items         SourceItem[]
+  projects      ContentProject[]
+  facts         StoryFact[]
+  articleGenerations ArticleGeneration[]
 
   @@index([tenantId, status, lastSeenAt])
+  @@index([tenantId, candidateScore])
   @@map("story_clusters")
+}
+
+/// Operational health of a ContentSource. One row per source, updated in place
+/// by the discovery pipeline. Never deleted manually; cascade on source delete.
+model SourceHealth {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  sourceId          String    @map("source_id") @db.Uuid
+  healthStatus      String    @default("unknown") @map("health_status")
+  lastHttpStatus    Int?      @map("last_http_status")
+  httpStatusCounts  Json?     @map("http_status_counts")
+  fetchLatencyMs    Int?      @map("fetch_latency_ms")
+  totalFetches      Int       @default(0) @map("total_fetches")
+  successfulFetches Int       @default(0) @map("successful_fetches")
+  failedFetches     Int       @default(0) @map("failed_fetches")
+  parseFailures     Int       @default(0) @map("parse_failures")
+  emptyFeeds        Int       @default(0) @map("empty_feeds")
+  itemsDiscovered   Int       @default(0) @map("items_discovered")
+  duplicateRate     Float?    @map("duplicate_rate")
+  lastNewItemAt     DateTime? @map("last_new_item_at")
+  rateLimitEvents   Int       @default(0) @map("rate_limit_events")
+  notModifiedFetches Int      @default(0) @map("not_modified_fetches")
+  lastError         String?   @map("last_error")
+  lastErrorAt       DateTime? @map("last_error_at")
+  circuitState      String    @default("closed") @map("circuit_state")
+  circuitOpenedAt   DateTime? @map("circuit_opened_at")
+  lastHealthCheckAt DateTime? @map("last_health_check_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source ContentSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceId])
+  @@index([tenantId, healthStatus])
+  @@map("source_health")
+}
+
+/// One row per discovery run (manual fetch or worker tick) for tracing and
+/// operational metrics: run → source → adapter → items → clusters.
+model DiscoveryRun {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  sourceId        String?   @map("source_id") @db.Uuid
+  runKey          String    @map("run_key")
+  adapterType     String?   @map("adapter_type")
+  status          String    @default("running")
+  startedAt       DateTime  @default(now()) @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+  durationMs      Int?      @map("duration_ms")
+  itemsFound      Int       @default(0) @map("items_found")
+  itemsCreated    Int       @default(0) @map("items_created")
+  itemsDuplicated Int       @default(0) @map("items_duplicated")
+  clustersCreated Int       @default(0) @map("clusters_created")
+  parseErrors     Int       @default(0) @map("parse_errors")
+  sourceFailures  Int       @default(0) @map("source_failures")
+  errorMessage    String?   @map("error_message")
+  metrics         Json?
+  costCounters    Json?     @map("cost_counters")
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  source ContentSource? @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  items  SourceItem[]
+
+  @@index([tenantId, startedAt])
+  @@index([runKey])
+  @@map("discovery_runs")
+}
+
+/// Bootstrap source packs (e.g. `movie-tv-en`). Definitions live in code;
+/// this table records which packs exist for the Studio catalog. ContentSource
+/// rows imported from a pack carry `packKey` for provenance.
+model SourcePack {
+  id          String    @id @default(uuid()) @db.Uuid
+  key         String    @unique
+  name        String
+  description String?
+  category    String?
+  language    String?
+  country     String?
+  sourceCount Int       @default(0)
+  optional    Boolean   @default(true)
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@map("source_packs")
+}
+
+/// Import run of a source pack into a tenant. The database (ContentSource) is
+/// the runtime source of truth; packs are only bootstrap configuration.
+model SourcePackImport {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  packKey          String    @map("pack_key")
+  status           String    @default("running")
+  importedCount    Int       @default(0) @map("imported_count")
+  skippedCount     Int       @default(0) @map("skipped_count")
+  failedCount      Int       @default(0) @map("failed_count")
+  createdSourceIds Json?     @map("created_source_ids")
+  log              Json?
+  importedAt       DateTime  @default(now()) @map("imported_at")
+  importedByUserId String?   @map("imported_by_user_id") @db.Uuid
+  finishedAt       DateTime? @map("finished_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, packKey])
+  @@map("source_pack_imports")
+}
+
+/// Structured-data enrichment provider (TMDB, OMDb, YouTube Data API, IMDb
+/// official API, future providers). Independent from editorial ContentSources:
+/// providers enrich, sources discover. Credentials are server-side secret
+/// references (env var names) — API keys are never stored here or returned
+/// to the browser.
+model EnrichmentProvider {
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String    @map("tenant_id") @db.Uuid
+  key                    String
+  name                   String
+  providerType           String    @map("provider_type")
+  adapter                String    @default("api")
+  baseUrl                String?   @map("base_url")
+  endpoint               String?
+  credentialsRef         String?   @map("credentials_ref")
+  enabled                Boolean   @default(true)
+  priority               Int       @default(0)
+  category               String?
+  language               String    @default("en")
+  country                String?
+  refreshIntervalMinutes Int       @default(60) @map("refresh_interval_minutes")
+  rateLimitPolicy        Json?     @map("rate_limit_policy")
+  extractionPolicy       Json?     @map("extraction_policy")
+  configuration          Json?
+  lastFetchedAt          DateTime? @map("last_fetched_at")
+  lastSuccessAt          DateTime? @map("last_success_at")
+  consecutiveFailures    Int       @default(0) @map("consecutive_failures")
+  lastError              String?   @map("last_error")
+  lastErrorAt            DateTime? @map("last_error_at")
+  verifiedAt             DateTime? @map("verified_at")
+  verificationStatus     String?   @map("verification_status")
+  createdAt              DateTime   @default(now()) @map("created_at")
+  updatedAt              DateTime   @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId, enabled])
+  @@map("enrichment_providers")
+}
+
+/// Generic entity registry (Phase 3). Domain-agnostic types (person,
+/// organization, …) plus domain-specific types contributed by intelligence
+/// domain plugins (movie, tv_series, actor, franchise, …).
+model Entity {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  domain       String   @default("generic")
+  type         String
+  name         String
+  canonicalKey String   @map("canonical_key")
+  aliases      Json?
+  externalIds  Json?    @map("external_ids")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  itemLinks   SourceItemEntity[]
+  enrichments ProviderEnrichment[]
+
+  @@unique([tenantId, domain, type, canonicalKey])
+  @@index([tenantId, type])
+  @@index([tenantId, name])
+  @@map("entities")
+}
+
+/// Entity mention in a source item, with confidence and source evidence.
+model SourceItemEntity {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  itemId          String   @map("item_id") @db.Uuid
+  entityId        String   @map("entity_id") @db.Uuid
+  confidence      Float    @default(0.5)
+  evidence        Json?
+  extractionLevel Int      @default(1) @map("extraction_level")
+  extractedAt     DateTime @default(now()) @map("extracted_at")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  tenant Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item   SourceItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  entity Entity     @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, entityId])
+  @@index([tenantId, entityId])
+  @@map("source_item_entities")
+}
+
+/// Fact ledger (Phase 3): structured editorial grounding. Generated articles
+/// must later depend on this layer instead of raw source text.
+model StoryFact {
+  id                 String       @id @default(uuid()) @db.Uuid
+  tenantId           String       @map("tenant_id") @db.Uuid
+  clusterId          String?      @map("cluster_id") @db.Uuid
+  itemId             String       @map("item_id") @db.Uuid
+  factKey            String       @map("fact_key")
+  statement          String       @db.Text
+  sourceUrl          String?      @map("source_url")
+  publisher          String?
+  evidenceRef        String?      @map("evidence_ref")
+  confidence         Float        @default(0.5)
+  extractedAt        DateTime     @default(now()) @map("extracted_at")
+  verificationStatus String       @default("unverified") @map("verification_status")
+  conflictingFacts   Json?        @map("conflicting_facts")
+  metadata           Json?
+  createdAt          DateTime     @default(now()) @map("created_at")
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  item    SourceItem    @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  cluster StoryCluster? @relation(fields: [clusterId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, itemId, factKey])
+  @@index([tenantId, clusterId])
+  @@index([tenantId, factKey, verificationStatus])
+  @@map("story_facts")
+}
+
+/// External provider response cache (Phase 3). TTL by resource type,
+/// stale-while-revalidate, negative caching, request coalescing.
+model ProviderCacheEntry {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  providerKey    String   @map("provider_key")
+  resourceType   String   @map("resource_type")
+  cacheKey       String   @map("cache_key")
+  payload        Json?
+  isNegative     Boolean  @default(false) @map("is_negative")
+  expiresAt      DateTime @map("expires_at")
+  lastAccessedAt DateTime @default(now()) @map("last_accessed_at")
+  hitCount       Int      @default(0) @map("hit_count")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, providerKey, resourceType, cacheKey])
+  @@index([tenantId, providerKey, expiresAt])
+  @@map("provider_cache_entries")
+}
+
+/// Enriched metadata for an entity from an external provider (TMDB, OMDb…).
+model ProviderEnrichment {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  entityId         String    @map("entity_id") @db.Uuid
+  providerKey      String    @map("provider_key")
+  providerEntityId String?   @map("provider_entity_id")
+  resourceType     String    @map("resource_type")
+  title            String?
+  originalTitle    String?   @map("original_title")
+  releaseDate      DateTime? @map("release_date")
+  matchMethod      String    @default("search") @map("match_method")
+  confidence       Float     @default(0.5)
+  data             Json?
+  cachedAt         DateTime  @default(now()) @map("cached_at")
+  expiresAt        DateTime? @map("expires_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, entityId])
+  @@index([tenantId, providerKey, providerEntityId])
+  @@unique([entityId, providerKey])
+  @@map("provider_enrichments")
+}
+
+/// Compact, reusable editorial profile of a connected website (Phase 3).
+/// Built from permitted signals: sitemap, existing titles, categories,
+/// taxonomy, editorial description, language, location, audience. Never
+/// re-crawled per candidate.
+model SiteEditorialProfile {
+  id                   String    @id @default(uuid()) @db.Uuid
+  tenantId             String    @map("tenant_id") @db.Uuid
+  siteId               String    @map("site_id") @db.Uuid
+  profileVersion       Int       @default(1) @map("profile_version")
+  topics               Json?
+  categories           Json?
+  taxonomy             Json?
+  audience             Json?
+  language             String?
+  location             Json?
+  editorialDescription String?   @map("editorial_description") @db.Text
+  contentGaps          Json?     @map("content_gaps")
+  existingTitles       Json?     @map("existing_titles")
+  sitemapUrl           String?   @map("sitemap_url")
+  articleStats         Json?     @map("article_stats")
+  builtAt              DateTime  @default(now()) @map("built_at")
+  createdAt            DateTime  @default(now()) @map("created_at")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@map("site_editorial_profiles")
+}
+
+/// Mute rules: silence a topic or a source in candidate triage (Phase 3).
+model MuteRule {
+  id        String    @id @default(uuid()) @db.Uuid
+  tenantId  String    @map("tenant_id") @db.Uuid
+  kind      String
+  value     String
+  active    Boolean   @default(true)
+  mutedBy   String?   @map("muted_by")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, kind, value])
+  @@index([tenantId, kind, active])
+  @@map("mute_rules")
+}
+
+/// Per-tenant intelligence configuration (Phase 3): enabled domains,
+/// provider precedence (identity/rating/metadata), AI-judge policy and
+/// level budget policy. Kept out of business code.
+model IntelligenceSettings {
+  id                 String    @id @default(uuid()) @db.Uuid
+  tenantId           String    @map("tenant_id") @db.Uuid
+  enabledDomains     Json?     @map("enabled_domains")
+  providerPrecedence Json?     @map("provider_precedence")
+  aiJudge            Json?     @map("ai_judge")
+  levelPolicy        Json?     @map("level_policy")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId])
+  @@map("intelligence_settings")
+}
+
+/// Evidence-grounded original article generation (Phase 4). One row per
+/// generation run: the editorial brief, fact licenses, writer prompt, parsed
+/// article, SEO package, QA report and publication decision are all stored
+/// here so every claim is traceable back to the fact ledger.
+model ArticleGeneration {
+  id                     String   @id @default(uuid()) @db.Uuid
+  tenantId               String   @map("tenant_id") @db.Uuid
+  siteId                 String?  @map("site_id") @db.Uuid
+  clusterId              String?  @map("cluster_id") @db.Uuid
+  projectId              String?  @map("project_id") @db.Uuid
+  versionId              String?  @map("version_id") @db.Uuid
+  status                 String   @default("briefing") @map("status")
+  decision               String   @default("pending") @map("decision")
+  decisionReason         String?  @map("decision_reason") @db.Text
+  articleType            String?  @map("article_type")
+  searchIntent           String?  @map("search_intent")
+  brief                  Json?    @map("brief")
+  factLicenses           Json?    @map("fact_licenses")
+  writerPrompt           String?  @map("writer_prompt") @db.Text
+  articleOutput          String?  @map("article_output") @db.Text
+  parsedArticle          Json?    @map("parsed_article")
+  seoPackage             Json?    @map("seo_package")
+  qaReport               Json?    @map("qa_report")
+  publicationDecision    Json?    @map("publication_decision")
+  provenance             Json?    @map("provenance")
+  updateDelta            Json?    @map("update_delta")
+  provider               String?
+  model                  String?
+  costUsd                Float?   @map("cost_usd")
+  error                  String?  @db.Text
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site      Site?          @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  cluster   StoryCluster?  @relation(fields: [clusterId], references: [id], onDelete: SetNull)
+  project   ContentProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  version   ContentVersion? @relation(fields: [versionId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, clusterId, createdAt])
+  @@index([tenantId, projectId])
+  @@index([tenantId, status, createdAt])
+  @@map("article_generations")
 }
 
 model SocialContent {
@@ -1218,6 +1696,7 @@ model Publication {
   @@index([tenantId, status, scheduledFor])
   @@index([tenantId, projectId, channel])
   @@index([tenantId, channel, status])
+  @@index([tenantId, createdAt])
   // Uniqueness on (tenantId, idempotencyKey) is a partial unique index
   // created manually in migration 20260824000000_social_connections_and_web_discovery
   // (WHERE idempotency_key IS NOT NULL) — Prisma cannot model partial indexes.
@@ -1275,6 +1754,7 @@ model AutomationPolicy {
   socialRequired                Boolean         @default(true) @map("social_required")
   maximumQueueSize              Int             @default(20) @map("maximum_queue_size")
   articlesPerHour               Int             @default(2) @map("articles_per_hour")
+  qaGates                        Json?           @map("qa_gates")
   socialPostsPerHour            Int             @default(6) @map("social_posts_per_hour")
   maximumDailySocial            Int             @default(12) @map("maximum_daily_social")
   socialTimingMinutesX          Int             @default(5) @map("social_timing_minutes_x")
@@ -1340,33 +1820,33 @@ model EditorialBrief {
 }
 
 model EditorialPlan {
-  id              String              @id @default(uuid()) @db.Uuid
-  tenantId        String              @map("tenant_id") @db.Uuid
-  siteId          String?             @map("site_id") @db.Uuid
-  briefId         String?             @map("brief_id") @db.Uuid
-  name            String
-  status          EditorialPlanStatus @default(draft)
-  dateFrom        DateTime            @map("date_from")
-  dateTo          DateTime            @map("date_to")
-  objective       String?
-  channels        Json?
-  accountIds      Json?               @map("account_ids")
-  frequency       String?
-  timezone        String              @default("Europe/Madrid")
-  configuration   Json?
-  provider        String?
-  model           String?
-  promptVersion   String?             @map("prompt_version")
-  generatedOutput Json?               @map("generated_output")
-  strategyMode    String?             @map("strategy_mode")
-  primaryIntent   String?             @map("primary_intent")
-  contentFormats  Json?               @map("content_formats")
-  topicStrategy   Json?               @map("topic_strategy")
-  relevanceThreshold Float?           @map("relevance_threshold")
-  siteIntelligenceVersion Int?        @map("site_intelligence_version")
-  error           String?             @db.Text
-  createdAt       DateTime            @default(now()) @map("created_at")
-  updatedAt       DateTime            @updatedAt @map("updated_at")
+  id                      String              @id @default(uuid()) @db.Uuid
+  tenantId                String              @map("tenant_id") @db.Uuid
+  siteId                  String?             @map("site_id") @db.Uuid
+  briefId                 String?             @map("brief_id") @db.Uuid
+  name                    String
+  status                  EditorialPlanStatus @default(draft)
+  dateFrom                DateTime            @map("date_from")
+  dateTo                  DateTime            @map("date_to")
+  objective               String?
+  channels                Json?
+  accountIds              Json?               @map("account_ids")
+  frequency               String?
+  timezone                String              @default("Europe/Madrid")
+  configuration           Json?
+  provider                String?
+  model                   String?
+  promptVersion           String?             @map("prompt_version")
+  generatedOutput         Json?               @map("generated_output")
+  strategyMode            String?             @map("strategy_mode")
+  primaryIntent           String?             @map("primary_intent")
+  contentFormats          Json?               @map("content_formats")
+  topicStrategy           Json?               @map("topic_strategy")
+  relevanceThreshold      Float?              @map("relevance_threshold")
+  siteIntelligenceVersion Int?                @map("site_intelligence_version")
+  error                   String?             @db.Text
+  createdAt               DateTime            @default(now()) @map("created_at")
+  updatedAt               DateTime            @updatedAt @map("updated_at")
 
   tenant             Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site               Site?                            @relation(fields: [siteId], references: [id], onDelete: SetNull)
@@ -1380,72 +1860,72 @@ model EditorialPlan {
 }
 
 model EditorialPlanItem {
-  id                      String                  @id @default(uuid()) @db.Uuid
-  tenantId                String                  @map("tenant_id") @db.Uuid
-  planId                  String                  @map("plan_id") @db.Uuid
-  siteId                  String?                 @map("site_id") @db.Uuid
-  accountId               String?                 @map("account_id") @db.Uuid
-  campaignId              String?                 @map("campaign_id") @db.Uuid
-  sourceItemId            String?                 @map("source_item_id") @db.Uuid
-  projectId               String?                 @map("project_id") @db.Uuid
-  assignedUserId          String?                 @map("assigned_user_id") @db.Uuid
-  scheduledFor            DateTime?               @map("scheduled_for")
-  title                   String
-  workingTitle            String?                 @map("working_title")
-  topic                   String?
-  channel                 PublicationChannel
-  newsOrEvergreen         String?                 @map("news_or_evergreen")
-  objective               String?
-  audience                String?
-  searchIntent            String?                 @map("search_intent")
-  primaryKeyword          String?                 @map("primary_keyword")
-  secondaryKeywords       Json?                   @map("secondary_keywords")
-  relatedEntities         Json?                   @map("related_entities")
-  suggestedSlug           String?                 @map("suggested_slug")
-  seoTitle                String?                 @map("seo_title")
-  metaDescription         String?                 @map("meta_description")
-  socialHook              String?                 @map("social_hook")
-  cta                     String?
-  suggestedHashtags       Json?                   @map("suggested_hashtags")
-  imageConcept            String?                 @map("image_concept")
-  imageRequirements       String?                 @map("image_requirements")
-  priority                Int                     @default(0)
-  contentType             String?                 @map("content_type")
-  primaryIntent           String?                 @map("primary_intent")
-  secondaryIntents        Json?                   @map("secondary_intents")
-  funnelStage             String?                 @map("funnel_stage")
-  targetQuery             String?                 @map("target_query")
-  semanticKeywords        Json?                   @map("semantic_keywords")
-  questionsToAnswer       Json?                   @map("questions_to_answer")
-  topicCluster            String?                 @map("topic_cluster")
-  pillarPage              String?                 @map("pillar_page")
-  finalSuggestedTitle     String?                 @map("final_suggested_title")
-  angle                   String?
-  editorialObjective      String?                 @map("editorial_objective")
-  competitorAngle         String?                 @map("competitor_angle")
-  suggestedInternalLinks  Json?                   @map("suggested_internal_links")
-  suggestedExternalEvidenceTypes Json?            @map("suggested_external_evidence_types")
-  faqCandidates           Json?                   @map("faq_candidates")
-  schemaTypes             Json?                   @map("schema_types")
-  outline                 Json?
-  recommendedWordCountMin Int?                    @map("recommended_word_count_min")
-  recommendedWordCountMax Int?                    @map("recommended_word_count_max")
-  difficultyEstimate      Int?                    @map("difficulty_estimate")
-  opportunityScore        Float?                  @map("opportunity_score")
-  relevanceScore          Float?                  @map("relevance_score")
-  cannibalizationRisk     String?                 @map("cannibalization_risk")
-  confidence              Float?
-  rationale               String?                 @db.Text
-  sourceEvidence          Json?                   @map("source_evidence")
-  freshnessRequirement    String?                 @map("freshness_requirement")
-  status                  EditorialPlanItemStatus @default(proposed)
-  contentGenerationStatus String                  @default("pending") @map("content_generation_status")
-  approvalStatus          String                  @default("pending") @map("approval_status")
-  publicationStatus       String?                 @map("publication_status")
-  notes                   String?                 @db.Text
-  metadata                Json?
-  createdAt               DateTime                @default(now()) @map("created_at")
-  updatedAt               DateTime                @updatedAt @map("updated_at")
+  id                             String                  @id @default(uuid()) @db.Uuid
+  tenantId                       String                  @map("tenant_id") @db.Uuid
+  planId                         String                  @map("plan_id") @db.Uuid
+  siteId                         String?                 @map("site_id") @db.Uuid
+  accountId                      String?                 @map("account_id") @db.Uuid
+  campaignId                     String?                 @map("campaign_id") @db.Uuid
+  sourceItemId                   String?                 @map("source_item_id") @db.Uuid
+  projectId                      String?                 @map("project_id") @db.Uuid
+  assignedUserId                 String?                 @map("assigned_user_id") @db.Uuid
+  scheduledFor                   DateTime?               @map("scheduled_for")
+  title                          String
+  workingTitle                   String?                 @map("working_title")
+  topic                          String?
+  channel                        PublicationChannel
+  newsOrEvergreen                String?                 @map("news_or_evergreen")
+  objective                      String?
+  audience                       String?
+  searchIntent                   String?                 @map("search_intent")
+  primaryKeyword                 String?                 @map("primary_keyword")
+  secondaryKeywords              Json?                   @map("secondary_keywords")
+  relatedEntities                Json?                   @map("related_entities")
+  suggestedSlug                  String?                 @map("suggested_slug")
+  seoTitle                       String?                 @map("seo_title")
+  metaDescription                String?                 @map("meta_description")
+  socialHook                     String?                 @map("social_hook")
+  cta                            String?
+  suggestedHashtags              Json?                   @map("suggested_hashtags")
+  imageConcept                   String?                 @map("image_concept")
+  imageRequirements              String?                 @map("image_requirements")
+  priority                       Int                     @default(0)
+  contentType                    String?                 @map("content_type")
+  primaryIntent                  String?                 @map("primary_intent")
+  secondaryIntents               Json?                   @map("secondary_intents")
+  funnelStage                    String?                 @map("funnel_stage")
+  targetQuery                    String?                 @map("target_query")
+  semanticKeywords               Json?                   @map("semantic_keywords")
+  questionsToAnswer              Json?                   @map("questions_to_answer")
+  topicCluster                   String?                 @map("topic_cluster")
+  pillarPage                     String?                 @map("pillar_page")
+  finalSuggestedTitle            String?                 @map("final_suggested_title")
+  angle                          String?
+  editorialObjective             String?                 @map("editorial_objective")
+  competitorAngle                String?                 @map("competitor_angle")
+  suggestedInternalLinks         Json?                   @map("suggested_internal_links")
+  suggestedExternalEvidenceTypes Json?                   @map("suggested_external_evidence_types")
+  faqCandidates                  Json?                   @map("faq_candidates")
+  schemaTypes                    Json?                   @map("schema_types")
+  outline                        Json?
+  recommendedWordCountMin        Int?                    @map("recommended_word_count_min")
+  recommendedWordCountMax        Int?                    @map("recommended_word_count_max")
+  difficultyEstimate             Int?                    @map("difficulty_estimate")
+  opportunityScore               Float?                  @map("opportunity_score")
+  relevanceScore                 Float?                  @map("relevance_score")
+  cannibalizationRisk            String?                 @map("cannibalization_risk")
+  confidence                     Float?
+  rationale                      String?                 @db.Text
+  sourceEvidence                 Json?                   @map("source_evidence")
+  freshnessRequirement           String?                 @map("freshness_requirement")
+  status                         EditorialPlanItemStatus @default(proposed)
+  contentGenerationStatus        String                  @default("pending") @map("content_generation_status")
+  approvalStatus                 String                  @default("pending") @map("approval_status")
+  publicationStatus              String?                 @map("publication_status")
+  notes                          String?                 @db.Text
+  metadata                       Json?
+  createdAt                      DateTime                @default(now()) @map("created_at")
+  updatedAt                      DateTime                @updatedAt @map("updated_at")
 
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   plan         EditorialPlan      @relation(fields: [planId], references: [id], onDelete: Cascade)
@@ -1942,27 +2422,27 @@ enum NotificationSeverity {
 }
 
 model ConnectorInstallation {
-  id                     String            @id @default(uuid()) @db.Uuid
-  tenantId               String            @map("tenant_id") @db.Uuid
-  siteId                 String?           @map("site_id") @db.Uuid
-  kind                   InstallationKind
-  provider               String
-  state                  InstallationState @default(draft)
-  displayName            String?           @map("display_name")
-  externalAccountId      String?           @map("external_account_id")
-  config                 Json?
-  discovered             Json?
-  capabilities           Json?
-  credentialsCiphertext  String?           @map("credentials_ciphertext") @db.Text
-  credentialsRef         String?           @map("credentials_ref")
-  secretFingerprint      String?           @map("secret_fingerprint")
-  lastError              String?           @map("last_error") @db.Text
-  verifiedAt             DateTime?         @map("verified_at")
-  activatedAt            DateTime?         @map("activated_at")
-  version                Int               @default(1)
-  createdByStudioUserId  String?           @map("created_by_studio_user_id") @db.Uuid
-  createdAt              DateTime          @default(now()) @map("created_at")
-  updatedAt              DateTime          @updatedAt @map("updated_at")
+  id                    String            @id @default(uuid()) @db.Uuid
+  tenantId              String            @map("tenant_id") @db.Uuid
+  siteId                String?           @map("site_id") @db.Uuid
+  kind                  InstallationKind
+  provider              String
+  state                 InstallationState @default(draft)
+  displayName           String?           @map("display_name")
+  externalAccountId     String?           @map("external_account_id")
+  config                Json?
+  discovered            Json?
+  capabilities          Json?
+  credentialsCiphertext String?           @map("credentials_ciphertext") @db.Text
+  credentialsRef        String?           @map("credentials_ref")
+  secretFingerprint     String?           @map("secret_fingerprint")
+  lastError             String?           @map("last_error") @db.Text
+  verifiedAt            DateTime?         @map("verified_at")
+  activatedAt           DateTime?         @map("activated_at")
+  version               Int               @default(1)
+  createdByStudioUserId String?           @map("created_by_studio_user_id") @db.Uuid
+  createdAt             DateTime          @default(now()) @map("created_at")
+  updatedAt             DateTime          @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
@@ -1974,29 +2454,29 @@ model ConnectorInstallation {
 }
 
 model Operation {
-  id               String          @id @default(uuid()) @db.Uuid
-  tenantId         String          @map("tenant_id") @db.Uuid
-  siteId           String?         @map("site_id") @db.Uuid
-  type             String
-  status           OperationStatus @default(queued)
-  phase            String?
-  progress         Int             @default(0)
-  totalSteps       Int             @default(0) @map("total_steps")
-  completedSteps   Int             @default(0) @map("completed_steps")
-  initiatorUserId  String?         @map("initiator_user_id") @db.Uuid
-  entityType       String?         @map("entity_type")
-  entityId         String?         @map("entity_id") @db.Uuid
-  retryCount       Int             @default(0) @map("retry_count")
-  errorSummary     String?         @map("error_summary") @db.Text
-  errorCode        String?         @map("error_code")
-  queueName        String?         @map("queue_name")
-  jobKey           String?         @map("job_key")
-  metadata         Json?
-  startedAt        DateTime?       @map("started_at")
-  finishedAt       DateTime?       @map("finished_at")
-  cancelledAt      DateTime?       @map("cancelled_at")
-  createdAt        DateTime        @default(now()) @map("created_at")
-  updatedAt        DateTime        @updatedAt @map("updated_at")
+  id              String          @id @default(uuid()) @db.Uuid
+  tenantId        String          @map("tenant_id") @db.Uuid
+  siteId          String?         @map("site_id") @db.Uuid
+  type            String
+  status          OperationStatus @default(queued)
+  phase           String?
+  progress        Int             @default(0)
+  totalSteps      Int             @default(0) @map("total_steps")
+  completedSteps  Int             @default(0) @map("completed_steps")
+  initiatorUserId String?         @map("initiator_user_id") @db.Uuid
+  entityType      String?         @map("entity_type")
+  entityId        String?         @map("entity_id") @db.Uuid
+  retryCount      Int             @default(0) @map("retry_count")
+  errorSummary    String?         @map("error_summary") @db.Text
+  errorCode       String?         @map("error_code")
+  queueName       String?         @map("queue_name")
+  jobKey          String?         @map("job_key")
+  metadata        Json?
+  startedAt       DateTime?       @map("started_at")
+  finishedAt      DateTime?       @map("finished_at")
+  cancelledAt     DateTime?       @map("cancelled_at")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
@@ -2005,6 +2485,7 @@ model Operation {
   @@index([tenantId, status])
   @@index([tenantId, siteId, createdAt])
   @@index([tenantId, jobKey])
+  @@index([tenantId, status, createdAt])
   @@map("operations")
 }
 
@@ -2047,4 +2528,70 @@ model NotificationPreference {
 
   @@unique([tenantId, userId, category])
   @@map("notification_preferences")
+}
+
+/// Per-tenant/site/content-type AI cost budget (Phase 5). Rows are keyed by
+/// (tenantId, siteId, contentType, period); NULL siteId/contentType mean the
+/// tenant-wide default for that scope. Enforcement: warn → degrade → delay →
+/// pause, never silently exceed hardLimitUsd.
+model CostBudget {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  siteId       String?   @map("site_id") @db.Uuid
+  contentType  String?   @map("content_type")
+  period       String    @default("daily")
+  limitUsd     Float     @map("limit_usd")
+  hardLimitUsd Float?    @map("hard_limit_usd")
+  action       String    @default("warn")
+  degradeModel String?   @map("degrade_model")
+  enabled      Boolean   @default(true)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, siteId, contentType])
+  @@map("cost_budgets")
+}
+
+/// Append-only AI spend ledger (Phase 5). Aggregated for budget enforcement
+/// and cost observability. Never updated in place.
+model AiSpendEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String?  @map("site_id") @db.Uuid
+  contentType  String?  @map("content_type")
+  kind         String   @default("generation")
+  provider     String?
+  model        String?
+  costUsd      Float    @map("cost_usd")
+  tokensInput  Int?     @map("tokens_input")
+  tokensOutput Int?     @map("tokens_output")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, siteId, createdAt])
+  @@map("ai_spend_events")
+}
+
+/// Worker liveness heartbeat (Phase 5). One row per worker process name;
+/// workers upsert their last_beat_at every heartbeat interval and mark
+/// themselves stopped on graceful shutdown.
+model WorkerHeartbeat {
+  id          String    @id @default(uuid()) @db.Uuid
+  name        String    @unique
+  pid         Int       @default(0)
+  status      String    @default("running")
+  currentTask String?   @map("current_task")
+  startedAt   DateTime? @map("started_at")
+  lastBeatAt  DateTime  @default(now()) @map("last_beat_at")
+  stoppedAt   DateTime? @map("stopped_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@index([lastBeatAt])
+  @@map("worker_heartbeats")
 }
