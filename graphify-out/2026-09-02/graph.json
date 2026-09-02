@@ -7102,6 +7102,45 @@
       "source_location": "L22"
     },
     {
+      "id": "tests_social_connections_routes_test_fixture",
+      "label": "Fixture",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "fixture",
+      "source_file": "tests/social-connections-routes.test.ts",
+      "source_location": "L10"
+    },
+    {
+      "id": "tests_studio_routes_test_fixture",
+      "label": "Fixture",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "fixture",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L11"
+    },
+    {
+      "id": "tests_tenant_isolation_test_fixture",
+      "label": "Fixture",
+      "_callable": true,
+      "_callable_class": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "fixture",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L10"
+    },
+    {
       "id": "src_studio_entities_extraction_extractioninput",
       "label": "ExtractionInput",
       "_callable": true,
@@ -8360,7 +8399,7 @@
       "file_type": "code",
       "norm_label": "automationtickresult",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L817"
+      "source_location": "L818"
     },
     {
       "id": "src_studio_planner_autopilotprojectview",
@@ -8373,7 +8412,7 @@
       "file_type": "code",
       "norm_label": "autopilotprojectview",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L589"
+      "source_location": "L590"
     },
     {
       "id": "src_studio_planner_createprojectfromsourceiteminput",
@@ -8915,7 +8954,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimagefromtextinput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8928,7 +8967,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimagefromtextoutput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8941,7 +8980,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontentimageinput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8954,7 +8993,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontentimageoutput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8967,7 +9006,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontenttextinput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8980,7 +9019,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontenttextoutput",
       "source_file": "src/domain/usecases/content.ts",
@@ -8993,7 +9032,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "addfactinput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9006,7 +9045,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "addfactoutput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9019,7 +9058,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "createtopicinput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9032,7 +9071,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "createtopicoutput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9045,7 +9084,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimageinput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9058,7 +9097,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimageoutput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9071,7 +9110,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generatetextinput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9084,7 +9123,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generatetextoutput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9097,7 +9136,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getresultsinput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9110,7 +9149,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getresultsoutput",
       "source_file": "src/domain/usecases/topic.ts",
@@ -9123,7 +9162,7 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "usecaseerror",
       "source_file": "src/domain/usecases/types.ts",
@@ -9136,50 +9175,11 @@
       "_callable_class": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "usecaseresult",
       "source_file": "src/domain/usecases/types.ts",
       "source_location": "L7"
-    },
-    {
-      "id": "tests_social_connections_routes_test_fixture",
-      "label": "Fixture",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "fixture",
-      "source_file": "tests/social-connections-routes.test.ts",
-      "source_location": "L10"
-    },
-    {
-      "id": "tests_studio_routes_test_fixture",
-      "label": "Fixture",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "fixture",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L11"
-    },
-    {
-      "id": "tests_tenant_isolation_test_fixture",
-      "label": "Fixture",
-      "_callable": true,
-      "_callable_class": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "fixture",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L10"
     },
     {
       "id": "src_studio_automation_automationmodevalue",
@@ -15359,18 +15359,6 @@
       "source_location": "L21"
     },
     {
-      "id": "scripts_qa_visual_login_main",
-      "label": "main()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "main()",
-      "source_file": "scripts/qa-visual-login.ts",
-      "source_location": "L15"
-    },
-    {
       "id": "src_studio_auth_acceptstudioinvitation",
       "label": "acceptStudioInvitation()",
       "_callable": true,
@@ -15789,42 +15777,6 @@
       "norm_label": "verifystudiogooglecredential()",
       "source_file": "src/studio/google.ts",
       "source_location": "L30"
-    },
-    {
-      "id": "src_studio_passwords_hashstudiopassword",
-      "label": "hashStudioPassword()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "hashstudiopassword()",
-      "source_file": "src/studio/passwords.ts",
-      "source_location": "L30"
-    },
-    {
-      "id": "src_studio_passwords_scryptasync",
-      "label": "scryptAsync()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "scryptasync()",
-      "source_file": "src/studio/passwords.ts",
-      "source_location": "L8"
-    },
-    {
-      "id": "src_studio_passwords_verifystudiopassword",
-      "label": "verifyStudioPassword()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "verifystudiopassword()",
-      "source_file": "src/studio/passwords.ts",
-      "source_location": "L48"
     },
     {
       "id": "src_shared_utils_env_getpublicbaseurl",
@@ -19737,6 +19689,54 @@
       "norm_label": "provision()",
       "source_file": "scripts/provision-linked-tenants.ts",
       "source_location": "L129"
+    },
+    {
+      "id": "scripts_qa_visual_login_main",
+      "label": "main()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "main()",
+      "source_file": "scripts/qa-visual-login.ts",
+      "source_location": "L15"
+    },
+    {
+      "id": "src_studio_passwords_hashstudiopassword",
+      "label": "hashStudioPassword()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "hashstudiopassword()",
+      "source_file": "src/studio/passwords.ts",
+      "source_location": "L30"
+    },
+    {
+      "id": "src_studio_passwords_scryptasync",
+      "label": "scryptAsync()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "scryptasync()",
+      "source_file": "src/studio/passwords.ts",
+      "source_location": "L8"
+    },
+    {
+      "id": "src_studio_passwords_verifystudiopassword",
+      "label": "verifyStudioPassword()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "verifystudiopassword()",
+      "source_file": "src/studio/passwords.ts",
+      "source_location": "L48"
     },
     {
       "id": "tests_studio_ssr_test_createmockbackendserver",
@@ -28283,6 +28283,18 @@
       "source_location": "L909"
     },
     {
+      "id": "src_studio_auth_getinternalstudioworkspaceaccessbyslug",
+      "label": "getInternalStudioWorkspaceAccessBySlug()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 49,
+      "community_name": "security.ts",
+      "file_type": "code",
+      "norm_label": "getinternalstudioworkspaceaccessbyslug()",
+      "source_file": "src/studio/auth.ts",
+      "source_location": "L950"
+    },
+    {
       "id": "src_studio_auth_getstudioidentityproviderconfig",
       "label": "getStudioIdentityProviderConfig()",
       "_callable": true,
@@ -28655,6 +28667,222 @@
       "source_location": "L25"
     },
     {
+      "id": "src_shared_utils_hash_sha256",
+      "label": "sha256()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "sha256()",
+      "source_file": "src/shared/utils/hash.ts",
+      "source_location": "L3"
+    },
+    {
+      "id": "tests_automation_recovery_test_cleanup",
+      "label": "cleanup()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "cleanup()",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L26"
+    },
+    {
+      "id": "tests_automation_recovery_test_createtenant",
+      "label": "createTenant()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createtenant()",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L16"
+    },
+    {
+      "id": "tests_automation_recovery_test_seedpolicy",
+      "label": "seedPolicy()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "seedpolicy()",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L79"
+    },
+    {
+      "id": "tests_automation_recovery_test_seedproject",
+      "label": "seedProject()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "seedproject()",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L42"
+    },
+    {
+      "id": "tests_autopilot_planner_test_cleanupworkspace",
+      "label": "cleanupWorkspace()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "cleanupworkspace()",
+      "source_file": "tests/autopilot-planner.test.ts",
+      "source_location": "L99"
+    },
+    {
+      "id": "tests_autopilot_planner_test_createworkspace",
+      "label": "createWorkspace()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createworkspace()",
+      "source_file": "tests/autopilot-planner.test.ts",
+      "source_location": "L34"
+    },
+    {
+      "id": "tests_autopilot_planner_test_passingbody",
+      "label": "passingBody()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "passingbody()",
+      "source_file": "tests/autopilot-planner.test.ts",
+      "source_location": "L22"
+    },
+    {
+      "id": "tests_content_intelligence_test_creatededupfixture",
+      "label": "createDedupFixture()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "creatededupfixture()",
+      "source_file": "tests/content-intelligence.test.ts",
+      "source_location": "L212"
+    },
+    {
+      "id": "tests_notifications_test_createtenant",
+      "label": "createTenant()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createtenant()",
+      "source_file": "tests/notifications.test.ts",
+      "source_location": "L16"
+    },
+    {
+      "id": "tests_social_connections_routes_test_buildserver",
+      "label": "buildServer()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "buildserver()",
+      "source_file": "tests/social-connections-routes.test.ts",
+      "source_location": "L20"
+    },
+    {
+      "id": "tests_social_connections_routes_test_createfixture",
+      "label": "createFixture()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createfixture()",
+      "source_file": "tests/social-connections-routes.test.ts",
+      "source_location": "L12"
+    },
+    {
+      "id": "tests_studio_routes_test_buildstudiotestserver",
+      "label": "buildStudioTestServer()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "buildstudiotestserver()",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L90"
+    },
+    {
+      "id": "tests_studio_routes_test_cleanupfixture",
+      "label": "cleanupFixture()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "cleanupfixture()",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L76"
+    },
+    {
+      "id": "tests_studio_routes_test_createfixture",
+      "label": "createFixture()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createfixture()",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L19"
+    },
+    {
+      "id": "tests_tenant_isolation_test_buildserver",
+      "label": "buildServer()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "buildserver()",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L20"
+    },
+    {
+      "id": "tests_tenant_isolation_test_createfixture",
+      "label": "createFixture()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createfixture()",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L12"
+    },
+    {
+      "id": "tests_tenant_isolation_test_createsocialaccount",
+      "label": "createSocialAccount()",
+      "_callable": true,
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "createsocialaccount()",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L30"
+    },
+    {
       "id": "scripts_bootstrap_studio_access_main",
       "label": "main()",
       "_callable": true,
@@ -28773,18 +29001,6 @@
       "norm_label": "getfirstpartylaunchworkspaceset()",
       "source_file": "src/studio/auth.ts",
       "source_location": "L112"
-    },
-    {
-      "id": "src_studio_auth_getinternalstudioworkspaceaccessbyslug",
-      "label": "getInternalStudioWorkspaceAccessBySlug()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 52,
-      "community_name": "completeStudioSsoLogin",
-      "file_type": "code",
-      "norm_label": "getinternalstudioworkspaceaccessbyslug()",
-      "source_file": "src/studio/auth.ts",
-      "source_location": "L950"
     },
     {
       "id": "src_studio_auth_getstudiosessionbytoken",
@@ -33980,7 +34196,7 @@
       "file_type": "code",
       "norm_label": "advanceautopilotproject()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L462"
+      "source_location": "L463"
     },
     {
       "id": "src_studio_planner_createautoproject",
@@ -34028,7 +34244,7 @@
       "file_type": "code",
       "norm_label": "ensureautopublications()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L682"
+      "source_location": "L683"
     },
     {
       "id": "src_studio_planner_evaluateautopilotgateforversion",
@@ -34040,7 +34256,7 @@
       "file_type": "code",
       "norm_label": "evaluateautopilotgateforversion()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L612"
+      "source_location": "L613"
     },
     {
       "id": "src_studio_planner_markclusterselected",
@@ -34064,7 +34280,7 @@
       "file_type": "code",
       "norm_label": "pickaccount()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L756"
+      "source_location": "L757"
     },
     {
       "id": "src_studio_planner_progressautoprojects",
@@ -34088,7 +34304,7 @@
       "file_type": "code",
       "norm_label": "runautomationtick()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L827"
+      "source_location": "L828"
     },
     {
       "id": "src_studio_planner_selectcandidates",
@@ -35824,7 +36040,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimagefromtextusecase()",
       "source_file": "src/domain/usecases/content.ts",
@@ -35836,7 +36052,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontentimageusecase()",
       "source_file": "src/domain/usecases/content.ts",
@@ -35848,7 +36064,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getcontenttextusecase()",
       "source_file": "src/domain/usecases/content.ts",
@@ -35860,7 +36076,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "promptversionfromoptions()",
       "source_file": "src/domain/usecases/content.ts",
@@ -35872,7 +36088,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "addfactusecase()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35884,7 +36100,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "createtopicusecase()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35896,7 +36112,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generateimageusecase()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35908,7 +36124,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "generatetextusecase()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35920,7 +36136,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "getresultsusecase()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35932,7 +36148,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "promptversionfromoptions()",
       "source_file": "src/domain/usecases/topic.ts",
@@ -35944,7 +36160,7 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "err()",
       "source_file": "src/domain/usecases/types.ts",
@@ -35956,227 +36172,11 @@
       "_callable": true,
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "ok()",
       "source_file": "src/domain/usecases/types.ts",
       "source_location": "L11"
-    },
-    {
-      "id": "src_shared_utils_hash_sha256",
-      "label": "sha256()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "sha256()",
-      "source_file": "src/shared/utils/hash.ts",
-      "source_location": "L3"
-    },
-    {
-      "id": "tests_automation_recovery_test_cleanup",
-      "label": "cleanup()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "cleanup()",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L26"
-    },
-    {
-      "id": "tests_automation_recovery_test_createtenant",
-      "label": "createTenant()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createtenant()",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L16"
-    },
-    {
-      "id": "tests_automation_recovery_test_seedpolicy",
-      "label": "seedPolicy()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "seedpolicy()",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L79"
-    },
-    {
-      "id": "tests_automation_recovery_test_seedproject",
-      "label": "seedProject()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "seedproject()",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L42"
-    },
-    {
-      "id": "tests_autopilot_planner_test_cleanupworkspace",
-      "label": "cleanupWorkspace()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "cleanupworkspace()",
-      "source_file": "tests/autopilot-planner.test.ts",
-      "source_location": "L99"
-    },
-    {
-      "id": "tests_autopilot_planner_test_createworkspace",
-      "label": "createWorkspace()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createworkspace()",
-      "source_file": "tests/autopilot-planner.test.ts",
-      "source_location": "L34"
-    },
-    {
-      "id": "tests_autopilot_planner_test_passingbody",
-      "label": "passingBody()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "passingbody()",
-      "source_file": "tests/autopilot-planner.test.ts",
-      "source_location": "L22"
-    },
-    {
-      "id": "tests_content_intelligence_test_creatededupfixture",
-      "label": "createDedupFixture()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "creatededupfixture()",
-      "source_file": "tests/content-intelligence.test.ts",
-      "source_location": "L212"
-    },
-    {
-      "id": "tests_notifications_test_createtenant",
-      "label": "createTenant()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createtenant()",
-      "source_file": "tests/notifications.test.ts",
-      "source_location": "L16"
-    },
-    {
-      "id": "tests_social_connections_routes_test_buildserver",
-      "label": "buildServer()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "buildserver()",
-      "source_file": "tests/social-connections-routes.test.ts",
-      "source_location": "L20"
-    },
-    {
-      "id": "tests_social_connections_routes_test_createfixture",
-      "label": "createFixture()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createfixture()",
-      "source_file": "tests/social-connections-routes.test.ts",
-      "source_location": "L12"
-    },
-    {
-      "id": "tests_studio_routes_test_buildstudiotestserver",
-      "label": "buildStudioTestServer()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "buildstudiotestserver()",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L90"
-    },
-    {
-      "id": "tests_studio_routes_test_cleanupfixture",
-      "label": "cleanupFixture()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "cleanupfixture()",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L76"
-    },
-    {
-      "id": "tests_studio_routes_test_createfixture",
-      "label": "createFixture()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createfixture()",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L19"
-    },
-    {
-      "id": "tests_tenant_isolation_test_buildserver",
-      "label": "buildServer()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "buildserver()",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L20"
-    },
-    {
-      "id": "tests_tenant_isolation_test_createfixture",
-      "label": "createFixture()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createfixture()",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L12"
-    },
-    {
-      "id": "tests_tenant_isolation_test_createsocialaccount",
-      "label": "createSocialAccount()",
-      "_callable": true,
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "createsocialaccount()",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L30"
     },
     {
       "id": "src_studio_automation_assertsafeautomationpolicy",
@@ -36512,7 +36512,7 @@
       "file_type": "code",
       "norm_label": "nextfreeslot()",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L769"
+      "source_location": "L770"
     },
     {
       "id": "src_studio_publication_cantransition",
@@ -42201,17 +42201,6 @@
       "source_location": "L44"
     },
     {
-      "id": "scripts_qa_visual_login",
-      "label": "qa-visual-login.ts",
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "qa-visual-login.ts",
-      "source_file": "scripts/qa-visual-login.ts",
-      "source_location": "L1"
-    },
-    {
       "id": "src_studio_auth",
       "label": "studio/auth.ts",
       "_origin": "ast",
@@ -42242,17 +42231,6 @@
       "file_type": "code",
       "norm_label": "google.ts",
       "source_file": "src/studio/google.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "src_studio_passwords",
-      "label": "passwords.ts",
-      "_origin": "ast",
-      "community": 128,
-      "community_name": "studio/auth.ts",
-      "file_type": "code",
-      "norm_label": "passwords.ts",
-      "source_file": "src/studio/passwords.ts",
       "source_location": "L1"
     },
     {
@@ -46205,6 +46183,28 @@
       "norm_label": "upsert_a_record()",
       "source_file": "scripts/cloudflare-cutover.sh",
       "source_location": "L85"
+    },
+    {
+      "id": "scripts_qa_visual_login",
+      "label": "qa-visual-login.ts",
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "qa-visual-login.ts",
+      "source_file": "scripts/qa-visual-login.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "src_studio_passwords",
+      "label": "passwords.ts",
+      "_origin": "ast",
+      "community": 182,
+      "community_name": "qa-visual-login.ts",
+      "file_type": "code",
+      "norm_label": "passwords.ts",
+      "source_file": "src/studio/passwords.ts",
+      "source_location": "L1"
     },
     {
       "id": "scripts_qa_visual_installer",
@@ -53258,6 +53258,127 @@
       "source_location": "L1"
     },
     {
+      "id": "src_shared_utils_hash",
+      "label": "hash.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "hash.ts",
+      "source_file": "src/shared/utils/hash.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_automation_recovery_test",
+      "label": "automation-recovery.test.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "automation-recovery.test.ts",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_automation_recovery_test_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "tests/automation-recovery.test.ts",
+      "source_location": "L10"
+    },
+    {
+      "id": "tests_autopilot_planner_test",
+      "label": "autopilot-planner.test.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "autopilot-planner.test.ts",
+      "source_file": "tests/autopilot-planner.test.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_autopilot_planner_test_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "tests/autopilot-planner.test.ts",
+      "source_location": "L9"
+    },
+    {
+      "id": "tests_social_connections_routes_test",
+      "label": "social-connections-routes.test.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "social-connections-routes.test.ts",
+      "source_file": "tests/social-connections-routes.test.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_social_connections_routes_test_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "tests/social-connections-routes.test.ts",
+      "source_location": "L8"
+    },
+    {
+      "id": "tests_studio_routes_test",
+      "label": "studio-routes.test.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "studio-routes.test.ts",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_studio_routes_test_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "tests/studio-routes.test.ts",
+      "source_location": "L9"
+    },
+    {
+      "id": "tests_tenant_isolation_test",
+      "label": "tenant-isolation.test.ts",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "tenant-isolation.test.ts",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L1"
+    },
+    {
+      "id": "tests_tenant_isolation_test_prisma",
+      "label": "prisma",
+      "_origin": "ast",
+      "community": 51,
+      "community_name": "sha256",
+      "file_type": "code",
+      "norm_label": "prisma",
+      "source_file": "tests/tenant-isolation.test.ts",
+      "source_location": "L8"
+    },
+    {
       "id": "scripts_bootstrap_studio_access",
       "label": "bootstrap-studio-access.ts",
       "_origin": "ast",
@@ -56895,7 +57016,7 @@
       "label": "content.ts",
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "content.ts",
       "source_file": "src/domain/usecases/content.ts",
@@ -56906,7 +57027,7 @@
       "label": "topic.ts",
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "topic.ts",
       "source_file": "src/domain/usecases/topic.ts",
@@ -56917,132 +57038,11 @@
       "label": "usecases/types.ts",
       "_origin": "ast",
       "community": 78,
-      "community_name": "sha256",
+      "community_name": "topic.ts",
       "file_type": "code",
       "norm_label": "usecases/types.ts",
       "source_file": "src/domain/usecases/types.ts",
       "source_location": "L1"
-    },
-    {
-      "id": "src_shared_utils_hash",
-      "label": "hash.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "hash.ts",
-      "source_file": "src/shared/utils/hash.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_automation_recovery_test",
-      "label": "automation-recovery.test.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "automation-recovery.test.ts",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_automation_recovery_test_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "tests/automation-recovery.test.ts",
-      "source_location": "L10"
-    },
-    {
-      "id": "tests_autopilot_planner_test",
-      "label": "autopilot-planner.test.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "autopilot-planner.test.ts",
-      "source_file": "tests/autopilot-planner.test.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_autopilot_planner_test_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "tests/autopilot-planner.test.ts",
-      "source_location": "L9"
-    },
-    {
-      "id": "tests_social_connections_routes_test",
-      "label": "social-connections-routes.test.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "social-connections-routes.test.ts",
-      "source_file": "tests/social-connections-routes.test.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_social_connections_routes_test_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "tests/social-connections-routes.test.ts",
-      "source_location": "L8"
-    },
-    {
-      "id": "tests_studio_routes_test",
-      "label": "studio-routes.test.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "studio-routes.test.ts",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_studio_routes_test_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "tests/studio-routes.test.ts",
-      "source_location": "L9"
-    },
-    {
-      "id": "tests_tenant_isolation_test",
-      "label": "tenant-isolation.test.ts",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "tenant-isolation.test.ts",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L1"
-    },
-    {
-      "id": "tests_tenant_isolation_test_prisma",
-      "label": "prisma",
-      "_origin": "ast",
-      "community": 78,
-      "community_name": "sha256",
-      "file_type": "code",
-      "norm_label": "prisma",
-      "source_file": "tests/tenant-isolation.test.ts",
-      "source_location": "L8"
     },
     {
       "id": "src_studio_automation",
@@ -81152,7 +81152,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L477",
+      "source_location": "L478",
       "weight": 1.0
     },
     {
@@ -81164,7 +81164,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L487",
+      "source_location": "L488",
       "weight": 1.0
     },
     {
@@ -81176,7 +81176,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L501",
+      "source_location": "L502",
       "weight": 1.0
     },
     {
@@ -81188,7 +81188,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L511",
+      "source_location": "L512",
       "weight": 1.0
     },
     {
@@ -81200,7 +81200,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L535",
+      "source_location": "L536",
       "weight": 1.0
     },
     {
@@ -81212,7 +81212,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L540",
+      "source_location": "L541",
       "weight": 1.0
     },
     {
@@ -81224,7 +81224,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L561",
+      "source_location": "L562",
       "weight": 1.0
     },
     {
@@ -81236,7 +81236,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L575",
+      "source_location": "L576",
       "weight": 1.0
     },
     {
@@ -81356,7 +81356,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L695",
+      "source_location": "L696",
       "weight": 1.0
     },
     {
@@ -81368,7 +81368,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L698",
+      "source_location": "L699",
       "weight": 1.0
     },
     {
@@ -81380,7 +81380,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L701",
+      "source_location": "L702",
       "weight": 1.0
     },
     {
@@ -81392,7 +81392,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L714",
+      "source_location": "L715",
       "weight": 1.0
     },
     {
@@ -81404,7 +81404,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L654",
+      "source_location": "L655",
       "weight": 1.0
     },
     {
@@ -81416,7 +81416,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L672",
+      "source_location": "L673",
       "weight": 1.0
     },
     {
@@ -81428,7 +81428,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L676",
+      "source_location": "L677",
       "weight": 1.0
     },
     {
@@ -81476,7 +81476,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L781",
+      "source_location": "L782",
       "weight": 1.0
     },
     {
@@ -81488,7 +81488,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L784",
+      "source_location": "L785",
       "weight": 1.0
     },
     {
@@ -81560,7 +81560,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L448",
+      "source_location": "L449",
       "weight": 1.0
     },
     {
@@ -81572,7 +81572,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L852",
+      "source_location": "L853",
       "weight": 1.0
     },
     {
@@ -81584,7 +81584,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L853",
+      "source_location": "L854",
       "weight": 1.0
     },
     {
@@ -81596,7 +81596,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L863",
+      "source_location": "L864",
       "weight": 1.0
     },
     {
@@ -81608,7 +81608,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L865",
+      "source_location": "L866",
       "weight": 1.0
     },
     {
@@ -81620,7 +81620,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/studio/planner.ts",
-      "source_location": "L870",
+      "source_location": "L871",
       "weight": 1.0
     },
     {
@@ -177589,7 +177589,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L462",
+      "source_location": "L463",
       "weight": 1.0
     },
     {
@@ -177600,7 +177600,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L589",
+      "source_location": "L590",
       "weight": 1.0
     },
     {
@@ -177611,7 +177611,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L612",
+      "source_location": "L613",
       "weight": 1.0
     },
     {
@@ -177622,7 +177622,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L682",
+      "source_location": "L683",
       "weight": 1.0
     },
     {
@@ -177633,7 +177633,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L756",
+      "source_location": "L757",
       "weight": 1.0
     },
     {
@@ -177644,7 +177644,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L769",
+      "source_location": "L770",
       "weight": 1.0
     },
     {
@@ -177655,7 +177655,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L817",
+      "source_location": "L818",
       "weight": 1.0
     },
     {
@@ -177666,7 +177666,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/studio/planner.ts",
-      "source_location": "L827",
+      "source_location": "L828",
       "weight": 1.0
     },
     {

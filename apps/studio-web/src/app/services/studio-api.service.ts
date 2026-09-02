@@ -4,7 +4,9 @@ import { Observable } from 'rxjs';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import type {
   AiUsageRow,
+  AutomationHealth,
   AutomationPolicy,
+  AutomationRecoveryReport,
   AutomationStatus,
   CalendarEvent,
   ConnectorCapabilitiesResponse,
@@ -977,6 +979,14 @@ export class StudioApiService {
       params = params.set('siteId', siteId);
     }
     return this.http.get<AutomationStatus>(`${this.apiBase}/backend/v2/automation/status`, { params });
+  }
+
+  getAutomationHealth(): Observable<AutomationHealth> {
+    return this.http.get<AutomationHealth>(`${this.apiBase}/backend/v2/automation/health`);
+  }
+
+  recoverAutomation(payload: { siteId?: string | null; dryRun?: boolean }): Observable<AutomationRecoveryReport> {
+    return this.http.post<AutomationRecoveryReport>(`${this.apiBase}/backend/v2/automation/recover`, payload);
   }
 
   pauseAutomation(reason: string, siteId?: string): Observable<AutomationPolicy> {

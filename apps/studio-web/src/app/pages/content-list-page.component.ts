@@ -156,11 +156,23 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
                   </td>
                   <td>
                     <a class="au-table__title au-link" [routerLink]="['/studio/content', item.id]" (click)="$event.stopPropagation()">{{ item.title }}</a>
-                    <span class="au-table__sub">{{ item.goal }} · {{ item.primaryLanguage }}<span *ngIf="item.origin === 'auto'"> · automatic</span></span>
+                    <span class="au-table__sub">
+                      {{ item.goal }} · {{ item.primaryLanguage }}
+                      <span class="au-badge au-badge--outline au-badge--xs">{{ originLabel(item.origin) }}</span>
+                      <span class="au-badge au-badge--xs" [class.au-badge--brand]="item.automationMode === 'autopilot'" [class.au-badge--neutral]="item.automationMode !== 'autopilot'">{{ automationModeLabel(item.automationMode) }}</span>
+                    </span>
                   </td>
                   <td class="au-nowrap">{{ item.site.name }}</td>
                   <td>
-                    <span class="au-badge" [class]="'au-badge--' + stageTone(item.reviewGate)">{{ stageLabel(item.reviewGate) }}</span>
+                    <ng-container *ngIf="item.automationMode === 'autopilot'; else humanGate">
+                      <span class="au-badge" [class]="'au-badge--' + autopilotTone(item)">{{ autopilotLabel(item) }}</span>
+                      <span class="au-table__sub au-faint" *ngIf="item.automationSubstate === 'intervention_required' && item.reviewGate.blockers.length > 0">
+                        {{ item.reviewGate.blockers[0] }}
+                      </span>
+                    </ng-container>
+                    <ng-template #humanGate>
+                      <span class="au-badge" [class]="'au-badge--' + stageTone(item.reviewGate)">{{ stageLabel(item.reviewGate) }}</span>
+                    </ng-template>
                   </td>
                   <td>
                     <span
@@ -169,7 +181,10 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
                       [class.au-badge--danger]="qaState(item) === 'failed'"
                       [class.au-badge--neutral]="qaState(item) === 'none'"
                     >
-                      {{ qaState(item) }}
+                      {{ qaState(item) }}<span *ngIf="qaScore(item) !== null"> · {{ qaScore(item) }}</span>
+                    </span>
+                    <span class="au-table__sub au-faint" *ngIf="item.latestVersion && item.latestVersion.repairAttempts > 0">
+                      ↻ repaired {{ item.latestVersion.repairAttempts }}×
                     </span>
                   </td>
                   <td>
@@ -206,7 +221,7 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
                           <app-icon name="copy"></app-icon>
                           Duplicate
                         </button>
-                        <button class="au-menu__item" type="button" *ngIf="item.reviewGate.approvalReady && !showArchived" (click)="rowMenu.hide(); approveOne(item)">
+                        <button class="au-menu__item" type="button" *ngIf="item.reviewGate.approvalReady && !showArchived && item.automationMode !== 'autopilot'" (click)="rowMenu.hide(); approveOne(item)">
                           <app-icon name="circle-check"></app-icon>
                           Approve
                         </button>
@@ -330,6 +345,83 @@ export class ContentListPageComponent implements OnInit {
       return 'passed';
     }
     return state === 'failed' ? 'failed' : 'none';
+  }
+
+  qaScore(item: StudioProjectSummary): number | null {
+    const score = item.latestVersion?.qaReport?.score;
+    return typeof score === 'number' && Number.isFinite(score) ? score : null;
+  }
+
+  originLabel(origin: string): string {
+    if (origin === 'auto') {
+      return 'Automatic source';
+    }
+    if (origin === 'editorial') {
+      return 'Editorial plan';
+    }
+    return 'Manual';
+  }
+
+  automationModeLabel(mode: string | null): string {
+    if (mode === 'autopilot') {
+      return 'Autopilot';
+    }
+    if (mode === 'assisted') {
+      return 'Assisted';
+    }
+    return 'Manual';
+  }
+
+  autopilotLabel(item: StudioProjectSummary): string {
+    const substate = item.automationSubstate;
+    const repairAttempts = item.latestVersion?.repairAttempts ?? 0;
+    switch (substate) {
+      case 'generating':
+        return 'AUTOPILOT · generating';
+      case 'waiting_for_image':
+        return 'AUTOPILOT · waiting for image';
+      case 'qa_checking':
+        return 'AUTOPILOT · QA checking';
+      case 'qa_repairing':
+        return `AUTOPILOT · QA repair ${repairAttempts}`;
+      case 'qa_passed':
+        return 'AUTOPILOT · QA passed';
+      case 'auto_approved':
+        return 'AUTOPILOT · auto-approved';
+      case 'social_generating':
+        return 'AUTOPILOT · social';
+      case 'scheduling':
+        return 'AUTOPILOT · scheduling';
+      case 'scheduled':
+        return 'AUTOPILOT · scheduled';
+      case 'publishing':
+        return 'AUTOPILOT · publishing';
+      case 'published':
+        return 'AUTOPILOT · published';
+      case 'retrying':
+        return 'AUTOPILOT · retrying';
+      case 'intervention_required':
+        return 'AUTOPILOT · intervention';
+      default:
+        return 'AUTOPILOT · ' + stageLabel(item.reviewGate).toLowerCase();
+    }
+  }
+
+  autopilotTone(item: StudioProjectSummary): 'success' | 'warning' | 'danger' | 'muted' {
+    switch (item.automationSubstate) {
+      case 'published':
+        return 'success';
+      case 'intervention_required':
+        return 'danger';
+      case 'auto_approved':
+      case 'qa_passed':
+      case 'scheduled':
+      case 'publishing':
+      case 'retrying':
+        return 'warning';
+      default:
+        return 'muted';
+    }
   }
 
   toggleSelected(id: string): void {

@@ -97,6 +97,15 @@ function buildPublisher(overrides) {
         ...overrides,
     };
 }
+function noopVerification() {
+    return async () => ({
+        ok: true,
+        detail: "unused",
+        externalId: null,
+        externalUrl: null,
+        checkedAt: new Date().toISOString(),
+    });
+}
 (0, node_test_1.default)("processPublishingJob uses publishDraft and keeps the project approved when syncing a draft", async () => {
     const publication = buildPublication({
         requestPayload: { targetStatus: "draft" },
@@ -133,6 +142,7 @@ function buildPublisher(overrides) {
             calls.push("clear-published");
             return {};
         },
+        verifyWebsitePublication: noopVerification(),
     });
     strict_1.default.deepEqual(calls, [
         "update:processing",
@@ -174,6 +184,7 @@ function buildPublisher(overrides) {
             calls.push("clear-published");
             return {};
         },
+        verifyWebsitePublication: noopVerification(),
     });
     strict_1.default.deepEqual(calls, [
         "update:processing",
@@ -217,6 +228,7 @@ function buildPublisher(overrides) {
             calls.push("clear-published");
             return {};
         },
+        verifyWebsitePublication: noopVerification(),
     });
     strict_1.default.deepEqual(calls, [
         "update:processing",
@@ -267,6 +279,7 @@ function buildPublisher(overrides) {
             calls.push("clear-published");
             return {};
         },
+        verifyWebsitePublication: noopVerification(),
     });
     strict_1.default.deepEqual(calls, [
         "update:processing",

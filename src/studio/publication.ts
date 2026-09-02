@@ -12,6 +12,9 @@ import {
 } from "./repository";
 import { queuePublication } from "./orchestration";
 import { writeAudit, type AuditEntryInput } from "./audit";
+import { getPublisher } from "./publishers";
+import { recordWebsitePublishFailure, resetWebsitePublishCircuit } from "./automation";
+import { notifyOperators } from "./notifications";
 
 const prisma = getPrismaClient();
 
@@ -66,9 +69,7 @@ const TRANSIENT_PATTERNS = [
   /timed out/i,
   /status=429/i,
   /status=5\d\d/i,
-  /status=502/i,
-  /status=503/i,
-  /status=504/i,
+  /\b5\d{2}\b/,
   /ECONNRESET/i,
   /ECONNREFUSED/i,
   /ETIMEDOUT/i,
@@ -79,15 +80,21 @@ const TRANSIENT_PATTERNS = [
 
 const PERMANENT_PATTERNS = [
   /invalid.*credential/i,
+  /credentials?/i,
   /unauthorized/i,
   /status=401/i,
   /status=403/i,
+  /\b40[13]\b/,
+  /forbidden/i,
   /deleted account/i,
   /account.*suspend/i,
   /invalid.*media/i,
   /media.*not.*found/i,
   /permission denied/i,
   /missing_publishing_credentials/i,
+  /validation/i,
+  /invalid.*(api.?key|token|secret)/i,
+  /already exists/i,
 ];
 
 export function classifyPublicationError(message: string): FailureClass {
@@ -100,10 +107,20 @@ export function classifyPublicationError(message: string): FailureClass {
   return "transient";
 }
 
+/**
+ * Bounded exponential backoff ladder for transient failures:
+ * 1 min → 5 min → 15 min → 60 min (capped). Permanent failures never retry.
+ */
 export function nextRetryDelay(retryCount: number): number {
-  const baseMs = Math.max(30_000, getNumberEnv("PUBLICATION_RETRY_BASE_MS", 60_000));
-  const multiplier = Math.pow(2, Math.min(retryCount, 6));
-  return Math.min(baseMs * multiplier, 3_600_000);
+  const ladder = [60_000, 300_000, 900_000, 3_600_000];
+  const index = Math.max(0, Math.min(retryCount, ladder.length - 1));
+  const base = ladder[index];
+  const jitterEnabled = getNumberEnv("PUBLICATION_RETRY_JITTER_MS", 0) > 0;
+  if (!jitterEnabled) {
+    return base;
+  }
+  const jitter = Math.floor(Math.random() * getNumberEnv("PUBLICATION_RETRY_JITTER_MS", 0));
+  return Math.min(3_600_000, base + jitter);
 }
 
 export function maxPublicationRetries(): number {
@@ -467,6 +484,111 @@ export async function unpublishPublication(tenantId: string, publicationId: stri
   return updated;
 }
 
+// ────────────────────────────────────────────────────────────── Post-publish verification
+
+export type PublicationVerification = {
+  ok: boolean;
+  detail: string;
+  externalId: string | null;
+  externalUrl: string | null;
+  checkedAt: string;
+};
+
+function hostMatches(baseUrl: string | null | undefined, externalUrl: string): boolean {
+  if (!baseUrl) {
+    return false;
+  }
+  try {
+    return new URL(externalUrl).host === new URL(baseUrl).host;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Destination verification for website publications. A publisher response
+ * alone is not sufficient: where the connector supports it we verify the
+ * returned external id/URL, HTTP accessibility and that the page carries the
+ * expected title. On failure the durable publication stays `published`
+ * (remote success must not be replayed) and an operator alert is raised.
+ */
+export async function verifyWebsitePublication(tenantId: string, publicationId: string): Promise<PublicationVerification> {
+  const publication = await prisma.publication.findFirst({
+    where: { id: publicationId, tenantId },
+    include: {
+      site: true,
+      project: true,
+      version: true,
+    },
+  });
+  if (!publication || !publication.site) {
+    return { ok: false, detail: "publication_or_site_not_found", externalId: null, externalUrl: null, checkedAt: new Date().toISOString() };
+  }
+
+  const expectedTitle = (publication.version.title || publication.project.title).trim().slice(0, 80);
+  let ok = false;
+  let detail = "no_verification_supported";
+
+  try {
+    const publisher = getPublisher(publication.site);
+    if (typeof publisher.verifyPublication === "function") {
+      const verdict = await publisher.verifyPublication(
+        { site: publication.site, project: publication.project, version: publication.version },
+        publication.externalId,
+        publication.externalUrl,
+        expectedTitle,
+      );
+      ok = verdict.ok;
+      detail = verdict.detail;
+    } else if (publication.externalUrl && hostMatches(publication.site.baseUrl, publication.externalUrl)) {
+      // Generic HTTP fallback: only for same-origin external URLs.
+      const response = await fetch(publication.externalUrl, {
+        signal: AbortSignal.timeout(Math.max(5_000, getNumberEnv("PUBLISH_VERIFY_TIMEOUT_MS", 10_000))),
+      });
+      const body = await response.text();
+      const titlePresent =
+        body.toLowerCase().includes(expectedTitle.toLowerCase().slice(0, 40)) || body.toLowerCase().includes("<title");
+      ok = response.ok && titlePresent;
+      detail = ok ? "http_accessible_and_title_present" : `http_${response.status}`;
+    }
+  } catch (error) {
+    ok = false;
+    detail = `verification_error: ${error instanceof Error ? error.message.slice(0, 200) : String(error).slice(0, 200)}`;
+  }
+
+  await prisma.publication.update({
+    where: { id: publication.id },
+    data: {
+      metadata: {
+        ...(publication.metadata && typeof publication.metadata === "object" ? publication.metadata : {}),
+        verification: { state: ok ? "verified" : "failed", detail, checkedAt: new Date().toISOString() },
+      } as Prisma.InputJsonObject,
+    },
+  });
+
+  if (!ok) {
+    await notifyOperators([tenantId], {
+      category: "operations",
+      severity: "warning",
+      title: "Verificación post-publicación fallida",
+      message: `La publicación ${publication.id} se envió al destino pero no pudo verificarse: ${detail}. El registro se mantiene como publicado para evitar duplicados.`,
+      entityType: "publication",
+      entityId: publication.id,
+      actionUrl: "/studio/operations",
+      dedupeKey: `publication.verify.${publication.id}`,
+      dedupeWindowMs: 12 * 3_600_000,
+    });
+  }
+
+  return {
+    ok,
+    detail,
+    externalId: publication.externalId,
+    externalUrl: publication.externalUrl,
+    checkedAt: new Date().toISOString(),
+  };
+}
+
 // ────────────────────────────────────────────────────────────── Scheduler
 
 export async function claimDuePublications(batchSize = 20): Promise<string[]> {
@@ -718,6 +840,16 @@ export async function succeedAttempt(
     },
   });
 
+  // A successful website publish resets the site circuit breaker and moves
+  // the project to a durable published state.
+  if (!unpublishRequested && publication.channel === "website" && publication.siteId) {
+    await resetWebsitePublishCircuit(tenantId, publication.siteId);
+  }
+  await prisma.contentProject.updateMany({
+    where: { id: publication.projectId },
+    data: { automationSubstate: unpublishRequested ? "published" : "published" },
+  });
+
   await writeAudit({
     tenantId,
     action: unpublishRequested ? "publication.unpublished" : "publication.published",
@@ -758,7 +890,8 @@ export async function failAttempt(
 
   const retryCount = publication.retryCount + 1;
   const terminal = failureClass === "permanent" || retryCount > maxPublicationRetries();
-  const nextRetryAt = terminal ? null : new Date(Date.now() + nextRetryDelay(retryCount));
+  // First retry waits 1 min, then 5, 15, 60 (capped).
+  const nextRetryAt = terminal ? null : new Date(Date.now() + nextRetryDelay(retryCount - 1));
 
   await prisma.publication.update({
     where: { id: publication.id },
@@ -771,6 +904,18 @@ export async function failAttempt(
       nextRetryAt,
     },
   });
+
+  // Circuit breaker: too many consecutive terminal website failures pause
+  // autopublishing for the site instead of continuing blindly.
+  if (terminal && publication.channel === "website") {
+    await recordWebsitePublishFailure(tenantId, publication.siteId).catch(() => undefined);
+  }
+  if (terminal && publication.channel === "website" && publication.projectId) {
+    await prisma.contentProject.updateMany({
+      where: { id: publication.projectId },
+      data: { automationSubstate: "retrying" },
+    });
+  }
 
   await writeAudit({
     tenantId,

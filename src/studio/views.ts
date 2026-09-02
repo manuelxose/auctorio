@@ -106,6 +106,9 @@ export async function toVersionSummary(version: ProjectVersionRecord): Promise<V
     qaFailureCount: countQaFailures(version.qaReport),
     qaWarningCount: countQaWarnings(version.qaReport),
     derivativeCount: version.derivatives.length,
+    repairAttempts: version.repairAttempts,
+    autonomousGatePassed: version.autonomousGatePassed,
+    autonomousGateReport: version.autonomousGateReport,
     latestPublicationJob: version.publicationJobs[0]
       ? mapPublicationState(version.publicationJobs[0] as PublicationRecord)
       : null,
@@ -156,6 +159,8 @@ export async function toProjectDetail(project: ProjectRecord): Promise<StudioPro
     goal: project.goal,
     status: project.status,
     primaryLanguage: project.primaryLanguage,
+    automationMode: project.automationMode,
+    automationSubstate: project.automationSubstate,
     createdAt: project.createdAt,
     updatedAt: project.updatedAt,
     versionCount: project.versions.length,

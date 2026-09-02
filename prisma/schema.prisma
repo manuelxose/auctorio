@@ -355,6 +355,7 @@ model Tenant {
   publishingAccounts             PublishingAccount[]
   publications                   Publication[]
   publicationAttempts            PublicationAttempt[]
+  qualityRepairAttempts          QualityRepairAttempt[]
   automationPolicies             AutomationPolicy[]
   campaigns                      Campaign[]
   editorialBriefs                EditorialBrief[]
@@ -608,6 +609,8 @@ model ContentProject {
   campaignId            String?       @map("campaign_id") @db.Uuid
   briefId               String?       @map("brief_id") @db.Uuid
   origin                String        @default("manual")
+  automationMode        String?       @map("automation_mode")
+  automationSubstate    String?       @map("automation_substate")
   deletedAt             DateTime?     @map("deleted_at")
   deletedBy             String?       @map("deleted_by")
   deletedByStudioUserId String?       @map("deleted_by_studio_user_id") @db.Uuid
@@ -629,6 +632,7 @@ model ContentProject {
   socialContents     SocialContent[]
   publications       Publication[]
   editorialPlanItems EditorialPlanItem[]
+  qualityRepairAttempts QualityRepairAttempt[]
 
   @@index([tenantId, siteId, status])
   @@index([tenantId, topicId])
@@ -656,6 +660,10 @@ model ContentVersion {
   approvedBy             String?       @map("approved_by")
   approvedByStudioUserId String?       @map("approved_by_studio_user_id") @db.Uuid
   publishedAt            DateTime?     @map("published_at")
+  repairAttempts         Int           @default(0) @map("repair_attempts")
+  repairLockedUntil      DateTime?     @map("repair_locked_until")
+  autonomousGatePassed   Boolean       @default(false) @map("autonomous_gate_passed")
+  autonomousGateReport   Json?         @map("autonomous_gate_report")
   createdAt              DateTime      @default(now()) @map("created_at")
   updatedAt              DateTime      @updatedAt @map("updated_at")
 
@@ -668,6 +676,7 @@ model ContentVersion {
   publications         Publication[]
   socialContents       SocialContent[]
   articleGenerations   ArticleGeneration[]
+  qualityRepairAttempts QualityRepairAttempt[]
   approvedByStudioUser StudioUser?         @relation("StudioUserApprovedVersions", fields: [approvedByStudioUserId], references: [id], onDelete: SetNull)
 
   @@unique([projectId, versionNumber])
@@ -1727,12 +1736,46 @@ model PublicationAttempt {
   @@map("publication_attempts")
 }
 
+/// Durable audit of one targeted self-healing QA repair attempt (Phase 6).
+/// Persists the original findings, chosen strategies, changed fields, before/
+/// after QA scores and remaining blockers for full traceability.
+model QualityRepairAttempt {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  projectId         String    @map("project_id") @db.Uuid
+  versionId         String    @map("version_id") @db.Uuid
+  attemptNumber     Int       @map("attempt_number")
+  status            String    @default("running")
+  findingsSnapshot  Json?     @map("findings_snapshot")
+  strategies        Json?
+  changedFields     Json?     @map("changed_fields")
+  qaScoreBefore     Float?    @map("qa_score_before")
+  qaScoreAfter      Float?    @map("qa_score_after")
+  remainingBlockers Json?     @map("remaining_blockers")
+  provider          String?
+  model             String?
+  costUsd           Float?    @map("cost_usd")
+  error             String?   @db.Text
+  startedAt         DateTime  @default(now()) @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  project ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  version ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, versionId, attemptNumber])
+  @@map("quality_repair_attempts")
+}
+
 model AutomationPolicy {
   id                            String          @id @default(uuid()) @db.Uuid
   tenantId                      String          @map("tenant_id") @db.Uuid
   siteId                        String?         @map("site_id") @db.Uuid
   enabled                       Boolean         @default(false)
   state                         AutomationState @default(active)
+  mode                          String          @default("manual")
   pausedReason                  String?         @map("paused_reason")
   timezone                      String          @default("Europe/Madrid")
   articlesPerDay                Int             @default(3) @map("articles_per_day")
@@ -1746,6 +1789,13 @@ model AutomationPolicy {
   autoApprove                   Boolean         @default(false) @map("auto_approve")
   autoSchedule                  Boolean         @default(false) @map("auto_schedule")
   autoPublish                   Boolean         @default(false) @map("auto_publish")
+  autoRepair                    Boolean         @default(false) @map("auto_repair")
+  maxRepairAttempts             Int             @default(4) @map("max_repair_attempts")
+  autonomousQaThresholds        Json?           @map("autonomous_qa_thresholds")
+  sourceRequirements            Json?           @map("source_requirements")
+  consecutivePublishFailures    Int             @default(0) @map("consecutive_publish_failures")
+  circuitOpen                   Boolean         @default(false) @map("circuit_open")
+  circuitOpenedAt               DateTime?       @map("circuit_opened_at")
   minimumStoryScore             Float           @default(0.5) @map("minimum_story_score")
   categories                    Json?
   excludedCategories            Json?           @map("excluded_categories")

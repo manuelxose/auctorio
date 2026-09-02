@@ -8,7 +8,7 @@ import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingWindow, StudioSite } from '../models/studio.models';
+import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, AutomationStatus, PublishingAccount, PublishingWindow, StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-automation-page',
@@ -79,27 +79,53 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
       </section>
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="policy">
-        <h2 class="au-panel__title">Behavior</h2>
-        <p class="au-panel__subtitle au-mb-3">Each mode explains exactly what may happen without you.</p>
+        <h2 class="au-panel__title">Automation mode</h2>
+        <p class="au-panel__subtitle au-mb-3">One first-class mode decides the whole pipeline. Modes are atomic: contradictory flag combinations are never saved.</p>
         <div class="au-automation-modes" role="radiogroup" aria-label="Automation mode">
-          <button class="au-mode" [class.is-active]="mode === 'manual'" role="radio" [attr.aria-checked]="mode === 'manual'" type="button" (click)="setMode('manual')">
+          <button class="au-mode" [class.is-active]="policy.mode === 'manual' || !policy.mode" role="radio" [attr.aria-checked]="policy.mode === 'manual' || !policy.mode" type="button" (click)="setMode('manual')">
             <strong>Manual</strong>
-            <span>AI assists. You approve and publish.</span>
+            <span>No autonomous generation, approval or publication. You do everything.</span>
           </button>
-          <button class="au-mode" [class.is-active]="mode === 'approval'" role="radio" [attr.aria-checked]="mode === 'approval'" type="button" (click)="setMode('approval')">
-            <strong>Approval required</strong>
-            <span>AI drafts and schedules after human approval.</span>
+          <button class="au-mode" [class.is-active]="policy.mode === 'assisted'" role="radio" [attr.aria-checked]="policy.mode === 'assisted'" type="button" (click)="setMode('assisted')">
+            <strong>Assisted</strong>
+            <span>AI generates, repairs and reruns QA. You approve before anything publishes.</span>
           </button>
-          <button class="au-mode au-mode--warning" [class.is-active]="mode === 'automatic'" role="radio" [attr.aria-checked]="mode === 'automatic'" type="button" (click)="setMode('automatic')">
-            <strong>Automatic</strong>
-            <span>AI may publish within the limits below.</span>
+          <button class="au-mode au-mode--warning" [class.is-active]="policy.mode === 'autopilot'" role="radio" [attr.aria-checked]="policy.mode === 'autopilot'" type="button" (click)="setMode('autopilot')">
+            <strong>Autopilot</strong>
+            <span>Full zero-touch pipeline with a strict autonomous quality gate.</span>
           </button>
-        </div>
-        <div class="au-banner au-banner--warning" *ngIf="mode === 'automatic'">
-          <app-icon name="warning"></app-icon>
-          <span class="au-banner__text">Automatic publishing will publish without further approval. Review destinations, windows, and daily limits before saving.</span>
         </div>
 
+        <div class="au-banner au-banner--success" *ngIf="policy.mode === 'autopilot'">
+          <div class="au-banner__text">
+            <strong>Autopilot will:</strong>
+            <ul class="au-checklist">
+              <li>✓ generate content</li>
+              <li>✓ run strict QA</li>
+              <li>✓ repair failures automatically (bounded retries)</li>
+              <li>✓ approve only after the strict autonomous QA gate passes</li>
+              <li>✓ schedule publications</li>
+              <li>✓ publish them automatically</li>
+              <li>✓ verify publication</li>
+              <li>✓ stop and notify you if recovery fails</li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="au-banner au-banner--warning" *ngIf="policy.mode === 'assisted'">
+          <app-icon name="warning"></app-icon>
+          <span class="au-banner__text">Assisted mode generates and schedules automatically but never approves or publishes without you.</span>
+        </div>
+
+        <button class="au-btn au-btn--ghost au-btn--sm au-mt-2" type="button" (click)="advancedOpen = !advancedOpen" [attr.aria-expanded]="advancedOpen">
+          <app-icon [name]="advancedOpen ? 'chevron-up' : 'chevron-down'"></app-icon>
+          {{ advancedOpen ? 'Hide advanced controls' : 'Advanced controls' }}
+        </button>
+      </section>
+
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="policy && advancedOpen">
+        <h2 class="au-panel__title">Advanced controls</h2>
+        <p class="au-panel__subtitle au-mb-3">Limits, windows and quality policy. Autopilot keeps every safeguard below active.</p>
         <h3 class="au-panel__title au-mt-4 au-mb-2">Daily volume</h3>
         <div class="au-field-grid">
           <label class="au-field"><span class="au-field__label">Articles / day</span><input class="au-input" type="number" min="0" max="20" [(ngModel)]="policy.articlesPerDay" /></label>
@@ -121,6 +147,18 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
           <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.imageRequired" /> Require image</label>
           <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.socialRequired" /> Require social derivatives</label>
         </div>
+
+        <h3 class="au-panel__title au-mt-4 au-mb-2">Quality & self-healing</h3>
+        <div class="au-field-grid">
+          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoRepair" /> Auto-repair QA failures (targeted repair)</label>
+          <label class="au-field"><span class="au-field__label">Max repair attempts</span><input class="au-input" type="number" min="0" max="10" [(ngModel)]="policy.maxRepairAttempts" /></label>
+          <label class="au-field"><span class="au-field__label">Circuit breaker threshold (consecutive failures)</span><input class="au-input" type="number" min="1" max="10" [(ngModel)]="policy.consecutivePublishFailures" /></label>
+        </div>
+        <label class="au-field au-mt-2">
+          <span class="au-field__label">Autonomous QA thresholds (JSON)</span>
+          <textarea class="au-input" rows="7" [(ngModel)]="qaThresholdsText" placeholder='{ "overallQualityScore": 90, "evidenceScore": 85 }'></textarea>
+        </label>
+        <p class="au-hint">Defaults: overall/structural/editorial/SEO ≥ 90, evidence ≥ 85, zero blocking errors, zero unresolved high-priority warnings. High-value commercial content can raise them.</p>
 
         <h3 class="au-panel__title au-mt-4 au-mb-2">Candidate selection</h3>
         <div class="au-field-grid">
@@ -178,6 +216,63 @@ import type { AutomationPolicy, AutomationStatus, PublishingAccount, PublishingW
         </div>
       </section>
 
+      <section class="au-panel au-panel--padded au-mb-3">
+        <h2 class="au-panel__title">Workers & operational health</h2>
+        <p class="au-panel__subtitle au-mb-2">
+          <span class="au-badge" [class.au-badge--success]="health && health.redisConfigured && !health.degraded" [class.au-badge--danger]="health && (!health.redisConfigured || health.degraded)">
+            {{ health ? (health.degraded ? 'Degraded' : 'Healthy') : 'Loading…' }}
+          </span>
+          <span class="au-hint au-ml-1">Redis: {{ health ? (health.redisConfigured ? 'configured' : 'MISSING') : '…' }}</span>
+        </p>
+        <div class="au-table-wrap">
+          <table class="au-table">
+            <thead>
+              <tr>
+                <th>Worker</th>
+                <th>Status</th>
+                <th>Last heartbeat</th>
+                <th>Current task</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let worker of health?.workers ?? []">
+                <td>{{ worker.name }}</td>
+                <td>
+                  <span class="au-badge" [class.au-badge--success]="worker.status === 'running' && !worker.stale" [class.au-badge--danger]="worker.status !== 'running' || worker.stale">
+                    {{ worker.status }}{{ worker.stale ? ' · stale' : '' }}
+                  </span>
+                </td>
+                <td class="au-muted">{{ formatRelative(worker.lastBeatAt) }}</td>
+                <td class="au-muted">{{ worker.currentTask ?? '—' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="au-hint au-mt-2">Worker heartbeats update continuously. A stale heartbeat or missing Redis triggers a prominent operational failure and degrades the health badge.</p>
+      </section>
+
+      <section class="au-panel au-panel--padded">
+        <h2 class="au-panel__title">Recover stuck automatic content</h2>
+        <p class="au-panel__subtitle au-mb-2">Automatically repair, approve and reschedule existing AUTOPILOT projects stuck in QA blocked, Ready for review or failed publication states. Manual projects are never touched.</p>
+        <div class="au-form__actions">
+          <button class="au-btn au-btn--secondary" type="button" (click)="runRecovery(true)" [disabled]="recovering">
+            <app-icon name="eye"></app-icon>
+            Dry-run
+          </button>
+          <button class="au-btn au-btn--primary" type="button" (click)="runRecovery(false)" [disabled]="recovering">
+            <app-icon name="refresh"></app-icon>
+            {{ recovering ? 'Recovering…' : 'Recover now' }}
+          </button>
+        </div>
+        <div class="au-banner au-banner--info" *ngIf="recoveryReport">
+          <span class="au-banner__text">
+            {{ recoveryReport.dryRun ? 'Dry run:' : 'Recovery:' }}
+            scanned {{ recoveryReport.scanned }} · eligible {{ recoveryReport.eligible }} · acted {{ recoveryReport.acted }}
+            <span *ngIf="recoveryReport.items.length > 0">· last: {{ recoveryReport.items[0].projectId.slice(0, 8) }} → {{ recoveryReport.items[0].action }} ({{ recoveryReport.items[0].result }})</span>
+          </span>
+        </div>
+      </section>
+
       <section class="au-panel au-panel--padded">
         <h2 class="au-panel__title">Social accounts</h2>
         <p class="au-panel__subtitle au-mb-2">Accounts used by automation for X and Instagram publishing.</p>
@@ -217,15 +312,14 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   categoriesText = '';
   excludedCategoriesText = '';
   priorityTopicsText = '';
+  qaThresholdsText = '';
+  advancedOpen = false;
+  health: AutomationHealth | null = null;
+  recovering = false;
+  recoveryReport: AutomationRecoveryReport | null = null;
   saving = false;
   feedback = '';
   private refreshSubscription: Subscription | null = null;
-
-  get mode(): 'manual' | 'approval' | 'automatic' {
-    if (this.policy?.autoPublish) return 'automatic';
-    if (this.policy?.autoGenerate || this.policy?.autoApprove || this.policy?.autoSchedule) return 'approval';
-    return 'manual';
-  }
 
   get nextSlots(): Array<{ channel: string; at: string }> {
     return this.status?.nextSlots ?? [];
@@ -252,6 +346,9 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
         this.categoriesText = (policy.categories ?? []).join(', ');
         this.excludedCategoriesText = (policy.excludedCategories ?? []).join(', ');
         this.priorityTopicsText = (policy.priorityTopics ?? []).join(', ');
+        this.qaThresholdsText = policy.autonomousQaThresholds
+          ? JSON.stringify(policy.autonomousQaThresholds, null, 2)
+          : '';
         this.loadStatus();
       },
       error: () => {
@@ -262,6 +359,16 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
       next: (response) => {
         this.accounts = response.items.filter((account) => account.platform !== 'website');
       },
+    });
+    this.loadHealth();
+  }
+
+  loadHealth(): void {
+    this.api.getAutomationHealth().subscribe({
+      next: (health) => {
+        this.health = health;
+      },
+      error: () => undefined,
     });
   }
 
@@ -274,23 +381,30 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  setMode(mode: 'manual' | 'approval' | 'automatic'): void {
+  setMode(mode: 'manual' | 'assisted' | 'autopilot'): void {
     if (!this.policy) return;
+    this.policy.mode = mode;
     if (mode === 'manual') {
+      this.policy.enabled = false;
       this.policy.autoGenerate = false;
       this.policy.autoApprove = false;
       this.policy.autoSchedule = false;
       this.policy.autoPublish = false;
-    } else if (mode === 'approval') {
+      this.policy.autoRepair = false;
+    } else if (mode === 'assisted') {
+      this.policy.enabled = true;
       this.policy.autoGenerate = true;
       this.policy.autoApprove = false;
       this.policy.autoSchedule = true;
       this.policy.autoPublish = false;
+      this.policy.autoRepair = true;
     } else {
+      this.policy.enabled = true;
       this.policy.autoGenerate = true;
       this.policy.autoApprove = true;
       this.policy.autoSchedule = true;
       this.policy.autoPublish = true;
+      this.policy.autoRepair = true;
     }
   }
 
@@ -312,6 +426,11 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
         autoApprove: this.policy.autoApprove,
         autoSchedule: this.policy.autoSchedule,
         autoPublish: this.policy.autoPublish,
+        mode: this.policy.mode,
+        autoRepair: this.policy.autoRepair,
+        maxRepairAttempts: this.policy.maxRepairAttempts,
+        autonomousQaThresholds: parseJsonField(this.qaThresholdsText),
+        sourceRequirements: this.policy.sourceRequirements,
         minimumStoryScore: this.policy.minimumStoryScore,
         categories: this.categoriesText.split(',').map((item) => item.trim()).filter(Boolean),
         excludedCategories: this.excludedCategoriesText.split(',').map((item) => item.trim()).filter(Boolean),
@@ -405,5 +524,53 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
 
   dateLabel(value: string): string {
     return new Date(value).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  formatRelative(value: string | null | undefined): string {
+    if (!value) {
+      return '—';
+    }
+    const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
+    if (minutes < 1) {
+      return 'just now';
+    }
+    return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
+  }
+
+  runRecovery(dryRun: boolean): void {
+    this.recovering = true;
+    this.api
+      .recoverAutomation({ siteId: this.selectedSiteId, dryRun })
+      .subscribe({
+        next: (report) => {
+          this.recovering = false;
+          this.recoveryReport = report;
+          if (dryRun) {
+            this.toast.success(`Dry run complete: ${report.scanned} scanned, ${report.eligible} eligible.`);
+          } else {
+            this.toast.success(`Recovery finished: ${report.acted} actions applied.`);
+          }
+          this.load();
+        },
+        error: (error) => {
+          this.recovering = false;
+          this.feedback = String(error?.error?.message ?? 'Recovery failed.');
+        },
+      });
+  }
+}
+
+function parseJsonField(text: string): Record<string, unknown> | null {
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(trimmed);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
   }
 }

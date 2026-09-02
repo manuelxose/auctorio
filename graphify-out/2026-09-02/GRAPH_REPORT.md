@@ -1,11 +1,11 @@
 # Graph Report - auctorio  (2026-09-02)
 
 ## Corpus Check
-- 447 files · ~386,656 words
+- 447 files · ~386,639 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 5024 nodes · 12146 edges · 236 communities (196 shown, 40 thin omitted)
+- 5024 nodes · 12146 edges · 238 communities (198 shown, 40 thin omitted)
 - Extraction: 100% EXTRACTED · 0% INFERRED · 0% AMBIGUOUS · INFERRED: 39 edges (avg confidence: 0.84)
 - Token cost: 0 input · 0 output
 
@@ -66,6 +66,7 @@
 - InboxPageComponent
 - security.ts
 - repositories.ts
+- sha256
 - completeStudioSsoLogin
 - pipeline.ts
 - SourcesPageComponent
@@ -92,7 +93,7 @@
 - ActivityPageComponent
 - Arquitectura Tecnica del Backend de Generacion de Contenido con IA (SEO e Instagram)
 - scripts
-- sha256
+- topic.ts
 - automation.ts
 - brief-builder.ts
 - orchestrator.ts
@@ -195,6 +196,7 @@
 - Auctorio — Source Support Matrix
 - provision-linked-tenants.ts
 - cloudflare-cutover.sh
+- qa-visual-login.ts
 - qa-visual-installer.mjs
 - studio-ssr.test.ts
 - AGENTS.md - Auctorio AI Agents
@@ -267,7 +269,7 @@
 ## Import Cycles
 - None detected.
 
-## Communities (236 total, 40 thin omitted)
+## Communities (238 total, 40 thin omitted)
 
 ### Community 0 - "studio.models.ts"
 Cohesion: 0.03
@@ -462,16 +464,20 @@ Cohesion: 0.10
 Nodes (5): SourceItemStatus, StudioSourceItem, StudioStoryDetail, InboxPageComponent, Component
 
 ### Community 49 - "security.ts"
-Cohesion: 0.11
-Nodes (26): assignStudioRoleToUser(), createStudioRole(), ensureStudioRoles(), ensureTenantBootstrap(), ensureUniqueRoleKey(), getInternalStudioIdentityProviderBySlug(), getStudioIdentityProviderConfig(), listStudioRoles() (+18 more)
+Cohesion: 0.10
+Nodes (27): assignStudioRoleToUser(), createStudioRole(), ensureStudioRoles(), ensureTenantBootstrap(), ensureUniqueRoleKey(), getInternalStudioIdentityProviderBySlug(), getInternalStudioWorkspaceAccessBySlug(), getStudioIdentityProviderConfig() (+19 more)
 
 ### Community 50 - "repositories.ts"
 Cohesion: 0.07
 Nodes (26): AiAudit, ContentImage, ContentStatus, ContentText, ContentTextType, Fact, FactSourceType, Job (+18 more)
 
+### Community 51 - "sha256"
+Cohesion: 0.08
+Nodes (19): sha256(), createTenant(), prisma, createWorkspace(), prisma, createDedupFixture(), createTenant(), buildServer() (+11 more)
+
 ### Community 52 - "completeStudioSsoLogin"
-Cohesion: 0.11
-Nodes (28): main(), WORKSPACE_BOOTSTRAP, applyMappedRoles(), completeStudioSsoLogin(), createStudioLaunchTicket(), createStudioUserSession(), ensureRolesByKeys(), ensureStudioAccountByEmail() (+20 more)
+Cohesion: 0.12
+Nodes (27): main(), WORKSPACE_BOOTSTRAP, applyMappedRoles(), completeStudioSsoLogin(), createStudioLaunchTicket(), createStudioUserSession(), ensureRolesByKeys(), ensureStudioAccountByEmail() (+19 more)
 
 ### Community 53 - "pipeline.ts"
 Cohesion: 0.07
@@ -573,9 +579,9 @@ Nodes (23): 0.1 Estados y transiciones (publicaciones), 0.2 Workers y colas, 0.3
 Cohesion: 0.08
 Nodes (25): scripts, automation:recover, bootstrap:studio-access, build, build:studio, dev:studio, ops:queue, report:editorial-engine (+17 more)
 
-### Community 78 - "sha256"
-Cohesion: 0.05
-Nodes (49): GenerateImageFromTextInput, GenerateImageFromTextOutput, generateImageFromTextUseCase(), GetContentImageInput, GetContentImageOutput, getContentImageUseCase(), GetContentTextInput, GetContentTextOutput (+41 more)
+### Community 78 - "topic.ts"
+Cohesion: 0.11
+Nodes (30): GenerateImageFromTextInput, GenerateImageFromTextOutput, generateImageFromTextUseCase(), GetContentImageInput, GetContentImageOutput, getContentImageUseCase(), GetContentTextInput, GetContentTextOutput (+22 more)
 
 ### Community 79 - "automation.ts"
 Cohesion: 0.08
@@ -770,8 +776,8 @@ Cohesion: 0.15
 Nodes (13): devDependencies, @playwright/test, prisma, ts-node, @types/node, @types/nodemailer, typescript, @types/node (+5 more)
 
 ### Community 128 - "studio/auth.ts"
-Cohesion: 0.10
-Nodes (44): main(), acceptStudioInvitation(), AccountWithMemberships, buildApiKeyStudioSession(), buildHumanSession(), buildPermissionList(), buildRoleKeyList(), completeGlobalAccountLogin() (+36 more)
+Cohesion: 0.11
+Nodes (40): acceptStudioInvitation(), AccountWithMemberships, buildApiKeyStudioSession(), buildHumanSession(), buildPermissionList(), buildRoleKeyList(), completeGlobalAccountLogin(), completeLocalAccountLogin() (+32 more)
 
 ### Community 129 - "email.ts"
 Cohesion: 0.39
@@ -961,6 +967,10 @@ Nodes (7): asJson(), FIXTURE_SITES, hashApiKey(), main(), parseArgs(), provision
 Cohesion: 0.73
 Nodes (5): cf_api(), require_env(), set_zone_setting(), cloudflare-cutover.sh script, upsert_a_record()
 
+### Community 182 - "qa-visual-login.ts"
+Cohesion: 0.53
+Nodes (4): main(), hashStudioPassword(), scryptAsync(), verifyStudioPassword()
+
 ### Community 183 - "qa-visual-installer.mjs"
 Cohesion: 0.33
 Nodes (5): overflowRows, PAGES, report, THEMES, WIDTHS
@@ -1013,7 +1023,7 @@ Nodes (3): name, private, version
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `getPrismaClient()` connect `getPrismaClient` to `studio/auth.ts`, `provider-cache.ts`, `routes-editorial.ts`, `social-connections.ts`, `intelligence-phase3.test.ts`, `queue-ops.ts`, `editorial.ts`, `source-registry.test.ts`, `repository.ts`, `prisma.ts`, `sources.ts`, `discovery-planner.ts`, `producer.ts`, `routes.ts`, `intelligence-report.ts`, `cleanup-seeded-connections.ts`, `source-registry.ts`, `content-intelligence.test.ts`, `routes-connectors.ts`, `routes-phase5-ops.ts`, `editorial-plan-v2.test.ts`, `enrichment-providers.ts`, `internal-linking.ts`, `quality-repair.test.ts`, `provision-linked-tenants.ts`, `pipeline.ts`, `operations.ts`, `editorial-engine.test.ts`, `publication.ts`, `planner.ts`, `sha256`, `automation.ts`, `orchestrator.ts`, `movie-tv/plugin.ts`, `quality-repair.ts`, `profile.ts`, `deps.ts`, `site-intelligence/sitemap.ts`, `story-clustering.ts`, `notifications.ts`, `social.ts`, `structuredEvent`, `deduplication.ts`, `editorial-engine-fixtures.ts`, `worker-scheduler.ts`, `intelligence-settings.ts`, `site-editorial-profile.ts`, `crawler.ts`?**
+- **Why does `getPrismaClient()` connect `getPrismaClient` to `studio/auth.ts`, `provider-cache.ts`, `routes-editorial.ts`, `social-connections.ts`, `intelligence-phase3.test.ts`, `queue-ops.ts`, `editorial.ts`, `source-registry.test.ts`, `repository.ts`, `prisma.ts`, `sources.ts`, `discovery-planner.ts`, `producer.ts`, `routes.ts`, `intelligence-report.ts`, `cleanup-seeded-connections.ts`, `source-registry.ts`, `content-intelligence.test.ts`, `routes-connectors.ts`, `routes-phase5-ops.ts`, `editorial-plan-v2.test.ts`, `enrichment-providers.ts`, `internal-linking.ts`, `quality-repair.test.ts`, `sha256`, `provision-linked-tenants.ts`, `pipeline.ts`, `qa-visual-login.ts`, `operations.ts`, `editorial-engine.test.ts`, `publication.ts`, `planner.ts`, `automation.ts`, `orchestrator.ts`, `movie-tv/plugin.ts`, `quality-repair.ts`, `profile.ts`, `deps.ts`, `site-intelligence/sitemap.ts`, `story-clustering.ts`, `notifications.ts`, `social.ts`, `structuredEvent`, `deduplication.ts`, `editorial-engine-fixtures.ts`, `worker-scheduler.ts`, `intelligence-settings.ts`, `site-editorial-profile.ts`, `crawler.ts`?**
   _High betweenness centrality (0.050) - this node is a cross-community bridge._
 - **Why does `getNumberEnv()` connect `getNumberEnv` to `publishers.ts`, `social-provider.ts`, `social-connections.ts`, `api.ts`, `editorial.ts`, `source-registry.test.ts`, `discovery.ts`, `producer.ts`, `sources.ts`, `metrics.ts`, `getPrismaClient`, `scraping/index.ts`, `topic-controller.ts`, `operations.ts`, `connectors/verification.ts`, `ai/text.ts`, `publication.ts`, `planner.ts`, `automation.ts`, `FirecrawlWebIntelligenceProvider`, `adapters/http.ts`, `profile.ts`, `deps.ts`, `image.ts`, `structured.ts`, `site-intelligence/sitemap.ts`, `structuredEvent`, `getEnv`, `PublisherContext`, `getRedisConnectionOptions`, `worker-scheduler.ts`, `crawler.ts`?**
   _High betweenness centrality (0.024) - this node is a cross-community bridge._

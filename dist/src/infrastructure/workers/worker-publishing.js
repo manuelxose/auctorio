@@ -24,6 +24,7 @@ const defaultDependencies = {
     getPublisher: publishers_1.getPublisher,
     markProjectPublished: repository_1.markProjectPublished,
     clearProjectPublicationState: repository_1.clearProjectPublicationState,
+    verifyWebsitePublication: publication_1.verifyWebsitePublication,
 };
 function readTargetStatus(publication) {
     const requestPayload = publication.requestPayload && typeof publication.requestPayload === "object"
@@ -87,6 +88,15 @@ async function processPublishingJob(publicationJobId, dependencies = defaultDepe
     await syncDurablePublication(publication.id, status, result, externalId);
     if (status === "published") {
         await dependencies.markProjectPublished(publication.tenantId, publication.projectId, publication.versionId, "published");
+        // Post-publish verification: a publisher response alone is not enough.
+        // Remote success must never be replayed, so verification never mutates
+        // the publication state back to a retryable status.
+        const durable = await prisma.publication.findFirst({
+            where: { publicationJobId: publication.id },
+        });
+        if (durable) {
+            await dependencies.verifyWebsitePublication(publication.tenantId, durable.id);
+        }
         return;
     }
     await dependencies.clearProjectPublicationState(publication.tenantId, publication.projectId, publication.versionId);

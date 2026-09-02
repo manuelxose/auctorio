@@ -367,6 +367,8 @@ export async function listProjects(
         goal: project.goal,
         status: project.status,
         origin: project.origin,
+        automationMode: project.automationMode,
+        automationSubstate: project.automationSubstate,
         primaryLanguage: project.primaryLanguage,
         createdAt: project.createdAt,
         updatedAt: project.updatedAt,
@@ -451,6 +453,9 @@ export async function listProjects(
             qaFailureCount: countQaFailures(latestVersion.qaReport),
             qaWarningCount: countQaWarnings(latestVersion.qaReport),
             derivativeCount: latestVersion.derivatives.length,
+            repairAttempts: latestVersion.repairAttempts,
+            autonomousGatePassed: latestVersion.autonomousGatePassed,
+            autonomousGateReport: latestVersion.autonomousGateReport,
             latestPublicationJob: latestVersion.publicationJobs[0]
               ? mapPublicationJob(latestVersion.publicationJobs[0])
               : null,

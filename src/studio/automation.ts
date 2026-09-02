@@ -3,6 +3,13 @@ import type { AutomationPolicy, PublicationChannel } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getNumberEnv } from "../shared/utils/env";
 import { writeAudit } from "./audit";
+import {
+  buildModePayload,
+  clampRepairAttempts,
+  isAutomationMode,
+  type AutomationMode,
+} from "./automation-mode";
+import { notifyOperators } from "./notifications";
 
 const prisma = getPrismaClient();
 
@@ -26,7 +33,15 @@ export const AUTOMATION_DEFAULTS = {
   autoApprove: false,
   autoSchedule: false,
   autoPublish: false,
+  mode: "manual",
+  autoRepair: false,
+  maxRepairAttempts: 4,
 } as const;
+
+/** Maximum consecutive website publication failures before the circuit opens. */
+export const CIRCUIT_BREAKER_THRESHOLD = 3;
+
+export type AutomationModeValue = AutomationMode;
 
 // ────────────────────────────────────────────────────────────── Policy CRUD
 
@@ -62,6 +77,9 @@ export async function getOrCreatePolicy(tenantId: string, siteId: string | null)
       autoApprove: AUTOMATION_DEFAULTS.autoApprove,
       autoSchedule: AUTOMATION_DEFAULTS.autoSchedule,
       autoPublish: AUTOMATION_DEFAULTS.autoPublish,
+      mode: AUTOMATION_DEFAULTS.mode,
+      autoRepair: AUTOMATION_DEFAULTS.autoRepair,
+      maxRepairAttempts: AUTOMATION_DEFAULTS.maxRepairAttempts,
       activeDaysOfWeek: [0, 1, 2, 3, 4, 5, 6] as unknown as Prisma.InputJsonValue,
       publishingWindows: [
         { channel: "website", days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "20:00" },
@@ -92,6 +110,11 @@ export type UpdatePolicyInput = {
   autoApprove?: boolean;
   autoSchedule?: boolean;
   autoPublish?: boolean;
+  autoRepair?: boolean;
+  maxRepairAttempts?: number;
+  mode?: AutomationModeValue;
+  autonomousQaThresholds?: Record<string, unknown> | null;
+  sourceRequirements?: Record<string, unknown> | null;
   minimumStoryScore?: number;
   categories?: string[] | null;
   excludedCategories?: string[] | null;
@@ -128,10 +151,42 @@ export function sanitizePolicyInput(input: UpdatePolicyInput): UpdatePolicyInput
   if (sanitized.minimumStoryScore !== undefined) {
     sanitized.minimumStoryScore = Math.max(0, Math.min(1, sanitized.minimumStoryScore));
   }
+  if (sanitized.maxRepairAttempts !== undefined) {
+    sanitized.maxRepairAttempts = clampRepairAttempts(sanitized.maxRepairAttempts);
+  }
   return sanitized;
 }
 
+/**
+ * Resolve the effective mode for an update. When `mode` is present it wins
+ * and the flags are derived atomically from it (no contradictory partial
+ * states can be persisted); otherwise the legacy flag path is preserved.
+ */
+export function resolveModeUpdate(input: UpdatePolicyInput): UpdatePolicyInput {
+  if (input.mode === undefined || !isAutomationMode(input.mode)) {
+    return input;
+  }
+  const payload = buildModePayload(input.mode as AutomationMode, {
+    maxRepairAttempts: input.maxRepairAttempts,
+    autonomousQaThresholds: input.autonomousQaThresholds,
+    sourceRequirements: input.sourceRequirements,
+  });
+  return {
+    ...input,
+    enabled: payload.flags.enabled,
+    autoGenerate: payload.flags.autoGenerate,
+    autoApprove: payload.flags.autoApprove,
+    autoSchedule: payload.flags.autoSchedule,
+    autoPublish: payload.flags.autoPublish,
+    autoRepair: payload.flags.autoRepair,
+    ...(payload.autopilot ? { maxRepairAttempts: payload.autopilot.maxRepairAttempts } : {}),
+  };
+}
+
 export function assertSafeAutomationPolicy(input: UpdatePolicyInput): void {
+  if (input.mode !== undefined && isAutomationMode(input.mode)) {
+    return;
+  }
   if (input.autoPublish && (!input.autoGenerate || !input.autoApprove || !input.autoSchedule)) {
     throw new Error("auto_publish_requires_generation_approval_and_schedule");
   }
@@ -144,7 +199,8 @@ export async function updatePolicy(
   actorUserId?: string | null,
 ): Promise<AutomationPolicy> {
   const policy = await getOrCreatePolicy(tenantId, siteId);
-  const sanitized = sanitizePolicyInput(input);
+  const resolved = resolveModeUpdate(input);
+  const sanitized = sanitizePolicyInput(resolved);
   assertSafeAutomationPolicy(sanitized);
   const previous = {
     articlesPerDay: policy.articlesPerDay,
@@ -153,13 +209,18 @@ export async function updatePolicy(
     autoGenerate: policy.autoGenerate,
     autoPublish: policy.autoPublish,
     enabled: policy.enabled,
+    mode: policy.mode,
+    autoRepair: policy.autoRepair,
   };
 
+  // Selecting autopilot atomically produces an internally consistent policy:
+  // enabled, active, all automation flags on. Never a partial state.
+  const modeApplied = sanitized.mode !== undefined && isAutomationMode(sanitized.mode);
   const updated = await prisma.automationPolicy.update({
     where: { id: policy.id },
     data: {
-      enabled: sanitized.enabled,
-      state: sanitized.state,
+      enabled: modeApplied ? true : sanitized.enabled,
+      state: modeApplied && sanitized.mode !== "manual" ? "active" : sanitized.state,
       pausedReason: sanitized.pausedReason === undefined ? undefined : sanitized.pausedReason,
       timezone: sanitized.timezone,
       articlesPerDay: sanitized.articlesPerDay,
@@ -173,6 +234,11 @@ export async function updatePolicy(
       autoApprove: sanitized.autoApprove,
       autoSchedule: sanitized.autoSchedule,
       autoPublish: sanitized.autoPublish,
+      autoRepair: sanitized.autoRepair,
+      maxRepairAttempts: sanitized.maxRepairAttempts,
+      mode: sanitized.mode,
+      autonomousQaThresholds: sanitized.autonomousQaThresholds === undefined ? undefined : sanitized.autonomousQaThresholds ? (sanitized.autonomousQaThresholds as Prisma.InputJsonObject) : Prisma.JsonNull,
+      sourceRequirements: sanitized.sourceRequirements === undefined ? undefined : sanitized.sourceRequirements ? (sanitized.sourceRequirements as Prisma.InputJsonObject) : Prisma.JsonNull,
       minimumStoryScore: sanitized.minimumStoryScore,
       categories: sanitized.categories === undefined ? undefined : sanitized.categories ? (sanitized.categories as Prisma.InputJsonValue) : Prisma.JsonNull,
       excludedCategories: sanitized.excludedCategories === undefined ? undefined : sanitized.excludedCategories ? (sanitized.excludedCategories as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -348,6 +414,14 @@ export type AutomationStatus = {
   state: string;
   pausedReason: string | null;
   timezone: string;
+  mode: string;
+  autoRepair: boolean;
+  maxRepairAttempts: number;
+  circuit: {
+    open: boolean;
+    consecutiveFailures: number;
+    openedAt: string | null;
+  };
   today: {
     date: string;
     articlesPlanned: number;
@@ -393,6 +467,9 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
   if (pendingQueue > policy.maximumQueueSize) {
     warnings.push(`pending queue (${pendingQueue}) exceeds configured maximum (${policy.maximumQueueSize})`);
   }
+  if (policy.circuitOpen) {
+    warnings.push("website autopublishing is paused by the circuit breaker after consecutive publication failures");
+  }
 
   const slots = generateEditorialSlots(policy, dayStart);
   const now = new Date();
@@ -407,6 +484,14 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
     state: policy.state,
     pausedReason: policy.pausedReason,
     timezone: policy.timezone,
+    mode: policy.mode,
+    autoRepair: policy.autoRepair,
+    maxRepairAttempts: policy.maxRepairAttempts,
+    circuit: {
+      open: policy.circuitOpen,
+      consecutiveFailures: policy.consecutivePublishFailures,
+      openedAt: policy.circuitOpenedAt?.toISOString() ?? null,
+    },
     today: {
       date: dayStart.toISOString(),
       articlesPlanned,
@@ -424,4 +509,75 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
     nextSlots,
     warnings,
   };
+}
+
+// ────────────────────────────────────────────────────────────── Circuit breaker
+
+/**
+ * Record a terminal website publication failure for the site policy. When
+ * consecutive failures reach the threshold, the circuit opens: website
+ * autopublishing is paused for that site, the policy is marked degraded and
+ * operators are notified. Successful publications reset the counter.
+ */
+export async function recordWebsitePublishFailure(tenantId: string, siteId: string | null): Promise<void> {
+  const policy = await getOrCreatePolicy(tenantId, siteId);
+  const failures = policy.consecutivePublishFailures + 1;
+  const opensCircuit = failures >= CIRCUIT_BREAKER_THRESHOLD;
+
+  const updated = await prisma.automationPolicy.update({
+    where: { id: policy.id },
+    data: {
+      consecutivePublishFailures: failures,
+      ...(opensCircuit
+        ? {
+            circuitOpen: true,
+            circuitOpenedAt: new Date(),
+            state: "degraded",
+            pausedReason: "circuit_breaker_open",
+            autoPublish: false,
+          }
+        : {}),
+    },
+  });
+
+  if (opensCircuit) {
+    await writeAudit({
+      tenantId,
+      action: "automation.circuit_opened",
+      entityType: "automation_policy",
+      entityId: policy.id,
+      actorType: "system",
+      metadata: { siteId, failures, threshold: CIRCUIT_BREAKER_THRESHOLD },
+    });
+    await notifyOperators([tenantId], {
+      category: "operations",
+      severity: "error",
+      title: "Autopilot pausado por fallos consecutivos de publicación",
+      message: `El sitio acumula ${failures} publicaciones web fallidas consecutivas; la autopublicación web se ha pausado y la política marcada como degradada. Los trabajos seguros ya en curso se preservan.`,
+      entityType: "automation_policy",
+      entityId: policy.id,
+      actionUrl: "/studio/automation",
+      dedupeKey: `autopilot.circuit.${policy.id}`,
+      dedupeWindowMs: 12 * 3_600_000,
+    });
+  }
+
+  void updated;
+}
+
+export async function resetWebsitePublishCircuit(tenantId: string, siteId: string | null): Promise<void> {
+  const policy = await getOrCreatePolicy(tenantId, siteId);
+  await prisma.automationPolicy.update({
+    where: { id: policy.id },
+    data: {
+      consecutivePublishFailures: 0,
+      circuitOpen: false,
+      circuitOpenedAt: null,
+    },
+  });
+}
+
+export async function isWebsitePublishCircuitOpen(tenantId: string, siteId: string | null): Promise<boolean> {
+  const policy = await getOrCreatePolicy(tenantId, siteId);
+  return policy.circuitOpen;
 }
