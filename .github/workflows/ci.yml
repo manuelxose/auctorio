@@ -21,6 +21,9 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
     env:
       DATABASE_URL: postgresql://auctorio:auctorio@localhost:5432/auctorio_test
       REDIS_URL: redis://localhost:6379

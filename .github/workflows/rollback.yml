@@ -1,0 +1,27 @@
+name: rollback-production
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Known-good commit or tag'
+        required: true
+permissions:
+  contents: read
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          envs: DEPLOY_REF
+          env:
+            DEPLOY_REF: ${{ inputs.ref }}
+          script: |
+            cd /var/www/content-ai-platform
+            git fetch --all --tags
+            git checkout --detach "$DEPLOY_REF"
+            /var/www/content-ai-platform/scripts/deploy-production.sh
