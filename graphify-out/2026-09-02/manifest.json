@@ -1136,7 +1136,7 @@
   ".vscode/mcp.json": {
     "mtime": 1773257216.5235314,
     "seen": 1788343334.8312213,
-    "ast_hash": "690f19f462da3192a98806fdb2377e72",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "prisma/migrations/20260824000000_social_connections_and_web_discovery/migration.sql": {
@@ -2805,6 +2805,54 @@
     "mtime": 1788343310.9113803,
     "seen": 1788343334.832857,
     "ast_hash": "ac514165b7ec06fcc1b0288b8b6dc250",
+    "semantic_hash": ""
+  },
+  "scripts/deploy-production.sh": {
+    "mtime": 1788344376.7074966,
+    "seen": 1788344441.947441,
+    "ast_hash": "cd442fb8d82ef1e7cfd9e91f9d81ec8a",
+    "semantic_hash": ""
+  },
+  "scripts/server-audit.sh": {
+    "mtime": 1788344360.460803,
+    "seen": 1788344441.9481933,
+    "ast_hash": "7f00b1d1145bdf17cb60194cae68c7c9",
+    "semantic_hash": ""
+  },
+  "scripts/stop-dev-agents.sh": {
+    "mtime": 1788344360.461803,
+    "seen": 1788344441.9489286,
+    "ast_hash": "375462ffd286cc18f17d0839e5b0a980",
+    "semantic_hash": ""
+  },
+  "scripts/wsl-bootstrap.sh": {
+    "mtime": 1788344376.7014968,
+    "seen": 1788344441.9489913,
+    "ast_hash": "ee82e08c1b309f7558827c4b7778d836",
+    "semantic_hash": ""
+  },
+  "scripts/wsl-verify.sh": {
+    "mtime": 1788344376.7044969,
+    "seen": 1788344441.9489946,
+    "ast_hash": "ba3fc55245ec4d493ddd8080a476516a",
+    "semantic_hash": ""
+  },
+  ".github/workflows/deploy.yml": {
+    "mtime": 1788344396.6921246,
+    "seen": 1788344442.0280294,
+    "ast_hash": "12126bc847a740c5cefcc79760ff4cf4",
+    "semantic_hash": ""
+  },
+  ".github/workflows/rollback.yml": {
+    "mtime": 1788344396.6941245,
+    "seen": 1788344442.0280335,
+    "ast_hash": "d0ff2e1a7a3cec5dc0c03e5701def893",
+    "semantic_hash": ""
+  },
+  "docs/server-optimization.md": {
+    "mtime": 1788344396.6981244,
+    "seen": 1788344442.030728,
+    "ast_hash": "e09897d6c03b1f8179be88651b27553b",
     "semantic_hash": ""
   }
 }

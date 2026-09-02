@@ -1135,8 +1135,8 @@
   },
   ".vscode/mcp.json": {
     "mtime": 1773257216.5235314,
-    "seen": 1788343334.8312213,
-    "ast_hash": "",
+    "seen": 1788363667.1094007,
+    "ast_hash": "690f19f462da3192a98806fdb2377e72",
     "semantic_hash": ""
   },
   "prisma/migrations/20260824000000_social_connections_and_web_discovery/migration.sql": {
@@ -1224,9 +1224,9 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1787338594.3718715,
-    "seen": 1787603831.244707,
-    "ast_hash": "f1c8944c9f7dcb7157ad199b2fe6c3f6",
+    "mtime": 1788344475.3957036,
+    "seen": 1788363667.110987,
+    "ast_hash": "d449089862e902fe9e3ef542cca8d5eb",
     "semantic_hash": ""
   },
   "AGENTS.md": {
@@ -2838,15 +2838,15 @@
     "semantic_hash": ""
   },
   ".github/workflows/deploy.yml": {
-    "mtime": 1788344396.6921246,
-    "seen": 1788344442.0280294,
-    "ast_hash": "12126bc847a740c5cefcc79760ff4cf4",
+    "mtime": 1788344475.3977036,
+    "seen": 1788363667.1109903,
+    "ast_hash": "bbf38c11ae7ac3c60ad4d979a5655784",
     "semantic_hash": ""
   },
   ".github/workflows/rollback.yml": {
-    "mtime": 1788344396.6941245,
-    "seen": 1788344442.0280335,
-    "ast_hash": "d0ff2e1a7a3cec5dc0c03e5701def893",
+    "mtime": 1788344475.4007034,
+    "seen": 1788363667.1109931,
+    "ast_hash": "348c2442ddc95400a77deec4cb478d74",
     "semantic_hash": ""
   },
   "docs/server-optimization.md": {
