@@ -220,6 +220,13 @@ export async function startProjectGeneration(
 
   await updateProjectStatus(tenantId, projectId, "draft");
 
+  if (project.origin === "auto") {
+    await prisma.contentProject.update({
+      where: { id: projectId },
+      data: { automationSubstate: "generating" },
+    });
+  }
+
   return { versionId: version.id, contentTextId: contentText.id, jobId: textJob.id };
 }
 
@@ -305,6 +312,13 @@ export async function syncTextResultToStudio(tenantId: string, contentTextId: st
   );
   await updateProjectStatus(tenantId, version.project.id, "ai_generated");
 
+  if (version.project.origin === "auto") {
+    await prisma.contentProject.update({
+      where: { id: version.project.id },
+      data: { automationSubstate: "waiting_for_image" },
+    });
+  }
+
   if (!version.contentImageId) {
     await requestImageGenerationForVersion(tenantId, version.id);
   }
@@ -319,6 +333,14 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
   const version = await findVersionByImageId(tenantId, contentImageId);
   if (!version) {
     return;
+  }
+
+  const isAuto = version.project.origin === "auto";
+  if (isAuto) {
+    await prisma.contentProject.update({
+      where: { id: version.project.id },
+      data: { automationSubstate: "qa_checking" },
+    });
   }
 
   const qaReport = runVersionQaV2(
@@ -349,6 +371,13 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
     version.project.id,
     qaReport.passed ? "in_review" : "qa_failed",
   );
+
+  if (isAuto) {
+    await prisma.contentProject.update({
+      where: { id: version.project.id },
+      data: { automationSubstate: qaReport.passed ? "qa_passed" : "qa_failed" },
+    });
+  }
 }
 
 export async function queuePublication(publicationJobId: string) {

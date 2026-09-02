@@ -120,6 +120,17 @@ export type PublisherAdapter = {
   unpublish(context: PublisherContext, externalId: string): Promise<PublishResult>;
   uploadAsset?(context: PublisherContext): Promise<string | null>;
   getPublicationStatus?(context: PublisherContext, externalId: string): Promise<Record<string, unknown>>;
+  /**
+   * Optional post-publish destination verification. Returns whether the
+   * published piece is reachable and matches the expected title. Never
+   * fabricates a success.
+   */
+  verifyPublication?(
+    context: PublisherContext,
+    externalId: string | null,
+    externalUrl: string | null,
+    expectedTitle: string,
+  ): Promise<{ ok: boolean; detail: string }>;
 };
 
 export type AssetVariantInput = {
@@ -493,6 +504,9 @@ export type VersionSummary = Pick<
   derivativeCount: number;
   latestPublicationJob: PublicationExecutionState | null;
   qaReport: ContentVersion["qaReport"];
+  repairAttempts: number;
+  autonomousGatePassed: boolean;
+  autonomousGateReport: ContentVersion["autonomousGateReport"];
 };
 
 export type StudioProjectSummary = Pick<
@@ -511,6 +525,8 @@ export type StudioProjectSummary = Pick<
   site: Pick<Site, "id" | "key" | "name" | "type" | "locale" | "baseUrl">;
   versionCount: number;
   socialCount: number;
+  automationMode: string | null;
+  automationSubstate: string | null;
   publications: Array<{
     id: string;
     channel: string;

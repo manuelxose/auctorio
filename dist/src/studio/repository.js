@@ -344,6 +344,8 @@ async function listProjects(tenantId, input) {
                 goal: project.goal,
                 status: project.status,
                 origin: project.origin,
+                automationMode: project.automationMode,
+                automationSubstate: project.automationSubstate,
                 primaryLanguage: project.primaryLanguage,
                 createdAt: project.createdAt,
                 updatedAt: project.updatedAt,
@@ -424,6 +426,9 @@ async function listProjects(tenantId, input) {
                         qaFailureCount: (0, review_1.countQaFailures)(latestVersion.qaReport),
                         qaWarningCount: (0, review_1.countQaWarnings)(latestVersion.qaReport),
                         derivativeCount: latestVersion.derivatives.length,
+                        repairAttempts: latestVersion.repairAttempts,
+                        autonomousGatePassed: latestVersion.autonomousGatePassed,
+                        autonomousGateReport: latestVersion.autonomousGateReport,
                         latestPublicationJob: latestVersion.publicationJobs[0]
                             ? mapPublicationJob(latestVersion.publicationJobs[0])
                             : null,

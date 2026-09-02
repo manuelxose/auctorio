@@ -97,6 +97,16 @@ function buildPublisher(overrides?: Partial<PublisherAdapter>): PublisherAdapter
   };
 }
 
+function noopVerification() {
+  return async () => ({
+    ok: true,
+    detail: "unused",
+    externalId: null,
+    externalUrl: null,
+    checkedAt: new Date().toISOString(),
+  });
+}
+
 test("processPublishingJob uses publishDraft and keeps the project approved when syncing a draft", async () => {
   const publication = buildPublication({
     requestPayload: { targetStatus: "draft" },
@@ -135,6 +145,7 @@ test("processPublishingJob uses publishDraft and keeps the project approved when
       calls.push("clear-published");
       return {} as never;
     },
+    verifyWebsitePublication: noopVerification(),
   });
 
   assert.deepEqual(calls, [
@@ -180,6 +191,7 @@ test("processPublishingJob upgrades to published when the provider cannot keep a
       calls.push("clear-published");
       return {} as never;
     },
+    verifyWebsitePublication: noopVerification(),
   });
 
   assert.deepEqual(calls, [
@@ -227,6 +239,7 @@ test("processPublishingJob calls unpublish and clears published state", async ()
       calls.push("clear-published");
       return {} as never;
     },
+    verifyWebsitePublication: noopVerification(),
   });
 
   assert.deepEqual(calls, [
@@ -281,6 +294,7 @@ test("processPublishingJob routes talkaris draft publications through updateDraf
       calls.push("clear-published");
       return {} as never;
     },
+    verifyWebsitePublication: noopVerification(),
   });
 
   assert.deepEqual(calls, [

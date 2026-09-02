@@ -182,6 +182,9 @@ export type VersionSummary = {
   qaFailureCount: number;
   qaWarningCount: number;
   derivativeCount: number;
+  repairAttempts: number;
+  autonomousGatePassed: boolean;
+  autonomousGateReport: JsonRecord;
   latestPublicationJob: PublicationExecutionState | null;
   qaReport: {
     passed: boolean;
@@ -257,6 +260,8 @@ export type StudioProjectSummary = {
   };
   versionCount: number;
   socialCount: number;
+  automationMode: string | null;
+  automationSubstate: string | null;
   publications: Array<{
     id: string;
     channel: PublicationChannel;
@@ -1266,6 +1271,14 @@ export type AutomationPolicy = {
   autoApprove: boolean;
   autoSchedule: boolean;
   autoPublish: boolean;
+  mode: 'manual' | 'assisted' | 'autopilot' | null;
+  autoRepair: boolean;
+  maxRepairAttempts: number;
+  autonomousQaThresholds: JsonRecord;
+  sourceRequirements: JsonRecord;
+  circuitOpen: boolean;
+  circuitOpenedAt: string | null;
+  consecutivePublishFailures: number;
   minimumStoryScore: number;
   categories: string[] | null;
   excludedCategories: string[] | null;
@@ -1290,6 +1303,49 @@ export type AiUsageRow = {
   tokensInput: number;
   tokensOutput: number;
   costUsd: number;
+};
+
+export type WorkerHeartbeatView = {
+  name: string;
+  pid: number;
+  status: string;
+  currentTask: string | null;
+  startedAt: string | null;
+  lastBeatAt: string;
+  stoppedAt: string | null;
+  stale: boolean;
+};
+
+export type AutomationHealth = {
+  redisConfigured: boolean;
+  degraded: boolean;
+  workers: WorkerHeartbeatView[];
+  policies: Array<{
+    id: string;
+    siteId: string | null;
+    mode: string | null;
+    enabled: boolean;
+    state: string;
+    circuitOpen: boolean;
+    circuitOpenedAt: string | null;
+    consecutivePublishFailures: number;
+    pausedReason: string | null;
+  }>;
+};
+
+export type AutomationRecoveryItem = {
+  projectId: string;
+  action: 'skip' | 'repair' | 'approve' | 'schedule' | 'retry_publication' | 'intervention';
+  result: string;
+  detail?: string;
+};
+
+export type AutomationRecoveryReport = {
+  dryRun: boolean;
+  scanned: number;
+  eligible: number;
+  acted: number;
+  items: AutomationRecoveryItem[];
 };
 
 export type AutomationStatus = {

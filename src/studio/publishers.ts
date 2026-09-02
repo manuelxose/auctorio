@@ -65,6 +65,85 @@ function redactRemoteBody(text: string): string {
 }
 
 /**
+ * Shared post-publish verification helper: GET the external URL and check
+ * HTTP accessibility plus that the page carries the expected title. Never
+ * reports success without a real HTTP response.
+ */
+async function verifyPublicationByHttpGet(
+  url: string,
+  expectedTitle: string,
+): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      timeoutMs: getNumberEnv("PUBLISH_VERIFY_TIMEOUT_MS", 10_000),
+      retries: 0,
+    });
+    if (!response.ok) {
+      return { ok: false, detail: `http_${response.status}` };
+    }
+    const text = await response.text();
+    const normalizedTitle = expectedTitle
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .slice(0, 40);
+    const normalizedBody = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const titlePresent =
+      normalizedTitle.length > 0 && (normalizedBody.includes(normalizedTitle) || /<title[^>]*>/i.test(text));
+    return titlePresent
+      ? { ok: true, detail: "http_accessible_and_title_present" }
+      : { ok: false, detail: "title_not_found_on_page" };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: `http_verification_error: ${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}`,
+    };
+  }
+}
+
+/** Verify a JSON detail endpoint for title/status presence. */
+async function verifyPublicationByApiGet(
+  url: string,
+  expectedTitle: string,
+  headers: Record<string, string>,
+): Promise<{ ok: boolean; detail: string }> {
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: "GET",
+      headers,
+      timeoutMs: getNumberEnv("PUBLISH_VERIFY_TIMEOUT_MS", 10_000),
+      retries: 0,
+    });
+    if (!response.ok) {
+      return { ok: false, detail: `api_http_${response.status}` };
+    }
+    const text = await response.text();
+    const normalized = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    const normalizedTitle = expectedTitle.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 40);
+    if (normalized.includes(normalizedTitle)) {
+      return { ok: true, detail: "api_record_verified" };
+    }
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      const record = (parsed.data && typeof parsed.data === "object" ? parsed.data : parsed) as Record<string, unknown>;
+      const title = typeof record.title === "string" ? record.title : null;
+      if (title && title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").includes(normalizedTitle)) {
+        return { ok: true, detail: "api_record_title_verified" };
+      }
+    } catch {
+      // Non-JSON detail endpoint: fall through to body check.
+    }
+    return { ok: false, detail: "title_not_found_in_api_record" };
+  } catch (error) {
+    return {
+      ok: false,
+      detail: `api_verification_error: ${error instanceof Error ? error.message.slice(0, 120) : String(error).slice(0, 120)}`,
+    };
+  }
+}
+
+/**
  * Pure GuiaTV payload builder (exported for fidelity tests). Maps the approved
  * SEO brief fields from project metadata into the destination contract.
  */
@@ -491,6 +570,21 @@ class GuiaTvPublisher implements PublisherAdapter {
       responsePayload: response as Record<string, unknown>,
     };
   }
+
+  async verifyPublication(
+    _context: PublisherContext,
+    externalId: string | null,
+    externalUrl: string | null,
+    expectedTitle: string,
+  ): Promise<{ ok: boolean; detail: string }> {
+    if (externalUrl) {
+      return verifyPublicationByHttpGet(externalUrl, expectedTitle);
+    }
+    if (!externalId) {
+      return { ok: false, detail: "missing_external_id_and_url" };
+    }
+    return { ok: false, detail: "external_url_unavailable" };
+  }
 }
 
 class TecnoriaPublisher implements PublisherAdapter {
@@ -720,6 +814,26 @@ class TecnoriaPublisher implements PublisherAdapter {
     }
 
     return this.upsert(context, "draft", externalId);
+  }
+
+  async verifyPublication(
+    context: PublisherContext,
+    externalId: string | null,
+    externalUrl: string | null,
+    expectedTitle: string,
+  ): Promise<{ ok: boolean; detail: string }> {
+    if (externalUrl) {
+      const direct = await verifyPublicationByHttpGet(externalUrl, expectedTitle);
+      if (direct.ok) {
+        return direct;
+      }
+    }
+    if (externalId) {
+      const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
+      const headers = await this.getAuthHeaders(context.site, "application/json");
+      return verifyPublicationByApiGet(`${siteBaseUrl}/api/v1/blog/${externalId}`, expectedTitle, headers);
+    }
+    return { ok: false, detail: "missing_external_id_and_url" };
   }
 }
 

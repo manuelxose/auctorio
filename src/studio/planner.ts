@@ -15,6 +15,10 @@ import {
   startOfLocalDay,
 } from "./automation";
 import { countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
+import { runQualityRepairCycle } from "./quality-repair";
+import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
+import type { QaReportV2 } from "./qa";
+import type { AutomationMode } from "./automation-mode";
 
 const prisma = getPrismaClient();
 
@@ -308,7 +312,11 @@ async function createAutoProject(policy: AutomationPolicy, tenantId: string, sou
   if (project) {
     await prisma.contentProject.update({
       where: { id: project.id },
-      data: { origin: "auto" },
+      data: {
+        origin: "auto",
+        automationMode: policy.mode,
+        automationSubstate: "generating",
+      },
     });
   }
 }
@@ -380,13 +388,26 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       socialContents: true,
       publications: { where: { status: { not: "deleted" } } },
       site: true,
+      topic: true,
     },
     take: 30,
   });
 
   for (const project of projects) {
     const latestVersion = project.versions[0] ?? null;
+    const mode = policy.mode as AutomationMode;
 
+    // ── AUTOPILOT: strict gate, self-healing repair, automatic approval. ──
+    if (mode === "autopilot") {
+      const advanced = await advanceAutopilotProject(policy, tenantId, project, latestVersion);
+      progress.projectsAdvanced += advanced.projectsAdvanced;
+      progress.socialJobsCreated += advanced.socialJobsCreated;
+      progress.publicationsCreated += advanced.publicationsCreated;
+      progress.approvals += advanced.approvals;
+      continue;
+    }
+
+    // ── Legacy / assisted path (human approval semantics preserved). ──
     if (!latestVersion) {
       if (policy.autoGenerate) {
         await startProjectGeneration(project.id, tenantId);
@@ -418,11 +439,10 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
     }
 
     if (policy.autoSchedule && (socialReady || !policy.socialRequired)) {
-      const publishedVersionStatuses = ["approved", "published"];
-      const versionEligible =
-        policy.autoApprove
-          ? publishedVersionStatuses.includes(latestVersion.status)
-          : ["approved", "in_review", "qa_passed"].includes(latestVersion.status);
+      // Assisted/manual semantics: publications are only ever created for
+      // versions a human already approved. Scheduling pre-approval content
+      // would let the scheduler publish without human consent.
+      const versionEligible = ["approved", "published"].includes(latestVersion.status);
 
       if (versionEligible) {
         const created = await ensureAutoPublications(policy, tenantId, project.id, latestVersion.id);
@@ -434,7 +454,232 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
   return progress;
 }
 
-async function ensureAutoPublications(
+/**
+ * Advance one AUTOPILOT project one step per tick. The step order mirrors the
+ * pipeline: generation → image → strict QA → targeted repair (bounded) →
+ * auto approval → social → scheduling → publication.
+ */
+async function advanceAutopilotProject(
+  policy: AutomationPolicy,
+  tenantId: string,
+  project: AutopilotProjectView,
+  latestVersion: AutopilotProjectView["versions"][number] | null,
+): Promise<ProgressResult> {
+  const progress: ProgressResult = {
+    projectsAdvanced: 0,
+    socialJobsCreated: 0,
+    publicationsCreated: 0,
+    approvals: 0,
+  };
+
+  if (!latestVersion) {
+    if (policy.autoGenerate) {
+      await startProjectGeneration(project.id, tenantId);
+      await prisma.contentProject.update({
+        where: { id: project.id },
+        data: { automationSubstate: "generating" },
+      });
+      progress.projectsAdvanced += 1;
+    }
+    return progress;
+  }
+
+  const imageReady = isHeroImageReady(latestVersion.contentImage);
+
+  // Waiting for the image pipeline: no further advancement until it finishes
+  // (the image worker triggers QA once the hero variant is persisted).
+  if (latestVersion.status === "ai_generated" || latestVersion.status === "draft") {
+    await prisma.contentProject.update({
+      where: { id: project.id },
+      data: { automationSubstate: imageReady ? "qa_checking" : "waiting_for_image" },
+    });
+    return progress;
+  }
+
+  // QA failed → bounded self-healing repair cycle.
+  if (latestVersion.status === "qa_failed") {
+    const outcome = await runQualityRepairCycle(tenantId, project.id, policy);
+    progress.projectsAdvanced += 1;
+    if (outcome.outcome === "gate_passed") {
+      // QA passed after repair; the next tick approves and schedules.
+    }
+    return progress;
+  }
+
+  // QA passed → the strict autonomous quality gate decides.
+  if (latestVersion.status === "qa_passed") {
+    const gate = await evaluateAutopilotGateForVersion(tenantId, policy, project, latestVersion);
+
+    if (!gate.passed) {
+      if (policy.autoRepair) {
+        await runQualityRepairCycle(tenantId, project.id, policy);
+        progress.projectsAdvanced += 1;
+      } else {
+        await prisma.contentProject.update({
+          where: { id: project.id },
+          data: { automationSubstate: "intervention_required" },
+        });
+      }
+      return progress;
+    }
+
+    // Persist the gate result for observability and approve automatically.
+    await prisma.contentVersion.update({
+      where: { id: latestVersion.id },
+      data: {
+        autonomousGatePassed: true,
+        autonomousGateReport: gate.report as unknown as Prisma.InputJsonObject,
+      },
+    });
+    if (policy.autoApprove) {
+      await approveVersion(tenantId, project.id, latestVersion.id, "automation/autopilot", null);
+      await prisma.contentProject.update({
+        where: { id: project.id },
+        data: { automationSubstate: "auto_approved" },
+      });
+      await writeAudit({
+        tenantId,
+        action: "project.autopilot_approved",
+        entityType: "content_project",
+        entityId: project.id,
+        actorType: "system",
+        actorUserId: null,
+        metadata: { actor: "automation/autopilot", versionId: latestVersion.id, qaScore: gate.report.overallScore },
+      });
+      progress.approvals += 1;
+    }
+    return progress;
+  }
+
+  // Approved → social derivatives, then scheduling.
+  if (latestVersion.status === "approved") {
+    const socialReady = !policy.socialRequired || project.socialContents.length > 0;
+    const socialChannelsWanted =
+      (policy.xPostsPerDay > 0 ? ["x"] : []).concat(policy.instagramPostsPerDay > 0 ? ["instagram"] : []);
+
+    if (!socialReady && socialChannelsWanted.length > 0 && latestVersion.bodyHtml) {
+      await createSocialGenerationJobs(tenantId, {
+        projectId: project.id,
+        versionId: latestVersion.id,
+        channels: socialChannelsWanted as Array<"x" | "instagram">,
+      });
+      await prisma.contentProject.update({
+        where: { id: project.id },
+        data: { automationSubstate: "social_generating" },
+      });
+      progress.socialJobsCreated += 1;
+      return progress;
+    }
+
+    if (policy.autoSchedule && (socialReady || !policy.socialRequired)) {
+      const created = await ensureAutoPublications(policy, tenantId, project.id, latestVersion.id);
+      progress.publicationsCreated += created;
+      await prisma.contentProject.update({
+        where: { id: project.id },
+        data: { automationSubstate: created > 0 ? "scheduled" : "scheduling" },
+      });
+    }
+    return progress;
+  }
+
+  // Publication is flowing through the scheduler/publishing workers.
+  return progress;
+}
+
+export type AutopilotProjectView = {
+  id: string;
+  versions: Array<{
+    id: string;
+    status: string;
+    title: string | null;
+    excerpt: string | null;
+    bodyHtml: string | null;
+    seoTitle: string | null;
+    seoDescription: string | null;
+    qaReport: unknown;
+    contentImage: {
+      status: string | null;
+      storagePath: string | null;
+      assetVariants: Array<{ kind: string }>;
+    } | null;
+  }>;
+  socialContents: Array<{ id: string }>;
+  publications: Array<{ id: string }>;
+  metadata: unknown;
+  topic: { id: string } | null;
+};
+
+export async function evaluateAutopilotGateForVersion(
+  tenantId: string,
+  policy: AutomationPolicy,
+  project: AutopilotProjectView,
+  latestVersion: AutopilotProjectView["versions"][number],
+) {
+  const metadata = (project.metadata && typeof project.metadata === "object"
+    ? project.metadata
+    : {}) as Record<string, unknown>;
+  const readString = (key: string): string | null => {
+    const value = metadata[key];
+    return typeof value === "string" && value.trim() ? value.trim() : null;
+  };
+
+  const qaReport = latestVersion.qaReport && typeof latestVersion.qaReport === "object"
+    ? (latestVersion.qaReport as { passed?: unknown; score?: unknown; findings?: unknown })
+    : null;
+
+  const findings = Array.isArray(qaReport?.findings)
+    ? (qaReport.findings as QaReportV2["findings"])
+    : [];
+
+  const factRows = project.topic
+    ? await prisma.fact.findMany({
+        where: { tenantId, topicId: project.topic.id },
+        select: { sourceRef: true },
+        take: 50,
+      })
+    : [];
+  const sourceGroups = new Set(
+    factRows
+      .map((fact) => fact.sourceRef)
+      .filter((url): url is string => Boolean(url))
+      .map((url) => {
+        try {
+          return new URL(url).hostname;
+        } catch {
+          return url;
+        }
+      }),
+  ).size;
+
+  const report = evaluateAutonomousGate(
+    {
+      version: {
+        status: latestVersion.status,
+        title: latestVersion.title,
+        excerpt: latestVersion.excerpt,
+        bodyHtml: latestVersion.bodyHtml,
+        seoTitle: latestVersion.seoTitle,
+        seoDescription: latestVersion.seoDescription,
+      },
+      qaReport: {
+        passed: qaReport?.passed === true,
+        score: typeof qaReport?.score === "number" ? qaReport.score : 0,
+        checks: [],
+        findings,
+      },
+      contentType: readString("contentType") ?? readString("articleType"),
+      intent: readString("primaryIntent") ?? readString("searchIntent"),
+      heroImageReady: isHeroImageReady(latestVersion.contentImage),
+      sourceGroups,
+      cannibalizationRisk: readString("cannibalizationRisk"),
+    },
+    readGateConfig(policy),
+  );
+
+  return { passed: report.passed, report };
+}
+
+export async function ensureAutoPublications(
   policy: AutomationPolicy,
   tenantId: string,
   projectId: string,

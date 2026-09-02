@@ -179,6 +179,12 @@ async function startProjectGeneration(projectId, tenantId, feedback, promptPrese
         },
     });
     await (0, repository_1.updateProjectStatus)(tenantId, projectId, "draft");
+    if (project.origin === "auto") {
+        await prisma.contentProject.update({
+            where: { id: projectId },
+            data: { automationSubstate: "generating" },
+        });
+    }
     return { versionId: version.id, contentTextId: contentText.id, jobId: textJob.id };
 }
 async function requestImageGenerationForVersion(tenantId, versionId, promptPresetVersionId) {
@@ -244,6 +250,12 @@ async function syncTextResultToStudio(tenantId, contentTextId) {
     await (0, repository_1.updateVersionFromText)(tenantId, version.id, derived, "ai_generated");
     await (0, repository_1.replaceDerivatives)(tenantId, version.project.id, version.id, buildDerivatives(derived, version.project.site));
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, "ai_generated");
+    if (version.project.origin === "auto") {
+        await prisma.contentProject.update({
+            where: { id: version.project.id },
+            data: { automationSubstate: "waiting_for_image" },
+        });
+    }
     if (!version.contentImageId) {
         await requestImageGenerationForVersion(tenantId, version.id);
     }
@@ -256,6 +268,13 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     const version = await (0, repository_1.findVersionByImageId)(tenantId, contentImageId);
     if (!version) {
         return;
+    }
+    const isAuto = version.project.origin === "auto";
+    if (isAuto) {
+        await prisma.contentProject.update({
+            where: { id: version.project.id },
+            data: { automationSubstate: "qa_checking" },
+        });
     }
     const qaReport = (0, qa_1.runVersionQaV2)({
         title: version.title,
@@ -273,6 +292,12 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     });
     await (0, repository_1.updateVersionQa)(version.id, qaReport.passed ? "qa_passed" : "qa_failed", qaReport);
     await (0, repository_1.updateProjectStatus)(tenantId, version.project.id, qaReport.passed ? "in_review" : "qa_failed");
+    if (isAuto) {
+        await prisma.contentProject.update({
+            where: { id: version.project.id },
+            data: { automationSubstate: qaReport.passed ? "qa_passed" : "qa_failed" },
+        });
+    }
 }
 async function queuePublication(publicationJobId) {
     const queue = await (0, producer_1.getPublishingQueue)();

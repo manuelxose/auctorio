@@ -25,7 +25,8 @@
     "start:worker:automation": "ts-node scripts/start-worker-automation.ts",
     "start:worker:social": "ts-node scripts/start-worker-social.ts",
     "report:editorial-engine": "ts-node scripts/editorial-engine-fixtures.ts",
-    "ops:queue": "ts-node scripts/queue-ops.ts"
+    "ops:queue": "ts-node scripts/queue-ops.ts",
+    "automation:recover": "ts-node scripts/automation-recover.ts"
   },
   "dependencies": {
     "@prisma/client": "^5.10.2",

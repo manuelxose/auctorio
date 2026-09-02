@@ -42,6 +42,9 @@ import {
   updatePublicationSchedule,
 } from "./publication";
 import { listCalendarEvents } from "./calendar";
+import { listWorkerHeartbeats } from "./worker-health";
+import { recoverStuckAutoProjects } from "./automation-recovery";
+import { getEnv } from "../shared/utils/env";
 import {
   getAutomationStatus,
   getOrCreatePolicy,
@@ -1340,6 +1343,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           socialTimingMinutesX: body.socialTimingMinutesX,
           socialTimingMinutesInstagram: body.socialTimingMinutesInstagram,
           sourceSelectionRules: body.sourceSelectionRules,
+          mode: body.mode,
+          autoRepair: body.autoRepair,
+          maxRepairAttempts: body.maxRepairAttempts,
+          autonomousQaThresholds: body.autonomousQaThresholds,
+          sourceRequirements: body.sourceRequirements,
         },
         context.userId,
       );
@@ -1381,6 +1389,50 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const body = parseBody<{ siteId?: string }>(request);
     const policy = await resumeAutomation(context.tenantId, parseOptionalString(body.siteId) ?? null, context.userId);
     return reply.send(policy);
+  });
+
+  fastify.get("/v2/automation/health", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const workers = await listWorkerHeartbeats();
+    const policies = await prisma.automationPolicy.findMany({
+      where: { tenantId: context.tenantId },
+      select: {
+        id: true,
+        siteId: true,
+        mode: true,
+        enabled: true,
+        state: true,
+        circuitOpen: true,
+        circuitOpenedAt: true,
+        consecutivePublishFailures: true,
+        pausedReason: true,
+      },
+    });
+    const redisConfigured = Boolean(getEnv("REDIS_URL", ""));
+    return reply.send({
+      redisConfigured,
+      workers,
+      policies,
+      degraded: !redisConfigured || workers.some((worker) => worker.stale) || policies.some((policy) => policy.circuitOpen),
+    });
+  });
+
+  fastify.post("/v2/automation/recover", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
+    if (!context) {
+      return;
+    }
+    const body = parseBody<{ siteId?: string; dryRun?: boolean; statuses?: string[] }>(request);
+    const report = await recoverStuckAutoProjects({
+      tenantId: context.tenantId,
+      siteId: parseOptionalString(body.siteId) ?? null,
+      dryRun: body.dryRun === true,
+      statuses: Array.isArray(body.statuses) ? body.statuses : undefined,
+    });
+    return reply.send(report);
   });
 
   // ──────────────────────────────────────────────────────────── Editorial plans

@@ -19,7 +19,7 @@ import { getPrismaClient } from "../db/prisma";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { incrementCounter } from "../../studio/metrics";
-import { classifyPublicationError, maxPublicationRetries, nextRetryDelay } from "../../studio/publication";
+import { classifyPublicationError, maxPublicationRetries, nextRetryDelay, verifyWebsitePublication } from "../../studio/publication";
 
 const prisma = getPrismaClient();
 
@@ -38,6 +38,7 @@ type PublishingDependencies = {
   getPublisher: typeof getPublisher;
   markProjectPublished: typeof markProjectPublished;
   clearProjectPublicationState: typeof clearProjectPublicationState;
+  verifyWebsitePublication: typeof verifyWebsitePublication;
 };
 
 const defaultDependencies: PublishingDependencies = {
@@ -49,6 +50,7 @@ const defaultDependencies: PublishingDependencies = {
   getPublisher,
   markProjectPublished,
   clearProjectPublicationState,
+  verifyWebsitePublication,
 };
 
 function readTargetStatus(publication: LoadedPublication): PublicationTargetStatus {
@@ -149,6 +151,15 @@ export async function processPublishingJob(
       publication.versionId,
       "published",
     );
+    // Post-publish verification: a publisher response alone is not enough.
+    // Remote success must never be replayed, so verification never mutates
+    // the publication state back to a retryable status.
+    const durable = await prisma.publication.findFirst({
+      where: { publicationJobId: publication.id },
+    });
+    if (durable) {
+      await dependencies.verifyWebsitePublication(publication.tenantId, durable.id);
+    }
     return;
   }
 
