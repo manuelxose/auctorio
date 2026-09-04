@@ -1287,7 +1287,7 @@ model SourcePack {
   category    String?
   language    String?
   country     String?
-  sourceCount Int       @default(0)
+  sourceCount Int       @default(0) @map("source_count")
   optional    Boolean   @default(true)
   createdAt   DateTime  @default(now()) @map("created_at")
   updatedAt   DateTime  @updatedAt @map("updated_at")

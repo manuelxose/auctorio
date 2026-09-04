@@ -438,7 +438,10 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       continue;
     }
 
-    if (policy.autoSchedule && (socialReady || !policy.socialRequired)) {
+    // Assisted mode may prepare a release, but never creates a scheduled row:
+    // scheduled means executable to the scheduler. Autopilot is the only
+    // automatic path allowed to create executable publications.
+    if (mode === "autopilot" && policy.autoSchedule && (socialReady || !policy.socialRequired)) {
       // Assisted/manual semantics: publications are only ever created for
       // versions a human already approved. Scheduling pre-approval content
       // would let the scheduler publish without human consent.

@@ -15,6 +15,7 @@ import { writeAudit, type AuditEntryInput } from "./audit";
 import { getPublisher } from "./publishers";
 import { recordWebsitePublishFailure, resetWebsitePublishCircuit } from "./automation";
 import { notifyOperators } from "./notifications";
+import { assertPublicationReleaseReady } from "./release-readiness";
 
 const prisma = getPrismaClient();
 
@@ -643,6 +644,8 @@ export async function enqueuePublication(publicationId: string): Promise<void> {
   if (publication.status === "publishing") {
     return;
   }
+
+  await assertPublicationReleaseReady(publicationId);
 
   if (publication.channel === "website") {
     await enqueueWebsitePublication(publication.id);

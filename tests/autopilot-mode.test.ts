@@ -55,7 +55,7 @@ test("buildModePayload produces an internally consistent flag set per mode", () 
     autoGenerate: true,
     autoRepair: true,
     autoApprove: false,
-    autoSchedule: true,
+    autoSchedule: false,
     autoPublish: false,
   });
   assert.equal(assisted.autopilot, undefined);
@@ -101,6 +101,7 @@ test("resolveModeUpdate derives flags atomically from the mode", () => {
   // The mode wins: assisted can never auto-approve.
   assert.equal(assisted.autoApprove, false);
   assert.equal(assisted.autoPublish, false);
+  assert.equal(assisted.autoSchedule, false);
   assert.equal(assisted.enabled, true);
 
   const manual = resolveModeUpdate({ mode: "manual" });

@@ -46,14 +46,23 @@ SOURCE → DISCOVERY → SOURCE ITEM → CANDIDATE → CONTENT PROJECT → ARTIC
 
 - API: npm run start:api
 - Worker discovery (fuentes): npm run start:worker:discovery
-- Worker automation (planificador editorial): npm run start:worker:automation
-- Worker scheduler (publicaciones vencidas): npm run start:worker:scheduler
+- Worker control (planificador, scheduler y watchdog): npm run start:worker:automation
 - Worker scraping: npm run start:worker:scraping
 - Worker texto: npm run start:worker:text
 - Worker imagen: npm run start:worker:image
 - Worker publishing (websites): npm run start:worker:publishing
 - Worker social (generacion + X/Instagram): npm run start:worker:social
 - Studio SSR: npm run build:studio && npm run serve:studio
+
+## Inicio de sesión con Google
+
+El Studio admite Google Identity Services: el navegador obtiene un ID token y
+el API lo verifica contra `GOOGLE_CLIENT_ID` antes de crear la sesión. Añade el
+mismo `GOOGLE_CLIENT_ID` al entorno del API y del Studio, y registra el origen
+exacto del Studio en Google Cloud Console → OAuth client → **Authorized
+JavaScript origins** (por ejemplo, `http://localhost:4200` para desarrollo y
+el dominio HTTPS de producción). Este flujo no usa ni requiere un client
+secret. Si la variable no está configurada, el botón de Google no se muestra.
 
 Produccion: unit files systemd en `infra/systemd/` (api, studio, 8 workers).
 

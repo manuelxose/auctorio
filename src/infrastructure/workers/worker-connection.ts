@@ -15,6 +15,7 @@ import { publishEvent } from "../../studio/events";
 import { structuredEvent } from "../../shared/utils/logger";
 import { getNumberEnv } from "../../shared/utils/env";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
+import { assertRedisConfigured } from "../queue/redis";
 
 const prisma = getPrismaClient();
 
@@ -148,6 +149,7 @@ export async function processConnectionJob(data: ConnectionJobData, dependencies
 }
 
 export async function runConnectionWorker(): Promise<void> {
+  assertRedisConfigured();
   const worker = new Worker<ConnectionJobData>(
     QUEUE_NAMES.connection,
     async (job) => {

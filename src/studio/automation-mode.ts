@@ -41,7 +41,9 @@ export const MODE_FLAGS: Record<AutomationMode, AutomationFlagSet> = {
     autoGenerate: true,
     autoRepair: true,
     autoApprove: false,
-    autoSchedule: true,
+    // A scheduled row is executable by the scheduler. Assisted mode prepares
+    // content for a human release and therefore must not create one.
+    autoSchedule: false,
     autoPublish: false,
   },
   autopilot: {

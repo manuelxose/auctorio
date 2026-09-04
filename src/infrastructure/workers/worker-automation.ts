@@ -1,22 +1,17 @@
-import { getEnv, getNumberEnv } from "../../shared/utils/env";
+import { getNumberEnv } from "../../shared/utils/env";
 import { runAutomationTick } from "../../studio/planner";
 import { runAutomationWatchdogTick } from "../../studio/automation-watchdog";
+import { runSchedulerTick } from "./worker-scheduler";
 import { runIntervalWorker } from "./worker-runtime";
 import { structuredEvent } from "../../shared/utils/logger";
+import { assertRedisConfigured } from "../queue/redis";
 
-export async function runAutomationWorker() {
-  const redisUrl = getEnv("REDIS_URL", "");
-  if (!redisUrl) {
-    // A console warning alone is insufficient: missing Redis is an
-    // operational failure and is surfaced through the worker heartbeat
-    // (worker marked degraded) and the operations health endpoint.
-    structuredEvent("worker.automation.redis_missing", { message: "REDIS_URL is missing; automation worker not started" }, "error");
-    console.warn("[worker:automation] REDIS_URL is missing; worker not started");
-    return;
-  }
+/** One control-plane process owns planning, scheduling and watchdog checks. */
+export async function runControlWorker() {
+  assertRedisConfigured();
 
   await runIntervalWorker({
-    name: "automation",
+    name: "control",
     intervalMs: Math.max(30_000, getNumberEnv("AUTOMATION_INTERVAL_MS", 120_000)),
     tick: async () => {
       const result = await runAutomationTick();
@@ -31,6 +26,16 @@ export async function runAutomationWorker() {
     },
     extraIntervals: [
       {
+        name: "scheduler",
+        intervalMs: Math.max(5_000, getNumberEnv("SCHEDULER_INTERVAL_MS", 10_000)),
+        tick: async () => {
+          const result = await runSchedulerTick();
+          if (result.claimed > 0 || result.failed > 0) {
+            structuredEvent("scheduler.tick", result);
+          }
+        },
+      },
+      {
         name: "automation-watchdog",
         intervalMs: Math.max(60_000, getNumberEnv("WATCHDOG_INTERVAL_MS", 120_000)),
         tick: async () => {
@@ -40,3 +45,6 @@ export async function runAutomationWorker() {
     ],
   });
 }
+
+/** @deprecated Use runControlWorker; kept for launcher compatibility. */
+export const runAutomationWorker = runControlWorker;

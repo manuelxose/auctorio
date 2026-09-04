@@ -71,6 +71,9 @@ async function createPublication(fixture: SchedulerFixture, overrides: Record<st
       channel: "instagram",
       status: "scheduled",
       scheduledFor: new Date(),
+      // This fixture exercises queue idempotency, not autonomous release
+      // authorization. Manual releases bypass the autopilot readiness gate.
+      manualOverride: true,
       ...overrides,
     },
   });
@@ -198,6 +201,19 @@ test("duplicate enqueuePublication calls are idempotent for in-flight publicatio
     assert.equal(attemptsAfterSecond, 1);
   } finally {
     await clearQueue(QUEUE_NAMES.social);
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("automatic releases are blocked before queueing when autopilot readiness is missing", async () => {
+  const fixture = await createSchedulerFixture();
+  try {
+    const publication = await createPublication(fixture, { manualOverride: false });
+    await assert.rejects(() => enqueuePublication(publication.id), /release_blocked:automation_policy_missing/);
+    const after = await prisma.publication.findUniqueOrThrow({ where: { id: publication.id } });
+    assert.equal(after.status, "scheduled");
+    assert.equal(await prisma.publicationAttempt.count({ where: { publicationId: publication.id } }), 0);
+  } finally {
     await cleanupFixture(fixture.tenantId);
   }
 });

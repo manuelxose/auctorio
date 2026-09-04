@@ -1,5 +1,5 @@
 import { Worker } from "bullmq";
-import { getEnv, getNumberEnv } from "../../shared/utils/env";
+import { getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
 import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
@@ -13,6 +13,7 @@ import { completeOperationForJob, failOperationForJob } from "./operation-hooks"
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { getSocialIntegrationProvider, type SocialPublishInput } from "../../studio/social-provider";
 import { resolveAccountCredentials, runConnectionHealthCheck } from "../../studio/social-connections";
+import { assertRedisConfigured } from "../queue/redis";
 
 const prisma = getPrismaClient();
 
@@ -199,11 +200,7 @@ async function processUnpublish(data: SocialUnpublishJobData) {
 }
 
 export async function runSocialWorker() {
-  const redisUrl = getEnv("REDIS_URL", "");
-  if (!redisUrl) {
-    console.warn("[worker:social] REDIS_URL is missing; worker not started");
-    return;
-  }
+  assertRedisConfigured();
 
   const worker = new Worker(
     QUEUE_NAMES.social,

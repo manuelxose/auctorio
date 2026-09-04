@@ -12,7 +12,6 @@ import {
 } from "../../studio/repository";
 import { getPublisher } from "../../studio/publishers";
 import { buildAssetPublicUrl } from "../../studio/orchestration";
-import { getEnv } from "../../shared/utils/env";
 import type { PublicationStatus } from "@prisma/client";
 import type { PublishResult, PublicationTargetStatus } from "../../studio/types";
 import { getPrismaClient } from "../db/prisma";
@@ -20,6 +19,7 @@ import { completeOperationForJob, failOperationForJob } from "./operation-hooks"
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { incrementCounter } from "../../studio/metrics";
 import { classifyPublicationError, maxPublicationRetries, nextRetryDelay, verifyWebsitePublication } from "../../studio/publication";
+import { assertRedisConfigured } from "../queue/redis";
 
 const prisma = getPrismaClient();
 
@@ -226,11 +226,7 @@ async function syncDurablePublication(
 }
 
 export async function runPublishingWorker() {
-  const redisUrl = getEnv("REDIS_URL", "");
-  if (!redisUrl) {
-    console.warn("[worker:publishing] REDIS_URL is missing; worker not started");
-    return;
-  }
+  assertRedisConfigured();
 
   const worker = new Worker(
     QUEUE_NAMES.publishing,
