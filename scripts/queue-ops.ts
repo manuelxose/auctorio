@@ -22,6 +22,21 @@ import { getPrismaClient } from "../src/infrastructure/db/prisma";
 const prisma = getPrismaClient();
 
 const ALL_QUEUES: string[] = Object.values(QUEUE_NAMES);
+const OP_TIMEOUT_MS = Math.max(1_000, Number.parseInt(process.env.QUEUE_OP_TIMEOUT_MS ?? "5000", 10) || 5_000);
+
+async function withTimeout<T>(label: string, operation: Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_timeout_after_${OP_TIMEOUT_MS}ms`)), OP_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 function usage(): never {
   console.error(
@@ -77,13 +92,13 @@ async function health(): Promise<void> {
   for (const name of ALL_QUEUES) {
     const queue = open(name);
     try {
-      const counts = await queue.getJobCounts("waiting", "active", "delayed", "failed", "completed");
+      const counts = await withTimeout(`${name}_counts`, queue.getJobCounts("waiting", "active", "delayed", "failed", "completed"));
       queueRows.push({ queue: name, ...counts });
     } catch (error) {
       redis = `error: ${error instanceof Error ? error.message : String(error)}`;
       queueRows.push({ queue: name, error: redis });
     } finally {
-      await queue.close().catch(() => undefined);
+      await withTimeout(`${name}_close`, queue.close()).catch(() => undefined);
     }
   }
 

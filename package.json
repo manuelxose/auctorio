@@ -26,6 +26,7 @@
     "start:worker:social": "ts-node scripts/start-worker-social.ts",
     "report:editorial-engine": "ts-node scripts/editorial-engine-fixtures.ts",
     "ops:queue": "ts-node scripts/queue-ops.ts",
+    "ops:release-preflight": "ts-node scripts/release-preflight.ts",
     "automation:recover": "ts-node scripts/automation-recover.ts"
   },
   "dependencies": {

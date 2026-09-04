@@ -1,6 +1,6 @@
-import { runAutomationWorker } from "../src/infrastructure/workers/worker-automation";
+import { runControlWorker } from "../src/infrastructure/workers/worker-automation";
 
-runAutomationWorker().catch((err) => {
+runControlWorker().catch((err) => {
   console.error(err);
   process.exit(1);
 });

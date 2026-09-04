@@ -8,7 +8,7 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "serve:ssr": "node dist/studio-web/server/server.mjs",
-    "dev:ssr": "npm run build && npm run serve:ssr"
+    "dev:ssr": "ng serve --configuration development"
   },
   "prettier": {
     "printWidth": 100,

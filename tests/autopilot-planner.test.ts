@@ -240,3 +240,45 @@ test("autopilot: irreparable content does NOT publish and notifies the operator"
     await cleanupWorkspace(workspace.tenantId);
   }
 });
+
+test("assisted mode prepares approved automatic content without scheduling a release", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await prisma.automationPolicy.update({
+      where: { id: workspace.policyId },
+      data: { mode: "assisted", autoApprove: false, autoSchedule: false, autoPublish: false },
+    });
+    const project = await prisma.contentProject.create({
+      data: {
+        tenantId: workspace.tenantId,
+        siteId: workspace.siteId,
+        topicId: workspace.topicId,
+        title: "Contenido preparado para revisión humana",
+        brief: "Brief",
+        origin: "auto",
+        status: "approved",
+        automationMode: "assisted",
+      },
+    });
+    await prisma.contentVersion.create({
+      data: {
+        tenantId: workspace.tenantId,
+        projectId: project.id,
+        versionNumber: 1,
+        status: "approved",
+        title: "Contenido preparado para revisión humana",
+        excerpt: "Resumen",
+        bodyHtml: "<p>Contenido revisable.</p>",
+        seoTitle: "Contenido revisable",
+        seoDescription: "Descripción revisable",
+        contentImageId: workspace.imageId,
+      },
+    });
+
+    const tick = await runAutomationTick();
+    assert.equal(tick.publicationsCreated, 0);
+    assert.equal(await prisma.publication.count({ where: { projectId: project.id } }), 0);
+  } finally {
+    await cleanupWorkspace(workspace.tenantId);
+  }
+});

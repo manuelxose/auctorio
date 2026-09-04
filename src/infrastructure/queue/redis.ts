@@ -1,4 +1,4 @@
-import { getEnv } from "../../shared/utils/env";
+import { getEnv, getNumberEnv } from "../../shared/utils/env";
 
 export type RedisConnectionOptions = {
   host: string;
@@ -6,6 +6,9 @@ export type RedisConnectionOptions = {
   username?: string;
   password?: string;
   db?: number;
+  connectTimeout?: number;
+  maxRetriesPerRequest?: null;
+  enableOfflineQueue?: boolean;
 };
 
 export function getRedisConnectionOptions(): RedisConnectionOptions {
@@ -23,5 +26,15 @@ export function getRedisConnectionOptions(): RedisConnectionOptions {
     username: url.username || undefined,
     password: url.password || undefined,
     db: Number.isNaN(db) ? undefined : db,
+    // Avoid invisible multi-minute waits in CLI preflight/operations calls.
+    connectTimeout: Math.max(1_000, getNumberEnv("REDIS_CONNECT_TIMEOUT_MS", 5_000)),
+    maxRetriesPerRequest: null,
+    enableOfflineQueue: false,
   };
+}
+
+export function assertRedisConfigured(): void {
+  if (!getEnv("REDIS_URL", "").trim()) {
+    throw new Error("REDIS_URL is required; worker cannot start");
+  }
 }

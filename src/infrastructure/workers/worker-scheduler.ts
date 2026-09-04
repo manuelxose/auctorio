@@ -1,4 +1,4 @@
-import { getEnv, getNumberEnv } from "../../shared/utils/env";
+import { getNumberEnv } from "../../shared/utils/env";
 import { claimDuePublications, enqueuePublication } from "../../studio/publication";
 import { runIntervalWorker } from "./worker-runtime";
 import { getPrismaClient } from "../db/prisma";
@@ -6,6 +6,7 @@ import { structuredEvent } from "../../shared/utils/logger";
 import { incrementCounter, setGauge } from "../../studio/metrics";
 import { getQueueDepth } from "../queue/backpressure";
 import { notifyOperators } from "../../studio/notifications";
+import { assertRedisConfigured } from "../queue/redis";
 
 const prisma = getPrismaClient();
 
@@ -69,9 +70,19 @@ export async function runSchedulerTick(): Promise<SchedulerTickResult> {
       result.enqueued += 1;
       incrementCounter("scheduler_publications_enqueued_total", 1);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // A release gate rejection is not a publishing failure. Return the row
+      // to ready so an operator can fix the named blocker without retries.
+      if (message.startsWith("release_blocked:")) {
+        await prisma.publication.update({
+          where: { id: publicationId },
+          data: { status: "ready", lastError: message.slice(0, 500), failureReason: "release_blocked" },
+        });
+        structuredEvent("scheduler.release_blocked", { publicationId, blockers: message.slice("release_blocked:".length) }, "warn");
+        continue;
+      }
       result.failed += 1;
       incrementCounter("scheduler_enqueue_failures_total", 1);
-      const message = error instanceof Error ? error.message : String(error);
       structuredEvent("scheduler.enqueue_failed", { publicationId, error: message }, "error");
       const failed = await prisma.publication.update({
         where: { id: publicationId },
@@ -100,11 +111,7 @@ export async function runSchedulerTick(): Promise<SchedulerTickResult> {
 }
 
 export async function runSchedulerWorker() {
-  const redisUrl = getEnv("REDIS_URL", "");
-  if (!redisUrl) {
-    console.warn("[worker:scheduler] REDIS_URL is missing; worker not started");
-    return;
-  }
+  assertRedisConfigured();
 
   await runIntervalWorker({
     name: "scheduler",

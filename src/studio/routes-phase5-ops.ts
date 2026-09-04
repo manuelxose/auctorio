@@ -23,6 +23,7 @@ import { getMetricsSnapshot } from "./metrics";
 import { listWorkerHeartbeats } from "./worker-health";
 import { deleteCostBudget, getAiSpend, listCostBudgets, upsertCostBudget } from "./cost-budgets";
 import { structuredEvent } from "../shared/utils/logger";
+import { getTenantReleaseReadiness } from "./release-readiness";
 
 const prisma = getPrismaClient();
 
@@ -156,6 +157,14 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
       status: degraded ? "degraded" : "ok",
       ...health,
     });
+  });
+
+  /** Read-only release preflight used before enabling a tenant autopilot. */
+  fastify.get("/v2/operations/release-preflight", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const report = await getTenantReleaseReadiness(context.tenantId);
+    return reply.code(report.ready ? 200 : 409).send(report);
   });
 
   // ──────────────────────────────────────────────────────────── Cost controls
