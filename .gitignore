@@ -20,6 +20,7 @@ current
 releases/
 test-results/
 playwright-report/
+.worktrees/
 .agentic-backup/
 !.claude/
 !.claude/settings.json
