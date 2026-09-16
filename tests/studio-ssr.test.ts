@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import http, { type IncomingMessage, type ServerResponse } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
+import path from "node:path";
 
 const PRIVATE_PROVIDER_PATTERN = /\bDeepSeek\b|\bFLUX\b|\bSiliconFlow\b|\bFal\.ai\b/i;
 
@@ -147,9 +148,9 @@ async function startStudioServer(backendUrl: string): Promise<{
   const port = await getFreePort();
   const child = spawn(
     "node",
-    ["/var/www/auctorio/apps/studio-web/dist/studio-web/server/server.mjs"],
+    [path.resolve(__dirname, "../../apps/studio-web/dist/studio-web/server/server.mjs")],
     {
-      cwd: "/var/www/auctorio/apps/studio-web",
+      cwd: path.resolve(__dirname, "../../apps/studio-web"),
       env: {
         ...process.env,
         PORT: String(port),
@@ -271,15 +272,13 @@ test("studio SSR redirects unauthenticated users to /login", async () => {
   assert.match(location, /\/login\?returnTo=%2Fstudio/);
 });
 
-test("studio login route remains public", async () => {
+test("legacy studio login route redirects to the canonical public login", async () => {
   const response = await fetch(`${studio.baseUrl}/studio/login`, {
     redirect: "manual",
   });
 
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /Auctorio/);
-  assert.match(html, /<app-root><\/app-root>/i);
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get("location"), "/login");
 });
 
 test("studio login stores an encrypted HttpOnly cookie and session/me returns the user view", async () => {

@@ -24,3 +24,16 @@ playwright-report/
 .agentic-backup/
 !.claude/
 !.claude/settings.json
+
+# GSD Pi project state and local integration
+.gsd
+.gsd-worktrees/
+.gsd-backups/
+.gsd-id
+.mcp.json
+.bg-shell/
+.claude/settings.local.json
+
+# The application storage directory is ignored; this source module is not runtime storage.
+!src/infrastructure/storage/
+!src/infrastructure/storage/**

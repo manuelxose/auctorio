@@ -10,6 +10,7 @@ nvm alias default 22
 nvm use 22
 git config --global core.autocrlf input
 npm ci
+npm ci --prefix apps/studio-web --ignore-scripts
 cp -n .env.example .env || true
 sed -i 's/^APP_ENV=.*/APP_ENV=local/; s/^NODE_ENV=.*/NODE_ENV=development/; s#^DATABASE_URL=.*#DATABASE_URL=postgresql://auctorio:auctorio@localhost:5432/content_ai#; s#^REDIS_URL=.*#REDIS_URL=redis://localhost:6379#; s/^PUBLISH_DRY_RUN=.*/PUBLISH_DRY_RUN=true/' .env
 sudo -u postgres psql -tc "SELECT 1 FROM pg_roles WHERE rolname='auctorio'" | grep -q 1 || sudo -u postgres psql -c "CREATE USER auctorio PASSWORD 'auctorio'"

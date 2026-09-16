@@ -37,6 +37,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm ci --prefix apps/studio-web --ignore-scripts
       - name: Validate migrations match the schema
         run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DATABASE_URL" --exit-code
       - run: npm run typecheck

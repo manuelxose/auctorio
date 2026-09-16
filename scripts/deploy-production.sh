@@ -7,6 +7,7 @@ HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:4401/health/live}"
 SERVICES=(content-ai-api content-ai-studio content-ai-worker-discovery content-ai-worker-scraping content-ai-worker-text content-ai-worker-image content-ai-worker-automation content-ai-worker-publishing content-ai-worker-social content-ai-worker-connection)
 cd "$APP_ROOT"
 npm ci
+npm ci --prefix apps/studio-web --ignore-scripts
 npx prisma migrate deploy
 npm run build
 npm run build:studio
