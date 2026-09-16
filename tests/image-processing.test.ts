@@ -35,6 +35,19 @@ test("buildImageDerivatives creates hero, og and thumbnail webp variants", async
 
   for (const derivative of result.derivatives) {
     assert.equal(derivative.mimeType, "image/webp");
+    const expected = {
+      hero: { width: 1280, height: 720 },
+      og: { width: 1200, height: 630 },
+      thumbnail: { width: 480, height: 270 },
+    }[derivative.kind];
+    assert.deepEqual(
+      { width: derivative.width, height: derivative.height },
+      expected,
+    );
+    assert.equal(
+      derivative.storagePath,
+      `tenant-1/derivatives/image-1/${derivative.kind}.webp`,
+    );
     const metadata = await sharp(path.join(root, derivative.storagePath)).metadata();
     assert.equal(metadata.format, "webp");
     assert.equal(metadata.width, derivative.width);

@@ -1928,6 +1928,13 @@ app.use((req, res, next) => {
         }
       }
 
+      if (isLoginRoute && !validatedSession) {
+        const queryIndex = req.originalUrl.indexOf('?');
+        const query = queryIndex >= 0 ? req.originalUrl.slice(queryIndex) : '';
+        res.redirect(302, `/login${query}`);
+        return;
+      }
+
       if ((isLoginRoute || isOpsLoginRoute) && validatedSession && !forceLoginView) {
         res.redirect(302, returnTo);
         return;

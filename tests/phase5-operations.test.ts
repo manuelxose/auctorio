@@ -30,6 +30,7 @@ const prisma = getPrismaClient();
 type SchedulerFixture = {
   tenantId: string;
   siteId: string;
+  accountId: string;
   projectId: string;
   versionId: string;
   seed: string;
@@ -59,7 +60,19 @@ async function createSchedulerFixture(): Promise<SchedulerFixture> {
       seoDescription: "desc",
     },
   });
-  return { tenantId: tenant.id, siteId: site.id, projectId: project.id, versionId: version.id, seed };
+  const account = await prisma.publishingAccount.create({
+    data: {
+      tenantId: tenant.id,
+      siteId: site.id,
+      platform: "instagram",
+      displayName: "Scheduler test account",
+      provider: "legacy",
+      credentialsCiphertext: "test-fixture-ciphertext",
+      connectionStatus: "connected",
+      status: "active",
+    },
+  });
+  return { tenantId: tenant.id, siteId: site.id, accountId: account.id, projectId: project.id, versionId: version.id, seed };
 }
 
 async function createPublication(fixture: SchedulerFixture, overrides: Record<string, unknown> = {}) {
@@ -68,6 +81,7 @@ async function createPublication(fixture: SchedulerFixture, overrides: Record<st
       tenantId: fixture.tenantId,
       projectId: fixture.projectId,
       versionId: fixture.versionId,
+      accountId: fixture.accountId,
       channel: "instagram",
       status: "scheduled",
       scheduledFor: new Date(),
