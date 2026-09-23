@@ -22,8 +22,6 @@ test-results/
 playwright-report/
 .worktrees/
 .agentic-backup/
-!.claude/
-!.claude/settings.json
 
 # GSD Pi project state and local integration
 .gsd
@@ -37,3 +35,20 @@ playwright-report/
 # The application storage directory is ignored; this source module is not runtime storage.
 !src/infrastructure/storage/
 !src/infrastructure/storage/**
+
+# === AI agents/skills tooling + graphify (local-only, never in remote) ===
+.claude/
+.codex/
+.copilot/
+.agents/
+.planning/
+.ai/
+.agentic/
+.agentic-platform-backups/
+graphify-out/
+AGENTS.md
+CLAUDE.md
+AI_GUIDE.md
+copilot-instructions.md
+.mcp.json
+mcp.json
