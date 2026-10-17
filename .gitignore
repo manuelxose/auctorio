@@ -23,13 +23,7 @@ playwright-report/
 .worktrees/
 .agentic-backup/
 
-# the workflow tool project state and local integration
-.wf
-.wf-worktrees/
-.wf-backups/
-.wf-id
 .mcp.json
-.bg-shell/
 .claude/settings.local.json
 
 # The application storage directory is ignored; this source module is not runtime storage.
@@ -41,7 +35,6 @@ playwright-report/
 .codex/
 .copilot/
 .agents/
-.planning/
 .ai/
 .agentic/
 .agentic-platform-backups/

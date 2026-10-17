@@ -1,6 +1,6 @@
 # Auctorio baseline
 
-Captured on 2026-09-15 before the the workflow tool ecosystem bootstrap changes.
+Captured on 2026-09-15 before the ecosystem bootstrap changes.
 
 ## Repository state
 
@@ -62,9 +62,7 @@ is configured.
 
 Graphify 0.9.53 is installed and a current root graph exists at
 `graphify-out/graph.json`; dated graph snapshots are also present. Context
-Mode is available through this session’s MCP integration. The wf and Pi
-standalone commands are unavailable on `PATH`, although wf/SDD planning
-artifacts exist in `.superpowers/sdd/`.
+Mode is available through this session’s MCP integration. SDD planning artifacts exist in `.superpowers/sdd/`.
 
 This baseline is deliberately non-executing: no database, Redis, deployment,
 credential, browser, E2E, or live-provider check was run. The only required

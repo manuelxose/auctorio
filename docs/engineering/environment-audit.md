@@ -16,7 +16,6 @@ and credentials from environment files were not read or recorded.
 | Python | `python3` is installed | 3.12.3 | AVAILABLE | None. |
 | Docker Engine | Docker CLI is installed | 29.7.2 | AVAILABLE | None. |
 | Docker Compose | Docker Compose plugin is installed | 5.5.0 | AVAILABLE | None. |
-| wf CLI | `wf` command not found; project SDD artifacts exist under `.superpowers/sdd/` | MISSING | MISSING | Use the installed Codex wf workflow/skills; do not install a duplicate CLI during this baseline task. |
 | Pi CLI | `pi` command not found | MISSING | MISSING | No action in this audit; later bootstrap work must choose its installation path explicitly. |
 | Graphify | CLI and current `graphify-out/graph.json` are present | 0.9.53 | AVAILABLE | Query the graph before broad codebase investigation and refresh it after structural code changes. |
 | Context Mode | Connected MCP tools are available in this session; no standalone `context-mode` command is on `PATH` | MCP version not exposed | AVAILABLE | Use the MCP tools; no CLI installation needed. |

@@ -1,11 +1,10 @@
 # Global skill registry
 
 The registry is intentionally descriptive. Skill implementations and provider
-configuration remain in the user-scoped Codex/wf installation.
+configuration remain in the user-scoped Codex installation.
 
 | Skill family | Responsibility | Trigger/surface | Status |
 | --- | --- | --- | --- |
-| the workflow tool | milestone, planning, execution, verification, recovery | native `wf` workflow | validated |
 | Graphify | code-impact and relationship context | `graphify query/path/explain` | query validated; refresh blocked by cache guard |
 | Context Mode | focused local context and indexed evidence | bundled doctor/index/search | validated |
 | Ponytail | minimal implementation and dependency discipline | engineering task review | applied |

@@ -2,13 +2,12 @@
 
 ## Ownership
 
-the workflow tool is the project workflow owner. It owns milestones, slices, task state,
-execution checkpoints, verification, recovery, and resume. Provider selection,
-credentials, and reusable skills remain in the user-scoped global platform.
+Provider selection, credentials, and reusable skills remain in the user-scoped
+global platform.
 
 Graphify supplies code-impact context; Context Mode supplies focused local
 context; Ponytail keeps changes minimal. None of these tools owns product
-state or replaces the workflow tool.
+state.
 
 ## Runtime boundary
 
@@ -28,6 +27,6 @@ this directory or in committed evidence.
 
 ## Source of truth
 
-Live source and configuration outrank tests, wf state, indexed context,
+Live source and configuration outrank tests, indexed context,
 documentation, and historical plans. Tests must execute real assertions;
 environment prerequisites are recorded as blockers rather than simulated.
