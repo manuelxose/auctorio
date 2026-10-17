@@ -39,7 +39,12 @@ jobs:
       - run: npm ci
       - run: npm ci --prefix apps/studio-web --ignore-scripts
       - name: Validate migrations match the schema
-        run: npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$DATABASE_URL" --exit-code
+        # The shadow database is left populated by prisma, so it must not be the database the tests migrate.
+        env:
+          SHADOW_DATABASE_URL: postgresql://auctorio:auctorio@localhost:5432/auctorio_shadow
+        run: |
+          PGPASSWORD=auctorio psql -h localhost -U auctorio -d postgres -c 'CREATE DATABASE auctorio_shadow'
+          npx prisma migrate diff --from-migrations prisma/migrations --to-schema-datamodel prisma/schema.prisma --shadow-database-url "$SHADOW_DATABASE_URL" --exit-code
       - run: npm run typecheck
       - run: npm run build
       - run: npm run build:studio

@@ -638,6 +638,7 @@ model ContentProject {
   @@index([tenantId, topicId])
   @@index([tenantId, deletedAt])
   @@index([tenantId, sourceItemId])
+  @@index([tenantId, automationSubstate], map: "content_projects_tenant_id_automation_substate_idx")
   @@map("content_projects")
 }
 
@@ -661,7 +662,7 @@ model ContentVersion {
   approvedByStudioUserId String?       @map("approved_by_studio_user_id") @db.Uuid
   publishedAt            DateTime?     @map("published_at")
   repairAttempts         Int           @default(0) @map("repair_attempts")
-  repairLockedUntil      DateTime?     @map("repair_locked_until")
+  repairLockedUntil      DateTime?     @map("repair_locked_until") @db.Timestamptz(6)
   autonomousGatePassed   Boolean       @default(false) @map("autonomous_gate_passed")
   autonomousGateReport   Json?         @map("autonomous_gate_report")
   createdAt              DateTime      @default(now()) @map("created_at")
@@ -683,6 +684,7 @@ model ContentVersion {
   @@index([tenantId, projectId, status])
   @@index([tenantId, contentTextId])
   @@index([tenantId, contentImageId])
+  @@index([repairLockedUntil], map: "content_versions_repair_lock_idx")
   @@index([tenantId, approvedByStudioUserId])
   @@map("content_versions")
 }
@@ -1452,7 +1454,7 @@ model ProviderCacheEntry {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, providerKey, resourceType, cacheKey])
+  @@unique([tenantId, providerKey, resourceType, cacheKey], map: "provider_cache_entries_tenant_id_provider_key_resource_type_cac")
   @@index([tenantId, providerKey, expiresAt])
   @@map("provider_cache_entries")
 }
@@ -1480,7 +1482,7 @@ model ProviderEnrichment {
   entity Entity @relation(fields: [entityId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, entityId])
-  @@index([tenantId, providerKey, providerEntityId])
+  @@index([tenantId, providerKey, providerEntityId], map: "provider_enrichments_tenant_id_provider_key_provider_entity_id_")
   @@unique([entityId, providerKey])
   @@map("provider_enrichments")
 }
@@ -1740,7 +1742,7 @@ model PublicationAttempt {
 /// Persists the original findings, chosen strategies, changed fields, before/
 /// after QA scores and remaining blockers for full traceability.
 model QualityRepairAttempt {
-  id                String    @id @default(uuid()) @db.Uuid
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenantId          String    @map("tenant_id") @db.Uuid
   projectId         String    @map("project_id") @db.Uuid
   versionId         String    @map("version_id") @db.Uuid
@@ -1756,16 +1758,16 @@ model QualityRepairAttempt {
   model             String?
   costUsd           Float?    @map("cost_usd")
   error             String?   @db.Text
-  startedAt         DateTime  @default(now()) @map("started_at")
-  finishedAt        DateTime? @map("finished_at")
-  createdAt         DateTime  @default(now()) @map("created_at")
-  updatedAt         DateTime  @updatedAt @map("updated_at")
+  startedAt         DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt        DateTime? @map("finished_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   project ContentProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
   version ContentVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
 
-  @@index([tenantId, versionId, attemptNumber])
+  @@index([tenantId, versionId, attemptNumber], map: "quality_repair_attempts_tenant_version_idx")
   @@map("quality_repair_attempts")
 }
 
@@ -1795,7 +1797,7 @@ model AutomationPolicy {
   sourceRequirements            Json?           @map("source_requirements")
   consecutivePublishFailures    Int             @default(0) @map("consecutive_publish_failures")
   circuitOpen                   Boolean         @default(false) @map("circuit_open")
-  circuitOpenedAt               DateTime?       @map("circuit_opened_at")
+  circuitOpenedAt               DateTime?       @map("circuit_opened_at") @db.Timestamptz(6)
   minimumStoryScore             Float           @default(0.5) @map("minimum_story_score")
   categories                    Json?
   excludedCategories            Json?           @map("excluded_categories")
