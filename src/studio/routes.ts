@@ -244,7 +244,9 @@ async function handleReadyCheck() {
   const prisma = getPrismaClient();
   await prisma.$queryRaw`SELECT 1`;
 
-  const redis = new Redis(getRedisConnectionOptions());
+  // The shared options disable the offline queue so a CLI call cannot wait minutes for Redis; a readiness probe
+  // is the opposite case, so it queues the PING until the socket is up (connectTimeout still bounds the wait).
+  const redis = new Redis({ ...getRedisConnectionOptions(), enableOfflineQueue: true });
   try {
     await redis.ping();
   } finally {
