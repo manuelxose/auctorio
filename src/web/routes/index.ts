@@ -9,6 +9,7 @@ import {
 import { generateImageFromText, getContentImage } from "../controllers/content-image-controller";
 import { getContentText } from "../controllers/content-text-controller";
 import { registerStudioRoutes } from "../../studio/routes";
+import { registerIntegrationRoutes } from "./integrations";
 
 export function registerRoutes(fastify: FastifyInstance) {
   fastify.get("/health", async () => ({ status: "ok" }));
@@ -24,4 +25,6 @@ export function registerRoutes(fastify: FastifyInstance) {
   fastify.get("/v1/images/:id", getContentImage);
 
   registerStudioRoutes(fastify);
+  // Client pull feed (GuíaTV and any other site that syncs instead of receiving a push).
+  registerIntegrationRoutes(fastify);
 }
