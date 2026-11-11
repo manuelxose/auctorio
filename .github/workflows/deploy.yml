@@ -36,7 +36,14 @@ jobs:
           key: ${{ secrets.PRODUCTION_SSH_KEY }}
           envs: DEPLOY_REF
           script: |
+            set -euo pipefail
             cd /var/www/content-ai-platform
-            git fetch --all --tags
-            git checkout --detach "$DEPLOY_REF"
+            git fetch --all --tags --prune
+            # A branch name must resolve to the fetched remote branch; the server's local branch is never updated.
+            if git rev-parse --verify --quiet "origin/$DEPLOY_REF^{commit}" >/dev/null; then
+              git checkout --detach "origin/$DEPLOY_REF"
+            else
+              git checkout --detach "$DEPLOY_REF"
+            fi
+            echo "Deploying $(git rev-parse --short HEAD)"
             /var/www/content-ai-platform/scripts/deploy-production.sh

@@ -14,7 +14,7 @@ npm run build:studio
 /var/www/bin/deploy-auctorio-studio.sh
 systemctl disable --now content-ai-worker-scheduler.service 2>/dev/null || true
 systemctl restart "${SERVICES[@]}"
-sleep 3
-curl --fail --silent --show-error "$HEALTH_URL" >/dev/null
+# The API needs more than a few seconds after a full restart; retry for up to ~60s instead of a fixed sleep.
+curl --fail --silent --show-error --retry 30 --retry-delay 2 --retry-connrefused "$HEALTH_URL" >/dev/null
 for service in "${SERVICES[@]}"; do systemctl is-active --quiet "$service.service"; done
 echo "Deployment verified: $(git rev-parse --short HEAD)"
