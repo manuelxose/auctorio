@@ -1227,6 +1227,8 @@ const RETIRED_PUBLIC_PATHS: Record<string, string> = {
   '/es/galeria': '/es/ejemplos',
   '/built-by-tecnoria': '/',
   '/es/creado-por-tecnoria': '/es',
+  '/contact': '/waitlist',
+  '/es/contacto': '/es/lista-de-espera',
 };
 app.get(Object.keys(RETIRED_PUBLIC_PATHS), (req, res) => {
   res.redirect(301, RETIRED_PUBLIC_PATHS[req.path]);

@@ -71,12 +71,14 @@ import { SeoService } from '../services/seo.service';
             ></textarea>
           </div>
 
-          <button class="marketing-button marketing-button--primary" type="submit" [disabled]="submitted">
-            {{ submitted
-              ? (locale === 'es' ? 'Enviado ✓' : 'Sent ✓')
-              : content.formLabels.submit
-            }}
+          <button class="marketing-button marketing-button--primary" type="submit">
+            {{ content.formLabels.submit }}
           </button>
+          <p class="auth-note" role="status" *ngIf="submitted">
+            {{ locale === 'es'
+              ? 'Se ha abierto tu programa de correo con la solicitud. Envíala para entrar en la lista; si no se abre, escríbenos a hello@auctorio.com.'
+              : 'Your email app has opened with the request. Send it to join the list; if it did not open, write to hello@auctorio.com.' }}
+          </p>
         </form>
 
         <aside class="contact-info">
@@ -118,7 +120,7 @@ export class ContactPageComponent {
         this.seo.createBreadcrumbSchema([
           { name: BRAND_NAME, path: getMarketingPath(this.locale, 'home') },
           {
-            name: this.locale === 'es' ? 'Contacto' : 'Contact',
+            name: this.locale === 'es' ? 'Lista de espera' : 'Waitlist',
             path: getMarketingPath(this.locale, 'contact'),
           },
         ]),
@@ -133,6 +135,17 @@ export class ContactPageComponent {
       form.reportValidity();
       return;
     }
+    // shortcut: there is no waitlist endpoint yet, so the request goes out by email instead of being silently dropped. Replace with a POST to a waitlist API when it exists.
+    const field = (name: string) => String(new FormData(form).get(name) ?? '').trim();
+    const subject = this.locale === 'es' ? 'Lista de espera de Auctorio' : 'Auctorio waitlist';
+    const body = [
+      `${this.content.formLabels.name}: ${field('name')}`,
+      `${this.content.formLabels.email}: ${field('email')}`,
+      `${this.content.formLabels.company}: ${field('company')}`,
+      '',
+      field('message'),
+    ].join('\n');
+    window.location.href = `mailto:hello@auctorio.com?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     this.submitted = true;
   }
 }

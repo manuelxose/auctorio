@@ -114,7 +114,7 @@ import { SeoService } from '../services/seo.service';
 
         <div class="wrap-actions">
           <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'contact')">
-            {{ locale === 'en' ? 'Request a demo' : 'Solicitar demo' }}
+            {{ locale === 'en' ? 'Join the waitlist' : 'Únete a la lista de espera' }}
           </a>
           <a
             class="marketing-button marketing-button--ghost"

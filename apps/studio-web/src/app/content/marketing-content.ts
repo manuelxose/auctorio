@@ -169,8 +169,8 @@ export const MARKETING_ROUTES: MarketingRouteEntry[] = [
   },
   {
     key: 'contact',
-    pathByLocale: { en: '/contact', es: '/es/contacto' },
-    labelByLocale: { en: 'Contact', es: 'Contacto' },
+    pathByLocale: { en: '/waitlist', es: '/es/lista-de-espera' },
+    labelByLocale: { en: 'Waitlist', es: 'Lista de espera' },
     priority: 0.7,
     changefreq: 'monthly',
   },
@@ -182,7 +182,7 @@ const HOME_CONTENT: Record<MarketingLocale, HomeContent> = {
     title: 'The AI editorial workflow for publishers and newsrooms',
     lead:
       'Plan stories from search demand, draft with AI, review with your editors and publish to every site and social channel from one workspace. Nothing goes live without a person signing it off.',
-    primaryCta: 'Request a demo',
+    primaryCta: 'Join the waitlist',
     secondaryCta: 'See the workflows',
     metrics: [
       { value: 'One workspace', label: 'Planning, drafting, review and publishing in the same place.' },
@@ -246,18 +246,18 @@ const HOME_CONTENT: Record<MarketingLocale, HomeContent> = {
     useCasesEyebrow: 'Who it is for',
     useCasesTitle: 'Built for publishers, agencies and teams running several sites.',
     faqEyebrow: 'Questions',
-    faqTitle: 'What editorial teams ask before a demo.',
-    finalEyebrow: 'See it with your own content',
-    finalTitle: 'Run your next editorial week in Auctorio.',
+    faqTitle: 'What editorial teams ask us most.',
+    finalEyebrow: 'Early access',
+    finalTitle: 'Be among the first newsrooms on Auctorio.',
     finalLead:
-      'Book a 30-minute demo. We will walk through a real story from plan to publication using your sites and channels.',
+      'Auctorio is opening in waves. Join the waitlist and we will invite your team as soon as a place opens.',
   },
   es: {
     kicker: 'Software de flujo editorial',
     title: 'El flujo editorial con IA para medios y redacciones',
     lead:
       'Planifica temas según la demanda de búsqueda, redacta con IA, revisa con tus editores y publica en todas tus webs y redes desde un único espacio. Nada se publica sin que una persona lo apruebe.',
-    primaryCta: 'Solicitar demo',
+    primaryCta: 'Únete a la lista de espera',
     secondaryCta: 'Ver los flujos',
     metrics: [
       { value: 'Un solo espacio', label: 'Planificación, redacción, revisión y publicación en el mismo sitio.' },
@@ -321,11 +321,11 @@ const HOME_CONTENT: Record<MarketingLocale, HomeContent> = {
     useCasesEyebrow: 'Para quién es',
     useCasesTitle: 'Pensado para medios, agencias y equipos con varias webs.',
     faqEyebrow: 'Preguntas',
-    faqTitle: 'Lo que preguntan los equipos editoriales antes de una demo.',
-    finalEyebrow: 'Pruébalo con tu propio contenido',
-    finalTitle: 'Organiza tu próxima semana editorial con Auctorio.',
+    faqTitle: 'Lo que más nos preguntan los equipos editoriales.',
+    finalEyebrow: 'Acceso anticipado',
+    finalTitle: 'Sé de las primeras redacciones en Auctorio.',
     finalLead:
-      'Reserva una demo de 30 minutos. Recorreremos una pieza real, del plan a la publicación, con tus webs y canales.',
+      'Auctorio abre por fases. Únete a la lista de espera y te invitaremos en cuanto haya plaza para tu equipo.',
   },
 };
 
@@ -778,7 +778,7 @@ export const FAQ_ENTRIES = {
     {
       question: 'How do we get started?',
       answer:
-        'Request a demo. We connect a test site, set up your workflow stages and run one real piece from plan to publication with your team.',
+        'Join the waitlist. When your place opens we connect a test site, set up your workflow stages and run one real piece from plan to publication with your team.',
     },
   ],
   es: [
@@ -820,7 +820,7 @@ export const FAQ_ENTRIES = {
     {
       question: '¿Cómo empezamos?',
       answer:
-        'Solicita una demo. Conectamos una web de prueba, configuramos las fases de tu flujo y llevamos una pieza real del plan a la publicación con tu equipo.',
+        'Únete a la lista de espera. Cuando haya plaza, conectamos una web de prueba, configuramos las fases de tu flujo y llevamos una pieza real del plan a la publicación con tu equipo.',
     },
   ],
 } as const;
@@ -856,39 +856,39 @@ export interface ContactContent {
 
 const CONTACT_CONTENT: Record<MarketingLocale, ContactContent> = {
   en: {
-    kicker: 'Contact',
-    title: 'Book a demo of Auctorio',
-    lead: 'Tell us about your sites and how your team publishes today. We reply within one business day.',
+    kicker: 'Early access',
+    title: 'Join the Auctorio waitlist',
+    lead: 'Auctorio is opening to editorial teams in waves. Tell us a little about your sites and we will invite you as soon as a place opens.',
     formLabels: {
       name: 'Full name',
       email: 'Work email',
       company: 'Company or publication',
-      message: 'What would you like to see?',
-      submit: 'Send message',
+      message: 'What do you publish, and on how many sites?',
+      submit: 'Join the waitlist',
     },
     infoTitle: 'Other ways to reach us',
     infoItems: [
       { label: 'Email', value: 'hello@auctorio.com' },
       { label: 'Response time', value: 'Within one business day' },
-      { label: 'Demo', value: '30 minutes, with your own sites' },
+      { label: 'Onboarding', value: 'We set up your first site with you' },
     ],
   },
   es: {
-    kicker: 'Contacto',
-    title: 'Reserva una demo de Auctorio',
-    lead: 'Cuéntanos qué webs tienes y cómo publica hoy tu equipo. Respondemos en un día laborable.',
+    kicker: 'Acceso anticipado',
+    title: 'Únete a la lista de espera de Auctorio',
+    lead: 'Auctorio se abre a equipos editoriales por fases. Cuéntanos un poco sobre tus webs y te invitaremos en cuanto haya plaza.',
     formLabels: {
       name: 'Nombre completo',
       email: 'Email profesional',
       company: 'Empresa o medio',
-      message: '¿Qué te gustaría ver?',
-      submit: 'Enviar mensaje',
+      message: '¿Qué publicáis y en cuántas webs?',
+      submit: 'Unirme a la lista',
     },
     infoTitle: 'Otras formas de contactar',
     infoItems: [
       { label: 'Email', value: 'hello@auctorio.com' },
       { label: 'Respuesta', value: 'En un día laborable' },
-      { label: 'Demo', value: '30 minutos, con tus propias webs' },
+      { label: 'Puesta en marcha', value: 'Configuramos contigo tu primera web' },
     ],
   },
 };
@@ -982,15 +982,14 @@ export function getLocalizedFaqEntries(locale: MarketingLocale) {
 }
 
 export function getMarketingNavigation(locale: MarketingLocale): MarketingNavigationItem[] {
-  const items: MarketingNavigationItem[] = MARKETING_ROUTES.map((route) => ({
+  const items: MarketingNavigationItem[] = MARKETING_ROUTES.filter((route) => route.key !== 'contact').map((route) => ({
     key: route.key,
     label: route.labelByLocale[locale],
     path: route.pathByLocale[locale],
   }));
   const blogPath = BLOG_PATH[locale];
   if (blogPath) {
-    // Before Contact: the blog only exists in the locales that have articles.
-    items.splice(items.length - 1, 0, { key: 'blog', label: 'Blog', path: blogPath });
+    items.push({ key: 'blog', label: 'Blog', path: blogPath });
   }
   return items;
 }
@@ -1062,14 +1061,14 @@ export function getLocalizedPageSeo(
     },
     contact: {
       en: {
-        title: 'Book a demo',
-        description: 'Book a 30-minute Auctorio demo with your own sites. We reply within one business day.',
-        keywords: ['auctorio demo', 'editorial workflow demo'],
+        title: 'Join the waitlist',
+        description: 'Join the Auctorio waitlist for early access to AI editorial workflow software for publishers, agencies and multi-site teams.',
+        keywords: ['auctorio waitlist', 'editorial workflow software early access'],
       },
       es: {
-        title: 'Reserva una demo',
-        description: 'Reserva una demo de Auctorio de 30 minutos con tus propias webs. Respondemos en un día laborable.',
-        keywords: ['demo auctorio', 'demo software editorial'],
+        title: 'Lista de espera',
+        description: 'Únete a la lista de espera de Auctorio y accede antes al software de flujo editorial con IA para medios, agencias y equipos con varias webs.',
+        keywords: ['lista de espera auctorio', 'acceso anticipado software editorial'],
       },
     },
   } satisfies Record<MarketingPageKey, Record<MarketingLocale, SeoEntry>>;
@@ -1098,6 +1097,11 @@ export function getUseCaseAlternatePaths(useCaseId: UseCaseId) {
 export function translateMarketingPath(pathname: string, targetLocale: MarketingLocale): string {
   const clean = pathname.replace(/\/+$/, '') || '/';
   const locale = getMarketingLocaleFromPath(clean);
+
+  // Blog index ↔ blog index; an article without a translation falls back to the other blog index.
+  if (clean === BLOG_PATH.en || clean === BLOG_PATH.es || clean.startsWith(`${BLOG_PATH[locale]}/`)) {
+    return BLOG_PATH[targetLocale];
+  }
 
   const matchedRoute = MARKETING_ROUTES.find(
     (route) => route.pathByLocale.en === clean || route.pathByLocale.es === clean,

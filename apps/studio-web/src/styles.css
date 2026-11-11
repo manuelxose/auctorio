@@ -1031,23 +1031,81 @@ html[data-theme='dark'] .stat-card strong { background: none; color: var(--au-br
   .marketing-footer__lead { grid-column: 1 / -1; }
 }
 
+.marketing-nav__actions { display: none; }
+
 @media (max-width: 1240px) {
-  .marketing-header__inner { flex-wrap: wrap; }
   .marketing-header__actions { padding-left: 0; border-left: 0; }
-  .mobile-menu-toggle { display: inline-flex; }
   .marketing-header__actions .marketing-button--ghost { display: none; }
+  .mobile-menu-toggle { display: inline-flex; }
+
+  /* Mobile menu: a glass panel that overlays the page instead of pushing it down. */
   .marketing-nav {
     display: none;
-    order: 3;
-    flex-basis: 100%;
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    right: 0;
     flex-direction: column;
     align-items: stretch;
-    margin: 4px 0 6px;
-    padding-top: 8px;
+    gap: 2px;
+    margin: 0;
+    padding: 10px;
+    max-height: calc(100dvh - 110px);
+    overflow-y: auto;
+    border: 1px solid var(--au-border);
+    border-radius: 20px;
+    background: var(--au-surface-pop);
+    box-shadow: var(--au-shadow-pop);
+    -webkit-backdrop-filter: blur(var(--au-blur-strong, 28px)) saturate(180%);
+    backdrop-filter: blur(var(--au-blur-strong, 28px)) saturate(180%);
+  }
+
+  .marketing-nav.is-open { display: flex; animation: au-pop-in 160ms ease; }
+  .marketing-nav a { min-height: 48px; padding: 0 14px; font-size: 1rem; }
+
+  .marketing-nav__actions {
+    display: grid;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 12px;
     border-top: 1px solid var(--au-border);
   }
-  .marketing-nav.is-open { display: flex; }
-  .marketing-nav a { min-height: 44px; }
+
+  .marketing-nav__actions .marketing-button { width: 100%; justify-content: center; }
+  .marketing-nav .marketing-nav__actions a { min-height: 48px; font-size: 0.95rem; }
+  /* Nav link colours must not leak into the action buttons. */
+  .marketing-nav .marketing-nav__actions .marketing-button--primary,
+  .marketing-nav .marketing-nav__actions .marketing-button--primary:hover { color: var(--au-on-brand); background: var(--au-brand-gradient); }
+  .marketing-nav .marketing-nav__actions .marketing-button--ghost { color: var(--au-text); }
+
+  .mobile-menu-toggle span { transition: transform var(--w-ease), opacity var(--w-ease); }
+  .mobile-menu-toggle[aria-expanded='true'] span:nth-child(1) { transform: translateY(6px) rotate(45deg); }
+  .mobile-menu-toggle[aria-expanded='true'] span:nth-child(2) { opacity: 0; }
+  .mobile-menu-toggle[aria-expanded='true'] span:nth-child(3) { transform: translateY(-6px) rotate(-45deg); }
+}
+
+.marketing-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: var(--au-overlay);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
+}
+
+body.menu-open { overflow: hidden; }
+body.menu-open iframe[title="Talkaris Widget"] { visibility: hidden; }
+
+@media (max-width: 560px) {
+  .marketing-header__cta { display: none; }
+}
+
+/* shortcut: the chat launcher is a third-party iframe sized inline (272x96, closed state matched by its inline height); shrink it on phones. Replace with a launcher option if the widget ever exposes one. */
+@media (max-width: 780px) {
+  iframe[title="Talkaris Widget"][style*="height: 96px"] {
+    transform: scale(0.72);
+    transform-origin: bottom right;
+  }
 }
 
 @media (max-width: 1060px) {
@@ -1071,7 +1129,7 @@ html[data-theme='dark'] .stat-card strong { background: none; color: var(--au-br
   .hero-actions .marketing-button { flex: 1 1 auto; }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 340px) {
   .brand-signature__name { display: none; }
   .stat-grid { grid-template-columns: minmax(0, 1fr); }
 }

@@ -82,7 +82,7 @@ import { SeoService } from '../services/seo.service';
             <p class="marketing-copy">Planificación por demanda de búsqueda, revisión con comprobaciones previas y publicación en todas tus webs y redes.</p>
           </div>
           <div class="wrap-actions">
-            <a class="marketing-button marketing-button--primary" [routerLink]="contactPath">Solicitar demo</a>
+            <a class="marketing-button marketing-button--primary" [routerLink]="contactPath">Únete a la lista de espera</a>
             <a class="marketing-button marketing-button--ghost" [routerLink]="useCasesPath">Ver casos de uso</a>
           </div>
         </div>
@@ -113,7 +113,7 @@ export class ArticlePageComponent {
   readonly wordCount = this.article ? getArticleWordCount(this.article) : 0;
   readonly minutes = Math.max(1, Math.round(this.wordCount / 220));
   readonly homePath = getMarketingPath(this.locale, 'home');
-  readonly blogPath = BLOG_PATH[this.locale] ?? '/';
+  readonly blogPath = BLOG_PATH[this.locale];
   readonly contactPath = getMarketingPath(this.locale, 'contact');
   readonly useCasesPath = getMarketingPath(this.locale, 'use_cases');
   readonly articlePath = this.article ? getArticlePath(this.article) : this.blogPath;

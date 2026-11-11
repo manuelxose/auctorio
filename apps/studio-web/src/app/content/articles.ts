@@ -19,7 +19,7 @@ export type Article = {
   faq: ReadonlyArray<{ question: string; answer: string }>;
 };
 
-export const BLOG_PATH: Partial<Record<MarketingLocale, string>> = { es: '/es/blog' };
+export const BLOG_PATH: Record<MarketingLocale, string> = { en: '/blog', es: '/es/blog' };
 
 export const ARTICLES: Article[] = [
   {

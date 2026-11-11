@@ -107,7 +107,7 @@ type GoogleAccounts = {
           </button>
         </form>
 
-        <p class="auth-note">No account yet? <a class="au-link" routerLink="/contact">Request a demo</a></p>
+        <p class="auth-note">No account yet? <a class="au-link" routerLink="/waitlist">Join the waitlist</a></p>
       </div>
     </section>
   `,

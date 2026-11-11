@@ -1,4 +1,4 @@
-import { CommonModule, ViewportScroller } from '@angular/common';
+import { CommonModule, DOCUMENT, ViewportScroller } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
@@ -22,6 +22,7 @@ import { BLOG_PATH } from '../content/articles';
   selector: 'app-public-shell',
   standalone: true,
   imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet, AuctorioChatWidgetComponent],
+  host: { '(document:keydown.escape)': 'closeMenu()' },
   template: `
     <a class="skip-link" href="#main-content">
       {{ currentLocale === 'es' ? 'Saltar al contenido' : 'Skip to content' }}
@@ -41,10 +42,18 @@ import { BLOG_PATH } from '../content/articles';
               [routerLink]="item.path"
               routerLinkActive="is-active"
               [routerLinkActiveOptions]="{ exact: item.key === 'home' }"
-              (click)="menuOpen = false"
+              (click)="closeMenu()"
             >
               {{ item.label }}
             </a>
+            <div class="marketing-nav__actions">
+              <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath" (click)="closeMenu()">
+                {{ currentLocale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
+              </a>
+              <a class="marketing-button marketing-button--primary" [routerLink]="contactPath" (click)="closeMenu()">
+                {{ currentLocale === 'es' ? 'Únete a la lista de espera' : 'Join the waitlist' }}
+              </a>
+            </div>
           </nav>
 
           <div class="marketing-header__actions">
@@ -58,15 +67,16 @@ import { BLOG_PATH } from '../content/articles';
             <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
               {{ currentLocale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
             </a>
-            <a class="marketing-button marketing-button--primary" [routerLink]="contactPath">
-              {{ currentLocale === 'es' ? 'Solicitar demo' : 'Request a demo' }}
+            <a class="marketing-button marketing-button--primary marketing-header__cta" [routerLink]="contactPath">
+              {{ currentLocale === 'es' ? 'Únete a la lista de espera' : 'Join the waitlist' }}
             </a>
             <button
               class="mobile-menu-toggle"
-              (click)="menuOpen = !menuOpen"
+              type="button"
+              (click)="toggleMenu()"
               [attr.aria-expanded]="menuOpen"
               aria-controls="primary-navigation"
-              [attr.aria-label]="menuOpen ? 'Close menu' : 'Open menu'"
+              [attr.aria-label]="currentLocale === 'es' ? (menuOpen ? 'Cerrar menú' : 'Abrir menú') : (menuOpen ? 'Close menu' : 'Open menu')"
             >
               <span></span>
               <span></span>
@@ -75,6 +85,10 @@ import { BLOG_PATH } from '../content/articles';
           </div>
         </div>
       </header>
+
+      @if (menuOpen) {
+        <div class="marketing-menu-backdrop" (click)="closeMenu()" aria-hidden="true"></div>
+      }
 
       <main id="main-content" class="marketing-main">
         <router-outlet></router-outlet>
@@ -102,14 +116,13 @@ import { BLOG_PATH } from '../content/articles';
               <a [routerLink]="useCasesPath">{{ currentLocale === 'es' ? 'Casos de uso' : 'Use cases' }}</a>
               <a *ngIf="blogPath" [routerLink]="blogPath">Blog</a>
               <a [routerLink]="faqPath">{{ currentLocale === 'es' ? 'Preguntas frecuentes' : 'FAQ' }}</a>
-              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Contacto' : 'Contact' }}</a>
             </div>
           </nav>
 
           <nav [attr.aria-label]="footerResources.startTitle">
             <p class="marketing-kicker">{{ footerResources.startTitle }}</p>
             <div class="marketing-footer__links">
-              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Solicitar demo' : 'Request a demo' }}</a>
+              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Únete a la lista de espera' : 'Join the waitlist' }}</a>
               <a [href]="studioLoginPath">{{ currentLocale === 'es' ? 'Entrar al Studio' : 'Sign in to Studio' }}</a>
             </div>
           </nav>
@@ -128,6 +141,7 @@ import { BLOG_PATH } from '../content/articles';
 export class PublicShellComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private subscription: Subscription | null = null;
+  private readonly document = inject(DOCUMENT);
 
   constructor() {
     // Anchor jumps (article table of contents) must clear the sticky glass header.
@@ -150,7 +164,7 @@ export class PublicShellComponent implements OnInit, OnDestroy {
   faqPath = getMarketingPath('en', 'faq');
   contactPath = getMarketingPath('en', 'contact');
   useCases = getLocalizedUseCases('en');
-  blogPath: string | undefined = BLOG_PATH.en;
+  blogPath = BLOG_PATH.en;
   readonly year = new Date().getFullYear();
 
   ngOnInit(): void {
@@ -158,13 +172,28 @@ export class PublicShellComponent implements OnInit, OnDestroy {
     this.subscription = this.router.events
       .pipe(filter((event) => event instanceof NavigationEnd))
       .subscribe((event) => {
-        this.menuOpen = false;
+        this.closeMenu();
         this.syncState((event as NavigationEnd).urlAfterRedirects);
       });
   }
 
+  toggleMenu(): void {
+    this.setMenu(!this.menuOpen);
+  }
+
+  closeMenu(): void {
+    this.setMenu(false);
+  }
+
+  /** body.menu-open locks page scroll and hides the floating chat while the mobile menu is open. */
+  private setMenu(open: boolean): void {
+    this.menuOpen = open;
+    this.document.body?.classList.toggle('menu-open', open);
+  }
+
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
+    this.closeMenu();
   }
 
   private syncState(url: string): void {

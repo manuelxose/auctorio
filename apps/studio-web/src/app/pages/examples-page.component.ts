@@ -64,7 +64,7 @@ import { SeoService } from '../services/seo.service';
     <section class="marketing-section marketing-section--final">
       <div class="cta-banner">
         <div>
-          <p class="marketing-kicker">{{ locale === 'en' ? 'Demo' : 'Demo' }}</p>
+          <p class="marketing-kicker">{{ locale === 'en' ? 'Early access' : 'Acceso anticipado' }}</p>
           <h2>
             {{
               locale === 'en'
@@ -75,7 +75,7 @@ import { SeoService } from '../services/seo.service';
         </div>
         <div class="wrap-actions">
           <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'contact')">
-            {{ locale === 'en' ? 'Request a demo' : 'Solicitar demo' }}
+            {{ locale === 'en' ? 'Join the waitlist' : 'Únete a la lista de espera' }}
           </a>
         </div>
       </div>

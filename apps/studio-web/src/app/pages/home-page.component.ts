@@ -200,7 +200,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 
         <div class="wrap-actions">
           <a class="marketing-button marketing-button--primary" [routerLink]="getPagePath('contact')">
-            {{ locale === 'en' ? 'Request a demo' : 'Solicitar demo' }}
+            {{ locale === 'en' ? 'Join the waitlist' : 'Únete a la lista de espera' }}
           </a>
           <a class="marketing-button marketing-button--ghost" [href]="studioLoginPath">
             {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}

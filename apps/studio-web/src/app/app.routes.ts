@@ -182,9 +182,10 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/examples-page.component').then((m) => m.ExamplesPageComponent),
       },
       { path: 'gallery', redirectTo: '/examples', pathMatch: 'full' },
+      { path: 'contact', redirectTo: '/waitlist', pathMatch: 'full' },
       { path: 'faq', loadComponent: () => import('./pages/faq-page.component').then((m) => m.FaqPageComponent) },
       {
-        path: 'contact',
+        path: 'waitlist',
         loadComponent: () => import('./pages/contact-page.component').then((m) => m.ContactPageComponent),
       },
       { path: 'built-by-tecnoria', redirectTo: '/', pathMatch: 'full' },
@@ -205,6 +206,11 @@ export const routes: Routes = [
         data: { locale: 'es' },
       },
       { path: 'es/galeria', redirectTo: '/es/ejemplos', pathMatch: 'full' },
+      { path: 'es/contacto', redirectTo: '/es/lista-de-espera', pathMatch: 'full' },
+      {
+        path: 'blog',
+        loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
+      },
       {
         path: 'es/blog',
         loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
@@ -217,7 +223,7 @@ export const routes: Routes = [
       },
       { path: 'es/faq', loadComponent: () => import('./pages/faq-page.component').then((m) => m.FaqPageComponent), data: { locale: 'es' } },
       {
-        path: 'es/contacto',
+        path: 'es/lista-de-espera',
         loadComponent: () => import('./pages/contact-page.component').then((m) => m.ContactPageComponent),
         data: { locale: 'es' },
       },
