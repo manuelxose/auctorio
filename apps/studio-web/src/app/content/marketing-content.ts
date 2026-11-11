@@ -1,4 +1,4 @@
-import { BLOG_PATH, getArticlePath, getArticles } from './articles';
+import { BLOG_PATH, getArticle, getArticlePath, getArticles, getArticleTranslation } from './articles';
 export const BRAND_NAME = 'Auctorio';
 export const BRAND_SIGNATURE = 'Made by Tecnoria';
 export const BRAND_TAGLINE = 'Editorial workflow software with AI for publishers, agencies and multi-site teams.';
@@ -1099,7 +1099,12 @@ export function translateMarketingPath(pathname: string, targetLocale: Marketing
   const locale = getMarketingLocaleFromPath(clean);
 
   // Blog index ↔ blog index; an article without a translation falls back to the other blog index.
-  if (clean === BLOG_PATH.en || clean === BLOG_PATH.es || clean.startsWith(`${BLOG_PATH[locale]}/`)) {
+  if (clean.startsWith(`${BLOG_PATH[locale]}/`)) {
+    const article = getArticle(locale, clean.slice(BLOG_PATH[locale].length + 1));
+    const translation = article ? getArticleTranslation(article, targetLocale) : null;
+    return translation ? getArticlePath(translation) : BLOG_PATH[targetLocale];
+  }
+  if (clean === BLOG_PATH.en || clean === BLOG_PATH.es) {
     return BLOG_PATH[targetLocale];
   }
 

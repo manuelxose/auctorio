@@ -865,6 +865,19 @@ html[data-theme='dark'] .stat-card strong { background: none; color: var(--au-br
 .marketing-footer__bottom a { color: inherit; transition: color var(--w-ease); }
 .marketing-footer__bottom a:hover { color: var(--au-brand); }
 
+.visually-hidden {
+  position: absolute !important;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.form-status { margin: 0; padding: 12px 14px; border-radius: 12px; font-size: 0.95rem; }
+.form-status--success { background: var(--au-success-soft); color: var(--au-success); }
+.form-status--error { background: var(--au-danger-soft); color: var(--au-danger); }
+
 /* ── Blog article ── */
 .breadcrumbs {
   display: flex;

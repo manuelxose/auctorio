@@ -212,6 +212,10 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
       },
       {
+        path: 'blog/:slug',
+        loadComponent: () => import('./pages/article-page.component').then((m) => m.ArticlePageComponent),
+      },
+      {
         path: 'es/blog',
         loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
         data: { locale: 'es' },

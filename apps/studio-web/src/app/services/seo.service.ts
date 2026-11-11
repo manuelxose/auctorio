@@ -50,6 +50,8 @@ export class SeoService {
     const imageUrl = config.imageAsset ? this.resolveUrl(config.imageAsset.defaultPath) : null;
 
     this.title.setTitle(pageTitle);
+    // index.html ships lang="en"; Spanish pages must declare their own language (SSR and client).
+    this.document.documentElement.lang = config.locale;
     this.meta.updateTag({ name: 'description', content: description });
     this.meta.updateTag({
       name: 'robots',

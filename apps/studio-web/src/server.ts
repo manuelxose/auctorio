@@ -1234,6 +1234,52 @@ app.get(Object.keys(RETIRED_PUBLIC_PATHS), (req, res) => {
   res.redirect(301, RETIRED_PUBLIC_PATHS[req.path]);
 });
 
+// ── Public waitlist ────────────────────────────────────────────────────
+// shortcut: in-memory per-IP limit, per process; move to Redis if the SSR server runs on several instances.
+const waitlistHits = new Map<string, number[]>();
+const WAITLIST_WINDOW_MS = 10 * 60 * 1000;
+const WAITLIST_MAX_PER_WINDOW = 5;
+
+app.post('/api/waitlist', express.json({ limit: '8kb' }), (req, res) => {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  // Honeypot: real visitors never fill the hidden "website" field; bots usually do. Pretend success.
+  if (typeof body['website'] === 'string' && body['website'].trim()) {
+    res.status(201).json({ ok: true });
+    return;
+  }
+
+  const ip = req.ip || req.socket.remoteAddress || 'unknown';
+  const now = Date.now();
+  const recent = (waitlistHits.get(ip) ?? []).filter((at) => now - at < WAITLIST_WINDOW_MS);
+  if (recent.length >= WAITLIST_MAX_PER_WINDOW) {
+    res.status(429).json({ error: 'too_many_requests' });
+    return;
+  }
+  if (waitlistHits.size > 5000) {
+    waitlistHits.clear(); // bound memory; losing old windows only relaxes the limit briefly
+  }
+  waitlistHits.set(ip, [...recent, now]);
+
+  void (async () => {
+    const response = await fetch(new URL('/internal/waitlist', backendBaseUrl), {
+      method: 'POST',
+      headers: { ...getInternalHeaders(), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: body['email'],
+        name: body['name'],
+        company: body['company'],
+        message: body['message'],
+        locale: body['locale'],
+        sourcePath: body['sourcePath'],
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    res.status(response.ok ? 201 : response.status === 400 ? 400 : 502).json(response.ok ? { ok: true } : payload);
+  })().catch(() => {
+    res.status(502).json({ error: 'backend_unavailable' });
+  });
+});
+
 app.get('/robots.txt', (req, res) => {
   const origin = getRequestOrigin(req);
   res.type('text/plain').send(

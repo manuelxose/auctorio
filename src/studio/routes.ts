@@ -141,6 +141,7 @@ import {
 import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
 import { registerConnectorRoutes } from "./routes-connectors";
+import { registerWaitlistRoutes } from "./waitlist";
 import { registerOperationRoutes } from "./routes-operations";
 import { registerPhase5OpsRoutes } from "./routes-phase5-ops";
 import { registerNotificationRoutes } from "./routes-notifications";
@@ -412,6 +413,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerIntelligenceRoutes(fastify);
   registerEditorialEngineRoutes(fastify);
   registerConnectorRoutes(fastify);
+  registerWaitlistRoutes(fastify);
   registerOperationRoutes(fastify);
   registerPhase5OpsRoutes(fastify);
   registerNotificationRoutes(fastify);

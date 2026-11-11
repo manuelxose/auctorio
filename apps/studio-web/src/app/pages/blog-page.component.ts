@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
-import { ARTICLES, BLOG_PATH, getArticlePath, getArticleWordCount } from '../content/articles';
+import { BLOG_PATH, getArticlePath, getArticles, getArticleWordCount } from '../content/articles';
 import { getAssetBySlug, getMarketingPath, type MarketingLocale } from '../content/marketing-content';
 import { SeoService } from '../services/seo.service';
 
@@ -33,10 +33,9 @@ import { SeoService } from '../services/seo.service';
           </figure>
           <p class="marketing-kicker">
             {{ article.kicker }} · {{ article.minutes }} {{ copy.minutes }}
-            <span class="tag-chip" *ngIf="article.locale !== locale" [attr.lang]="article.locale">{{ article.locale === 'es' ? 'Español' : 'English' }}</span>
           </p>
-          <h2 [attr.lang]="article.locale"><a [routerLink]="article.path">{{ article.title }}</a></h2>
-          <p [attr.lang]="article.locale">{{ article.description }}</p>
+          <h2><a [routerLink]="article.path">{{ article.title }}</a></h2>
+          <p>{{ article.description }}</p>
           <a class="marketing-inline-link" [routerLink]="article.path">{{ copy.read }}</a>
         </article>
       </div>
@@ -51,9 +50,8 @@ export class BlogPageComponent {
   readonly copy =
     this.locale === 'es'
       ? { title: 'Guías sobre flujo editorial, SEO y publicación', lead: 'Artículos prácticos para redacciones y equipos de contenido: cómo planificar, revisar y publicar mejor.', minutes: 'min de lectura', read: 'Leer la guía' }
-      : { title: 'Guides on editorial workflow, SEO and publishing', lead: 'Practical articles for newsrooms and content teams on planning, reviewing and publishing better. Some guides are only available in Spanish for now.', minutes: 'min read', read: 'Read the guide' };
-  // Every guide is listed in both indexes, own-language first, so the blog is never empty in either locale.
-  readonly articles = [...ARTICLES].sort((a, b) => Number(b.locale === this.locale) - Number(a.locale === this.locale)).map((article) => ({
+      : { title: 'Guides on editorial workflow, SEO and publishing', lead: 'Practical articles for newsrooms and content teams on planning, reviewing and publishing better.', minutes: 'min read', read: 'Read the guide' };
+  readonly articles = getArticles(this.locale).map((article) => ({
     ...article,
     path: getArticlePath(article),
     asset: getAssetBySlug(article.heroAssetSlug),
