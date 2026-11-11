@@ -212,7 +212,7 @@ test("public home renders the Auctorio landing without redirecting to the studio
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /Auctorio/);
-  assert.match(html, /AI content operations platform/i);
+  assert.match(html, /AI Editorial Workflow Software for Publishers/i);
   assert.doesNotMatch(html, PRIVATE_PROVIDER_PATTERN);
 });
 
@@ -223,7 +223,7 @@ test("english and spanish public routes render without redirecting to the studio
 
   assert.equal(spanish.status, 200);
   const html = await spanish.text();
-  assert.match(html, /Operaciones de contenido con IA para publishers/i);
+  assert.match(html, /Software de flujo editorial con IA para medios/i);
   assert.doesNotMatch(html, PRIVATE_PROVIDER_PATTERN);
 });
 
