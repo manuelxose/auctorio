@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import type { AutomationPolicy, FactSourceType, PublicationChannel } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { structuredEvent } from "../shared/utils/logger";
 import { writeAudit } from "./audit";
 import { approveVersion, createProject, ensureProjectTopic } from "./repository";
 import { startProjectGeneration } from "./orchestration";
@@ -394,50 +395,58 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
   });
 
   for (const project of projects) {
-    const latestVersion = project.versions[0] ?? null;
-    const mode = policy.mode as AutomationMode;
+    // One failing project (a vanished row, a provider error) must not abort the tick for every other tenant.
+    try {
+      const latestVersion = project.versions[0] ?? null;
+      const mode = policy.mode as AutomationMode;
 
-    // ── AUTOPILOT: strict gate, self-healing repair, automatic approval. ──
-    if (mode === "autopilot") {
-      const advanced = await advanceAutopilotProject(policy, tenantId, project, latestVersion);
-      progress.projectsAdvanced += advanced.projectsAdvanced;
-      progress.socialJobsCreated += advanced.socialJobsCreated;
-      progress.publicationsCreated += advanced.publicationsCreated;
-      progress.approvals += advanced.approvals;
-      continue;
-    }
-
-    // ── Legacy / assisted path (human approval semantics preserved). ──
-    if (!latestVersion) {
-      if (policy.autoGenerate) {
-        await startProjectGeneration(project.id, tenantId);
-        progress.projectsAdvanced += 1;
+      // ── AUTOPILOT: strict gate, self-healing repair, automatic approval. ──
+      if (mode === "autopilot") {
+        const advanced = await advanceAutopilotProject(policy, tenantId, project, latestVersion);
+        progress.projectsAdvanced += advanced.projectsAdvanced;
+        progress.socialJobsCreated += advanced.socialJobsCreated;
+        progress.publicationsCreated += advanced.publicationsCreated;
+        progress.approvals += advanced.approvals;
+        continue;
       }
-      continue;
+
+      // ── Legacy / assisted path (human approval semantics preserved). ──
+      if (!latestVersion) {
+        if (policy.autoGenerate) {
+          await startProjectGeneration(project.id, tenantId);
+          progress.projectsAdvanced += 1;
+        }
+        continue;
+      }
+
+      // Auto approval requires stricter quality than an ordinary QA-passed
+      // version. Failures remain in QA/review and are never scheduled.
+      if (policy.autoApprove && isAutomaticApprovalQualityReady(latestVersion)) {
+        await approveVersion(tenantId, project.id, latestVersion.id, "automation", null);
+        progress.approvals += 1;
+        continue;
+      }
+
+      const socialReady = !policy.socialRequired || project.socialContents.length > 0;
+      const socialChannelsWanted =
+        (policy.xPostsPerDay > 0 ? ["x"] : []).concat(policy.instagramPostsPerDay > 0 ? ["instagram"] : []);
+
+      if (!socialReady && socialChannelsWanted.length > 0 && latestVersion.bodyHtml) {
+        await createSocialGenerationJobs(tenantId, {
+          projectId: project.id,
+          versionId: latestVersion.id,
+          channels: socialChannelsWanted as Array<"x" | "instagram">,
+        });
+        progress.socialJobsCreated += 1;
+        continue;
+      }
+    } catch (error) {
+      structuredEvent(
+        "planner.project_failed",
+        { tenantId, projectId: project.id, error: error instanceof Error ? error.message : String(error) },
+        "error",
+      );
     }
-
-    // Auto approval requires stricter quality than an ordinary QA-passed
-    // version. Failures remain in QA/review and are never scheduled.
-    if (policy.autoApprove && isAutomaticApprovalQualityReady(latestVersion)) {
-      await approveVersion(tenantId, project.id, latestVersion.id, "automation", null);
-      progress.approvals += 1;
-      continue;
-    }
-
-    const socialReady = !policy.socialRequired || project.socialContents.length > 0;
-    const socialChannelsWanted =
-      (policy.xPostsPerDay > 0 ? ["x"] : []).concat(policy.instagramPostsPerDay > 0 ? ["instagram"] : []);
-
-    if (!socialReady && socialChannelsWanted.length > 0 && latestVersion.bodyHtml) {
-      await createSocialGenerationJobs(tenantId, {
-        projectId: project.id,
-        versionId: latestVersion.id,
-        channels: socialChannelsWanted as Array<"x" | "instagram">,
-      });
-      progress.socialJobsCreated += 1;
-      continue;
-    }
-
   }
 
   return progress;
