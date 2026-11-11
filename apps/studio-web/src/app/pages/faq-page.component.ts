@@ -28,8 +28,8 @@ import { SeoService } from '../services/seo.service';
       <p class="marketing-lead">
         {{
           locale === 'en'
-            ? 'Everything you need to know about the platform, editorial workflow, integrations and getting started.'
-            : 'Todo lo que necesitas saber sobre la plataforma, flujo editorial, integraciones y cómo empezar.'
+            ? 'Human approval, integrations, multi-site publishing, SEO and how to get started.'
+            : 'Aprobación humana, integraciones, publicación en varias webs, SEO y cómo empezar.'
         }}
       </p>
     </section>

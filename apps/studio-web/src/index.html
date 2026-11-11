@@ -9,8 +9,11 @@
     name="description"
     content="Auctorio is the AI content operations platform that helps publishers manage editorial workflows, approvals, assets and multi-site publishing from one search-ready system."
   >
-  <meta name="theme-color" content="#090d12">
-  <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <meta name="theme-color" content="#0d0c1d">
+  <link rel="icon" href="/favicon.ico" sizes="32x32">
+  <link rel="icon" href="/logo.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+  <link rel="manifest" href="/site.webmanifest">
   <script>
     (function () {
       try {
@@ -29,6 +32,7 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
   <style>
     .studio-boot {
       position: fixed;
@@ -38,9 +42,9 @@
       justify-content: center;
       padding: 24px;
       background:
-        radial-gradient(circle at top left, rgba(79, 143, 255, 0.18), transparent 28%),
-        linear-gradient(180deg, #07101d 0%, #0a1220 58%, #0b1422 100%);
-      color: #edf3ff;
+        radial-gradient(900px 600px at 8% -10%, rgba(99, 102, 241, 0.32), transparent 60%), radial-gradient(700px 520px at 100% 0%, rgba(234, 88, 12, 0.16), transparent 62%),
+        #0d0c1d;
+      color: #eeedf8;
       font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       z-index: 9999;
     }
@@ -53,14 +57,16 @@
       width: min(100%, 560px);
       padding: 32px;
       border-radius: 28px;
-      border: 1px solid rgba(137, 180, 255, 0.2);
-      background: rgba(11, 18, 32, 0.96);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(30, 28, 60, 0.6);
+      -webkit-backdrop-filter: blur(24px) saturate(170%);
+      backdrop-filter: blur(24px) saturate(170%);
       box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
     }
 
     .studio-boot__eyebrow {
       margin: 0 0 10px;
-      color: #9bbdff;
+      color: #fb923c;
       font-size: 12px;
       font-weight: 700;
       letter-spacing: 0.18em;
@@ -76,13 +82,13 @@
 
     .studio-boot__copy {
       margin: 16px 0 0;
-      color: rgba(237, 243, 255, 0.72);
+      color: rgba(238, 237, 248, 0.72);
       line-height: 1.6;
     }
 
     .studio-boot__status {
       margin: 20px 0 0;
-      color: rgba(237, 243, 255, 0.92);
+      color: rgba(238, 237, 248, 0.92);
       font-weight: 600;
     }
 
@@ -96,13 +102,13 @@
     .studio-boot__metric {
       padding: 14px 16px;
       border-radius: 18px;
-      border: 1px solid rgba(137, 180, 255, 0.14);
+      border: 1px solid rgba(255, 255, 255, 0.14);
       background: rgba(255, 255, 255, 0.04);
     }
 
     .studio-boot__metric span {
       display: block;
-      color: rgba(237, 243, 255, 0.52);
+      color: rgba(238, 237, 248, 0.52);
       font-size: 12px;
       margin-bottom: 6px;
     }
@@ -129,10 +135,10 @@
       justify-content: center;
       min-height: 46px;
       padding: 0 18px;
-      border: 1px solid rgba(137, 180, 255, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.2);
       border-radius: 999px;
-      background: #4f8fff;
-      color: #07101d;
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      color: #ffffff;
       font-weight: 700;
       text-decoration: none;
       cursor: pointer;
@@ -140,7 +146,7 @@
 
     .studio-boot__button--secondary {
       background: rgba(255, 255, 255, 0.04);
-      color: #edf3ff;
+      color: #eeedf8;
     }
 
     @media (max-width: 720px) {
@@ -162,7 +168,7 @@
   <div class="studio-boot" id="studio-boot" aria-live="polite">
     <section class="studio-boot__panel">
       <p class="studio-boot__eyebrow">Auctorio</p>
-      <h1 class="studio-boot__title">Loading your workspace</h1>
+      <p class="studio-boot__title">Loading your workspace</p>
       <p class="studio-boot__copy">
         Signing you in and preparing your sites. If this takes too long, refresh the page.
       </p>

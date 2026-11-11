@@ -17,19 +17,19 @@ import { SeoService } from '../services/seo.service';
   imports: [CommonModule, RouterLink],
   template: `
     <section class="page-hero">
-      <p class="marketing-kicker">{{ locale === 'en' ? 'Examples' : 'Ejemplos' }}</p>
+      <p class="marketing-kicker">{{ locale === 'en' ? 'Workflows' : 'Flujos de trabajo' }}</p>
       <h1>
         {{
           locale === 'en'
-            ? 'Content workflow examples for publishers, editorial desks and multi-site teams.'
-            : 'Ejemplos de workflow de contenido para publishers, redacciones y equipos multi-site.'
+            ? 'Editorial workflow examples, step by step'
+            : 'Ejemplos de flujo editorial, paso a paso'
         }}
       </h1>
       <p class="marketing-lead">
         {{
           locale === 'en'
-            ? 'These examples explain how briefs, review loops, assets and publishing states can live inside one operating model.'
-            : 'Estos ejemplos explican como briefs, revisiones, assets y estados de publicacion pueden convivir dentro del mismo modelo operativo.'
+            ? 'Four situations every editorial team knows: choosing what to cover, reviewing before publishing, sending one piece everywhere and planning the week.'
+            : 'Cuatro situaciones que conoce cualquier redacción: decidir qué cubrir, revisar antes de publicar, enviar una pieza a todas partes y planificar la semana.'
         }}
       </p>
     </section>
@@ -64,18 +64,18 @@ import { SeoService } from '../services/seo.service';
     <section class="marketing-section marketing-section--final">
       <div class="cta-banner">
         <div>
-          <p class="marketing-kicker">{{ locale === 'en' ? 'Use cases' : 'Casos de uso' }}</p>
+          <p class="marketing-kicker">{{ locale === 'en' ? 'Early access' : 'Acceso anticipado' }}</p>
           <h2>
             {{
               locale === 'en'
-                ? 'Examples explain the workflow. Use cases explain where the workflow creates leverage.'
-                : 'Los ejemplos explican el workflow. Los casos de uso explican donde crea ventaja.'
+                ? 'Want to see these workflows with your own sites?'
+                : '¿Quieres ver estos flujos con tus propias webs?'
             }}
           </h2>
         </div>
         <div class="wrap-actions">
-          <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'use_cases')">
-            {{ locale === 'en' ? 'Explore use cases' : 'Explorar casos de uso' }}
+          <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'contact')">
+            {{ locale === 'en' ? 'Join the waitlist' : 'Únete a la lista de espera' }}
           </a>
         </div>
       </div>

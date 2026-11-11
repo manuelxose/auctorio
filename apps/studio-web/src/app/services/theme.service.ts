@@ -86,7 +86,7 @@ export class ThemeService {
     document.documentElement.setAttribute('data-theme', theme);
     const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
     if (meta) {
-      meta.content = theme === 'dark' ? '#0b1220' : '#f6f8fb';
+      meta.content = theme === 'dark' ? '#0d0c1d' : '#f3f0ea';
     }
   }
 }

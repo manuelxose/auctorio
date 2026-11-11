@@ -42,7 +42,8 @@ type WidgetWindow = Window &
 })
 export class AuctorioChatWidgetComponent implements OnInit, OnChanges, OnDestroy {
   private readonly scriptId = 'auctorio-chat-widget-loader';
-  private readonly iframeTitle = 'Tecnoria Chat Widget';
+  // Title the third-party embed gives its iframe; used to remove it on locale change.
+  private readonly iframeTitle = 'Talkaris Widget';
   private readonly origin = inject(STUDIO_ORIGIN);
   private mountTimeoutId: number | null = null;
   @Input() locale: MarketingLocale = 'en';

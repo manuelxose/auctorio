@@ -71,12 +71,23 @@ import { SeoService } from '../services/seo.service';
             ></textarea>
           </div>
 
-          <button class="marketing-button marketing-button--primary" type="submit" [disabled]="submitted">
-            {{ submitted
-              ? (locale === 'es' ? 'Enviado ✓' : 'Sent ✓')
-              : content.formLabels.submit
-            }}
+          <!-- Honeypot: hidden from people and assistive tech; bots that fill it are ignored server-side. -->
+          <div class="visually-hidden" aria-hidden="true">
+            <label for="contact-website">Website</label>
+            <input id="contact-website" type="text" name="website" tabindex="-1" autocomplete="off" />
+          </div>
+
+          <button class="marketing-button marketing-button--primary" type="submit" [disabled]="state === 'sending'">
+            {{ state === 'sending' ? (locale === 'es' ? 'Enviando…' : 'Sending…') : content.formLabels.submit }}
           </button>
+          <p class="form-status form-status--success" role="status" *ngIf="state === 'done'">
+            {{ locale === 'es'
+              ? '¡Listo! Estás en la lista de espera. Te escribiremos en cuanto haya plaza para tu equipo.'
+              : 'Done! You are on the waitlist. We will email you as soon as a place opens for your team.' }}
+          </p>
+          <p class="form-status form-status--error" role="alert" *ngIf="state === 'error'">
+            {{ errorMessage }}
+          </p>
         </form>
 
         <aside class="contact-info">
@@ -98,7 +109,8 @@ export class ContactPageComponent {
 
   readonly locale = (this.route.snapshot.data['locale'] as MarketingLocale | undefined) ?? 'en';
   readonly content = getMarketingContactContent(this.locale);
-  submitted = false;
+  state: 'idle' | 'sending' | 'done' | 'error' = 'idle';
+  errorMessage = '';
 
   constructor() {
     const seoEntry = getLocalizedPageSeo(this.locale, 'contact');
@@ -118,7 +130,7 @@ export class ContactPageComponent {
         this.seo.createBreadcrumbSchema([
           { name: BRAND_NAME, path: getMarketingPath(this.locale, 'home') },
           {
-            name: this.locale === 'es' ? 'Contacto' : 'Contact',
+            name: this.locale === 'es' ? 'Lista de espera' : 'Waitlist',
             path: getMarketingPath(this.locale, 'contact'),
           },
         ]),
@@ -126,13 +138,53 @@ export class ContactPageComponent {
     });
   }
 
-  onSubmit(event: Event): void {
+  async onSubmit(event: Event): Promise<void> {
     event.preventDefault();
     const form = event.target as HTMLFormElement;
     if (!form.checkValidity()) {
       form.reportValidity();
       return;
     }
-    this.submitted = true;
+
+    const data = new FormData(form);
+    const field = (name: string) => String(data.get(name) ?? '').trim();
+    this.state = 'sending';
+    try {
+      const response = await fetch('/api/waitlist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: field('name'),
+          email: field('email'),
+          company: field('company'),
+          message: field('message'),
+          website: field('website'),
+          locale: this.locale,
+          sourcePath: getMarketingPath(this.locale, 'contact'),
+        }),
+      });
+      if (response.ok) {
+        this.state = 'done';
+        form.reset();
+        return;
+      }
+      this.errorMessage = this.describeError(response.status, (await response.json().catch(() => ({}))).error);
+    } catch {
+      this.errorMessage = this.describeError(0, undefined);
+    }
+    this.state = 'error';
+  }
+
+  private describeError(status: number, code: string | undefined): string {
+    const es = this.locale === 'es';
+    if (code === 'invalid_email') {
+      return es ? 'Revisa el email: no parece válido.' : 'Please check your email address.';
+    }
+    if (status === 429) {
+      return es ? 'Demasiados intentos. Prueba de nuevo en unos minutos.' : 'Too many attempts. Please try again in a few minutes.';
+    }
+    return es
+      ? 'No hemos podido guardar tu solicitud. Inténtalo de nuevo o escríbenos a hello@auctorio.com.'
+      : 'We could not save your request. Please try again or email hello@auctorio.com.';
   }
 }

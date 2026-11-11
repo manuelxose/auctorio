@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject } from '@angular/core';
+import { Component, inject, RESPONSE_INIT } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { SeoService } from '../services/seo.service';
 import {
@@ -19,15 +19,15 @@ import {
       <h1>
         {{
           locale === 'en'
-            ? 'The page you are looking for is not part of the public Auctorio site.'
-            : 'La pagina que buscas no forma parte de la capa publica de Auctorio.'
+            ? 'We could not find that page'
+            : 'No encontramos esa página'
         }}
       </h1>
       <p class="marketing-lead">
         {{
           locale === 'en'
-            ? 'Go back to the platform overview, browse the public use cases or enter the Studio if you already operate the workflow.'
-            : 'Puedes volver a la home, revisar los casos de uso o entrar al Studio si ya vienes a operar el workflow.'
+            ? 'It may have moved or been removed. Go back to the home page or sign in to the Studio.'
+            : 'Puede que se haya movido o eliminado. Vuelve a la portada o entra en el Studio.'
         }}
       </p>
       <div class="hero-actions">
@@ -49,8 +49,13 @@ export class PublicNotFoundPageComponent {
   readonly studioLoginPath = getStudioLoginPath();
 
   constructor() {
+    // Real 404 on the server render instead of a soft 404 (200 + "not found" copy).
+    const response = inject(RESPONSE_INIT, { optional: true });
+    if (response) {
+      response.status = 404;
+    }
     this.seo.update({
-      title: this.locale === 'en' ? 'Page not found' : 'Pagina no encontrada',
+      title: this.locale === 'en' ? 'Page not found' : 'Página no encontrada',
       description:
         this.locale === 'en'
           ? 'The requested route does not exist inside the public Auctorio marketing site.'

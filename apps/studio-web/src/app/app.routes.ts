@@ -6,21 +6,6 @@ import { studioAuthGuard, studioRoleGuard } from './guards/studio-guards';
  * equivalent new destinations.
  */
 export const routes: Routes = [
-  // ── Auth ────────────────────────────────────────────────────────────
-  { path: 'login', loadComponent: () => import('./pages/login-page.component').then((m) => m.LoginPageComponent) },
-  {
-    path: 'forgot-password',
-    loadComponent: () => import('./pages/forgot-password-page.component').then((m) => m.ForgotPasswordPageComponent),
-  },
-  {
-    path: 'reset-password',
-    loadComponent: () => import('./pages/reset-password-page.component').then((m) => m.ResetPasswordPageComponent),
-  },
-  {
-    path: 'accept-invite',
-    loadComponent: () => import('./pages/accept-invite-page.component').then((m) => m.AcceptInvitePageComponent),
-  },
-
   // ── Studio ──────────────────────────────────────────────────────────
   {
     path: 'studio',
@@ -168,6 +153,21 @@ export const routes: Routes = [
     path: '',
     loadComponent: () => import('./layout/public-shell.component').then((m) => m.PublicShellComponent),
     children: [
+      // ── Auth ────────────────────────────────────────────────────────────
+      { path: 'login', loadComponent: () => import('./pages/login-page.component').then((m) => m.LoginPageComponent) },
+      {
+        path: 'forgot-password',
+        loadComponent: () => import('./pages/forgot-password-page.component').then((m) => m.ForgotPasswordPageComponent),
+      },
+      {
+        path: 'reset-password',
+        loadComponent: () => import('./pages/reset-password-page.component').then((m) => m.ResetPasswordPageComponent),
+      },
+      {
+        path: 'accept-invite',
+        loadComponent: () => import('./pages/accept-invite-page.component').then((m) => m.AcceptInvitePageComponent),
+      },
+
       { path: '', loadComponent: () => import('./pages/home-page.component').then((m) => m.HomePageComponent) },
       {
         path: 'use-cases',
@@ -181,19 +181,14 @@ export const routes: Routes = [
         path: 'examples',
         loadComponent: () => import('./pages/examples-page.component').then((m) => m.ExamplesPageComponent),
       },
-      {
-        path: 'gallery',
-        loadComponent: () => import('./pages/gallery-page.component').then((m) => m.GalleryPageComponent),
-      },
+      { path: 'gallery', redirectTo: '/examples', pathMatch: 'full' },
+      { path: 'contact', redirectTo: '/waitlist', pathMatch: 'full' },
       { path: 'faq', loadComponent: () => import('./pages/faq-page.component').then((m) => m.FaqPageComponent) },
       {
-        path: 'contact',
+        path: 'waitlist',
         loadComponent: () => import('./pages/contact-page.component').then((m) => m.ContactPageComponent),
       },
-      {
-        path: 'built-by-tecnoria',
-        loadComponent: () => import('./pages/made-by-tecnoria-page.component').then((m) => m.MadeByTecnoriaPageComponent),
-      },
+      { path: 'built-by-tecnoria', redirectTo: '/', pathMatch: 'full' },
       { path: 'es', loadComponent: () => import('./pages/home-page.component').then((m) => m.HomePageComponent), data: { locale: 'es' } },
       {
         path: 'es/casos-de-uso',
@@ -210,22 +205,33 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/examples-page.component').then((m) => m.ExamplesPageComponent),
         data: { locale: 'es' },
       },
+      { path: 'es/galeria', redirectTo: '/es/ejemplos', pathMatch: 'full' },
+      { path: 'es/contacto', redirectTo: '/es/lista-de-espera', pathMatch: 'full' },
       {
-        path: 'es/galeria',
-        loadComponent: () => import('./pages/gallery-page.component').then((m) => m.GalleryPageComponent),
+        path: 'blog',
+        loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
+      },
+      {
+        path: 'blog/:slug',
+        loadComponent: () => import('./pages/article-page.component').then((m) => m.ArticlePageComponent),
+      },
+      {
+        path: 'es/blog',
+        loadComponent: () => import('./pages/blog-page.component').then((m) => m.BlogPageComponent),
+        data: { locale: 'es' },
+      },
+      {
+        path: 'es/blog/:slug',
+        loadComponent: () => import('./pages/article-page.component').then((m) => m.ArticlePageComponent),
         data: { locale: 'es' },
       },
       { path: 'es/faq', loadComponent: () => import('./pages/faq-page.component').then((m) => m.FaqPageComponent), data: { locale: 'es' } },
       {
-        path: 'es/contacto',
+        path: 'es/lista-de-espera',
         loadComponent: () => import('./pages/contact-page.component').then((m) => m.ContactPageComponent),
         data: { locale: 'es' },
       },
-      {
-        path: 'es/creado-por-tecnoria',
-        loadComponent: () => import('./pages/made-by-tecnoria-page.component').then((m) => m.MadeByTecnoriaPageComponent),
-        data: { locale: 'es' },
-      },
+      { path: 'es/creado-por-tecnoria', redirectTo: '/es', pathMatch: 'full' },
       { path: '**', loadComponent: () => import('./pages/public-not-found-page.component').then((m) => m.PublicNotFoundPageComponent) },
     ],
   },
