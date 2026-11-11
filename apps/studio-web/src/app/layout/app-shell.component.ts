@@ -2,7 +2,6 @@ import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject, PLATFORM_ID } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
-  ActivatedRoute,
   NavigationEnd,
   Router,
   RouterLink,
@@ -39,14 +38,163 @@ type NavItem = {
   ],
   template: `
     <div class="au-app au-shell" *ngIf="!loading; else bootState">
-      <aside class="au-sidebar" [class.is-open]="menuOpen">
-        <div class="au-sidebar__head">
-          <a class="au-brand" routerLink="/studio/overview" (click)="menuOpen = false">
-            <span class="au-brand__mark">AU</span>
-            <span class="au-brand__name">Auctorio</span>
-          </a>
-        </div>
+      <!-- Navbar 1: global sections + actions -->
+      <header class="au-topnav">
+        <button
+          class="au-icon-button au-menu-toggle"
+          type="button"
+          (click)="menuOpen = !menuOpen"
+          [attr.aria-expanded]="menuOpen"
+          aria-label="Toggle navigation"
+        >
+          <app-icon name="menu"></app-icon>
+        </button>
 
+        <a class="au-brand" routerLink="/studio/overview" aria-label="Auctorio, overview">
+          <img class="au-brand__mark" src="/logo.svg" alt="" width="34" height="34" />
+          <span class="au-brand__name">Auctorio</span>
+        </a>
+
+        <nav class="au-sections" aria-label="Sections">
+          <a
+            class="au-section-tab"
+            *ngFor="let group of navGroups"
+            [routerLink]="group.items[0].path"
+            [class.is-active]="group.label === activeGroup"
+            [attr.aria-current]="group.label === activeGroup ? 'page' : null"
+          >
+            <app-icon [name]="group.icon"></app-icon>
+            {{ group.label }}
+          </a>
+          <a class="au-section-tab" routerLink="/studio/settings/profile" routerLinkActive="is-active">
+            <app-icon name="settings"></app-icon>
+            Settings
+          </a>
+        </nav>
+
+        <div class="au-topbar__actions">
+          <a
+            class="au-icon-button"
+            routerLink="/studio/activity"
+            aria-label="Background activity"
+            title="Background activity"
+          >
+            <app-icon name="activity"></app-icon>
+          </a>
+          <button
+            class="au-icon-button au-icon-button--bell"
+            type="button"
+            #bellTrigger
+            (click)="refreshNotificationSummary(); bellMenu.toggle(bellTrigger)"
+            [attr.aria-expanded]="bellMenu.isOpen()"
+            aria-haspopup="menu"
+            aria-label="Notifications"
+            title="Notifications"
+          >
+            <app-icon name="bell"></app-icon>
+            <span class="au-bell-badge" *ngIf="unreadCount > 0" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+          </button>
+          <app-popover #bellMenu>
+            <div class="au-menu au-menu--wide" aria-label="Notifications preview">
+              <div class="au-menu__label au-menu__label--split">
+                Notifications
+                <a class="au-link au-link--sm" routerLink="/studio/notifications" (click)="bellMenu.hide()">View all</a>
+              </div>
+              <button
+                class="au-menu__item"
+                type="button"
+                *ngFor="let item of notificationPreview"
+                [class.au-menu__item--unread]="!item.readAt"
+                [routerLink]="notificationPath(item)"
+                [queryParams]="notificationQuery(item)"
+                (click)="openNotification(item, bellMenu)"
+              >
+                <span class="au-menu__item-text">
+                  <span class="au-menu__item-title">{{ item.title }}</span>
+                  <span class="au-menu__item-meta">{{ item.createdAt | date: 'short' }}</span>
+                </span>
+              </button>
+              <div class="au-menu__empty" *ngIf="notificationPreview.length === 0">
+                No notifications yet.
+              </div>
+            </div>
+          </app-popover>
+          <div class="au-split">
+            <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
+              <app-icon name="plus"></app-icon>
+              <span class="au-split__label">New content</span>
+            </a>
+            <button
+              class="au-split__caret"
+              type="button"
+              #createTrigger
+              (click)="createMenu.toggle(createTrigger)"
+              [attr.aria-expanded]="createMenu.isOpen()"
+              aria-haspopup="menu"
+              aria-label="More creation options"
+            >
+              <app-icon name="chevron-down"></app-icon>
+            </button>
+          </div>
+          <app-popover #createMenu>
+            <div class="au-menu">
+              <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()">
+                <app-icon name="plus"></app-icon>
+                New article
+              </a>
+              <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()">
+                <app-icon name="sparkles"></app-icon>
+                Generate editorial plan
+              </a>
+              <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()">
+                <app-icon name="sources"></app-icon>
+                Add source
+              </a>
+            </div>
+          </app-popover>
+
+          <div class="au-user" *ngIf="session">
+            <button
+              class="au-user__btn"
+              type="button"
+              #userTrigger
+              (click)="userMenu.toggle(userTrigger)"
+              [attr.aria-expanded]="userMenu.isOpen()"
+              aria-haspopup="menu"
+              [attr.aria-label]="'Account: ' + session.user.displayName"
+            >
+              <span class="au-avatar">{{ initials }}</span>
+            </button>
+            <app-popover #userMenu>
+              <div class="au-menu">
+                <div class="au-menu__label au-truncate">{{ session.user.displayName }} · {{ session.role }}</div>
+                <div class="au-menu__label au-menu__label--plain au-truncate">{{ session.user.email }}</div>
+                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide()">
+                  <app-icon name="user"></app-icon>
+                  Profile
+                </a>
+                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide()">
+                  <app-icon name="globe"></app-icon>
+                  Sites
+                </a>
+                <button class="au-menu__item" type="button" (click)="cycleTheme()">
+                  <app-icon [name]="themeIcon"></app-icon>
+                  Appearance
+                  <span class="au-menu__meta">{{ themeLabel }}</span>
+                </button>
+                <div class="au-menu__sep"></div>
+                <button class="au-menu__item is-danger" type="button" (click)="logout()">
+                  <app-icon name="logout"></app-icon>
+                  Log out
+                </button>
+              </div>
+            </app-popover>
+          </div>
+        </div>
+      </header>
+
+      <!-- Navbar 2: section rail (drawer on mobile, lists every section there) -->
+      <aside class="au-sidebar" [class.is-open]="menuOpen" aria-label="Section navigation">
         <!-- Site switcher -->
         <div class="au-ws">
           <button
@@ -85,8 +233,13 @@ type NavItem = {
           </app-popover>
         </div>
 
-        <!-- Grouped navigation -->
-        <nav class="au-nav" *ngFor="let group of navGroups" [attr.aria-label]="group.label">
+        <!-- Grouped navigation: desktop shows only the active section -->
+        <nav
+          class="au-nav"
+          *ngFor="let group of navGroups"
+          [class.is-current]="group.label === railGroup"
+          [attr.aria-label]="group.label"
+        >
           <div class="au-nav__label">{{ group.label }}</div>
           <a
             class="au-nav-item"
@@ -99,168 +252,17 @@ type NavItem = {
             {{ item.label }}
           </a>
         </nav>
-
-        <nav class="au-nav au-mt-2" aria-label="System">
-          <a
-            class="au-nav-item"
-            routerLink="/studio/settings/profile"
-            routerLinkActive="is-active"
-            (click)="menuOpen = false"
-          >
-            <app-icon name="settings"></app-icon>
-            Settings
-          </a>
-        </nav>
-
-        <!-- User area -->
-        <div class="au-sidebar__footer">
-          <div class="au-user" *ngIf="session">
-            <button
-              class="au-user__btn"
-              type="button"
-              #userTrigger
-              (click)="userMenu.toggle(userTrigger)"
-              [attr.aria-expanded]="userMenu.isOpen()"
-              aria-haspopup="menu"
-            >
-              <span class="au-avatar">{{ initials }}</span>
-              <span class="au-user__meta">
-                <span class="au-user__name">{{ session.user.displayName }}</span>
-                <span class="au-user__role">{{ session.role }}</span>
-              </span>
-              <app-icon name="chevron-down" class="au-faint"></app-icon>
-            </button>
-            <app-popover #userMenu>
-              <div class="au-menu">
-                <div class="au-menu__label au-truncate">{{ session.user.email }}</div>
-                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide(); menuOpen = false">
-                  <app-icon name="user"></app-icon>
-                  Profile
-                </a>
-                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide(); menuOpen = false">
-                  <app-icon name="globe"></app-icon>
-                  Sites
-                </a>
-                <button class="au-menu__item" type="button" (click)="cycleTheme()">
-                  <app-icon [name]="themeIcon"></app-icon>
-                  Appearance
-                  <span class="au-menu__meta">{{ themeLabel }}</span>
-                </button>
-                <div class="au-menu__sep"></div>
-                <button class="au-menu__item is-danger" type="button" (click)="logout()">
-                  <app-icon name="logout"></app-icon>
-                  Log out
-                </button>
-              </div>
-            </app-popover>
-          </div>
-        </div>
       </aside>
 
       @if (menuOpen) {
         <div class="au-backdrop" (click)="menuOpen = false"></div>
       }
 
-      <div class="au-main">
-        <header class="au-topbar">
-          <button
-            class="au-menu-toggle"
-            type="button"
-            (click)="menuOpen = !menuOpen"
-            [attr.aria-expanded]="menuOpen"
-            aria-label="Toggle navigation"
-          >
-            <span></span><span></span><span></span>
-          </button>
-          <div class="au-topbar__context">
-            <span class="au-topbar__title">{{ sectionTitle }}</span>
-          </div>
-          <div class="au-topbar__actions">
-            <a
-              class="au-icon-button"
-              routerLink="/studio/activity"
-              aria-label="Background activity"
-              title="Background activity"
-            >
-              <app-icon name="activity"></app-icon>
-            </a>
-            <button
-              class="au-icon-button au-icon-button--bell"
-              type="button"
-              #bellTrigger
-              (click)="refreshNotificationSummary(); bellMenu.toggle(bellTrigger)"
-              [attr.aria-expanded]="bellMenu.isOpen()"
-              aria-haspopup="menu"
-              aria-label="Notifications"
-              title="Notifications"
-            >
-              <app-icon name="bell"></app-icon>
-              <span class="au-bell-badge" *ngIf="unreadCount > 0" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
-            </button>
-            <app-popover #bellMenu>
-              <div class="au-menu au-menu--wide" aria-label="Notifications preview">
-                <div class="au-menu__label au-menu__label--split">
-                  Notifications
-                  <a class="au-link au-link--sm" routerLink="/studio/notifications" (click)="bellMenu.hide()">View all</a>
-                </div>
-                <button
-                  class="au-menu__item"
-                  type="button"
-                  *ngFor="let item of notificationPreview"
-                  [class.au-menu__item--unread]="!item.readAt"
-                  [routerLink]="notificationPath(item)"
-                  [queryParams]="notificationQuery(item)"
-                  (click)="openNotification(item, bellMenu)"
-                >
-                  <span class="au-menu__item-text">
-                    <span class="au-menu__item-title">{{ item.title }}</span>
-                    <span class="au-menu__item-meta">{{ item.createdAt | date: 'short' }}</span>
-                  </span>
-                </button>
-                <div class="au-menu__empty" *ngIf="notificationPreview.length === 0">
-                  No notifications yet.
-                </div>
-              </div>
-            </app-popover>
-            <div class="au-split">
-              <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
-                <app-icon name="plus"></app-icon>
-                New content
-              </a>
-              <button
-                class="au-split__caret"
-                type="button"
-                #createTrigger
-                (click)="createMenu.toggle(createTrigger)"
-                [attr.aria-expanded]="createMenu.isOpen()"
-                aria-haspopup="menu"
-                aria-label="More creation options"
-              >
-                <app-icon name="chevron-down"></app-icon>
-              </button>
-            </div>
-            <app-popover #createMenu>
-              <div class="au-menu">
-                <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()">
-                  <app-icon name="plus"></app-icon>
-                  New article
-                </a>
-                <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()">
-                  <app-icon name="sparkles"></app-icon>
-                  Generate editorial plan
-                </a>
-                <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()">
-                  <app-icon name="sources"></app-icon>
-                  Add source
-                </a>
-              </div>
-            </app-popover>
-          </div>
-        </header>
+      <main class="au-main">
         <div class="au-content">
           <router-outlet></router-outlet>
         </div>
-      </div>
+      </main>
     </div>
 
     <ng-template #bootState>
@@ -272,7 +274,6 @@ type NavItem = {
 })
 export class AppShellComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
-  private readonly route = inject(ActivatedRoute);
   private readonly seo = inject(SeoService);
   private readonly appContext = inject(AppContextService);
   private readonly themeService = inject(ThemeService);
@@ -280,9 +281,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private readonly sse = inject(SseService);
   private readonly platformId = inject(PLATFORM_ID);
 
-  readonly navGroups: Array<{ label: string; items: NavItem[] }> = [
+  readonly navGroups: Array<{ label: string; icon: string; items: NavItem[] }> = [
     {
       label: 'Workspace',
+      icon: 'home',
       items: [
         { label: 'Overview', path: '/studio/overview', icon: 'overview' },
         { label: 'Inbox', path: '/studio/inbox', icon: 'inbox' },
@@ -294,6 +296,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
     },
     {
       label: 'Publish',
+      icon: 'publications',
       items: [
         { label: 'Publications', path: '/studio/publications', icon: 'publications' },
         { label: 'Media', path: '/studio/media', icon: 'media' },
@@ -302,12 +305,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
     },
     {
       label: 'Operate',
+      icon: 'operations',
       items: [
         { label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan' },
         { label: 'Sources', path: '/studio/sources', icon: 'sources' },
         { label: 'Automation', path: '/studio/automation', icon: 'automation' },
         { label: 'Activity', path: '/studio/activity', icon: 'activity' },
-      { label: 'Operations', path: '/studio/operations', icon: 'operations' },
+        { label: 'Operations', path: '/studio/operations', icon: 'operations' },
       ],
     },
   ];
@@ -323,7 +327,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
   activeSiteId: string | null = null;
   loading = true;
   menuOpen = false;
-  sectionTitle = '';
+  /** Section tab highlighted in the top bar ('' on settings/notifications). */
+  activeGroup = 'Workspace';
+  /** Section listed in the rail; routes outside every group keep the last one. */
+  railGroup = 'Workspace';
   unreadCount = 0;
   notificationPreview: StudioNotification[] = [];
 
@@ -358,8 +365,12 @@ export class AppShellComponent implements OnInit, OnDestroy {
       )
       .subscribe(() => {
         this.menuOpen = false;
-        const snapshot = this.route.snapshot.firstChild;
-        this.sectionTitle = snapshot?.data['studioMeta']?.title ?? '';
+        const url = this.router.url.split(/[?#]/)[0];
+        const group = this.navGroups.find((g) =>
+          g.items.some((item) => url === item.path || url.startsWith(item.path + '/')),
+        );
+        this.activeGroup = group?.label ?? '';
+        this.railGroup = group?.label ?? this.railGroup;
       });
 
     void this.bootstrap();

@@ -49,8 +49,8 @@ import { SeoService } from '../services/seo.service';
     <section class="marketing-section" *ngIf="useCase">
       <div class="content-split">
         <article class="marketing-card">
-          <p class="marketing-kicker">{{ locale === 'en' ? 'Typical friction' : 'Fricciones tipicas' }}</p>
-          <h2>{{ locale === 'en' ? 'What usually slows the operation down.' : 'Lo que suele frenar la operativa.' }}</h2>
+          <p class="marketing-kicker">{{ locale === 'en' ? 'Typical friction' : 'Problemas habituales' }}</p>
+          <h2>{{ locale === 'en' ? 'What slows the team down today.' : 'Lo que hoy frena al equipo.' }}</h2>
           <ul class="marketing-bullet-list">
             <li *ngFor="let pain of useCase.pains[locale]">{{ pain }}</li>
           </ul>
@@ -58,7 +58,7 @@ import { SeoService } from '../services/seo.service';
 
         <article class="marketing-card marketing-card--dark">
           <p class="marketing-kicker">{{ locale === 'en' ? 'Outcomes' : 'Resultados' }}</p>
-          <h2>{{ locale === 'en' ? 'What changes when the workflow is structured.' : 'Lo que cambia cuando el workflow esta estructurado.' }}</h2>
+          <h2>{{ locale === 'en' ? 'What changes with Auctorio.' : 'Lo que cambia con Auctorio.' }}</h2>
           <ul class="marketing-bullet-list">
             <li *ngFor="let outcome of useCase.outcomes[locale]">{{ outcome }}</li>
           </ul>
@@ -68,8 +68,8 @@ import { SeoService } from '../services/seo.service';
 
     <section class="marketing-section" *ngIf="useCase">
       <div class="section-headline">
-        <p class="marketing-kicker">{{ locale === 'en' ? 'Deliverables' : 'Entregables' }}</p>
-        <h2>{{ locale === 'en' ? 'The layers that make this workflow viable.' : 'Las capas que hacen viable este workflow.' }}</h2>
+        <p class="marketing-kicker">{{ locale === 'en' ? 'Included' : 'Incluye' }}</p>
+        <h2>{{ locale === 'en' ? 'What you get in the Studio.' : 'Lo que tienes en el Studio.' }}</h2>
       </div>
 
       <div class="marketing-card-grid marketing-card-grid--triple">
@@ -81,8 +81,8 @@ import { SeoService } from '../services/seo.service';
 
     <section class="marketing-section" *ngIf="supportingAssets.length > 0">
       <div class="section-headline">
-        <p class="marketing-kicker">{{ locale === 'en' ? 'Visual support' : 'Apoyo visual' }}</p>
-        <h2>{{ locale === 'en' ? 'Generated visuals that explain the operating model.' : 'Visuales generados que explican el modelo operativo.' }}</h2>
+        <p class="marketing-kicker">{{ locale === 'en' ? 'Screens' : 'Pantallas' }}</p>
+        <h2>{{ locale === 'en' ? 'How it looks in Auctorio.' : 'Así se ve en Auctorio.' }}</h2>
       </div>
 
       <div class="gallery-grid">
@@ -109,12 +109,12 @@ import { SeoService } from '../services/seo.service';
       <div class="cta-banner">
         <div>
           <p class="marketing-kicker">{{ locale === 'en' ? 'Next step' : 'Siguiente paso' }}</p>
-          <h2>{{ locale === 'en' ? 'Use the public layer for positioning. Use the Studio when the team is ready to operate.' : 'Usa la capa publica para posicionamiento. Usa el Studio cuando el equipo este listo para operar.' }}</h2>
+          <h2>{{ locale === 'en' ? 'See this workflow running with your own sites.' : 'Mira este flujo funcionando con tus propias webs.' }}</h2>
         </div>
 
         <div class="wrap-actions">
-          <a class="marketing-button marketing-button--primary" [href]="studioLoginPath">
-            {{ locale === 'en' ? 'Enter Studio' : 'Entrar al Studio' }}
+          <a class="marketing-button marketing-button--primary" [routerLink]="getMarketingPath(locale, 'contact')">
+            {{ locale === 'en' ? 'Request a demo' : 'Solicitar demo' }}
           </a>
           <a
             class="marketing-button marketing-button--ghost"

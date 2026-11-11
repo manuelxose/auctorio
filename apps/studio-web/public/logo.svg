@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="t">
+  <title id="t">Auctorio</title>
+  <defs>
+    <linearGradient id="au-bg" x1="6" y1="4" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5b52f0"/>
+      <stop offset="1" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="au-gloss" x1="32" y1="0" x2="32" y2="44" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fff" stop-opacity=".3"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="18" fill="url(#au-bg)"/>
+  <rect width="64" height="64" rx="18" fill="url(#au-gloss)"/>
+  <!-- Fountain-pen nib drawn as an "A": the breather hole is the counter, the slit the crossbar gap -->
+  <path d="M32 9 49.6 45c.8 1.8-.2 3.7-2.2 4.1L37 51l-5-8.6-5 8.6-10.4-1.9c-2-.4-3-2.3-2.2-4.1Z" fill="#fff"/>
+  <path d="M32 32.5v9.9" stroke="url(#au-bg)" stroke-width="2.6" stroke-linecap="round"/>
+  <circle cx="32" cy="28.2" r="4.1" fill="#f97316"/>
+</svg>

@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, ViewportScroller } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
@@ -6,9 +6,9 @@ import { AuctorioChatWidgetComponent } from '../components/auctorio-chat-widget.
 import {
   BRAND_NAME,
   BRAND_SIGNATURE,
-  BRAND_TAGLINE,
   type MarketingLocale,
   getFooterResources,
+  getLocalizedUseCases,
   getMarketingLocaleFromPath,
   getMarketingNavigation,
   getMarketingPath,
@@ -16,6 +16,7 @@ import {
   TECNORIA_LINKS,
   translateMarketingPath,
 } from '../content/marketing-content';
+import { BLOG_PATH } from '../content/articles';
 
 @Component({
   selector: 'app-public-shell',
@@ -29,11 +30,12 @@ import {
     <div class="marketing-shell">
       <header class="marketing-header">
         <div class="marketing-header__inner">
-          <a [routerLink]="homePath" class="brand-signature">
+          <a [routerLink]="homePath" class="brand-signature" [attr.aria-label]="brandName + (currentLocale === 'es' ? ', inicio' : ', home')">
+            <img src="/logo.svg" alt="" width="36" height="36" />
             <span class="brand-signature__name">{{ brandName }}</span>
           </a>
 
-          <nav class="marketing-nav" [class.is-open]="menuOpen" aria-label="Primary navigation">
+          <nav id="primary-navigation" class="marketing-nav" [class.is-open]="menuOpen" aria-label="Primary navigation">
             <a
               *ngFor="let item of navigation"
               [routerLink]="item.path"
@@ -81,52 +83,41 @@ import {
       <footer class="marketing-footer">
         <div class="marketing-footer__grid">
           <section class="marketing-footer__lead">
-            <p class="brand-signature__name" style="font-size:1.25rem;margin-bottom:.5rem">{{ brandName }}</p>
-            <p class="marketing-copy">{{ brandTagline }}</p>
-            <p class="marketing-footer__note">{{ footerResources.legalCopy }}</p>
+            <a [routerLink]="homePath" class="brand-signature"><img src="/logo.svg" alt="" width="36" height="36" loading="lazy" /><span class="brand-signature__name">{{ brandName }}</span></a>
+            <p class="marketing-copy">{{ footerResources.legalCopy }}</p>
           </section>
 
-          <section>
+          <nav [attr.aria-label]="footerResources.productTitle">
             <p class="marketing-kicker">{{ footerResources.productTitle }}</p>
             <div class="marketing-footer__links">
               <a [routerLink]="homePath">{{ currentLocale === 'es' ? 'Plataforma' : 'Platform' }}</a>
-              <a [routerLink]="useCasesPath">{{ currentLocale === 'es' ? 'Casos de uso' : 'Use cases' }}</a>
-              <a [routerLink]="examplesPath">{{ currentLocale === 'es' ? 'Ejemplos' : 'Examples' }}</a>
-              <a [href]="studioLoginPath">{{ currentLocale === 'es' ? 'Entrar al Studio' : 'Enter Studio' }}</a>
-              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Contacto' : 'Contact' }}</a>
+              <a [routerLink]="examplesPath">{{ currentLocale === 'es' ? 'Flujos de trabajo' : 'Workflows' }}</a>
+              <a *ngFor="let useCase of useCases" [routerLink]="useCase.path">{{ useCase.localizedName }}</a>
             </div>
-          </section>
+          </nav>
 
-          <section>
+          <nav [attr.aria-label]="footerResources.resourcesTitle">
             <p class="marketing-kicker">{{ footerResources.resourcesTitle }}</p>
             <div class="marketing-footer__links">
-              <a [routerLink]="faqPath">FAQ</a>
-              <a [routerLink]="builtByPath">
-                {{ currentLocale === 'es' ? 'Creado por Tecnoria' : 'Built by Tecnoria' }}
-              </a>
-              <a [href]="tecnoriaLinks.caseStudies" target="_blank" rel="noopener">
-                {{ currentLocale === 'es' ? 'Casos de éxito' : 'Case studies' }}
-              </a>
+              <a [routerLink]="useCasesPath">{{ currentLocale === 'es' ? 'Casos de uso' : 'Use cases' }}</a>
+              <a *ngIf="blogPath" [routerLink]="blogPath">Blog</a>
+              <a [routerLink]="faqPath">{{ currentLocale === 'es' ? 'Preguntas frecuentes' : 'FAQ' }}</a>
+              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Contacto' : 'Contact' }}</a>
             </div>
-          </section>
+          </nav>
 
-          <section>
-            <p class="marketing-kicker">Tecnoria</p>
+          <nav [attr.aria-label]="footerResources.startTitle">
+            <p class="marketing-kicker">{{ footerResources.startTitle }}</p>
             <div class="marketing-footer__links">
-              <a [href]="tecnoriaLinks.home" target="_blank" rel="noopener">tecnoria.com</a>
-              <a [href]="tecnoriaLinks.chatbotService" target="_blank" rel="noopener">
-                {{ currentLocale === 'es' ? 'Chatbots IA' : 'AI chatbots' }}
-              </a>
-              <a [href]="tecnoriaLinks.contact" target="_blank" rel="noopener">
-                {{ currentLocale === 'es' ? 'Contactar Tecnoria' : 'Contact Tecnoria' }}
-              </a>
+              <a [routerLink]="contactPath">{{ currentLocale === 'es' ? 'Solicitar demo' : 'Request a demo' }}</a>
+              <a [href]="studioLoginPath">{{ currentLocale === 'es' ? 'Entrar al Studio' : 'Sign in to Studio' }}</a>
             </div>
-          </section>
+          </nav>
         </div>
 
         <div class="marketing-footer__bottom">
-          <span>{{ signature }}</span>
-          <span>{{ currentLocale === 'es' ? 'Sitio público bilingüe orientado a SEO.' : 'Bilingual public site built for SEO.' }}</span>
+          <span>© {{ year }} {{ brandName }}</span>
+          <a [href]="tecnoriaLinks.home" target="_blank" rel="noopener">{{ signature }}</a>
         </div>
       </footer>
 
@@ -138,9 +129,13 @@ export class PublicShellComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private subscription: Subscription | null = null;
 
+  constructor() {
+    // Anchor jumps (article table of contents) must clear the sticky glass header.
+    inject(ViewportScroller).setOffset([0, 112]);
+  }
+
   readonly brandName = BRAND_NAME;
   readonly signature = BRAND_SIGNATURE;
-  readonly brandTagline = BRAND_TAGLINE;
   readonly tecnoriaLinks = TECNORIA_LINKS;
   readonly studioLoginPath = getStudioLoginPath();
 
@@ -152,10 +147,11 @@ export class PublicShellComponent implements OnInit, OnDestroy {
   homePath = getMarketingPath('en', 'home');
   useCasesPath = getMarketingPath('en', 'use_cases');
   examplesPath = getMarketingPath('en', 'examples');
-  galleryPath = getMarketingPath('en', 'gallery');
   faqPath = getMarketingPath('en', 'faq');
-  builtByPath = getMarketingPath('en', 'built_by_tecnoria');
   contactPath = getMarketingPath('en', 'contact');
+  useCases = getLocalizedUseCases('en');
+  blogPath: string | undefined = BLOG_PATH.en;
+  readonly year = new Date().getFullYear();
 
   ngOnInit(): void {
     this.syncState(this.router.url);
@@ -182,9 +178,9 @@ export class PublicShellComponent implements OnInit, OnDestroy {
     this.homePath = getMarketingPath(this.currentLocale, 'home');
     this.useCasesPath = getMarketingPath(this.currentLocale, 'use_cases');
     this.examplesPath = getMarketingPath(this.currentLocale, 'examples');
-    this.galleryPath = getMarketingPath(this.currentLocale, 'gallery');
     this.faqPath = getMarketingPath(this.currentLocale, 'faq');
-    this.builtByPath = getMarketingPath(this.currentLocale, 'built_by_tecnoria');
+    this.useCases = getLocalizedUseCases(this.currentLocale);
+    this.blogPath = BLOG_PATH[this.currentLocale];
     this.contactPath = getMarketingPath(this.currentLocale, 'contact');
   }
 }

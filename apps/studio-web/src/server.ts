@@ -1221,6 +1221,17 @@ function shouldHandleWithAngular(pathname: string): boolean {
   return !isStaticAssetRequest(pathname);
 }
 
+// Retired public pages: permanent redirects keep their search equity (the Angular routes only cover client navigation).
+const RETIRED_PUBLIC_PATHS: Record<string, string> = {
+  '/gallery': '/examples',
+  '/es/galeria': '/es/ejemplos',
+  '/built-by-tecnoria': '/',
+  '/es/creado-por-tecnoria': '/es',
+};
+app.get(Object.keys(RETIRED_PUBLIC_PATHS), (req, res) => {
+  res.redirect(301, RETIRED_PUBLIC_PATHS[req.path]);
+});
+
 app.get('/robots.txt', (req, res) => {
   const origin = getRequestOrigin(req);
   res.type('text/plain').send(

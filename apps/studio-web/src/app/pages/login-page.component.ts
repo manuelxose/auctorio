@@ -41,7 +41,18 @@ type GoogleAccounts = {
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
   template: `
-    <main class="au-auth">
+    <section class="auth-layout">
+      <div class="auth-pitch">
+        <p class="marketing-kicker">Auctorio Studio</p>
+        <h1>Sign in to your editorial workspace</h1>
+        <p class="marketing-lead">Plan, review and publish for every site and channel your team runs.</p>
+        <ul class="marketing-bullet-list">
+          <li>Editorial plan ranked by search demand.</li>
+          <li>Review with pre-publication checks.</li>
+          <li>One approval publishes everywhere.</li>
+        </ul>
+      </div>
+
       <div class="au-auth__card">
         <button
           class="au-btn au-btn--ghost au-btn--icon au-btn--sm au-auth__theme"
@@ -51,59 +62,54 @@ type GoogleAccounts = {
         >
           <app-icon [name]="themeIcon"></app-icon>
         </button>
-        <a class="au-brand" routerLink="/" aria-label="Auctorio">
-          <span class="au-brand__mark">AU</span>
-          <span class="au-brand__name">Auctorio</span>
-        </a>
+        <h2 class="au-auth__title">Sign in</h2>
+        <p class="au-auth__hint">Use your Google account or your work email.</p>
 
-        <h1 class="au-auth__title">Sign in</h1>
-        <p class="au-auth__hint">Create, review and publish content for your sites.</p>
+        <!-- Google first: the official GSI button when a client id is configured, an honest disabled twin otherwise. -->
+        <div #googleButtonHost class="au-google-button" *ngIf="googleConfigured && !googleFailed"></div>
+        <ng-container *ngIf="!googleConfigured || googleFailed">
+          <button class="auth-google" type="button" disabled aria-describedby="google-unavailable">
+            <svg viewBox="0 0 48 48" width="18" height="18" aria-hidden="true">
+              <path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/>
+              <path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.1 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/>
+              <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/>
+              <path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/>
+            </svg>
+            Continue with Google
+          </button>
+          <p class="auth-note" id="google-unavailable">
+            {{ googleFailed ? 'Google sign-in is not authorised for this domain yet.' : 'Google sign-in is not enabled on this server yet.' }}
+            Use your email and password.
+          </p>
+        </ng-container>
+
+        <div class="au-divider"><span>or with email</span></div>
 
         <form class="au-auth__form" (ngSubmit)="submit()">
           <label class="au-field">
-            <span class="au-field__label">Email</span>
-            <input
-              class="au-input"
-              type="email"
-              name="email"
-              autocomplete="email"
-              [(ngModel)]="email"
-              required
-            />
+            <span class="au-field__label">Work email</span>
+            <input class="au-input" type="email" name="email" autocomplete="email" [(ngModel)]="email" required />
           </label>
 
           <label class="au-field">
             <span class="au-field__label">Password</span>
-            <input
-              class="au-input"
-              type="password"
-              name="password"
-              autocomplete="current-password"
-              [(ngModel)]="password"
-              required
-            />
+            <input class="au-input" type="password" name="password" autocomplete="current-password" [(ngModel)]="password" required />
           </label>
 
           <div class="au-auth__row">
             <a class="au-link" routerLink="/forgot-password">Forgot password?</a>
           </div>
 
-          <p class="au-error" *ngIf="error">{{ error }}</p>
+          <p class="au-error" role="alert" *ngIf="error">{{ error }}</p>
 
           <button class="au-btn au-btn--primary au-btn--block" type="submit" [disabled]="busy">
             {{ busy ? 'Signing in…' : 'Sign in' }}
           </button>
         </form>
 
-        <ng-container *ngIf="googleConfigured">
-          <div class="au-divider"><span>or</span></div>
-          <div #googleButtonHost class="au-google-button" aria-label="Continue with Google" *ngIf="!googleFailed"></div>
-          <p class="au-auth__hint au-google-fallback" *ngIf="googleFailed">
-            Google Sign-In is not available for this domain yet. Use email and password to continue.
-          </p>
-        </ng-container>
+        <p class="auth-note">No account yet? <a class="au-link" routerLink="/contact">Request a demo</a></p>
       </div>
-    </main>
+    </section>
   `,
 })
 export class LoginPageComponent implements AfterViewInit {

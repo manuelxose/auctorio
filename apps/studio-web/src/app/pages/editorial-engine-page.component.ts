@@ -394,7 +394,7 @@ const OUTCOME_LABELS: Record<string, string> = {
       .ee-qa-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 0.35rem; }
       .ee-qa-item { display: flex; gap: 0.5rem; align-items: baseline; font-size: var(--au-fs-sm); }
       .ee-qa-item--ok { color: var(--au-muted); }
-      .ee-qa-item--warning { color: #b7791f; }
+      .ee-qa-item--warning { color: var(--au-warning); }
       .ee-qa-item--error { color: var(--au-danger, #c0392b); font-weight: 600; }
       .ee-critical { color: var(--au-danger, #c0392b); font-weight: 600; margin-top: 0.5rem; }
       .ee-gate-list { list-style: none; padding: 0; margin: 0.5rem 0; display: grid; gap: 0.25rem; font-size: var(--au-fs-sm); }

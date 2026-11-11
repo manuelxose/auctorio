@@ -22,15 +22,15 @@ import { SeoService } from '../services/seo.service';
       <h1>
         {{
           locale === 'en'
-            ? 'Content operations use cases built to rank, review and publish at scale.'
-            : 'Casos de uso de operaciones de contenido pensados para posicionar, revisar y publicar a escala.'
+            ? 'Who uses Auctorio for editorial work'
+            : 'Quién usa Auctorio para su trabajo editorial'
         }}
       </h1>
       <p class="marketing-lead">
         {{
           locale === 'en'
-            ? 'Auctorio is positioned first for digital publishers, then extended to agencies, brands and multi-site editorial operations that need a stronger workflow.'
-            : 'Auctorio se posiciona primero para publishers digitales y luego se extiende a agencias, marcas y operaciones editoriales multi-site que necesitan un workflow más fuerte.'
+            ? 'Newsrooms, agencies and groups with several sites use Auctorio to plan from search demand, review with editors and publish everywhere from one workflow.'
+            : 'Redacciones, agencias y grupos con varias webs usan Auctorio para planificar según la búsqueda, revisar con sus editores y publicar en todas partes desde un solo flujo.'
         }}
       </p>
     </section>

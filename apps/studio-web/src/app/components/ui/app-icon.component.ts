@@ -219,6 +219,12 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'path', d: 'M17 14V2' },
     { kind: 'path', d: 'M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z' },
   ],
+  menu: [
+    { kind: 'path', d: 'M4 6h16' },
+    { kind: 'path', d: 'M4 12h16' },
+    { kind: 'path', d: 'M4 18h16' },
+  ],
+  activity: [{ kind: 'path', d: 'M22 12h-4l-3 9L9 3l-3 9H2' }],
   home: [
     { kind: 'path', d: 'm3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z' },
     { kind: 'path', d: 'M9 22V12h6v10' },

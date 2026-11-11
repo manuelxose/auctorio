@@ -10,10 +10,10 @@ import { StudioApiService } from '../services/studio-api.service';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink],
   template: `
-    <main class="au-auth">
+    <section class="au-auth">
       <div class="au-auth__card">
         <a class="au-brand" routerLink="/" aria-label="Auctorio">
-          <span class="au-brand__mark">AU</span>
+          <img class="au-brand__mark" src="/logo.svg" alt="" width="34" height="34" />
           <span class="au-brand__name">Auctorio</span>
         </a>
         <h1 class="au-auth__title">Accept your invitation</h1>
@@ -32,7 +32,7 @@ import { StudioApiService } from '../services/studio-api.service';
 
         <a class="au-link au-auth__back" routerLink="/login">← Back to sign in</a>
       </div>
-    </main>
+    </section>
   `,
 })
 export class AcceptInvitePageComponent {

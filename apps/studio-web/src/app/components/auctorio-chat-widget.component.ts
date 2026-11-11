@@ -42,7 +42,7 @@ type WidgetWindow = Window &
 })
 export class AuctorioChatWidgetComponent implements OnInit, OnChanges, OnDestroy {
   private readonly scriptId = 'auctorio-chat-widget-loader';
-  private readonly iframeTitle = 'Tecnoria Chat Widget';
+  private readonly iframeTitle = 'Auctorio assistant';
   private readonly origin = inject(STUDIO_ORIGIN);
   private mountTimeoutId: number | null = null;
   @Input() locale: MarketingLocale = 'en';

@@ -3,11 +3,9 @@ import { Component, inject } from '@angular/core';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import {
   BRAND_NAME,
-  TECNORIA_LINKS,
   type MarketingLocale,
   getAlternatePagePaths,
   getAssetBySlug,
-  getHomeAssets,
   getHomeExamples,
   getLocalizedFaqEntries,
   getLocalizedPageSeo,
@@ -17,11 +15,12 @@ import {
   getStudioLoginPath,
 } from '../content/marketing-content';
 import { SeoService } from '../services/seo.service';
+import { AppIconComponent } from '../components/ui/app-icon.component';
 
 @Component({
   selector: 'app-home-page',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, AppIconComponent],
   template: `
     <section class="hero-section">
       <div class="hero-grid">
@@ -36,7 +35,7 @@ import { SeoService } from '../services/seo.service';
             </a>
             <a
               class="marketing-button marketing-button--ghost"
-              [routerLink]="getPagePath('use_cases')"
+              [routerLink]="getPagePath('examples')"
             >
               {{ content.secondaryCta }}
             </a>
@@ -48,6 +47,18 @@ import { SeoService } from '../services/seo.service';
         </article>
 
         <aside class="hero-panel">
+          <figure class="marketing-visual marketing-visual--hero" *ngIf="heroAsset">
+            <img
+              [src]="heroAsset.compactPath"
+              [srcset]="heroAsset.compactPath + ' 960w, ' + heroAsset.defaultPath + ' 1600w'"
+              sizes="(max-width: 1060px) 100vw, 560px"
+              [alt]="heroAsset.alt[locale]"
+              [width]="heroAsset.width"
+              [height]="heroAsset.height"
+              fetchpriority="high"
+              decoding="async"
+            />
+          </figure>
           <div class="stat-grid">
             <div class="stat-card" *ngFor="let metric of content.metrics">
               <strong>{{ metric.value }}</strong>
@@ -78,8 +89,10 @@ import { SeoService } from '../services/seo.service';
       </div>
 
       <div class="marketing-card-grid marketing-card-grid--quad">
-        <article class="marketing-card" *ngFor="let capability of content.capabilities">
-          <div class="feature-icon"></div>
+        <article class="marketing-card" *ngFor="let capability of content.capabilities; let i = index">
+          <div class="feature-icon" aria-hidden="true">
+            <app-icon [name]="capabilityIcons[i % capabilityIcons.length]"></app-icon>
+          </div>
           <h3>{{ capability.title }}</h3>
           <p>{{ capability.body }}</p>
         </article>
@@ -135,35 +148,6 @@ import { SeoService } from '../services/seo.service';
 
     <section class="marketing-section">
       <div class="section-headline">
-        <p class="marketing-kicker">{{ content.galleryEyebrow }}</p>
-        <h2>{{ content.galleryTitle }}</h2>
-      </div>
-
-      <div class="gallery-grid">
-        <article class="marketing-card gallery-card" *ngFor="let asset of galleryAssets">
-          <figure class="marketing-visual">
-            <img
-              [src]="asset.compactPath"
-              [srcset]="asset.compactPath + ' 960w, ' + asset.defaultPath + ' 1600w'"
-              sizes="(max-width: 780px) 100vw, 33vw"
-              [alt]="asset.localizedAlt"
-              [width]="asset.width"
-              [height]="asset.height"
-              loading="lazy"
-              decoding="async"
-            />
-          </figure>
-          <h3>{{ asset.localizedTitle }}</h3>
-          <p>{{ asset.localizedCaption }}</p>
-          <div class="tag-list">
-            <span class="tag-chip" *ngFor="let tag of asset.localizedTags">{{ tag }}</span>
-          </div>
-        </article>
-      </div>
-    </section>
-
-    <section class="marketing-section">
-      <div class="section-headline">
         <p class="marketing-kicker">{{ content.useCasesEyebrow }}</p>
         <h2>{{ content.useCasesTitle }}</h2>
       </div>
@@ -188,35 +172,6 @@ import { SeoService } from '../services/seo.service';
           <a class="marketing-inline-link" [routerLink]="useCase.path">
             {{ locale === 'en' ? 'View use case' : 'Ver caso de uso' }}
           </a>
-        </article>
-      </div>
-    </section>
-
-    <section class="marketing-section">
-      <div class="authority-grid">
-        <article class="marketing-card">
-          <p class="marketing-kicker">{{ content.authorityEyebrow }}</p>
-          <h2>{{ content.authorityTitle }}</h2>
-          <ul class="marketing-bullet-list">
-            <li *ngFor="let point of content.authorityPoints">{{ point }}</li>
-          </ul>
-        </article>
-
-        <article class="marketing-card marketing-card--dark">
-          <p class="marketing-kicker">Tecnoria</p>
-          <h2>{{ locale === 'en' ? 'Product strategy, engineering and delivery — visible on purpose.' : 'Estrategia de producto, ingeniería y entrega — visibles a propósito.' }}</h2>
-          <div class="authority-links">
-            <a [href]="tecnoriaLinks.home" target="_blank" rel="noopener">Tecnoria</a>
-            <a [href]="tecnoriaLinks.chatbotService" target="_blank" rel="noopener">
-              {{ locale === 'en' ? 'AI chatbots' : 'Chatbots IA' }}
-            </a>
-            <a [href]="tecnoriaLinks.caseStudies" target="_blank" rel="noopener">
-              {{ locale === 'en' ? 'Case studies' : 'Casos de éxito' }}
-            </a>
-            <a [href]="tecnoriaLinks.contact" target="_blank" rel="noopener">
-              {{ locale === 'en' ? 'Contact Tecnoria' : 'Contactar con Tecnoria' }}
-            </a>
-          </div>
         </article>
       </div>
     </section>
@@ -268,12 +223,12 @@ export class HomePageComponent {
   readonly locale = (this.route.snapshot.data['locale'] as MarketingLocale | undefined) ?? 'en';
   readonly content = getMarketingHomeContent(this.locale);
   readonly brandName = BRAND_NAME;
-  readonly tecnoriaLinks = TECNORIA_LINKS;
   readonly studioLoginPath = getStudioLoginPath();
   readonly faqs = getLocalizedFaqEntries(this.locale);
   readonly examples = getHomeExamples(this.locale);
-  readonly galleryAssets = getHomeAssets(this.locale);
   readonly heroAsset = getAssetBySlug('content-operations-showcase');
+  /** Workflow, search, assets, multi-site — same order as content.capabilities. */
+  readonly capabilityIcons = ['plan', 'search', 'media', 'globe'];
   readonly useCases = getLocalizedUseCases(this.locale).map((useCase) => {
     const leadAsset = getAssetBySlug(useCase.assetSlugs[0] || '');
     return {
@@ -314,7 +269,7 @@ export class HomePageComponent {
     });
   }
 
-  getPagePath(pageKey: 'use_cases' | 'built_by_tecnoria' | 'contact'): string {
+  getPagePath(pageKey: 'use_cases' | 'examples' | 'contact'): string {
     return getMarketingPath(this.locale, pageKey);
   }
 }
