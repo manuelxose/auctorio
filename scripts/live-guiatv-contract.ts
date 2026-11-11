@@ -69,7 +69,7 @@ async function main() {
   const postId = created.body.data?.post?.id;
   assert(Boolean(postId), "create must return data.post.id");
   assert(!String(postId).startsWith("dryrun-"), "external id must be real");
-  assert(created.body.data?.post?.link === `/editorial/${slug}`, `expected link /editorial/${slug}`);
+  assert(created.body.data?.post?.link === `/guias/${slug}`, `expected link /guias/${slug}`);
 
   // 3. Validation: unknown relatedRouteKey must be rejected.
   const invalid = await call("/v2/blog", {
