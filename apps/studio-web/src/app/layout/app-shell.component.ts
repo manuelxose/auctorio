@@ -12,16 +12,17 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { STUDIO_NAV, activeNavItem, type StudioNavGroup } from './studio-nav';
+import { STUDIO_NAV, activeNavItem } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
+const GROUPS_KEY = 'auctorio.studio.sidebar.closedGroups';
 const COPILOT_KEY = 'auctorio.studio.copilot.open';
 
 /**
- * Studio frame: global top bar, horizontal primary nav (areas) and a contextual
- * left sidebar (the selected area's tools plus the assistant; a drawer on
- * phones). Pages render in the router outlet beside the sidebar.
+ * Studio frame: global top bar (Navigation A), grouped left sidebar
+ * (Navigation B, collapsible, drawer on phones) and the copilot panel docked
+ * on the right. Pages render in the router outlet between them.
  */
 @Component({
   selector: 'app-app-shell',
@@ -33,6 +34,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       *ngIf="!loading; else bootState"
       [class.is-collapsed]="collapsed()"
       [class.has-copilot]="copilot.open()"
+      [class.is-copilot-wide]="copilot.wide()"
       [class.is-drawer-open]="drawerOpen()"
     >
       <a class="au-skip" href="#studio-main">Skip to content</a>
@@ -94,6 +96,12 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           </div>
         </app-popover>
 
+        <nav class="au-crumbs" aria-label="Location">
+          <span class="au-crumbs__group">{{ location().group }}</span>
+          <app-icon name="chevron-right"></app-icon>
+          <span class="au-crumbs__page" aria-current="page">{{ location().title }}</span>
+        </nav>
+
         <button class="au-top__search" type="button" (click)="openPalette()" aria-label="Search and go to (Ctrl+K)">
           <app-icon name="search"></app-icon>
           <span>Search</span>
@@ -153,7 +161,26 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               <app-icon name="plus"></app-icon>
               <span class="au-split__label">New content</span>
             </a>
+            <button
+              class="au-split__caret"
+              type="button"
+              #createTrigger
+              (click)="createMenu.toggle(createTrigger)"
+              [attr.aria-expanded]="createMenu.isOpen()"
+              aria-haspopup="menu"
+              aria-label="More creation options"
+            >
+              <app-icon name="chevron-down"></app-icon>
+            </button>
           </div>
+          <app-popover #createMenu>
+            <div class="au-menu">
+              <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()"><app-icon name="plus"></app-icon>New article</a>
+              <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()"><app-icon name="plan"></app-icon>Generate editorial plan</a>
+              <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()"><app-icon name="sources"></app-icon>Add source</a>
+              <a class="au-menu__item" routerLink="/studio/connections/wizard" (click)="createMenu.hide()"><app-icon name="plug"></app-icon>Connect a site or account</a>
+            </div>
+          </app-popover>
 
           <div class="au-user" *ngIf="session">
             <button
@@ -172,7 +199,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
                 <div class="au-menu__label au-truncate">{{ session.user.displayName }} · {{ session.role }}</div>
                 <div class="au-menu__label au-menu__label--plain au-truncate">{{ session.user.email }}</div>
                 <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide()"><app-icon name="user"></app-icon>Profile</a>
-                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide()"><app-icon name="settings"></app-icon>Settings</a>
                 <button class="au-menu__item" type="button" (click)="cycleTheme()">
                   <app-icon [name]="themeIcon"></app-icon>
                   Appearance
@@ -186,48 +212,53 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
         </div>
       </header>
 
-      <!-- Primary navigation: areas -->
-      <nav class="au-areas" aria-label="Areas">
-        <ul class="au-areas__list">
-          <li *ngFor="let area of nav">
-            <a
-              class="au-areas__item"
-              [routerLink]="area.items[0].path"
-              [class.is-active]="area.id === activeArea().id"
-              [attr.aria-current]="area.id === activeArea().id ? 'page' : null"
+      <!-- Navigation B: sidebar -->
+      <aside id="studio-sidebar" class="au-sb" aria-label="Studio navigation" (keydown)="onSidebarKey($event)">
+        <button
+          #copilotLauncher
+          class="au-sb__item au-sb__copilot"
+          type="button"
+          (click)="toggleCopilot()"
+          [class.is-active]="copilot.open()"
+          [attr.aria-pressed]="copilot.open()"
+          aria-controls="studio-copilot"
+          data-tip="Copilot"
+        >
+          <app-icon name="message"></app-icon>
+          <span class="au-sb__label">Copilot</span>
+          <kbd class="au-kbd au-sb__label">{{ copilotShortcut }}</kbd>
+        </button>
+
+        <nav class="au-sb__nav">
+          <section class="au-sb__group" *ngFor="let group of nav">
+            <button
+              class="au-sb__heading"
+              type="button"
+              (click)="toggleGroup(group.id)"
+              [attr.aria-expanded]="!closedGroups().has(group.id)"
+              [attr.aria-controls]="'sb-' + group.id"
             >
-              <app-icon [name]="area.icon"></app-icon>
-              <span>{{ area.label }}</span>
-            </a>
-          </li>
-        </ul>
-      </nav>
-
-      <!-- Contextual sidebar: the area's tools, then the assistant -->
-      <aside id="studio-sidebar" class="au-sb" aria-label="Studio sidebar" (keydown)="onSidebarKey($event)">
-        <nav class="au-sb__nav" [attr.aria-label]="activeArea().label + ' tools'">
-          <p class="au-sb__heading">{{ activeArea().label }}</p>
-          <ul class="au-sb__list">
-            <li *ngFor="let item of activeArea().items">
-              <a class="au-sb__item" [routerLink]="item.path" routerLinkActive="is-active" ariaCurrentWhenActive="page">
-                <app-icon [name]="item.icon"></app-icon>
-                <span class="au-sb__label">{{ item.label }}</span>
-              </a>
-            </li>
-          </ul>
-        </nav>
-
-        @if (copilot.open()) {
-          <section id="studio-copilot" class="au-sb__assistant" aria-label="Assistant">
-            <app-copilot-panel #panel (closed)="toggleCopilot(false)"></app-copilot-panel>
+              <span>{{ group.label }}</span>
+              <app-icon [name]="closedGroups().has(group.id) ? 'chevron-right' : 'chevron-down'"></app-icon>
+            </button>
+            <ul [id]="'sb-' + group.id" class="au-sb__list" [hidden]="closedGroups().has(group.id) && !collapsed()">
+              <li *ngFor="let item of group.items">
+                <a
+                  class="au-sb__item"
+                  [routerLink]="item.path"
+                  routerLinkActive="is-active"
+                  [routerLinkActiveOptions]="{ exact: false }"
+                  ariaCurrentWhenActive="page"
+                  [attr.data-tip]="item.label"
+                  [attr.aria-label]="collapsed() ? item.label : null"
+                >
+                  <app-icon [name]="item.icon"></app-icon>
+                  <span class="au-sb__label">{{ item.label }}</span>
+                </a>
+              </li>
+            </ul>
           </section>
-        } @else {
-          <button #copilotLauncher class="au-sb__item au-sb__copilot" type="button" (click)="toggleCopilot(true)" aria-controls="studio-copilot" aria-expanded="false">
-            <app-icon name="message"></app-icon>
-            <span class="au-sb__label">Assistant</span>
-            <kbd class="au-kbd">{{ copilotShortcut }}</kbd>
-          </button>
-        }
+        </nav>
       </aside>
 
       @if (drawerOpen()) {
@@ -239,6 +270,13 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           <router-outlet></router-outlet>
         </div>
       </main>
+
+      @if (copilot.open()) {
+        <div class="au-backdrop au-backdrop--copilot" (click)="toggleCopilot(false)"></div>
+      }
+      <aside id="studio-copilot" class="au-copilot" [hidden]="!copilot.open()" aria-label="Copilot">
+        <app-copilot-panel #panel (closed)="toggleCopilot(false)"></app-copilot-panel>
+      </aside>
 
       @if (paletteOpen()) {
         <app-command-palette #palette (closed)="closePalette()"></app-command-palette>
@@ -301,9 +339,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
   readonly drawerOpen = signal(false);
   readonly isPhone = signal(false);
   readonly paletteOpen = signal(false);
+  readonly closedGroups = signal<Set<string>>(new Set());
   readonly location = signal<{ group: string; title: string }>({ group: 'Workspace', title: 'Overview' });
-  /** Area of the current route; routes outside the nav (settings) keep the last one. */
-  readonly activeArea = signal<StudioNavGroup>(STUDIO_NAV[0]);
 
   readonly shortcut = this.isMac() ? '⌘K' : 'Ctrl K';
   readonly copilotShortcut = this.isMac() ? '⌘J' : 'Ctrl J';
@@ -347,8 +384,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         this.drawerOpen.set(false);
         this.location.set(this.resolveLocation());
-        const match = activeNavItem(this.router.url.split(/[?#]/)[0]);
-        if (match) this.activeArea.set(match.group);
       });
 
     void this.bootstrap();
@@ -368,11 +403,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private restoreLayout(): void {
     if (!isPlatformBrowser(this.platformId)) return;
     const stored = localStorage.getItem(COLLAPSE_KEY);
-    this.collapsed.set(stored === '1');
+    this.collapsed.set(stored === null ? window.matchMedia('(max-width: 1199px)').matches : stored === '1');
+    try {
+      this.closedGroups.set(new Set(JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]') as string[]));
+    } catch {
+      this.closedGroups.set(new Set());
+    }
     this.phoneQuery = window.matchMedia('(max-width: 860px)');
     this.isPhone.set(this.phoneQuery.matches);
     this.phoneQuery.addEventListener('change', this.onPhoneChange);
-    if (localStorage.getItem(COPILOT_KEY) !== '0' && window.matchMedia('(min-width: 861px)').matches) {
+    if (localStorage.getItem(COPILOT_KEY) === '1' && window.matchMedia('(min-width: 1200px)').matches) {
       this.copilot.toggle(true);
     }
   }
@@ -397,16 +437,23 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.navToggle?.nativeElement.focus();
   }
 
+  toggleGroup(id: string): void {
+    if (this.collapsed() && !this.isPhone()) return;
+    const next = new Set(this.closedGroups());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.closedGroups.set(next);
+    localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
+  }
+
   toggleCopilot(force?: boolean): void {
     const wasOpen = this.copilot.open();
     this.copilot.toggle(force);
+    this.drawerOpen.set(false);
     if (isPlatformBrowser(this.platformId)) localStorage.setItem(COPILOT_KEY, this.copilot.open() ? '1' : '0');
-    if (this.copilot.open() && !wasOpen) {
-      this.collapsed.set(false);
-      if (this.isPhone()) this.drawerOpen.set(true);
-      setTimeout(() => this.panel?.focusInput());
-    }
-    if (!this.copilot.open() && wasOpen) setTimeout(() => this.copilotLauncher?.nativeElement.focus());
+    if (this.copilot.open() && !wasOpen) this.panel?.focusInput();
+    // On phones the launcher sits in the closed drawer, so focus returns to the menu button.
+    if (!this.copilot.open() && wasOpen) (this.isPhone() ? this.navToggle : this.copilotLauncher)?.nativeElement.focus();
   }
 
   openPalette(): void {
@@ -431,13 +478,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
       this.toggleCopilot();
     } else if (event.key === 'Escape' && !this.paletteOpen()) {
       if (this.drawerOpen()) this.closeDrawer();
+      else if (this.copilot.open() && !document.querySelector('.au-pop')) this.toggleCopilot(false);
     }
   }
 
   /** Arrow keys move between sidebar entries; Home/End jump to the ends. */
   onSidebarKey(event: KeyboardEvent): void {
-    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) || (event.target as HTMLElement).closest('.au-sb__assistant')) return;
-    const items = Array.from(document.querySelectorAll<HTMLElement>('#studio-sidebar .au-sb__nav .au-sb__item')).filter((el) => el.offsetParent !== null);
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(document.querySelectorAll<HTMLElement>('#studio-sidebar .au-sb__item')).filter((el) => el.offsetParent !== null);
     const index = items.indexOf(document.activeElement as HTMLElement);
     if (index < 0) return;
     event.preventDefault();
