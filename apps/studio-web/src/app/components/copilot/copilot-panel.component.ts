@@ -4,6 +4,11 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { AppIconComponent } from '../ui/app-icon.component';
 import { AppContextService } from '../../services/app-context.service';
+import { AssistantApiService } from '../../services/assistant-api.service';
+import { EditorialContextService } from '../../services/editorial-context.service';
+import type { AssistantContextView } from '../../models/assistant.models';
+import { AssistantActionCardComponent } from './assistant-action-card.component';
+import { activeNavItem } from '../../layout/studio-nav';
 import { CopilotService, type CopilotMessage } from '../../services/copilot.service';
 import { renderCopilotMarkdown } from '../../utils/copilot-markdown';
 
@@ -16,7 +21,7 @@ type Suggestion = { label: string; prompt: string; competency: string };
 @Component({
   selector: 'app-copilot-panel',
   standalone: true,
-  imports: [FormsModule, DatePipe, AppIconComponent],
+  imports: [FormsModule, DatePipe, AppIconComponent, AssistantActionCardComponent],
   template: `
     <div class="cp" role="region" aria-labelledby="cp-title">
       <header class="cp__bar">
@@ -26,7 +31,7 @@ type Suggestion = { label: string; prompt: string; competency: string };
           </button>
           <h2 id="cp-title" class="cp__title">Conversations</h2>
         } @else {
-          <h2 id="cp-title" class="cp__title">Copilot</h2>
+          <h2 id="cp-title" class="cp__title">Assistant</h2>
           <button class="au-icon-button" type="button" (click)="openHistory()" aria-label="Conversation history" title="Conversation history">
             <app-icon name="history"></app-icon>
           </button>
@@ -34,10 +39,7 @@ type Suggestion = { label: string; prompt: string; competency: string };
             <app-icon name="plus"></app-icon>
           </button>
         }
-        <button class="au-icon-button cp__wide" type="button" (click)="copilot.wide.set(!copilot.wide())" [attr.aria-pressed]="copilot.wide()" aria-label="Wider panel" title="Wider panel">
-          <app-icon name="expand"></app-icon>
-        </button>
-        <button class="au-icon-button" type="button" (click)="closed.emit()" aria-label="Close copilot" title="Close (Esc)">
+        <button class="au-icon-button" type="button" (click)="closed.emit()" aria-label="Hide assistant" title="Hide assistant">
           <app-icon name="close"></app-icon>
         </button>
       </header>
@@ -70,15 +72,24 @@ type Suggestion = { label: string; prompt: string; competency: string };
         </div>
       } @else {
         <div class="cp__context" aria-label="Context sent with your message">
-          <span class="cp__chip"><app-icon name="globe"></app-icon>{{ siteName() }}</span>
-          @if (copilot.projectId()) {
+          <span class="cp__chip"><app-icon name="globe"></app-icon>{{ resolved()?.site?.name ?? siteName() }}</span>
+          @if (resolved()?.plan; as plan) {
+            <span class="cp__chip"><app-icon name="plan"></app-icon>{{ plan.name }} · {{ plan.itemCount }} items@if (plan.unfilledSlots) { · {{ plan.unfilledSlots }} open }</span>
+          }
+          @if (resolved()?.proposal; as proposal) {
+            <span class="cp__chip"><app-icon name="edit"></app-icon>{{ proposal.title }}</span>
+          } @else if (copilot.projectId()) {
             <span class="cp__chip"><app-icon name="content"></app-icon>Open article</span>
-          } @else {
+          }
+          @if (resolved()?.period; as period) {
+            <span class="cp__chip"><app-icon name="calendar"></app-icon>{{ period.from }} to {{ period.to }}</span>
+          }
+          @if (!resolved()?.plan && !copilot.projectId()) {
             <span class="cp__chip"><app-icon name="layers"></app-icon>{{ pageLabel() }}</span>
           }
         </div>
 
-        <div class="cp__log" #log (click)="followLink($event)" aria-live="polite">
+        <div class="cp__log" #log (click)="followLink($event)" role="log" aria-live="polite" aria-label="Conversation">
           @for (message of copilot.messages(); track message.id) {
             @if (message.role === 'user') {
               <div class="cp__msg cp__msg--user">{{ message.content }}</div>
@@ -121,6 +132,9 @@ type Suggestion = { label: string; prompt: string; competency: string };
                     }
                   </div>
                 }
+                @for (action of message.actions ?? []; track action.id) {
+                  <app-assistant-action-card [action]="action" (updated)="copilot.replaceAction($event)"></app-assistant-action-card>
+                }
                 @if (message.status === 'completed' && message.model) {
                   <span class="cp__meta">{{ message.provider }} · {{ message.model }}{{ message.tokensOutput !== null ? ' · ' + (message.tokensInput! + message.tokensOutput) + ' tokens' : '' }}</span>
                 }
@@ -128,11 +142,11 @@ type Suggestion = { label: string; prompt: string; competency: string };
             }
           } @empty {
             <div class="cp__empty">
-              <p class="cp__lead">Ask about this {{ copilot.projectId() ? 'article' : 'site' }}. Answers use your Studio data and say where they came from.</p>
+              <p class="cp__lead">Ask about {{ resolved()?.proposal ? 'this proposal' : resolved()?.plan ? 'this plan' : copilot.projectId() ? 'this article' : 'this site' }}. Answers use your Studio data and say where they came from. Changes always wait for your confirmation.</p>
               <ul class="cp__suggestions">
                 @for (suggestion of suggestions(); track suggestion.label) {
                   <li>
-                    <button type="button" class="cp__suggestion" (click)="copilot.send(suggestion.prompt, suggestion.competency)">
+                    <button type="button" class="cp__suggestion" (click)="copilot.send(suggestion.prompt, suggestion.competency || null)">
                       {{ suggestion.label }}
                     </button>
                   </li>
@@ -172,6 +186,11 @@ export class CopilotPanelComponent implements AfterViewChecked {
   readonly copilot = inject(CopilotService);
   private readonly appContext = inject(AppContextService);
   private readonly router = inject(Router);
+  private readonly assistantApi = inject(AssistantApiService);
+  private readonly editorial = inject(EditorialContextService);
+
+  /** Selection as the server resolved it (names, counts), for the context chip. */
+  readonly resolved = signal<AssistantContextView | null>(null);
 
   readonly closed = output<void>();
   readonly view = signal<'chat' | 'history'>('chat');
@@ -189,18 +208,25 @@ export class CopilotPanelComponent implements AfterViewChecked {
     return segment.replace(/-/g, ' ').replace(/^./, (c) => c.toUpperCase());
   });
 
-  readonly suggestions = computed<Suggestion[]>(() =>
-    this.copilot.projectId()
-      ? [
-          { label: 'Analyze this article for SEO weaknesses', prompt: 'Analyze this article for SEO weaknesses and suggest a better structure.', competency: 'seo-review' },
-          { label: 'Explain why the QA stage failed', prompt: 'Explain why the QA stage failed and what to change.', competency: 'qa-explain' },
-          { label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts for this article.', competency: 'publication-status' },
-        ]
-      : [
-          { label: 'What needs my attention on this site?', prompt: 'What needs my attention on this site?', competency: 'workspace-brief' },
-          { label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts.', competency: 'publication-status' },
-        ],
-  );
+  /** Prompts for the area the operator is in; the server's intent router maps them to tools. */
+  readonly suggestions = computed<Suggestion[]>(() => {
+    const sel = this.editorial.selection();
+    const area = sel.area ?? activeNavItem(this.copilot.route())?.group.id ?? 'operations';
+    const ask = (label: string, prompt = label): Suggestion => ({ label, prompt, competency: '' });
+    if (this.copilot.projectId()) {
+      return [
+        { label: 'Analyze this article for SEO weaknesses', prompt: 'Analyze this article for SEO weaknesses and suggest a better structure.', competency: 'seo-review' },
+        { label: 'Explain why the QA stage failed', prompt: 'Explain why the QA stage failed and what to change.', competency: 'qa-explain' },
+        { label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts for this article.', competency: 'publication-status' },
+      ];
+    }
+    if (sel.planItemId) return [ask('Why was this proposal suggested?', 'Why is this proposal relevant? Show the evidence.'), ask('Regenerate this proposal'), ask('Find weaknesses in this plan')];
+    if (area === 'calendar') return [ask('Suggest ideas for a day', sel.periodFrom ? 'Suggest ideas for ' + sel.periodFrom : 'Suggest ideas for this day'), ask('Fill the missing slots'), ask('Find gaps in this period', 'Find weaknesses in this plan')];
+    if (area === 'plan' || area === 'editorial-plan') return [ask('Explain the strategy'), ask('Find weaknesses in this plan'), ask('Suggest a publishing cadence'), ask('Fill the missing slots')];
+    if (area === 'intelligence' || area === 'sources' || area === 'competitors') return [ask('Explain the strategy', 'Explain the strategy and the topics it covers'), ask('Which gaps could a new source close?', 'Find weaknesses in this plan')];
+    if (area === 'production') return [{ label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts.', competency: 'publication-status' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
+    return [{ label: 'What needs my attention on this site?', prompt: 'What needs my attention on this site?', competency: 'workspace-brief' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
+  });
 
   constructor() {
     // A new site means a new conversation: answers never mix two sites' data.
@@ -209,6 +235,14 @@ export class CopilotPanelComponent implements AfterViewChecked {
       const site = this.copilot.siteId();
       if (previousSite !== undefined && site !== previousSite) this.copilot.newThread();
       previousSite = site;
+    });
+    // Resolve the selection server-side (tenant-checked) whenever it changes.
+    effect((onCleanup) => {
+      const selection = { ...this.editorial.selection(), siteId: this.copilot.siteId() };
+      const timer = setTimeout(() => {
+        this.assistantApi.context(selection).subscribe({ next: (view) => this.resolved.set(view), error: () => this.resolved.set(null) });
+      }, 200);
+      onCleanup(() => clearTimeout(timer));
     });
   }
 

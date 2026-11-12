@@ -3,6 +3,8 @@ import { HttpClient } from '@angular/common/http';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AssistantApiService } from '../services/assistant-api.service';
+import type { AssistantTool } from '../models/assistant.models';
 import { CopilotService, type CopilotCompetency, type CopilotCompetencyStat, type CopilotMessage } from '../services/copilot.service';
 
 const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
@@ -18,13 +20,41 @@ const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
   imports: [DatePipe, AppIconComponent],
   template: `
     <header class="au-page__header">
-      <h1 class="au-page__title">Competencies</h1>
-      <p class="au-page__subtitle">What the copilot can do with your Studio data. Every competency only reads; changes stay in their own screens.</p>
+      <h1 class="au-page__title">Assistant tools</h1>
+      <p class="au-page__subtitle">What the copilot can do with your Studio data. Read tools answer from computed data. Write tools only prepare a change: nothing happens until you confirm it, and every confirmed change is audited.</p>
     </header>
 
     @if (error()) {
       <p class="au-alert au-alert--danger" role="alert">{{ error() }}</p>
     }
+
+    <section class="au-panel" aria-labelledby="comp-tools">
+      <div class="au-panel__header"><h2 id="comp-tools" class="au-panel__title">Editorial tools</h2></div>
+      <div class="au-table-wrap"><table class="au-table">
+        <thead>
+          <tr>
+            <th scope="col">Tool</th>
+            <th scope="col">Type</th>
+            <th scope="col">Needs</th>
+            <th scope="col">Permission</th>
+            <th scope="col">Confirmation</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (tool of tools(); track tool.name) {
+            <tr>
+              <td data-label="Tool"><strong>{{ tool.label }}</strong><div class="au-muted">{{ tool.description }}</div></td>
+              <td data-label="Type"><span class="au-badge" [class.au-badge--neutral]="tool.kind === 'read'">{{ tool.kind === 'read' ? 'Read' : 'Write' }}</span></td>
+              <td data-label="Needs">{{ tool.needs }}</td>
+              <td data-label="Permission"><code>{{ tool.permission }}</code>@if (!tool.allowed) { <span class="au-muted"> · not in your role</span> }</td>
+              <td data-label="Confirmation">{{ tool.confirmation ? 'Required' : 'Not needed' }}</td>
+            </tr>
+          } @empty {
+            <tr><td colspan="5" class="au-muted">{{ loading() ? 'Loading…' : 'No tools available' }}</td></tr>
+          }
+        </tbody>
+      </table></div>
+    </section>
 
     <section class="au-panel" aria-labelledby="comp-registry">
       <div class="au-panel__header"><h2 id="comp-registry" class="au-panel__title">Registry</h2></div>
@@ -103,6 +133,8 @@ export class CompetenciesPageComponent implements OnInit {
   private readonly copilot = inject(CopilotService);
   private readonly base = `${inject(STUDIO_ORIGIN)}/studio/api/backend/v2/copilot`;
 
+  private readonly assistantApi = inject(AssistantApiService);
+  readonly tools = signal<AssistantTool[]>([]);
   readonly items = signal<CopilotCompetency[]>([]);
   readonly stats = signal<CopilotCompetencyStat[]>([]);
   readonly runs = signal<CopilotMessage[]>([]);
@@ -123,6 +155,7 @@ export class CompetenciesPageComponent implements OnInit {
   );
 
   ngOnInit(): void {
+    this.assistantApi.tools().subscribe({ next: (response) => this.tools.set(response.items), error: () => undefined });
     this.http.get<{ items: CopilotCompetency[]; stats: CopilotCompetencyStat[] }>(`${this.base}/competencies`).subscribe({
       next: (response) => {
         this.items.set(response.items);

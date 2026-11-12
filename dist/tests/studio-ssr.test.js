@@ -8,6 +8,7 @@ const strict_1 = __importDefault(require("node:assert/strict"));
 const node_http_1 = __importDefault(require("node:http"));
 const node_child_process_1 = require("node:child_process");
 const node_events_1 = require("node:events");
+const node_path_1 = __importDefault(require("node:path"));
 const PRIVATE_PROVIDER_PATTERN = /\bDeepSeek\b|\bFLUX\b|\bSiliconFlow\b|\bFal\.ai\b/i;
 async function createMockBackendServer() {
     let lastAuthorizationHeader;
@@ -119,8 +120,8 @@ async function waitForServer(url) {
 }
 async function startStudioServer(backendUrl) {
     const port = await getFreePort();
-    const child = (0, node_child_process_1.spawn)("node", ["/var/www/auctorio/apps/studio-web/dist/studio-web/server/server.mjs"], {
-        cwd: "/var/www/auctorio/apps/studio-web",
+    const child = (0, node_child_process_1.spawn)("node", [node_path_1.default.resolve(__dirname, "../../apps/studio-web/dist/studio-web/server/server.mjs")], {
+        cwd: node_path_1.default.resolve(__dirname, "../../apps/studio-web"),
         env: {
             ...process.env,
             PORT: String(port),
@@ -172,7 +173,7 @@ node_test_1.default.after(async () => {
     strict_1.default.equal(response.status, 200);
     const html = await response.text();
     strict_1.default.match(html, /Auctorio/);
-    strict_1.default.match(html, /AI content operations platform/i);
+    strict_1.default.match(html, /AI Editorial Workflow Software for Publishers/i);
     strict_1.default.doesNotMatch(html, PRIVATE_PROVIDER_PATTERN);
 });
 (0, node_test_1.default)("english and spanish public routes render without redirecting to the studio", async () => {
@@ -181,7 +182,7 @@ node_test_1.default.after(async () => {
     });
     strict_1.default.equal(spanish.status, 200);
     const html = await spanish.text();
-    strict_1.default.match(html, /Operaciones de contenido con IA para publishers/i);
+    strict_1.default.match(html, /Software de flujo editorial con IA para medios/i);
     strict_1.default.doesNotMatch(html, PRIVATE_PROVIDER_PATTERN);
 });
 (0, node_test_1.default)("robots.txt and segmented sitemaps expose only the public surface", async () => {
@@ -222,14 +223,12 @@ node_test_1.default.after(async () => {
     const location = response.headers.get("location") || "";
     strict_1.default.match(location, /\/login\?returnTo=%2Fstudio/);
 });
-(0, node_test_1.default)("studio login route remains public", async () => {
+(0, node_test_1.default)("legacy studio login route redirects to the canonical public login", async () => {
     const response = await fetch(`${studio.baseUrl}/studio/login`, {
         redirect: "manual",
     });
-    strict_1.default.equal(response.status, 200);
-    const html = await response.text();
-    strict_1.default.match(html, /Auctorio/);
-    strict_1.default.match(html, /<app-root><\/app-root>/i);
+    strict_1.default.equal(response.status, 302);
+    strict_1.default.equal(response.headers.get("location"), "/login");
 });
 (0, node_test_1.default)("studio login stores an encrypted HttpOnly cookie and session/me returns the user view", async () => {
     const loginResponse = await fetch(`${studio.baseUrl}/studio/api/session/login`, {

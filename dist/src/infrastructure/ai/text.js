@@ -3,19 +3,24 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.getTextProvider = getTextProvider;
 const env_1 = require("../../shared/utils/env");
 const http_1 = require("../../shared/utils/http");
+const ai_settings_1 = require("./ai-settings");
+const anthropic_text_1 = require("./anthropic-text");
 class OpenAICompatibleTextProvider {
     baseUrl;
     apiKey;
     defaultModel;
     providerName;
-    constructor(providerName, baseUrl, apiKey, model) {
+    forceModel;
+    /** forceModel: an admin picked the model, so per-call model overrides are ignored. */
+    constructor(providerName, baseUrl, apiKey, model, forceModel = false) {
         this.providerName = providerName;
         this.baseUrl = baseUrl.replace(/\/$/, "");
         this.apiKey = apiKey;
         this.defaultModel = model;
+        this.forceModel = forceModel;
     }
     async generate(input) {
-        const model = input.model || this.defaultModel;
+        const model = this.forceModel ? this.defaultModel : input.model || this.defaultModel;
         if (!model) {
             throw new Error("TEXT_MODEL is required");
         }
@@ -67,6 +72,13 @@ class MockTextProvider {
     }
 }
 function getTextProvider() {
+    // A workspace admin's choice (Settings → AI) wins over the environment default.
+    const selected = (0, ai_settings_1.activeAiSelection)();
+    if (selected) {
+        return selected.provider === "anthropic"
+            ? new anthropic_text_1.AnthropicTextProvider(selected.apiKey, selected.model)
+            : new OpenAICompatibleTextProvider(selected.provider, selected.baseUrl ?? "", selected.apiKey, selected.model, true);
+    }
     const provider = (0, env_1.getEnv)("TEXT_PROVIDER", "mock").toLowerCase();
     if (provider === "mock") {
         if ((0, env_1.isProductionEnv)()) {
