@@ -209,6 +209,19 @@ test("cancel prevents execution", async () => {
   assert.equal(await prisma.auditLog.count({ where: { tenantId: a.tenantId, entityId: staged.id, action: "copilot.action.confirmed" } }), 0);
 });
 
+test("an action stuck in executing is failed once stale and never re-run", async () => {
+  const actor = editor(a.tenantId, await makeUser(a.tenantId));
+  const ctx = await loadEditorialContext(a.tenantId, { planItemId: a.itemIds[2] });
+  const staged = await proposeAction(actor, await prepareAction(actor, ctx, "update_proposal", { title: "Crashed rename" }), { threadId: null, messageId: null });
+  await prisma.copilotAction.update({ where: { id: staged.id }, data: { status: "executing" } });
+  const fresh = await confirmAction(actor, staged.id);
+  assert.equal(fresh.action.status, "executing");
+  await prisma.$executeRaw`UPDATE copilot_actions SET updated_at = now() - interval '1 hour' WHERE id = ${staged.id}::uuid`;
+  const recovered = await confirmAction(actor, staged.id);
+  assert.equal(recovered.action.status, "failed");
+  assert.notEqual((await prisma.editorialPlanItem.findUniqueOrThrow({ where: { id: a.itemIds[2] } })).title, "Crashed rename");
+});
+
 test("propose_source stores an open recommendation and never activates it", async () => {
   const actor = editor(b.tenantId, await makeUser(b.tenantId));
   const response = await sendMessage(actor, { content: "Propose source https://www.Fixtures-Example.org/path as competitor because it covers local fixtures", context: { siteId: b.siteId } }, never);
