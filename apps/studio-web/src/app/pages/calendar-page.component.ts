@@ -7,6 +7,7 @@ import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
+import { EditorialContextService } from '../services/editorial-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { CalendarEvent, PublicationChannel, StudioProjectSummary, StudioSite, PublishingAccount } from '../models/studio.models';
@@ -23,9 +24,13 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <div>
           <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
-          <p class="au-page__subtitle">Proposals, briefs, drafts and publications on one timeline. Drag a card to another day to move it.</p>
+          <p class="au-page__subtitle">Proposals, briefs, drafts and publications on one timeline. Drag a card to another day, or use Move on a card to pick a date and time.</p>
         </div>
         <div class="au-page__actions">
+          <button class="au-btn au-btn--secondary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
+            <app-icon name="plus"></app-icon>
+            {{ showScheduleForm ? 'Hide form' : 'Schedule a publication' }}
+          </button>
           <select class="au-select au-filter-select" [(ngModel)]="channelFilter" (ngModelChange)="load()" aria-label="Filter by channel">
             <option value="">All channels</option>
             <option value="website">Website</option>
@@ -58,12 +63,13 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <span class="au-banner__text">{{ error }}</span>
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
       </div>
+      <p class="au-visually-hidden" role="status" aria-live="polite">{{ moveResult }}</p>
       <div class="au-banner au-banner--success" *ngIf="notice">
         <app-icon name="circle-check"></app-icon>
         <span class="au-banner__text">{{ notice }}</span>
       </div>
 
-      <section class="au-panel au-panel--padded au-mb-3">
+      <section id="schedule-form" class="au-panel au-panel--padded au-mb-3" *ngIf="showScheduleForm">
         <h2 class="au-panel__title">Schedule a publication</h2>
         <p class="au-panel__subtitle au-mb-3">Pick content, a channel and a time. Social channels need an approved social piece on the content.</p>
         <form class="au-field-grid au-calendar-form" (ngSubmit)="createFromCalendar()">
@@ -191,6 +197,10 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <button *ngIf="event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
             Open
           </button>
+          <button *ngIf="event.status !== 'published' && event.status !== 'canceled'" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="startMove(event)" [attr.aria-expanded]="movingId === event.id" [attr.aria-label]="'Move ' + event.title">
+            <app-icon name="calendar"></app-icon>
+            Move
+          </button>
           <ng-container *ngIf="event.kind === 'plan_item'">
             <button *ngIf="!event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" routerLink="/studio/editorial-plan">Open plan</button>
             <button *ngIf="event.status === 'proposed'" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="approve(event)">
@@ -226,6 +236,14 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           </ng-container>
         </div>
       </div>
+      <form class="au-inline au-mt-2" *ngIf="movingId === event.id" (ngSubmit)="confirmMove(event)" (keydown.escape)="cancelMove()" (click)="$event.stopPropagation()">
+        <label class="au-field au-mb-0">
+          <span class="au-field__label">Move to</span>
+          <input class="au-input" type="datetime-local" name="moveTo" [(ngModel)]="moveTo" required />
+        </label>
+        <button class="au-btn au-btn--primary au-btn--sm" type="submit" [disabled]="!moveTo">Move</button>
+        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="cancelMove()">Cancel</button>
+      </form>
     </ng-template>
   `,
 })
@@ -234,6 +252,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
+  private readonly context = inject(EditorialContextService);
 
   views: Array<{ key: CalendarView; label: string }> = [
     { key: 'list', label: 'List' },
@@ -248,6 +267,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   siteFilter = '';
   anchor = new Date();
   dragHint = false;
+  showScheduleForm = false;
+  movingId = '';
+  moveTo = '';
+  moveResult = '';
   error = '';
   notice = '';
   creating = false;
@@ -275,6 +298,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.context.update({ area: 'calendar' });
     this.sites = this.appContext.sites();
     this.api.listProjects({ page: 1, pageSize: 50 }).subscribe({
       next: (response) => {
@@ -302,6 +326,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.refreshSubscription?.unsubscribe();
+    this.context.clear(['area', 'siteId', 'planId', 'planItemId', 'periodFrom', 'periodTo']);
   }
 
   private range(): { from: Date; to: Date } {
@@ -327,6 +352,8 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   load(silent = false): void {
     if (!silent) this.error = '';
     const { from, to } = this.range();
+    const day = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+    this.context.update({ siteId: this.siteFilter || null, periodFrom: day(from), periodTo: day(new Date(to.getTime() - 1)) });
     this.api
       .listCalendar(from.toISOString(), to.toISOString(), this.channelFilter ? (this.channelFilter as PublicationChannel) : undefined, this.siteFilter || undefined)
       .subscribe({
@@ -526,15 +553,37 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       next: () => {
         this.reschedulingIds.delete(eventItem.id);
         this.toast.success(eventItem.kind === 'plan_item' ? 'Proposal moved.' : 'Publication rescheduled.');
+        this.moveResult = `${eventItem.title} moved to ${target.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}.`;
         this.load(true);
       },
       error: () => {
         if (eventItem.scheduledFor === optimisticSchedule) eventItem.scheduledFor = previous;
         this.reschedulingIds.delete(eventItem.id);
         this.error = eventItem.kind === 'plan_item' ? 'The proposal could not be moved.' : 'The publication could not be rescheduled.';
+        this.moveResult = this.error;
         this.load(true);
       },
     });
+  }
+
+  // Keyboard alternative to drag: pick an exact date and time, result announced via aria-live.
+  startMove(item: CalendarEvent): void {
+    this.movingId = this.movingId === item.id ? '' : item.id;
+    const at = item.scheduledFor ? new Date(item.scheduledFor) : new Date();
+    const pad = (n: number): string => String(n).padStart(2, '0');
+    this.moveTo = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    this.context.update({ planItemId: item.kind === 'plan_item' && this.movingId ? item.id : null, planId: item.kind === 'plan_item' && this.movingId ? item.planId : null });
+  }
+  cancelMove(): void {
+    this.movingId = '';
+    this.context.update({ planItemId: null, planId: null });
+  }
+  confirmMove(item: CalendarEvent): void {
+    const target = new Date(this.moveTo);
+    if (Number.isNaN(target.getTime())) return;
+    this.movingId = '';
+    this.moveResult = '';
+    this.reschedule(item, target);
   }
 
   publishNow(eventItem: CalendarEvent): void {
