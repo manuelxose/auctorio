@@ -222,6 +222,27 @@ test("an action stuck in executing is failed once stale and never re-run", async
   assert.notEqual((await prisma.editorialPlanItem.findUniqueOrThrow({ where: { id: a.itemIds[2] } })).title, "Crashed rename");
 });
 
+test("update_proposal validates the date against the plan and refuses items already in production", async () => {
+  const actor = editor(a.tenantId, await makeUser(a.tenantId));
+  const ctx = await loadEditorialContext(a.tenantId, { planItemId: a.itemIds[1] });
+  const prepare = (args: Record<string, unknown>) => prepareAction(actor, ctx, "update_proposal", args);
+  const refused = (status: number) => (error: unknown) => error instanceof CopilotError && error.status === status;
+  await assert.rejects(prepare({ scheduledFor: "2026-12-30" }), refused(400));
+  await assert.rejects(prepare({ scheduledFor: "2026-11-01" }), refused(400));
+  const ok = await prepare({ scheduledFor: "2026-11-18" });
+  assert.equal(ok.args.scheduledFor, "2026-11-18T09:00:00.000Z");
+  await prisma.editorialPlan.update({ where: { id: a.planId }, data: { timezone: "Europe/Madrid" } });
+  try {
+    assert.equal((await prepare({ scheduledFor: "2026-11-18" })).args.scheduledFor, "2026-11-18T08:00:00.000Z");
+  } finally {
+    await prisma.editorialPlan.update({ where: { id: a.planId }, data: { timezone: "UTC" } });
+  }
+  const busy = await prisma.editorialPlanItem.create({
+    data: { tenantId: a.tenantId, planId: a.planId, siteId: a.siteId, title: "Already generating item", channel: "website", status: "generating", scheduledFor: new Date("2026-11-17T09:00:00Z"), topicCluster: "x", rationale: "r", relevanceScore: 0.5 },
+  });
+  await assert.rejects(prepareAction(actor, await loadEditorialContext(a.tenantId, { planItemId: busy.id }), "update_proposal", { title: "Nope" }), refused(409));
+});
+
 test("propose_source stores an open recommendation and never activates it", async () => {
   const actor = { ...editor(b.tenantId, await makeUser(b.tenantId)), permissions: ["integrations.manage", "analytics.read"] };
   const response = await sendMessage(actor, { content: "Propose source https://www.Fixtures-Example.org/path as competitor because it covers local fixtures", context: { siteId: b.siteId } }, never);

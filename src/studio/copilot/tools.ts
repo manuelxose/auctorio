@@ -7,6 +7,7 @@
 
 import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
+import { localDateInZone, zonedTimeToUtc } from "../plan-slots";
 import { enqueueFillMissingSlots, enqueueRegeneratePlanItem, titleTokenOverlap, updateEditorialPlanItem } from "../editorial-plan";
 import type { StudioPermission } from "../security";
 import { type AssistantContext, evidenceCount, strings, unfilledSlotsOf } from "./assistant-context";
@@ -361,12 +362,21 @@ const suggestProposalsForDay: ReadTool = {
 // ── WRITE ────────────────────────────────────────────────────────────────
 
 async function ownedItem(tenantId: string, itemId: string) {
-  const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { plan: { select: { id: true, status: true, name: true } } } });
+  const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { plan: { select: { id: true, status: true, name: true, timezone: true, dateFrom: true, dateTo: true } } } });
   if (!item) throw new CopilotError(404, "proposal not found");
   return item;
 }
 
-function parseUpdate(args: ToolArgs) {
+type ItemWithPlan = Awaited<ReturnType<typeof ownedItem>>;
+
+/** Proposals that already have an article or a production run are changed through production, not here. */
+function assertEditable(item: ItemWithPlan) {
+  if (item.projectId || !["proposed", "approved", "rejected"].includes(item.status)) {
+    throw new CopilotError(409, "This proposal already has an article or is in production; it can no longer be edited here.");
+  }
+}
+
+function parseUpdate(args: ToolArgs, plan?: ItemWithPlan["plan"]) {
   const fields: Record<string, unknown> = {};
   const title = text(args.title, "title", 200);
   if (title) fields.title = title;
@@ -383,8 +393,14 @@ function parseUpdate(args: ToolArgs) {
   }
   if (args.scheduledFor !== undefined && args.scheduledFor !== null) {
     const raw = String(args.scheduledFor);
-    const date = new Date(DAY.test(raw) ? `${raw}T09:00:00Z` : raw);
+    const zone = plan?.timezone ?? "UTC";
+    // A date-only value means 09:00 in the plan's timezone.
+    const date = DAY.test(raw) ? zonedTimeToUtc(raw, "09:00", zone) : new Date(raw);
     if (Number.isNaN(date.getTime())) throw new CopilotError(400, "scheduledFor must be a date (YYYY-MM-DD) or ISO timestamp");
+    if (date.getTime() < Date.now()) throw new CopilotError(400, "scheduledFor is in the past");
+    if (plan && (localDateInZone(date, zone) < localDateInZone(plan.dateFrom, zone) || localDateInZone(date, zone) > localDateInZone(plan.dateTo, zone))) {
+      throw new CopilotError(400, "scheduledFor is outside the plan's date range");
+    }
     fields.scheduledFor = date.toISOString();
   }
   if (args.keywords !== undefined && args.keywords !== null) {
@@ -404,13 +420,16 @@ const updateProposal: WriteTool = {
   async prepare(ctx, args) {
     const itemId = requireId(args, "itemId", ctx.selection.planItemId, "Select the proposal to update first.");
     const item = await ownedItem(ctx.tenantId, itemId);
-    const fields = parseUpdate(args);
+    assertEditable(item);
+    const fields = parseUpdate(args, item.plan);
     const described = Object.entries(fields).map(([key, value]) => `${key} → ${Array.isArray(value) ? value.join(", ") : String(value)}`);
     return { args: { itemId, ...fields }, summary: `Update proposal “${item.title}”: ${described.join("; ")}` };
   },
   async execute(tenantId, _userId, args) {
     const itemId = requireId(args, "itemId", null, "itemId is required");
-    const fields = parseUpdate(args);
+    const item = await ownedItem(tenantId, itemId);
+    assertEditable(item);
+    const fields = parseUpdate(args, item.plan);
     const updated = await updateEditorialPlanItem(tenantId, itemId, {
       title: fields.title as string | undefined,
       seoTitle: fields.seoTitle as string | undefined,
