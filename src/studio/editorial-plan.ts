@@ -20,6 +20,7 @@ import {
 import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
+import { MAX_PLAN_SLOTS, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
 const CHANNELS = ["website", "x", "instagram"] as const;
@@ -44,7 +45,105 @@ export type GenerateEditorialPlanInput = {
   userId?: string | null;
   strategy?: PlanningStrategy;
   allowWithoutIntelligence?: boolean;
+  /** Deterministic publication slots; when set, publicationCount must equal slots.length. */
+  slots?: PlanSlot[];
+  slotRequest?: PlanSlotRequest;
+  /** Extend an existing plan instead of creating one: only `slots` are generated, everything else is kept. */
+  append?: PlanAppendMode;
 };
+
+type StoredPlanOutput = {
+  items?: unknown[];
+  dropped?: Array<{ title: string; reason: string }>;
+  warnings?: string[];
+  requestedCount?: number;
+  unfilledSlots?: UnfilledSlot[];
+};
+
+type PlanAppendMode = {
+  previousStatus: "ready" | "partial";
+  previous: StoredPlanOutput;
+  totalRequested: number;
+  /** Titles already in the plan; new briefs must not repeat them. */
+  avoidTitles: string[];
+  /** Unfilled slots outside this run that stay unfilled. */
+  keepUnfilled: UnfilledSlot[];
+  /** Regeneration: delete this item in the same transaction that inserts its replacement. */
+  replaceItemId?: string;
+};
+
+export type UnfilledSlot = { localDate: string; localTime: string; scheduledFor: string; reason: string };
+
+/** Assigns validated briefs to slots in order; the LLM's own scheduledFor is discarded. */
+export function assignBriefsToSlots(items: EditorialPlanBriefV2[], slots: PlanSlot[]): { items: EditorialPlanBriefV2[]; unfilled: UnfilledSlot[] } {
+  return {
+    items: items.slice(0, slots.length).map((item, index) => ({ ...item, scheduledFor: slots[index].scheduledFor.toISOString() })),
+    unfilled: slots.slice(items.length).map((slot) => ({
+      localDate: slot.localDate,
+      localTime: slot.localTime,
+      scheduledFor: slot.scheduledFor.toISOString(),
+      reason: "no valid proposal survived validation after bounded top-up retries",
+    })),
+  };
+}
+
+/** Merges a validated batch into the running set, dropping cross-batch duplicates and anything beyond `limit`. */
+export function mergePlanBatches(existing: PostValidationResult, batch: PostValidationResult, limit: number): PostValidationResult {
+  const seenTitles = new Set(existing.kept.map((item) => normalizeSlug(item.workingTitle)));
+  const seenQueries = new Set(existing.kept.map((item) => (item.targetQuery ? normalizeSlug(item.targetQuery) : "")));
+  const keptTitles = existing.kept.map((item) => item.workingTitle);
+  const extras: EditorialPlanBriefV2[] = [];
+  const dropped = [...existing.dropped, ...batch.dropped];
+  for (const item of batch.kept) {
+    const titleKey = normalizeSlug(item.workingTitle);
+    const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : "";
+    if (seenTitles.has(titleKey)) {
+      dropped.push({ title: item.workingTitle, reason: "duplicate title across generation batches" });
+      continue;
+    }
+    if (isNearDuplicateTitle(item.workingTitle, keptTitles)) {
+      dropped.push({ title: item.workingTitle, reason: "near-duplicate topic across generation batches" });
+      continue;
+    }
+    if (queryKey && seenQueries.has(queryKey)) {
+      dropped.push({ title: item.workingTitle, reason: `duplicate target query ${item.targetQuery}` });
+      continue;
+    }
+    seenTitles.add(titleKey);
+    if (queryKey) seenQueries.add(queryKey);
+    keptTitles.push(item.workingTitle);
+    extras.push(item);
+  }
+  const kept = [...existing.kept, ...extras];
+  for (const item of kept.slice(limit)) {
+    dropped.push({ title: item.workingTitle, reason: "exceeds requested publication count" });
+  }
+  return { kept: kept.slice(0, limit), dropped, warnings: [...existing.warnings, ...batch.warnings] };
+}
+
+/**
+ * Bounded quantity recovery: asks for the missing proposals until `target` is
+ * reached, `maxRounds` is spent, or the provider fails (runBatch returns null).
+ */
+export async function topUpPlanItems(
+  validated: PostValidationResult,
+  target: number,
+  runBatch: (missing: number, existingTitles: string[]) => Promise<PostValidationResult | null>,
+  options: { maxRounds?: number; perRound?: number; onRound?: (round: number, kept: number) => void | Promise<void> } = {},
+): Promise<{ validated: PostValidationResult; rounds: number }> {
+  const maxRounds = options.maxRounds ?? 3;
+  const perRound = options.perRound ?? 4;
+  let rounds = 0;
+  while (validated.kept.length < target && rounds < maxRounds) {
+    rounds += 1;
+    const missing = Math.min(perRound, target - validated.kept.length);
+    const batch = await runBatch(missing, validated.kept.map((item) => item.workingTitle));
+    if (!batch) break;
+    validated = mergePlanBatches(validated, batch, target);
+    await options.onRound?.(rounds, validated.kept.length);
+  }
+  return { validated, rounds };
+}
 
 export type PostValidationResult = {
   kept: EditorialPlanBriefV2[];
@@ -95,7 +194,7 @@ function isNearDuplicateTitle(candidate: string, existing: string[]): boolean {
  */
 export function postValidatePlanItems(
   items: EditorialPlanBriefV2[],
-  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy">,
+  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy" | "slots">,
   context: EditorialPlanningContext,
 ): PostValidationResult {
   const kept: EditorialPlanBriefV2[] = [];
@@ -119,9 +218,9 @@ export function postValidatePlanItems(
     }
     seenTitles.add(titleKey);
 
-    // 2. Date bounds.
+    // 2. Date bounds (slotted plans assign dates afterwards, so the model's date is irrelevant).
     const scheduled = new Date(item.scheduledFor);
-    if (Number.isNaN(scheduled.getTime()) || scheduled < input.dateFrom || scheduled > input.dateTo) {
+    if (!input.slots?.length && (Number.isNaN(scheduled.getTime()) || scheduled < input.dateFrom || scheduled > input.dateTo)) {
       dropped.push({ title, reason: "scheduledFor outside plan date range" });
       continue;
     }
@@ -249,7 +348,8 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
 }> {
   if (!input.siteId) throw new Error("editorial_plan_site_required");
   if (input.dateTo <= input.dateFrom) throw new Error("editorial_plan_invalid_date_range");
-  if (input.publicationCount < 1 || input.publicationCount > 100) throw new Error("editorial_plan_invalid_quantity");
+  if (input.publicationCount < 1 || input.publicationCount > MAX_PLAN_SLOTS) throw new Error("editorial_plan_invalid_quantity");
+  if (input.slots && input.slots.length !== input.publicationCount) throw new Error("editorial_plan_slot_count_mismatch");
   if (input.channels.length === 0) throw new Error("editorial_plan_channels_required");
 
   const requestedAccountIds = [...new Set(input.accountIds ?? [])];
@@ -278,7 +378,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
       tenantId: input.tenantId,
       siteId: input.siteId,
       briefId: input.briefId ?? null,
-      name: input.strategy?.campaignName || `Editorial plan ${input.dateFrom.toISOString().slice(0, 10)}`,
+      name: input.strategy?.campaignName || `Editorial plan ${input.slotRequest?.dateFrom ?? input.dateFrom.toISOString().slice(0, 10)}`,
       status: "generating",
       dateFrom: input.dateFrom,
       dateTo: input.dateTo,
@@ -307,6 +407,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
         audience: input.audience ?? null,
         market: strategy.market ?? null,
         campaignName: strategy.campaignName ?? null,
+        cadence: input.slotRequest ? (input.slotRequest as unknown as Prisma.InputJsonObject) : null,
       } as Prisma.InputJsonObject,
       promptVersion: EDITORIAL_PLAN_PROMPT_VERSION,
     },
@@ -373,44 +474,22 @@ async function executeEditorialPlanGeneration(
         eventContext: { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, siteType: context.site.type },
       });
 
-    const mergeBatch = (
-      existing: PostValidationResult,
-      batch: PostValidationResult,
-      limit: number,
-    ): PostValidationResult => {
-      const seenTitles = new Set(existing.kept.map((item) => normalizeSlug(item.workingTitle)));
-      const seenQueries = new Set(existing.kept.map((item) => (item.targetQuery ? normalizeSlug(item.targetQuery) : "")));
-      const keptTitles = existing.kept.map((item) => item.workingTitle);
-      const extras: EditorialPlanBriefV2[] = [];
-      const dropped = [...existing.dropped];
+    const mergeBatch = mergePlanBatches;
+    const avoidTitles = input.append?.avoidTitles ?? [];
+    // Post-validation plus, when extending a plan, rejection of anything that repeats a proposal it already holds.
+    const validate = (items: EditorialPlanBriefV2[], count: number): PostValidationResult => {
+      const batch = postValidatePlanItems(items, { ...input, publicationCount: count }, context);
+      if (avoidTitles.length === 0) return batch;
+      const avoidKeys = new Set(avoidTitles.map(normalizeSlug));
+      const kept: EditorialPlanBriefV2[] = [];
       for (const item of batch.kept) {
-        const titleKey = normalizeSlug(item.workingTitle);
-        const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : "";
-        if (seenTitles.has(titleKey)) {
-          dropped.push({ title: item.workingTitle, reason: "duplicate title across generation batches" });
-          continue;
+        if (avoidKeys.has(normalizeSlug(item.workingTitle)) || isNearDuplicateTitle(item.workingTitle, avoidTitles)) {
+          batch.dropped.push({ title: item.workingTitle, reason: "repeats a proposal already in this plan" });
+        } else {
+          kept.push(item);
         }
-        if (isNearDuplicateTitle(item.workingTitle, keptTitles)) {
-          dropped.push({ title: item.workingTitle, reason: "near-duplicate topic across generation batches" });
-          continue;
-        }
-        if (queryKey && seenQueries.has(queryKey)) {
-          dropped.push({ title: item.workingTitle, reason: `duplicate target query ${item.targetQuery}` });
-          continue;
-        }
-        seenTitles.add(titleKey);
-        if (queryKey) {
-          seenQueries.add(queryKey);
-        }
-        keptTitles.push(item.workingTitle);
-        extras.push(item);
       }
-      const kept = [...existing.kept, ...extras];
-      const excess = kept.slice(limit);
-      for (const item of excess) {
-        dropped.push({ title: item.workingTitle, reason: "exceeds requested publication count" });
-      }
-      return { kept: kept.slice(0, limit), dropped, warnings: [...existing.warnings, ...batch.warnings] };
+      return { ...batch, kept };
     };
 
     // A full brief is ~1.5k output tokens; 4 per call fits the 8k output cap of DeepSeek (Claude/OpenAI allow more).
@@ -429,10 +508,10 @@ async function executeEditorialPlanGeneration(
     try {
       for (let waveStart = 0; waveStart < chunks.length; waveStart += concurrency) {
         const wave = chunks.slice(waveStart, waveStart + concurrency);
-        const alreadyPlanned =
-          validated && validated.kept.length > 0
-            ? `\nAlready planned titles (do NOT repeat these or close variants of them): ${validated.kept.map((item) => item.workingTitle).join(" | ")}`
-            : "";
+        const plannedTitles = [...avoidTitles, ...(validated?.kept.map((item) => item.workingTitle) ?? [])];
+        const alreadyPlanned = plannedTitles.length > 0
+          ? `\nAlready planned titles (do NOT repeat these or close variants of them): ${plannedTitles.join(" | ")}`
+          : "";
         const results = await Promise.allSettled(
           wave.map((chunkCount, offset) =>
             runOnce(
@@ -453,7 +532,7 @@ async function executeEditorialPlanGeneration(
             attempts = [...attempts, ...result.attempts];
             lastProvider = result.attempts[result.attempts.length - 1].provider;
             lastModel = result.attempts[result.attempts.length - 1].model;
-            const batch = postValidatePlanItems(result.data.items, { ...input, publicationCount: chunkCount }, context);
+            const batch = validate(result.data.items, chunkCount);
             validated = validated ? mergeBatch(validated, batch, input.publicationCount) : batch;
             structuredEvent("editorial_plan.generation.chunk_completed", {
               tenantId: input.tenantId,
@@ -515,7 +594,7 @@ async function executeEditorialPlanGeneration(
         attempts = [...attempts, ...retryResult.attempts];
         lastProvider = retryResult.attempts[retryResult.attempts.length - 1].provider;
         lastModel = retryResult.attempts[retryResult.attempts.length - 1].model;
-        validated = postValidatePlanItems(retryResult.data.items, input, context);
+        validated = validate(retryResult.data.items, input.publicationCount);
       } catch (error) {
         if (error instanceof StructuredOutputError) {
           await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
@@ -530,48 +609,37 @@ async function executeEditorialPlanGeneration(
     // batches to respect the provider output cap) and merge, deduping by
     // normalized title, near-duplicate similarity and target query. The
     // application owns quantity enforcement.
-    let topUpRounds = 0;
-    while (validated && validated.kept.length < input.publicationCount && topUpRounds < 2) {
-      topUpRounds += 1;
-      const missing = Math.min(3, input.publicationCount - validated.kept.length);
-      const existingTitles = validated.kept.map((item) => item.workingTitle).join(" | ");
-      const feedback =
-        `\nCORRECTION REQUIRED: you returned ${validated.kept.length} items but ${input.publicationCount} in total were requested. ` +
-        `Return ${missing} ADDITIONAL distinct items. Do NOT repeat these titles or close variants of them: ${existingTitles}. ` +
-        `All new items must obey the same relevance and schema rules.`;
-      try {
-        const topUpResult = await runOnce(feedback, missing);
-        attempts = [...attempts, ...topUpResult.attempts];
-        lastProvider = topUpResult.attempts[topUpResult.attempts.length - 1].provider;
-        lastModel = topUpResult.attempts[topUpResult.attempts.length - 1].model;
-        const batch = postValidatePlanItems(
-          topUpResult.data.items,
-          { ...input, publicationCount: missing },
-          context,
-        );
-        validated = mergeBatch(validated, batch, input.publicationCount);
-        structuredEvent("editorial_plan.generation.topup", {
-          tenantId: input.tenantId,
-          siteId: input.siteId,
-          planId: plan.id,
-          round: topUpRounds,
-          kept: validated.kept.length,
-          requested: input.publicationCount,
-        });
-      } catch (error) {
-        if (error instanceof StructuredOutputError) {
-          structuredEvent("editorial_plan.generation.topup_failed", {
-            tenantId: input.tenantId,
-            siteId: input.siteId,
-            planId: plan.id,
-            round: topUpRounds,
-            requested: input.publicationCount,
-            kept: validated.kept.length,
-          }, "warn");
-          break;
-        }
-        throw error;
-      }
+    if (validated) {
+      const topUp = await topUpPlanItems(
+        validated,
+        input.publicationCount,
+        async (missing, existingTitles) => {
+          const feedback =
+            `\nCORRECTION REQUIRED: ${existingTitles.length} valid items exist but ${input.publicationCount} in total were requested. ` +
+            `Return ${missing} ADDITIONAL distinct items. Do NOT repeat these titles or close variants of them: ${existingTitles.join(" | ")}. ` +
+            `All new items must obey the same relevance and schema rules.`;
+          try {
+            const topUpResult = await runOnce(feedback, missing);
+            attempts = [...attempts, ...topUpResult.attempts];
+            lastProvider = topUpResult.attempts[topUpResult.attempts.length - 1].provider;
+            lastModel = topUpResult.attempts[topUpResult.attempts.length - 1].model;
+            return validate(topUpResult.data.items, missing);
+          } catch (error) {
+            if (!(error instanceof StructuredOutputError)) throw error;
+            structuredEvent("editorial_plan.generation.topup_failed", { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, requested: input.publicationCount }, "warn");
+            return null;
+          }
+        },
+        {
+          perRound: perCallBudget,
+          maxRounds: Math.max(3, Math.ceil(input.publicationCount / (perCallBudget * 4))),
+          onRound: async (round, kept) => {
+            structuredEvent("editorial_plan.generation.topup", { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, round, kept, requested: input.publicationCount });
+            await onProgress?.(kept, input.publicationCount);
+          },
+        },
+      );
+      validated = topUp.validated;
     }
 
     if (!validated || validated.kept.length === 0) {
@@ -587,8 +655,21 @@ async function executeEditorialPlanGeneration(
 
     await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, attempts, "succeeded");
 
-    const items = validated.kept;
+    const assignment = input.slots?.length ? assignBriefsToSlots(validated.kept, input.slots) : { items: validated.kept, unfilled: [] as UnfilledSlot[] };
+    const items = assignment.items;
+    const append = input.append;
+    const unfilledSlots = [...(append?.keepUnfilled ?? []), ...assignment.unfilled];
+    const requestedTotal = append?.totalRequested ?? input.publicationCount;
+    let filledTotal = items.length;
+    let finalStatus: "ready" | "partial" = "ready";
     await prisma.$transaction(async (tx) => {
+      if (append?.replaceItemId) {
+        // Only an untouched proposal may be replaced; approved or produced items are never discarded.
+        const removed = await tx.editorialPlanItem.deleteMany({
+          where: { id: append.replaceItemId, tenantId: input.tenantId, projectId: null, status: { in: ["proposed", "rejected"] } },
+        });
+        if (removed.count !== 1) throw new Error("editorial_plan_item_not_replaceable");
+      }
       for (const item of items) {
         await tx.editorialPlanItem.create({
           data: {
@@ -653,15 +734,25 @@ async function executeEditorialPlanGeneration(
           },
         });
       }
+      if (append) filledTotal = await tx.editorialPlanItem.count({ where: { planId: plan.id } });
+      // A plan with empty required slots is never "ready": it is reported as partial with the exact gaps.
+      finalStatus = unfilledSlots.length > 0 || filledTotal < requestedTotal ? "partial" : "ready";
       await tx.editorialPlan.update({
         where: { id: plan.id },
         data: {
-          status: "ready",
+          status: finalStatus,
           provider: lastProvider,
           model: lastModel,
           siteIntelligenceVersion: context.profile?.version ?? null,
-          generatedOutput: { items, dropped: validated.dropped, warnings: validated.warnings } as Prisma.InputJsonObject,
-          error: null,
+          generatedOutput: {
+            items: [...(append?.previous.items ?? []), ...items],
+            dropped: [...(append?.previous.dropped ?? []), ...validated.dropped],
+            warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
+            requestedCount: requestedTotal,
+            filledCount: filledTotal,
+            unfilledSlots,
+          } as unknown as Prisma.InputJsonObject,
+          error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
         },
       });
     });
@@ -691,7 +782,7 @@ async function executeEditorialPlanGeneration(
       tenantId: input.tenantId,
       actorType: input.userId ? "user" : "system",
       actorUserId: input.userId,
-      action: "editorial_plan.generated",
+      action: append ? (append.replaceItemId ? "editorial_plan.item_regenerated" : "editorial_plan.slots_filled") : "editorial_plan.generated",
       entityType: "editorial_plan",
       entityId: plan.id,
       metadata: {
@@ -705,9 +796,12 @@ async function executeEditorialPlanGeneration(
     return prisma.editorialPlan.findUnique({ where: { id: plan.id }, include: { items: true } });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // A failed extension must not destroy the plan it was extending.
     await prisma.editorialPlan.update({
       where: { id: plan.id },
-      data: { status: "failed", error: message },
+      data: input.append
+        ? { status: input.append.previousStatus, error: `Last ${input.append.replaceItemId ? "regeneration" : "fill"} failed: ${message}` }
+        : { status: "failed", error: message },
     });
     structuredEvent("editorial_plan.generation.failed", {
       tenantId: input.tenantId,
@@ -732,15 +826,26 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
  */
 export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPlanInput) {
   const { accounts, strategy, plan } = await prepareEditorialPlan(input);
+  return runPlanGenerationInBackground(plan, input, strategy, accounts, "editorial_plan_generation");
+}
+
+/** Shared durable runner: one Operation per run, real progress, partial/failed states mirrored on the operation. */
+async function runPlanGenerationInBackground(
+  plan: Awaited<ReturnType<typeof prisma.editorialPlan.create>>,
+  input: GenerateEditorialPlanInput,
+  strategy: PlanningStrategy,
+  accounts: Array<{ id: string; platform: string }>,
+  type: "editorial_plan_generation" | "editorial_plan_fill" | "editorial_plan_item_regeneration",
+) {
   const { createOperation, startOperation, completeOperation, failOperation, touchOperationProgress } = await import("./operations");
   const operation = await createOperation({
     tenantId: input.tenantId,
     siteId: input.siteId ?? null,
-    type: "editorial_plan_generation",
+    type,
     initiatorUserId: input.userId ?? null,
     entityType: "editorial_plan",
     entityId: plan.id,
-    metadata: { strategy: input.strategy ?? null },
+    metadata: { strategy: input.strategy ?? null, slots: input.publicationCount, replaceItemId: input.append?.replaceItemId ?? null },
   });
   await startOperation(operation.id, "generating");
   const reportProgress = (planned: number, total: number) =>
@@ -748,8 +853,12 @@ export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPla
       .then(() => undefined)
       .catch(() => undefined);
   void executeEditorialPlanGeneration(plan, input, strategy, accounts, reportProgress)
-    .then(async () => {
-      await completeOperation(operation.id);
+    .then(async (finished) => {
+      const output = (finished?.generatedOutput ?? {}) as StoredPlanOutput & { filledCount?: number };
+      const filled = output.filledCount ?? finished?.items.length ?? 0;
+      const total = output.requestedCount ?? input.publicationCount;
+      await touchOperationProgress(operation.id, { completedSteps: filled, totalSteps: total }).catch(() => undefined);
+      await completeOperation(operation.id, finished?.status === "partial" ? { partial: true, phase: `${filled} of ${total} slots filled` } : { phase: `${filled} proposals planned` });
     })
     .catch(async (error) => {
       await failOperation(operation.id, {
@@ -759,16 +868,131 @@ export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPla
       });
       structuredEvent(
         "editorial_plan.generation.background_error",
-        {
-          tenantId: input.tenantId,
-          siteId: input.siteId,
-          planId: plan.id,
-          normalizedError: error instanceof Error ? error.message : String(error),
-        },
+        { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, normalizedError: error instanceof Error ? error.message : String(error) },
         "error",
       );
     });
-  return { planId: plan.id, operationId: operation.id };
+  return { planId: plan.id, operationId: operation.id, expectedCount: input.publicationCount };
+}
+
+/** Rebuilds a generation input from a persisted plan so extensions use the same strategy and cadence. */
+async function loadPlanForExtension(tenantId: string, planId: string, userId?: string | null) {
+  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId }, include: { items: { select: { id: true, title: true } } } });
+  if (!plan) throw new Error("editorial_plan_not_found");
+  if (plan.status !== "ready" && plan.status !== "partial") throw new Error("editorial_plan_not_extendable");
+  const config = (plan.configuration ?? {}) as Record<string, unknown>;
+  const topics = (plan.topicStrategy ?? {}) as Record<string, unknown>;
+  const list = (value: unknown) => (Array.isArray(value) ? value.map(String) : []);
+  const accountIds = list(plan.accountIds);
+  const accounts = accountIds.length
+    ? await prisma.publishingAccount.findMany({ where: { tenantId, id: { in: accountIds }, enabled: true }, select: { id: true, platform: true } })
+    : [];
+  const strategy: PlanningStrategy = {
+    mode: (plan.strategyMode ?? "balanced") as PlanningStrategy["mode"],
+    primaryIntent: (plan.primaryIntent ?? null) as PlanningStrategy["primaryIntent"],
+    contentFormats: list(plan.contentFormats) as PlanningStrategy["contentFormats"],
+    market: (config.market as string | null) ?? null,
+    campaignName: (config.campaignName as string | null) ?? null,
+    language: (config.language as string) ?? "es",
+    audience: (config.audience as string | null) ?? null,
+    objective: plan.objective,
+    priorityTopics: list(topics.priorityTopics),
+    excludedTopics: list(topics.excludedTopics),
+    seasonalEvents: list(topics.seasonalEvents),
+    keywordSeeds: list(topics.keywordSeeds),
+    brandsOrEntities: list(topics.brandsOrEntities),
+  };
+  const base: Omit<GenerateEditorialPlanInput, "publicationCount" | "slots" | "append"> = {
+    tenantId,
+    siteId: plan.siteId,
+    dateFrom: plan.dateFrom,
+    dateTo: plan.dateTo,
+    objective: plan.objective,
+    channels: list(plan.channels).filter((channel): channel is PlanChannel => (CHANNELS as readonly string[]).includes(channel)),
+    timezone: plan.timezone,
+    accountIds: accounts.map((account) => account.id),
+    language: strategy.language,
+    audience: strategy.audience,
+    userId,
+    strategy,
+    allowWithoutIntelligence: plan.siteIntelligenceVersion === null,
+  };
+  return { plan, base, strategy, accounts, previous: (plan.generatedOutput ?? {}) as StoredPlanOutput };
+}
+
+/** Atomically claims the plan (ready|partial -> generating) so two extensions never run at once. */
+async function claimPlan(planId: string, from: "ready" | "partial"): Promise<void> {
+  const claimed = await prisma.editorialPlan.updateMany({ where: { id: planId, status: from }, data: { status: "generating" } });
+  if (claimed.count !== 1) throw new Error("editorial_plan_busy");
+}
+
+/** Missing-slot recovery: generates proposals only for the plan's unfilled slots; existing items are untouched. */
+export async function enqueueFillMissingSlots(tenantId: string, planId: string, userId?: string | null) {
+  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, planId, userId);
+  const unfilled = previous.unfilledSlots ?? [];
+  if (plan.status !== "partial" || unfilled.length === 0) throw new Error("editorial_plan_has_no_unfilled_slots");
+  const slots: PlanSlot[] = unfilled.map((slot, index) => ({ index, localDate: slot.localDate, localTime: slot.localTime, scheduledFor: new Date(slot.scheduledFor) }));
+  await claimPlan(plan.id, "partial");
+  return runPlanGenerationInBackground(
+    plan,
+    {
+      ...base,
+      publicationCount: slots.length,
+      slots,
+      append: {
+        previousStatus: "partial",
+        previous,
+        totalRequested: previous.requestedCount ?? plan.items.length + slots.length,
+        avoidTitles: plan.items.map((item) => item.title),
+        keepUnfilled: [],
+      },
+    },
+    strategy,
+    accounts,
+    "editorial_plan_fill",
+  );
+}
+
+/** Regenerates one untouched proposal in its own slot; every other item in the plan is preserved. */
+export async function enqueueRegeneratePlanItem(tenantId: string, itemId: string, userId?: string | null) {
+  const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
+  if (!item) throw new Error("editorial_plan_item_not_found");
+  if (item.projectId || !["proposed", "rejected"].includes(item.status)) throw new Error("editorial_plan_item_not_replaceable");
+  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, item.planId, userId);
+  const scheduledFor = item.scheduledFor ?? plan.dateFrom;
+  const local = new Intl.DateTimeFormat("en-CA", {
+    timeZone: plan.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(scheduledFor);
+  const part = (type: string) => local.find((entry) => entry.type === type)?.value ?? "00";
+  const slots: PlanSlot[] = [{ index: 0, localDate: `${part("year")}-${part("month")}-${part("day")}`, localTime: `${part("hour")}:${part("minute")}`, scheduledFor }];
+  const previousStatus = plan.status as "ready" | "partial";
+  await claimPlan(plan.id, previousStatus);
+  return runPlanGenerationInBackground(
+    plan,
+    {
+      ...base,
+      channels: [item.channel as PlanChannel],
+      publicationCount: 1,
+      slots,
+      append: {
+        previousStatus,
+        previous,
+        totalRequested: previous.requestedCount ?? plan.items.length,
+        avoidTitles: plan.items.map((entry) => entry.title),
+        keepUnfilled: previous.unfilledSlots ?? [],
+        replaceItemId: item.id,
+      },
+    },
+    strategy,
+    accounts,
+    "editorial_plan_item_regeneration",
+  );
 }
 
 async function recordGenerationAttempts(

@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import {
@@ -42,6 +42,7 @@ import {
   updatePublicationSchedule,
 } from "./publication";
 import { listCalendarEvents } from "./calendar";
+import { computePlanSlots, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
 import { getEnv } from "../shared/utils/env";
@@ -69,6 +70,8 @@ import {
   bulkSetEditorialPlanItemStatus,
   deleteEditorialPlanItem,
   enqueueEditorialPlanGeneration,
+  enqueueFillMissingSlots,
+  enqueueRegeneratePlanItem,
   generateContentFromEditorialPlanItem,
   generateEditorialPlan,
   getEditorialPlan,
@@ -1489,16 +1492,45 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       keywordSeeds?: string[];
       allowWithoutIntelligence?: boolean;
       async?: boolean;
+      articlesPerDay?: number;
+      weekdays?: number[];
+      weekdayQuotas?: Record<string, number>;
+      excludedDates?: string[];
+      publishTimes?: string[];
     }>(request);
-    const dateFrom = parseIsoDate(body.dateFrom);
-    const dateTo = parseIsoDate(body.dateTo);
+    let dateFrom = parseIsoDate(body.dateFrom);
+    let dateTo = parseIsoDate(body.dateTo);
     const channels = (body.channels ?? []).filter((channel): channel is (typeof PUBLICATION_CHANNELS)[number] =>
       isOneOf(channel, PUBLICATION_CHANNELS),
     );
     if (!dateFrom || !dateTo) return badRequest(reply, "dateFrom and dateTo are required ISO dates");
     if (!body.siteId || !isUuid(body.siteId)) return badRequest(reply, "siteId is required and must be a valid id");
     if (channels.length === 0) return badRequest(reply, "channels must include website, x, or instagram");
-    if (!body.publicationCount) return badRequest(reply, "publicationCount must be greater than zero");
+    const timezone = parseOptionalString(body.timezone) ?? "Europe/Madrid";
+    // Cadence mode: the app computes exact local-date slots; publicationCount is derived, never trusted.
+    let slotRequest: PlanSlotRequest | undefined;
+    let slots: PlanSlot[] | undefined;
+    if (body.articlesPerDay !== undefined) {
+      slotRequest = {
+        dateFrom: String(body.dateFrom).slice(0, 10),
+        dateTo: String(body.dateTo).slice(0, 10),
+        timezone,
+        articlesPerDay: Number(body.articlesPerDay),
+        weekdays: Array.isArray(body.weekdays) ? body.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6) : undefined,
+        weekdayQuotas: body.weekdayQuotas && typeof body.weekdayQuotas === "object" ? body.weekdayQuotas : undefined,
+        excludedDates: Array.isArray(body.excludedDates) ? body.excludedDates.map(String) : undefined,
+        publishTimes: Array.isArray(body.publishTimes) ? body.publishTimes.map(String) : undefined,
+      };
+      try {
+        slots = computePlanSlots(slotRequest);
+      } catch (error) {
+        return badRequest(reply, error instanceof Error ? error.message : String(error));
+      }
+      if (slots.length === 0) return badRequest(reply, "the selected dates, weekdays and quotas produce no publication slots");
+      ({ from: dateFrom, to: dateTo } = planRangeBounds(slotRequest.dateFrom, slotRequest.dateTo, timezone));
+    } else if (!body.publicationCount) {
+      return badRequest(reply, "articlesPerDay (or legacy publicationCount) must be greater than zero");
+    }
     try {
       const generationInput: GenerateEditorialPlanInput = {
         tenantId: context.tenantId,
@@ -1508,9 +1540,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         dateTo,
         objective: parseOptionalString(body.objective),
         channels,
-        publicationCount: body.publicationCount,
-        frequency: parseOptionalString(body.frequency),
-        timezone: parseOptionalString(body.timezone) ?? "Europe/Madrid",
+        publicationCount: slots ? slots.length : Number(body.publicationCount),
+        slots,
+        slotRequest,
+        frequency: parseOptionalString(body.frequency) ?? (slotRequest ? `${slotRequest.articlesPerDay}/day` : null),
+        timezone,
         accountIds: body.accountIds ?? [],
         language: parseOptionalString(body.language) ?? "es",
         audience: parseOptionalString(body.audience),
@@ -1540,7 +1574,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
 
       if (body.async !== false) {
         const enqueued = await enqueueEditorialPlanGeneration(generationInput);
-        return reply.code(202).send({ planId: enqueued.planId, status: "generating" });
+        return reply.code(202).send({
+          planId: enqueued.planId,
+          operationId: enqueued.operationId,
+          status: "generating",
+          expectedCount: enqueued.expectedCount,
+          slots: slots?.map((slot) => ({ localDate: slot.localDate, localTime: slot.localTime, scheduledFor: slot.scheduledFor.toISOString() })) ?? null,
+        });
       }
 
       const plan = await generateEditorialPlan(generationInput);
@@ -1561,6 +1601,44 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       }
       return badRequest(reply, message);
     }
+  });
+
+  // Missing-slot recovery and single-proposal regeneration: same durable runner, other items untouched.
+  const extensionErrors: Record<string, number> = {
+    editorial_plan_not_found: 404,
+    editorial_plan_item_not_found: 404,
+    editorial_plan_busy: 409,
+    editorial_plan_not_extendable: 409,
+    editorial_plan_has_no_unfilled_slots: 409,
+    editorial_plan_item_not_replaceable: 409,
+  };
+  const sendExtension = async (reply: FastifyReply, run: () => Promise<{ planId: string; operationId: string; expectedCount: number }>) => {
+    try {
+      const accepted = await run();
+      return reply.code(202).send({ ...accepted, status: "generating" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = extensionErrors[message];
+      if (code === 404) return notFound(reply, message);
+      if (code === 409) return conflict(reply, message);
+      return badRequest(reply, message);
+    }
+  };
+
+  fastify.post("/v2/editorial-plans/:id/fill", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    return sendExtension(reply, () => enqueueFillMissingSlots(context.tenantId, planId, context.userId));
+  });
+
+  fastify.post("/v2/editorial-plan-items/:id/regenerate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    return sendExtension(reply, () => enqueueRegeneratePlanItem(context.tenantId, itemId, context.userId));
   });
 
   fastify.patch("/v2/editorial-plan-items/:id", async (request, reply) => {

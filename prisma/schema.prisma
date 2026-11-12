@@ -283,6 +283,7 @@ enum EditorialPlanStatus {
   draft
   generating
   ready
+  partial
   failed
   archived
 }
