@@ -1,5 +1,6 @@
-import { Injectable, computed, inject, signal } from '@angular/core';
-import { lastValueFrom } from 'rxjs';
+import { Injectable, computed, effect, inject, signal } from '@angular/core';
+import { ActiveSiteStore } from './active-site.store';
+import { lastValueFrom, retry, throwError, timer } from 'rxjs';
 import type { StudioSession, StudioSite } from '../models/studio.models';
 import { StudioApiService } from './studio-api.service';
 
@@ -35,6 +36,12 @@ export class AppContextService {
   });
   readonly role = computed(() => this.sessionState()?.role ?? 'viewer');
 
+  constructor() {
+    // The HTTP interceptor reads the active site from this small store.
+    const store = inject(ActiveSiteStore);
+    effect(() => store.siteId.set(this.activeSite()?.id ?? null));
+  }
+
   async ensureSession(force = false): Promise<StudioSession | null> {
     if (!force && this.loadedState()) {
       return this.sessionState();
@@ -44,7 +51,11 @@ export class AppContextService {
     }
 
     this.loadingState.set(true);
-    this.inFlight = lastValueFrom(this.api.getSession())
+    // While the API restarts (503 / unreachable) keep retrying instead of sending the user to sign in.
+    const transient = (error: { status?: number }) => error?.status === 503 || error?.status === 0;
+    this.inFlight = lastValueFrom(
+      this.api.getSession().pipe(retry({ count: 10, delay: (error) => (transient(error) ? timer(2000) : throwError(() => error)) })),
+    )
       .then((session) => {
         this.sessionState.set(session);
         this.loadedState.set(true);

@@ -6,6 +6,7 @@ import { writeAudit } from "./audit";
 import { createProject } from "./repository";
 import { startProjectGeneration } from "./orchestration";
 import { structuredEvent } from "../shared/utils/logger";
+import { getNumberEnv } from "../shared/utils/env";
 import { generateStructured, StructuredOutputError, type StructuredGenerationAttempt } from "../infrastructure/ai/structured";
 import {
   EDITORIAL_PLAN_PROMPT_VERSION,
@@ -319,6 +320,8 @@ async function executeEditorialPlanGeneration(
   input: GenerateEditorialPlanInput,
   strategy: PlanningStrategy,
   accounts: Array<{ id: string; platform: string }>,
+  /** Called after each wave with topics validated so far, so the UI can show progress. */
+  onProgress?: (planned: number, total: number) => Promise<void>,
 ) {
   structuredEvent("editorial_plan.generation.started", {
     tenantId: input.tenantId,
@@ -365,7 +368,7 @@ async function executeEditorialPlanGeneration(
         prompt: buildPromptV2(input, context, countOverride) + (extraFeedback ?? ""),
         systemPrompt,
         temperature: 0.5,
-        maxTokens: 3000,
+        maxTokens: 8000,
         maxAttempts: 3,
         eventContext: { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, siteType: context.site.type },
       });
@@ -410,9 +413,8 @@ async function executeEditorialPlanGeneration(
       return { kept: kept.slice(0, limit), dropped, warnings: [...existing.warnings, ...batch.warnings] };
     };
 
-    // Batch size derives from the provider output cap: DeepSeek truncates at
-    // 4096 tokens, so ~2 full briefs per call is the safe budget.
-    const perCallBudget = 2;
+    // A full brief is ~1.5k output tokens; 4 per call fits the 8k output cap of DeepSeek (Claude/OpenAI allow more).
+    const perCallBudget = Math.max(1, Math.min(8, getNumberEnv("EDITORIAL_PLAN_ITEMS_PER_CALL", 4)));
     const chunks: number[] = [];
     let remaining = input.publicationCount;
     while (remaining > 0) {
@@ -420,54 +422,75 @@ async function executeEditorialPlanGeneration(
       remaining -= perCallBudget;
     }
 
+    // Chunks run in parallel waves: one wave costs the time of its slowest call instead of the
+    // sum of all calls (30 topics at 2 per call was 15 sequential calls). Each wave is told the
+    // titles planned by earlier waves; mergeBatch still drops duplicates between parallel chunks.
+    const concurrency = Math.max(1, Math.min(8, getNumberEnv("EDITORIAL_PLAN_CONCURRENCY", 8)));
     try {
-      for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
-        const chunkCount = chunks[chunkIndex];
-        try {
-          const alreadyPlanned =
-            chunkIndex > 0 && validated && validated.kept.length > 0
-              ? `\nAlready planned titles (do NOT repeat these or close variants of them): ${validated.kept.map((item) => item.workingTitle).join(" | ")}`
-              : undefined;
-          const result = await runOnce(alreadyPlanned, chunkCount);
-          attempts = [...attempts, ...result.attempts];
-          lastProvider = result.attempts[result.attempts.length - 1].provider;
-          lastModel = result.attempts[result.attempts.length - 1].model;
-          const batch = postValidatePlanItems(
-            result.data.items,
-            { ...input, publicationCount: chunkCount },
-            context,
+      for (let waveStart = 0; waveStart < chunks.length; waveStart += concurrency) {
+        const wave = chunks.slice(waveStart, waveStart + concurrency);
+        const alreadyPlanned =
+          validated && validated.kept.length > 0
+            ? `\nAlready planned titles (do NOT repeat these or close variants of them): ${validated.kept.map((item) => item.workingTitle).join(" | ")}`
+            : "";
+        const results = await Promise.allSettled(
+          wave.map((chunkCount, offset) =>
+            runOnce(
+              alreadyPlanned +
+                (wave.length > 1
+                  ? `\nThis is batch ${offset + 1} of ${wave.length} running at the same time: pick clearly different subtopics and keywords from the other batches.`
+                  : ""),
+              chunkCount,
+            ),
+          ),
+        );
+        let waveError: unknown = null;
+        for (let offset = 0; offset < results.length; offset += 1) {
+          const outcome = results[offset];
+          const chunkCount = wave[offset];
+          if (outcome.status === "fulfilled") {
+            const result = outcome.value;
+            attempts = [...attempts, ...result.attempts];
+            lastProvider = result.attempts[result.attempts.length - 1].provider;
+            lastModel = result.attempts[result.attempts.length - 1].model;
+            const batch = postValidatePlanItems(result.data.items, { ...input, publicationCount: chunkCount }, context);
+            validated = validated ? mergeBatch(validated, batch, input.publicationCount) : batch;
+            structuredEvent("editorial_plan.generation.chunk_completed", {
+              tenantId: input.tenantId,
+              siteId: input.siteId,
+              planId: plan.id,
+              chunkRequested: chunkCount,
+              chunkKept: batch.kept.length,
+              chunkDropped: batch.dropped.length,
+              dropReasons: [...new Set(batch.dropped.map((entry) => entry.reason.split(":")[0]))].slice(0, 3),
+              runningKept: validated.kept.length,
+            });
+            continue;
+          }
+          const error = outcome.reason;
+          if (!(error instanceof StructuredOutputError)) throw error;
+          waveError = waveError ?? error;
+          // A failed chunk must not destroy items validated by other chunks.
+          await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
+          structuredEvent(
+            "editorial_plan.generation.chunk_failed",
+            { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, chunkRequested: chunkCount, runningKept: validated?.kept.length ?? 0, attempts: error.attempts.length },
+            "warn",
           );
-          validated = validated ? mergeBatch(validated, batch, input.publicationCount) : batch;
-          structuredEvent("editorial_plan.generation.chunk_completed", {
+        }
+        // Nothing usable after the first wave: fail fast as the sequential version did.
+        // Attempts were already recorded above, so this bypasses the outer handler's recording.
+        if (waveError && (!validated || validated.kept.length === 0)) {
+          structuredEvent("editorial_plan.generation.failed", {
             tenantId: input.tenantId,
             siteId: input.siteId,
             planId: plan.id,
-            chunkRequested: chunkCount,
-            chunkKept: batch.kept.length,
-            chunkDropped: batch.dropped.length,
-            runningKept: validated.kept.length,
-          });
-        } catch (error) {
-          // A failed later chunk must not destroy already-validated items:
-          // record the failure and continue with the next chunk.
-          if (error instanceof StructuredOutputError && validated && validated.kept.length > 0) {
-            await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
-            structuredEvent(
-              "editorial_plan.generation.chunk_failed",
-              {
-                tenantId: input.tenantId,
-                siteId: input.siteId,
-                planId: plan.id,
-                chunkRequested: chunkCount,
-                runningKept: validated.kept.length,
-                attempts: error.attempts.length,
-              },
-              "warn",
-            );
-            continue;
-          }
-          throw error;
+            normalizedError: "EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID",
+            attempts: (waveError as StructuredOutputError).attempts.length,
+          }, "error");
+          throw new Error("EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID");
         }
+        await onProgress?.(validated?.kept.length ?? 0, input.publicationCount);
       }
     } catch (error) {
       if (error instanceof StructuredOutputError) {
@@ -709,7 +732,7 @@ export async function generateEditorialPlan(input: GenerateEditorialPlanInput) {
  */
 export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPlanInput) {
   const { accounts, strategy, plan } = await prepareEditorialPlan(input);
-  const { createOperation, startOperation, completeOperation, failOperation } = await import("./operations");
+  const { createOperation, startOperation, completeOperation, failOperation, touchOperationProgress } = await import("./operations");
   const operation = await createOperation({
     tenantId: input.tenantId,
     siteId: input.siteId ?? null,
@@ -720,7 +743,11 @@ export async function enqueueEditorialPlanGeneration(input: GenerateEditorialPla
     metadata: { strategy: input.strategy ?? null },
   });
   await startOperation(operation.id, "generating");
-  void executeEditorialPlanGeneration(plan, input, strategy, accounts)
+  const reportProgress = (planned: number, total: number) =>
+    touchOperationProgress(operation.id, { phase: `${planned} of ${total} topics planned`, completedSteps: planned, totalSteps: total })
+      .then(() => undefined)
+      .catch(() => undefined);
+  void executeEditorialPlanGeneration(plan, input, strategy, accounts, reportProgress)
     .then(async () => {
       await completeOperation(operation.id);
     })

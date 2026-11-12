@@ -1,98 +1,136 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject, PLATFORM_ID } from '@angular/core';
-import { FormsModule } from '@angular/forms';
-import {
-  NavigationEnd,
-  Router,
-  RouterLink,
-  RouterLinkActive,
-  RouterOutlet,
-} from '@angular/router';
+import { Component, ElementRef, HostListener, OnDestroy, OnInit, PLATFORM_ID, ViewChild, inject, signal } from '@angular/core';
+import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription, filter, startWith } from 'rxjs';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
 import { ThemeService } from '../services/theme.service';
 import { StudioApiService } from '../services/studio-api.service';
 import { SseService } from '../services/sse.service';
+import { CopilotService } from '../services/copilot.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
+import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
+import { CommandPaletteComponent } from './command-palette.component';
+import { STUDIO_NAV, activeNavItem } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
-type NavItem = {
-  label: string;
-  path: string;
-  icon: string;
-};
+const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
+const GROUPS_KEY = 'auctorio.studio.sidebar.closedGroups';
+const COPILOT_KEY = 'auctorio.studio.copilot.open';
 
+/**
+ * Studio frame: global top bar (Navigation A), grouped left sidebar
+ * (Navigation B, collapsible, drawer on phones) and the copilot panel docked
+ * on the right. Pages render in the router outlet between them.
+ */
 @Component({
   selector: 'app-app-shell',
   standalone: true,
-  imports: [
-    CommonModule,
-    FormsModule,
-    RouterLink,
-    RouterLinkActive,
-    RouterOutlet,
-    AppIconComponent,
-    AppPopoverComponent,
-  ],
+  imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet, AppIconComponent, AppPopoverComponent, CopilotPanelComponent, CommandPaletteComponent],
   template: `
-    <div class="au-app au-shell" *ngIf="!loading; else bootState">
-      <!-- Navbar 1: global sections + actions -->
-      <header class="au-topnav">
+    <div
+      class="au-app au-shell"
+      *ngIf="!loading; else bootState"
+      [class.is-collapsed]="collapsed()"
+      [class.has-copilot]="copilot.open()"
+      [class.is-copilot-wide]="copilot.wide()"
+      [class.is-drawer-open]="drawerOpen()"
+    >
+      <a class="au-skip" href="#studio-main">Skip to content</a>
+
+      <!-- Navigation A: global top bar -->
+      <header class="au-top">
         <button
-          class="au-icon-button au-menu-toggle"
+          #navToggle
+          class="au-icon-button"
           type="button"
-          (click)="menuOpen = !menuOpen"
-          [attr.aria-expanded]="menuOpen"
-          aria-label="Toggle navigation"
+          (click)="toggleNav()"
+          [attr.aria-expanded]="isPhone() ? drawerOpen() : !collapsed()"
+          aria-controls="studio-sidebar"
+          [attr.aria-label]="isPhone() ? 'Open navigation' : collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
+          [title]="collapsed() ? 'Expand sidebar' : 'Collapse sidebar'"
         >
-          <app-icon name="menu"></app-icon>
+          <app-icon [name]="isPhone() ? 'menu' : 'panel-left'"></app-icon>
         </button>
 
-        <a class="au-brand" routerLink="/studio/overview" aria-label="Auctorio, overview">
-          <img class="au-brand__mark" src="/logo.svg" alt="" width="34" height="34" />
-          <span class="au-brand__name">Auctorio</span>
+        <a class="au-top__brand" routerLink="/studio/overview" aria-label="Auctorio, overview">
+          <img src="/logo.svg" alt="" width="24" height="24" />
+          <span>Auctorio</span>
         </a>
 
-        <nav class="au-sections" aria-label="Sections">
-          <a
-            class="au-section-tab"
-            *ngFor="let group of navGroups"
-            [routerLink]="group.items[0].path"
-            [class.is-active]="group.label === activeGroup"
-            [attr.aria-current]="group.label === activeGroup ? 'page' : null"
-          >
-            <app-icon [name]="group.icon"></app-icon>
-            {{ group.label }}
-          </a>
-          <a class="au-section-tab" routerLink="/studio/settings/profile" routerLinkActive="is-active">
-            <app-icon name="settings"></app-icon>
-            Settings
-          </a>
+        <button
+          class="au-top__site"
+          type="button"
+          #siteTrigger
+          (click)="siteMenu.toggle(siteTrigger)"
+          [attr.aria-expanded]="siteMenu.isOpen()"
+          aria-haspopup="menu"
+          [attr.aria-label]="'Site: ' + activeSiteName + '. Switch site'"
+        >
+          <span class="au-top__site-mark" aria-hidden="true">{{ siteInitials }}</span>
+          <span class="au-top__site-name">{{ activeSiteName }}</span>
+          <app-icon name="chevron-down"></app-icon>
+        </button>
+        <app-popover #siteMenu>
+          <div class="au-menu" role="menu">
+            <div class="au-menu__label">{{ session?.user?.displayName }} · {{ session?.role }}</div>
+            <button
+              class="au-menu__item"
+              type="button"
+              role="menuitemradio"
+              *ngFor="let site of sites"
+              [attr.aria-checked]="site.id === activeSiteId"
+              [class.is-active]="site.id === activeSiteId"
+              (click)="selectSite(site.id, siteMenu)"
+            >
+              <span class="au-top__site-mark" aria-hidden="true">{{ siteInitialsOf(site) }}</span>
+              {{ site.name }}
+              <span class="au-menu__meta">{{ site.role }}</span>
+            </button>
+            <div class="au-menu__sep"></div>
+            <a class="au-menu__item" role="menuitem" routerLink="/studio/settings/sites" (click)="siteMenu.hide()">
+              <app-icon name="settings"></app-icon>
+              Manage sites
+            </a>
+          </div>
+        </app-popover>
+
+        <nav class="au-crumbs" aria-label="Location">
+          <span class="au-crumbs__group">{{ location().group }}</span>
+          <app-icon name="chevron-right"></app-icon>
+          <span class="au-crumbs__page" aria-current="page">{{ location().title }}</span>
         </nav>
 
-        <div class="au-topbar__actions">
+        <button class="au-top__search" type="button" (click)="openPalette()" aria-label="Search and go to (Ctrl+K)">
+          <app-icon name="search"></app-icon>
+          <span>Search</span>
+          <kbd class="au-kbd">{{ shortcut }}</kbd>
+        </button>
+
+        <div class="au-top__actions">
           <a
-            class="au-icon-button"
+            class="au-icon-button au-top__jobs"
             routerLink="/studio/activity"
-            aria-label="Background activity"
-            title="Background activity"
+            [attr.aria-label]="jobsLabel"
+            [title]="jobsLabel"
           >
             <app-icon name="activity"></app-icon>
+            <span class="au-top__count" *ngIf="activeJobs > 0" aria-hidden="true">{{ activeJobs > 99 ? '99+' : activeJobs }}</span>
+            <span class="au-top__flag" *ngIf="failedJobs > 0 && activeJobs === 0" aria-hidden="true"></span>
           </a>
           <button
-            class="au-icon-button au-icon-button--bell"
+            class="au-icon-button au-top__jobs"
             type="button"
             #bellTrigger
             (click)="refreshNotificationSummary(); bellMenu.toggle(bellTrigger)"
             [attr.aria-expanded]="bellMenu.isOpen()"
             aria-haspopup="menu"
-            aria-label="Notifications"
+            [attr.aria-label]="unreadCount ? 'Notifications, ' + unreadCount + ' unread' : 'Notifications'"
             title="Notifications"
           >
             <app-icon name="bell"></app-icon>
-            <span class="au-bell-badge" *ngIf="unreadCount > 0" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
+            <span class="au-top__count" *ngIf="unreadCount > 0" aria-hidden="true">{{ unreadCount > 99 ? '99+' : unreadCount }}</span>
           </button>
           <app-popover #bellMenu>
             <div class="au-menu au-menu--wide" aria-label="Notifications preview">
@@ -114,11 +152,10 @@ type NavItem = {
                   <span class="au-menu__item-meta">{{ item.createdAt | date: 'short' }}</span>
                 </span>
               </button>
-              <div class="au-menu__empty" *ngIf="notificationPreview.length === 0">
-                No notifications yet.
-              </div>
+              <div class="au-menu__empty" *ngIf="notificationPreview.length === 0">No notifications yet</div>
             </div>
           </app-popover>
+
           <div class="au-split">
             <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
               <app-icon name="plus"></app-icon>
@@ -138,18 +175,10 @@ type NavItem = {
           </div>
           <app-popover #createMenu>
             <div class="au-menu">
-              <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()">
-                <app-icon name="plus"></app-icon>
-                New article
-              </a>
-              <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()">
-                <app-icon name="sparkles"></app-icon>
-                Generate editorial plan
-              </a>
-              <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()">
-                <app-icon name="sources"></app-icon>
-                Add source
-              </a>
+              <a class="au-menu__item" routerLink="/studio/content/new" (click)="createMenu.hide()"><app-icon name="plus"></app-icon>New article</a>
+              <a class="au-menu__item" routerLink="/studio/editorial-plan" (click)="createMenu.hide()"><app-icon name="plan"></app-icon>Generate editorial plan</a>
+              <a class="au-menu__item" routerLink="/studio/sources" (click)="createMenu.hide()"><app-icon name="sources"></app-icon>Add source</a>
+              <a class="au-menu__item" routerLink="/studio/connections/wizard" (click)="createMenu.hide()"><app-icon name="plug"></app-icon>Connect a site or account</a>
             </div>
           </app-popover>
 
@@ -169,100 +198,89 @@ type NavItem = {
               <div class="au-menu">
                 <div class="au-menu__label au-truncate">{{ session.user.displayName }} · {{ session.role }}</div>
                 <div class="au-menu__label au-menu__label--plain au-truncate">{{ session.user.email }}</div>
-                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide()">
-                  <app-icon name="user"></app-icon>
-                  Profile
-                </a>
-                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide()">
-                  <app-icon name="globe"></app-icon>
-                  Sites
-                </a>
+                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide()"><app-icon name="user"></app-icon>Profile</a>
                 <button class="au-menu__item" type="button" (click)="cycleTheme()">
                   <app-icon [name]="themeIcon"></app-icon>
                   Appearance
                   <span class="au-menu__meta">{{ themeLabel }}</span>
                 </button>
                 <div class="au-menu__sep"></div>
-                <button class="au-menu__item is-danger" type="button" (click)="logout()">
-                  <app-icon name="logout"></app-icon>
-                  Log out
-                </button>
+                <button class="au-menu__item is-danger" type="button" (click)="logout()"><app-icon name="logout"></app-icon>Log out</button>
               </div>
             </app-popover>
           </div>
         </div>
       </header>
 
-      <!-- Navbar 2: section rail (drawer on mobile, lists every section there) -->
-      <aside class="au-sidebar" [class.is-open]="menuOpen" aria-label="Section navigation">
-        <!-- Site switcher -->
-        <div class="au-ws">
-          <button
-            class="au-ws__trigger"
-            type="button"
-            #siteTrigger
-            (click)="siteMenu.toggle(siteTrigger)"
-            [attr.aria-expanded]="siteMenu.isOpen()"
-            aria-haspopup="menu"
-            aria-label="Switch site"
-          >
-            <span class="au-ws__icon">{{ siteInitials }}</span>
-            <span class="au-ws__name">{{ activeSiteName }}</span>
-            <app-icon name="chevron-down" class="au-faint"></app-icon>
-          </button>
-          <app-popover #siteMenu>
-            <div class="au-menu">
-              <div class="au-menu__label">Switch site</div>
-              <button
-                class="au-menu__item"
-                type="button"
-                *ngFor="let site of sites"
-                [class.is-active]="site.id === activeSiteId"
-                (click)="selectSite(site.id, siteMenu)"
-              >
-                <span class="au-ws__icon">{{ siteInitialsOf(site) }}</span>
-                {{ site.name }}
-                <span class="au-menu__meta">{{ site.role }}</span>
-              </button>
-              <div class="au-menu__sep"></div>
-              <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="siteMenu.hide(); menuOpen = false">
-                <app-icon name="settings"></app-icon>
-                Manage sites
-              </a>
-            </div>
-          </app-popover>
-        </div>
-
-        <!-- Grouped navigation: desktop shows only the active section -->
-        <nav
-          class="au-nav"
-          *ngFor="let group of navGroups"
-          [class.is-current]="group.label === railGroup"
-          [attr.aria-label]="group.label"
+      <!-- Navigation B: sidebar -->
+      <aside id="studio-sidebar" class="au-sb" aria-label="Studio navigation" (keydown)="onSidebarKey($event)">
+        <button
+          #copilotLauncher
+          class="au-sb__item au-sb__copilot"
+          type="button"
+          (click)="toggleCopilot()"
+          [class.is-active]="copilot.open()"
+          [attr.aria-pressed]="copilot.open()"
+          aria-controls="studio-copilot"
+          data-tip="Copilot"
         >
-          <div class="au-nav__label">{{ group.label }}</div>
-          <a
-            class="au-nav-item"
-            *ngFor="let item of group.items"
-            [routerLink]="item.path"
-            routerLinkActive="is-active"
-            (click)="menuOpen = false"
-          >
-            <app-icon [name]="item.icon"></app-icon>
-            {{ item.label }}
-          </a>
+          <app-icon name="message"></app-icon>
+          <span class="au-sb__label">Copilot</span>
+          <kbd class="au-kbd au-sb__label">{{ copilotShortcut }}</kbd>
+        </button>
+
+        <nav class="au-sb__nav">
+          <section class="au-sb__group" *ngFor="let group of nav">
+            <button
+              class="au-sb__heading"
+              type="button"
+              (click)="toggleGroup(group.id)"
+              [attr.aria-expanded]="!closedGroups().has(group.id)"
+              [attr.aria-controls]="'sb-' + group.id"
+            >
+              <span>{{ group.label }}</span>
+              <app-icon [name]="closedGroups().has(group.id) ? 'chevron-right' : 'chevron-down'"></app-icon>
+            </button>
+            <ul [id]="'sb-' + group.id" class="au-sb__list" [hidden]="closedGroups().has(group.id) && !collapsed()">
+              <li *ngFor="let item of group.items">
+                <a
+                  class="au-sb__item"
+                  [routerLink]="item.path"
+                  routerLinkActive="is-active"
+                  [routerLinkActiveOptions]="{ exact: false }"
+                  ariaCurrentWhenActive="page"
+                  [attr.data-tip]="item.label"
+                  [attr.aria-label]="collapsed() ? item.label : null"
+                >
+                  <app-icon [name]="item.icon"></app-icon>
+                  <span class="au-sb__label">{{ item.label }}</span>
+                </a>
+              </li>
+            </ul>
+          </section>
         </nav>
       </aside>
 
-      @if (menuOpen) {
-        <div class="au-backdrop" (click)="menuOpen = false"></div>
+      @if (drawerOpen()) {
+        <div class="au-backdrop" (click)="closeDrawer()"></div>
       }
 
-      <main class="au-main">
+      <main id="studio-main" class="au-main" tabindex="-1">
         <div class="au-content">
           <router-outlet></router-outlet>
         </div>
       </main>
+
+      @if (copilot.open()) {
+        <div class="au-backdrop au-backdrop--copilot" (click)="toggleCopilot(false)"></div>
+      }
+      <aside id="studio-copilot" class="au-copilot" [hidden]="!copilot.open()" aria-label="Copilot">
+        <app-copilot-panel #panel (closed)="toggleCopilot(false)"></app-copilot-panel>
+      </aside>
+
+      @if (paletteOpen()) {
+        <app-command-palette #palette (closed)="closePalette()"></app-command-palette>
+      }
     </div>
 
     <ng-template #bootState>
@@ -280,59 +298,52 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly sse = inject(SseService);
   private readonly platformId = inject(PLATFORM_ID);
+  readonly copilot = inject(CopilotService);
 
-  readonly navGroups: Array<{ label: string; icon: string; items: NavItem[] }> = [
-    {
-      label: 'Workspace',
-      icon: 'home',
-      items: [
-        { label: 'Overview', path: '/studio/overview', icon: 'overview' },
-        { label: 'Inbox', path: '/studio/inbox', icon: 'inbox' },
-        { label: 'Editorial Engine', path: '/studio/editorial-engine', icon: 'sparkles' },
-        { label: 'Editorial Plan', path: '/studio/editorial-plan', icon: 'plan' },
-        { label: 'Content', path: '/studio/content', icon: 'content' },
-        { label: 'Calendar', path: '/studio/calendar', icon: 'calendar' },
-      ],
-    },
-    {
-      label: 'Publish',
-      icon: 'publications',
-      items: [
-        { label: 'Publications', path: '/studio/publications', icon: 'publications' },
-        { label: 'Media', path: '/studio/media', icon: 'media' },
-        { label: 'Connections', path: '/studio/connections', icon: 'connections' },
-      ],
-    },
-    {
-      label: 'Operate',
-      icon: 'operations',
-      items: [
-        { label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan' },
-        { label: 'Sources', path: '/studio/sources', icon: 'sources' },
-        { label: 'Automation', path: '/studio/automation', icon: 'automation' },
-        { label: 'Activity', path: '/studio/activity', icon: 'activity' },
-        { label: 'Operations', path: '/studio/operations', icon: 'operations' },
-      ],
-    },
-  ];
+  readonly nav = STUDIO_NAV;
+
+  @ViewChild('navToggle') private navToggle?: ElementRef<HTMLButtonElement>;
+  @ViewChild('copilotLauncher') private copilotLauncher?: ElementRef<HTMLButtonElement>;
+  @ViewChild('panel') private panel?: CopilotPanelComponent;
+  @ViewChild('palette') private set paletteRef(palette: CommandPaletteComponent | undefined) {
+    if (!palette) return;
+    palette.actions.set([
+      { id: 'copilot', label: 'Open copilot', group: 'Action', icon: 'message', run: () => this.toggleCopilot(true) },
+      { id: 'new-content', label: 'New article', group: 'Action', icon: 'plus', run: () => void this.router.navigateByUrl('/studio/content/new') },
+      { id: 'connect', label: 'Connect a site or account', group: 'Action', icon: 'plug', run: () => void this.router.navigateByUrl('/studio/connections/wizard') },
+      { id: 'theme', label: 'Switch appearance', group: 'Action', icon: 'sun', run: () => this.cycleTheme() },
+      ...this.sites.map((site) => ({ id: 'site-' + site.id, label: 'Switch to ' + site.name, group: 'Site', icon: 'globe' as const, run: () => void this.selectSite(site.id) })),
+    ]);
+    palette.focus();
+  }
 
   private subscription: Subscription | null = null;
   private sseUnsubscribe: (() => void) | null = null;
   private sseSubscription: Subscription | null = null;
   private notificationTimer: ReturnType<typeof setTimeout> | null = null;
   private notificationFallbackTimer: ReturnType<typeof setInterval> | null = null;
+  private phoneQuery: MediaQueryList | null = null;
+  private paletteReturnFocus: HTMLElement | null = null;
 
   session: StudioSession | null = null;
   sites: StudioSite[] = [];
   activeSiteId: string | null = null;
   loading = true;
-  menuOpen = false;
-  /** Section tab highlighted in the top bar ('' on settings/notifications). */
-  activeGroup = 'Workspace';
-  /** Section listed in the rail; routes outside every group keep the last one. */
-  railGroup = 'Workspace';
   unreadCount = 0;
   notificationPreview: StudioNotification[] = [];
+  activeJobs = 0;
+  failedJobs = 0;
+
+  /** User preference wins; without one, the sidebar starts collapsed below 1200px. */
+  readonly collapsed = signal(false);
+  readonly drawerOpen = signal(false);
+  readonly isPhone = signal(false);
+  readonly paletteOpen = signal(false);
+  readonly closedGroups = signal<Set<string>>(new Set());
+  readonly location = signal<{ group: string; title: string }>({ group: 'Workspace', title: 'Overview' });
+
+  readonly shortcut = this.isMac() ? '⌘K' : 'Ctrl K';
+  readonly copilotShortcut = this.isMac() ? '⌘J' : 'Ctrl J';
 
   get activeSiteName(): string {
     return this.sites.find((site) => site.id === this.activeSiteId)?.name ?? 'All sites';
@@ -347,7 +358,13 @@ export class AppShellComponent implements OnInit, OnDestroy {
     return this.initialsOf(label) || 'AU';
   }
 
-  get themeIcon(): string {
+  get jobsLabel(): string {
+    if (this.activeJobs) return `Background activity, ${this.activeJobs} running`;
+    if (this.failedJobs) return `Background activity, ${this.failedJobs} failed`;
+    return 'Background activity';
+  }
+
+  get themeIcon(): 'sun' | 'moon' | 'monitor' {
     const preference = this.themeService.preference();
     return preference === 'light' ? 'sun' : preference === 'dark' ? 'moon' : 'monitor';
   }
@@ -358,19 +375,15 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    this.restoreLayout();
     this.subscription = this.router.events
       .pipe(
         filter((event) => event instanceof NavigationEnd),
         startWith(null),
       )
       .subscribe(() => {
-        this.menuOpen = false;
-        const url = this.router.url.split(/[?#]/)[0];
-        const group = this.navGroups.find((g) =>
-          g.items.some((item) => url === item.path || url.startsWith(item.path + '/')),
-        );
-        this.activeGroup = group?.label ?? '';
-        this.railGroup = group?.label ?? this.railGroup;
+        this.drawerOpen.set(false);
+        this.location.set(this.resolveLocation());
       });
 
     void this.bootstrap();
@@ -380,37 +393,160 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.subscription?.unsubscribe();
     this.sseUnsubscribe?.();
     this.sseSubscription?.unsubscribe();
-    if (this.notificationTimer) {
-      clearTimeout(this.notificationTimer);
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
+    if (this.notificationFallbackTimer) clearInterval(this.notificationFallbackTimer);
+    this.phoneQuery?.removeEventListener('change', this.onPhoneChange);
+  }
+
+  // ── Layout state ──────────────────────────────────────────────────────
+
+  private restoreLayout(): void {
+    if (!isPlatformBrowser(this.platformId)) return;
+    const stored = localStorage.getItem(COLLAPSE_KEY);
+    this.collapsed.set(stored === null ? window.matchMedia('(max-width: 1199px)').matches : stored === '1');
+    try {
+      this.closedGroups.set(new Set(JSON.parse(localStorage.getItem(GROUPS_KEY) || '[]') as string[]));
+    } catch {
+      this.closedGroups.set(new Set());
     }
-    if (this.notificationFallbackTimer) {
-      clearInterval(this.notificationFallbackTimer);
+    this.phoneQuery = window.matchMedia('(max-width: 860px)');
+    this.isPhone.set(this.phoneQuery.matches);
+    this.phoneQuery.addEventListener('change', this.onPhoneChange);
+    if (localStorage.getItem(COPILOT_KEY) === '1' && window.matchMedia('(min-width: 1200px)').matches) {
+      this.copilot.toggle(true);
     }
   }
 
-  private watchLiveUpdates(): void {
-    if (!isPlatformBrowser(this.platformId)) {
+  private readonly onPhoneChange = (event: MediaQueryListEvent) => {
+    this.isPhone.set(event.matches);
+    this.drawerOpen.set(false);
+  };
+
+  toggleNav(): void {
+    if (this.isPhone()) {
+      this.drawerOpen.set(!this.drawerOpen());
+      if (this.drawerOpen()) setTimeout(() => (document.querySelector('#studio-sidebar .au-sb__item') as HTMLElement | null)?.focus());
       return;
     }
+    this.collapsed.set(!this.collapsed());
+    localStorage.setItem(COLLAPSE_KEY, this.collapsed() ? '1' : '0');
+  }
+
+  closeDrawer(): void {
+    this.drawerOpen.set(false);
+    this.navToggle?.nativeElement.focus();
+  }
+
+  toggleGroup(id: string): void {
+    if (this.collapsed() && !this.isPhone()) return;
+    const next = new Set(this.closedGroups());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.closedGroups.set(next);
+    localStorage.setItem(GROUPS_KEY, JSON.stringify([...next]));
+  }
+
+  toggleCopilot(force?: boolean): void {
+    const wasOpen = this.copilot.open();
+    this.copilot.toggle(force);
+    this.drawerOpen.set(false);
+    if (isPlatformBrowser(this.platformId)) localStorage.setItem(COPILOT_KEY, this.copilot.open() ? '1' : '0');
+    if (this.copilot.open() && !wasOpen) this.panel?.focusInput();
+    // On phones the launcher sits in the closed drawer, so focus returns to the menu button.
+    if (!this.copilot.open() && wasOpen) (this.isPhone() ? this.navToggle : this.copilotLauncher)?.nativeElement.focus();
+  }
+
+  openPalette(): void {
+    this.paletteReturnFocus = document.activeElement as HTMLElement | null;
+    this.paletteOpen.set(true);
+  }
+
+  closePalette(): void {
+    this.paletteOpen.set(false);
+    this.paletteReturnFocus?.focus();
+  }
+
+  @HostListener('document:keydown', ['$event'])
+  onGlobalKey(event: KeyboardEvent): void {
+    const mod = event.ctrlKey || event.metaKey;
+    if (mod && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      if (this.paletteOpen()) this.closePalette();
+      else this.openPalette();
+    } else if (mod && event.key.toLowerCase() === 'j') {
+      event.preventDefault();
+      this.toggleCopilot();
+    } else if (event.key === 'Escape' && !this.paletteOpen()) {
+      if (this.drawerOpen()) this.closeDrawer();
+      else if (this.copilot.open() && !document.querySelector('.au-pop')) this.toggleCopilot(false);
+    }
+  }
+
+  /** Arrow keys move between sidebar entries; Home/End jump to the ends. */
+  onSidebarKey(event: KeyboardEvent): void {
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const items = Array.from(document.querySelectorAll<HTMLElement>('#studio-sidebar .au-sb__item')).filter((el) => el.offsetParent !== null);
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    if (index < 0) return;
+    event.preventDefault();
+    const next =
+      event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  }
+
+  private resolveLocation(): { group: string; title: string } {
+    let snapshot: ActivatedRouteSnapshot | null = this.router.routerState.snapshot.root;
+    let title: string | undefined;
+    while (snapshot) {
+      title = (snapshot.data?.['studioMeta'] as { title?: string } | undefined)?.title ?? title;
+      snapshot = snapshot.firstChild;
+    }
+    const url = this.router.url.split(/[?#]/)[0];
+    const match = activeNavItem(url);
+    return { group: match?.group.label ?? 'Studio', title: title ?? match?.item.label ?? 'Studio' };
+  }
+
+  private isMac(): boolean {
+    return isPlatformBrowser(this.platformId) && /Mac|iPhone|iPad/.test(navigator.platform);
+  }
+
+  // ── Live counters ─────────────────────────────────────────────────────
+
+  private watchLiveUpdates(): void {
+    if (!isPlatformBrowser(this.platformId)) return;
     this.sseUnsubscribe = this.sse.subscribe((event) => {
       if (event.type === 'notification.created' || event.type === 'notification.read') {
         this.refreshNotificationSummary();
       }
+      if (event.type.startsWith('operation.') || event.type.startsWith('job.')) {
+        this.refreshJobs();
+      }
     });
     this.sseSubscription = this.sse.connection$.subscribe();
     this.refreshNotificationSummary();
-    // Fallback heartbeat keeps the badge accurate even when SSE is unavailable.
+    this.refreshJobs();
+    // Fallback heartbeat keeps the counters accurate even when SSE is unavailable.
     this.notificationFallbackTimer = setInterval(() => {
       if (document.visibilityState === 'visible') {
         this.refreshNotificationSummary();
+        this.refreshJobs();
       }
     }, 45_000);
   }
 
+  private refreshJobs(): void {
+    this.api.listOperations({ page: 1, pageSize: 1 }).subscribe({
+      next: (response) => {
+        const counts = response.counts ?? {};
+        this.activeJobs = (counts['running'] ?? 0) + (counts['queued'] ?? 0) + (counts['retrying'] ?? 0);
+        this.failedJobs = counts['failed'] ?? 0;
+      },
+      error: () => undefined,
+    });
+  }
+
   refreshNotificationSummary(): void {
-    if (this.notificationTimer) {
-      clearTimeout(this.notificationTimer);
-    }
+    if (this.notificationTimer) clearTimeout(this.notificationTimer);
     this.notificationTimer = setTimeout(() => {
       this.api.listNotifications({ page: 1, pageSize: 10 }).subscribe({
         next: (response) => {
@@ -446,9 +582,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
   notificationQuery(item: StudioNotification): Record<string, string> {
     const raw = item.actionUrl || '';
     const queryIndex = raw.indexOf('?');
-    if (queryIndex < 0) {
-      return {};
-    }
+    if (queryIndex < 0) return {};
     const params: Record<string, string> = {};
     for (const [key, value] of new URLSearchParams(raw.slice(queryIndex + 1))) {
       params[key] = value;
@@ -472,6 +606,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   private async bootstrap(): Promise<void> {
+    // The session lives in the browser; a server render shows the boot spinner only.
+    if (!isPlatformBrowser(this.platformId)) return;
     try {
       const session = await this.appContext.ensureSession();
       this.session = session;
@@ -496,18 +632,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   }
 
   private dismissBootOverlay(): void {
-    if (!isPlatformBrowser(this.platformId)) {
-      return;
-    }
+    if (!isPlatformBrowser(this.platformId)) return;
     document.body.classList.remove('studio-boot-pending');
     window.dispatchEvent(new Event('auctorio:studio-ready'));
   }
 
   async selectSite(siteId: string, menu?: AppPopoverComponent): Promise<void> {
     menu?.hide();
-    if (siteId === this.activeSiteId) {
-      return;
-    }
+    if (siteId === this.activeSiteId) return;
     const session = await this.appContext.switchSite(siteId);
     this.session = session;
     this.sites = session?.sites ?? [];

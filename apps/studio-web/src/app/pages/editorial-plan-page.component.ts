@@ -45,7 +45,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
       .au-brief__stat { display: flex; align-items: baseline; justify-content: space-between; gap: var(--au-s2); flex-wrap: wrap; }
       .au-brief__stat .au-brief__label { margin-bottom: 0; }
       .au-brief__stat strong { font-size: var(--au-fs-body); color: var(--au-text); }
-      .au-brief__label { display: block; font-size: var(--au-fs-caption); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: var(--au-muted); margin-bottom: var(--au-s1); }
+      .au-brief__label { display: block; font-size: var(--au-fs-caption); font-weight: 500; color: var(--au-muted); margin-bottom: var(--au-s1); }
       .au-brief__text { margin: 0; font-size: var(--au-fs-body-sm); line-height: 1.6; color: var(--au-text-2); overflow-wrap: anywhere; }
       .au-brief__text--strong { color: var(--au-text); font-weight: 600; }
       .au-brief__list { margin: 0; padding-left: var(--au-s3); font-size: var(--au-fs-body-sm); line-height: 1.6; color: var(--au-text-2); }

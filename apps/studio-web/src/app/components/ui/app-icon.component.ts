@@ -244,6 +244,31 @@ const ICONS: Record<string, IconElement[]> = {
     { kind: 'path', d: 'M15 8V2' },
     { kind: 'path', d: 'M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z' },
   ],
+  link: [{ kind: 'path', d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' }, { kind: 'path', d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' }],
+  'arrow-right': [{ kind: 'path', d: 'M5 12h14' }, { kind: 'path', d: 'm12 5 7 7-7 7' }],
+  loader: [{ kind: 'path', d: 'M21 12a9 9 0 1 1-6.22-8.56' }],
+  'panel-left': [
+    { kind: 'rect', x: 3, y: 4, width: 18, height: 16, rx: 2 },
+    { kind: 'path', d: 'M9 4v16' },
+  ],
+  'panel-right': [
+    { kind: 'rect', x: 3, y: 4, width: 18, height: 16, rx: 2 },
+    { kind: 'path', d: 'M15 4v16' },
+  ],
+  message: [{ kind: 'path', d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' }],
+  send: [{ kind: 'path', d: 'm22 2-7 20-4-9-9-4Z' }, { kind: 'path', d: 'M22 2 11 13' }],
+  stop: [{ kind: 'rect', x: 6, y: 6, width: 12, height: 12, rx: 2 }],
+  expand: [
+    { kind: 'path', d: 'M15 3h6v6' },
+    { kind: 'path', d: 'M9 21H3v-6' },
+    { kind: 'path', d: 'M21 3l-7 7' },
+    { kind: 'path', d: 'M3 21l7-7' },
+  ],
+  competency: [
+    { kind: 'path', d: 'M12 2 3 7l9 5 9-5-9-5Z' },
+    { kind: 'path', d: 'm3 17 9 5 9-5' },
+    { kind: 'path', d: 'm3 12 9 5 9-5' },
+  ],
 };
 
 export type StudioIconName = keyof typeof ICONS;

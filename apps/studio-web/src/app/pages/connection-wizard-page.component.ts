@@ -1,13 +1,15 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, OnDestroy, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, interval } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
 import { ConfirmService } from '../services/confirm.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
+import { SocialSetupGuideComponent } from '../components/social-setup-guide.component';
+import { detectConnectTarget, type ConnectTarget } from '../utils/connect-target';
 import type {
   ConfigSchemaField,
   ConnectorCapabilitiesResponse,
@@ -22,7 +24,7 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
 @Component({
   selector: 'app-connection-wizard-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, SocialSetupGuideComponent],
   styles: [
     `
 /* Destination cards */
@@ -79,57 +81,6 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
   color: var(--au-muted);
   font-size: var(--au-fs-metadata);
 }
-
-/* Stepper */
-.au-stepper {
-  list-style: none;
-  display: flex;
-  gap: var(--au-s2);
-  padding: 0;
-  margin: 0 0 var(--au-s4);
-  overflow-x: auto;
-}
-
-.au-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-shrink: 0;
-}
-
-.au-step__dot {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: var(--au-r-full);
-  background: var(--au-surface-2);
-  color: var(--au-muted);
-  font-size: var(--au-fs-caption);
-  font-weight: 650;
-  border: 1px solid var(--au-border);
-}
-
-.au-step.is-current .au-step__dot {
-  background: var(--au-brand);
-  color: var(--au-on-brand);
-  border-color: var(--au-brand);
-}
-
-.au-step.is-done .au-step__dot {
-  background: var(--au-success-soft);
-  color: var(--au-success);
-  border-color: var(--au-success);
-}
-
-.au-step__label {
-  font-size: var(--au-fs-body-sm);
-  color: var(--au-muted);
-  white-space: nowrap;
-}
-
-.au-step.is-current .au-step__label { color: var(--au-text); font-weight: 600; }
 
 /* Connection methods */
 .au-method-list {
@@ -188,9 +139,9 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
     <section class="au-page au-page--narrow">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Universal connection installer</p>
-          <h1 class="au-page__title">{{ resumeId ? 'Resume connection' : 'Connect destination' }}</h1>
-          <p class="au-page__subtitle">Auctorio discovers, verifies and activates publishing destinations without code changes.</p>
+          <p class="au-page__eyebrow">Connections</p>
+          <h1 class="au-page__title">{{ resumeId ? 'Resume connection' : 'Connect a site or account' }}</h1>
+          <p class="au-page__subtitle">Auctorio reads the destination, checks it with a test draft and only then lets you publish to it</p>
         </div>
       </header>
 
@@ -218,9 +169,50 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </ol>
 
       <!-- Step 1: Choose destination -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 0">
+      <section class="au-panel au-panel--padded" *ngIf="panel === 0">
         <h2 class="au-panel__title">What do you want to connect?</h2>
-        <p class="au-panel__subtitle">Capabilities below come from the connector registry, not hard-coded cards.</p>
+        <p class="au-panel__subtitle">Paste a website address, a profile link or an @handle. Auctorio works out the rest.</p>
+
+        <form class="au-magic" (ngSubmit)="startFromTarget()">
+          <label class="au-magic__field">
+            <span class="au-sr-only">Website, profile link or handle</span>
+            <app-icon name="plug"></app-icon>
+            <input
+              class="au-magic__input"
+              type="text"
+              name="target"
+              autocomplete="off"
+              spellcheck="false"
+              [(ngModel)]="targetInput"
+              (ngModelChange)="detected = detect($event)"
+              placeholder="example.com, instagram.com/yourbrand or @yourbrand"
+              aria-describedby="au-magic-result"
+            />
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="!detected || detected.kind === 'handle'">
+              Connect
+              <app-icon name="arrow-right"></app-icon>
+            </button>
+          </label>
+          <div id="au-magic-result" class="au-magic__result" aria-live="polite">
+            @if (detected) {
+              @if (detected.kind === 'handle') {
+                <span>Which network is {{ detected.label }} on?</span>
+                <button class="au-btn au-btn--sm" type="button" (click)="startSocial('instagram', detected.handle)">Instagram</button>
+                <button class="au-btn au-btn--sm" type="button" (click)="startSocial('x', detected.handle)">X</button>
+              } @else {
+                <span class="au-magic__chip" [attr.data-kind]="detected.kind">
+                  <app-icon [name]="detected.kind === 'website' ? 'globe' : 'user'"></app-icon>
+                  {{ detected.kind === 'website' ? 'Website' : '' }} {{ detected.label }}
+                </span>
+                <span class="au-muted">{{ detected.kind === 'website' ? 'Next: read the site and suggest how to publish to it' : 'Next: authorize the account' }}</span>
+              }
+            } @else if (targetInput.trim()) {
+              <span class="au-muted">Enter a domain like example.com, a profile link, or a handle starting with &#64;</span>
+            }
+          </div>
+        </form>
+
+        <p class="au-magic__or"><span>or choose a destination</span></p>
         <div class="au-destination-grid" *ngIf="capabilities">
           <button
             class="au-destination-card"
@@ -245,9 +237,9 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </section>
 
       <!-- Step 2: Website discovery -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 1">
-        <h2 class="au-panel__title">Website discovery</h2>
-        <p class="au-panel__subtitle">Enter the site URL. Auctorio normalizes it, blocks unsafe targets and probes only public, read-only endpoints.</p>
+      <section class="au-panel au-panel--padded" *ngIf="panel === 1">
+        <h2 class="au-panel__title">Read the website</h2>
+        <p class="au-panel__subtitle">Auctorio looks only at public pages: the CMS, the language and the sitemaps. Nothing is changed on the site.</p>
         <form (ngSubmit)="runDiscovery()">
           <label class="au-field">
             <span class="au-field__label">Website URL</span>
@@ -285,9 +277,9 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </section>
 
       <!-- Step 3: Connection method -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 2">
+      <section class="au-panel au-panel--padded" *ngIf="panel === 2">
         <h2 class="au-panel__title">Connection method</h2>
-        <p class="au-panel__subtitle">Only compatible options are shown. Advanced configuration is progressive disclosure.</p>
+        <p class="au-panel__subtitle">Only the methods this site supports are listed.</p>
         <div class="au-method-list" *ngIf="currentKindView">
           <button
             class="au-method-card"
@@ -313,7 +305,7 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </section>
 
       <!-- Step 4: Authenticate -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 3">
+      <section class="au-panel au-panel--padded" *ngIf="panel === 3">
         <ng-container *ngIf="installation?.kind === 'website'; else socialAuth">
           <h2 class="au-panel__title">Authenticate securely</h2>
           <p class="au-panel__subtitle">Secrets are write-only: encrypted at rest and never displayed again.</p>
@@ -347,36 +339,31 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
         </ng-container>
 
         <ng-template #socialAuth>
-          <h2 class="au-panel__title">Authorize {{ kindLabel(installation?.kind) }}</h2>
+          <h2 class="au-panel__title">Authorize {{ kindLabel(installation?.kind) }}{{ socialHandle ? ' · @' + socialHandle : '' }}</h2>
           <p class="au-panel__subtitle" *ngIf="socialConnectorReady">
-            Authorize Auctorio with OAuth (PKCE). The provider page opens in a new window and this wizard updates automatically.
+            Sign in to the account in the window that opens. This page updates on its own when it is done.
           </p>
-          <div class="au-banner au-banner--warning" *ngIf="!socialConnectorReady">
-            <app-icon name="info"></app-icon>
-            <span class="au-banner__text">
-              A social provider must be configured server-side first (Ayrshare managed API, or X/Meta developer apps).
-              Ask an operator to configure the provider credentials, then this step becomes one-click.
-            </span>
-          </div>
+          <app-social-setup-guide *ngIf="!socialConnectorReady" [platform]="installation?.kind === 'x' ? 'x' : 'instagram'"></app-social-setup-guide>
           <p class="au-error" *ngIf="authError">{{ authError }}</p>
           <div class="au-form__actions">
             <button class="au-btn au-btn--primary" type="button" (click)="startSocialAuthorization()" [disabled]="!socialConnectorReady || authorizing">
               <app-icon name="plug"></app-icon>
               {{ authorizing ? 'Preparing…' : 'Authorize ' + kindLabel(installation?.kind) }}
             </button>
-            <button class="au-btn au-btn--ghost" type="button" (click)="stepIndex = 2">Back</button>
+            <button class="au-btn au-btn--ghost" type="button" (click)="stepIndex = 0; refreshSteps()">Back</button>
           </div>
           <div class="au-banner au-banner--success" *ngIf="socialAuthorized" role="status">
             <app-icon name="check"></app-icon>
-            <span class="au-banner__text">Authorization received. Continue to review and activation.</span>
+            <span class="au-banner__text">Authorization received</span>
+            <button class="au-banner__action" type="button" (click)="stepIndex = 2; refreshSteps()">Continue to review</button>
           </div>
         </ng-template>
       </section>
 
       <!-- Step 5: Verify -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 4">
+      <section class="au-panel au-panel--padded" *ngIf="panel === 4">
         <h2 class="au-panel__title">Verify capabilities</h2>
-        <p class="au-panel__subtitle">Reversible probes only. Auctorio creates and deletes a sandbox draft; it never publishes public content without your confirmation.</p>
+        <p class="au-panel__subtitle">Auctorio creates a test draft, reads it back and deletes it. Nothing is published.</p>
         <ul class="au-probe-list" *ngIf="detail?.descriptor">
           <li class="au-probe" *ngFor="let probe of detail!.descriptor!.verification.probes">
             <app-icon name="circle-check"></app-icon>
@@ -399,7 +386,7 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </section>
 
       <!-- Step 6: Review & activate -->
-      <section class="au-panel au-panel--padded" *ngIf="stepIndex === 5">
+      <section class="au-panel au-panel--padded" *ngIf="panel === 5">
         <h2 class="au-panel__title">Review and activate</h2>
         <dl class="au-detail-grid">
           <dt>Destination</dt><dd>{{ installation?.displayName || kindLabel(installation?.kind) }}</dd>
@@ -460,6 +447,15 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
   verificationSummary = '';
   verificationPassed = false;
   resumeId: string | null = null;
+  targetInput = '';
+  detected: ConnectTarget | null = null;
+  socialHandle: string | null = null;
+
+  /** Panels follow the website numbering; the 3-step social flow maps onto authorize (3) and review (5). */
+  get panel(): number {
+    if (this.installation && this.installation.kind !== 'website') return [0, 3, 5][this.stepIndex] ?? 0;
+    return this.stepIndex;
+  }
 
   get currentKindView(): { connectors: Array<{ id: string; name: string; description: string }> } | null {
     const kind = this.capabilities?.kinds.find((entry) => entry.kind === this.installation?.kind);
@@ -474,11 +470,17 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.resumeId = this.route.snapshot.paramMap.get('id') ?? null;
+    const target = this.route.snapshot.queryParamMap.get('target') ?? '';
     this.api.getConnectorCapabilities().subscribe({
       next: (capabilities) => {
         this.capabilities = capabilities;
         if (this.resumeId) {
           this.loadInstallation(this.resumeId);
+        } else if (target) {
+          // Arrived from a "Connect" box elsewhere: start with what was pasted there.
+          this.targetInput = target;
+          this.detected = this.detect(target);
+          if (this.detected && this.detected.kind !== 'handle') this.startFromTarget();
         }
       },
       error: () => {
@@ -576,11 +578,46 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
     ].map((step, index) => ({ ...step, state: index < this.stepIndex ? 'done' : index === this.stepIndex ? 'current' : 'todo' }));
   }
 
-  private refreshSteps(): void {
+  refreshSteps(): void {
     this.steps = this.steps.map((step, index) => ({
       ...step,
       state: index < this.stepIndex ? 'done' : index === this.stepIndex ? 'current' : 'todo',
     }));
+  }
+
+  detect(value: string): ConnectTarget | null {
+    return detectConnectTarget(value);
+  }
+
+  /** One-box start: a website goes straight to discovery, a profile straight to authorization. */
+  startFromTarget(): void {
+    const target = this.detected;
+    if (!target || target.kind === 'handle') return;
+    if (target.kind === 'website') {
+      this.selectKind('website');
+      this.continueFromKind();
+      this.url = target.url;
+      this.runDiscovery();
+      return;
+    }
+    this.startSocial(target.kind, target.handle);
+  }
+
+  /** Resumes an unfinished draft for the same network instead of piling up duplicates. */
+  startSocial(kind: 'instagram' | 'x', handle: string | null): void {
+    this.socialHandle = handle;
+    this.selectKind(kind);
+    this.api.listConnectorInstallations(kind).subscribe({
+      next: (response) => {
+        const open = response.items.find((item) => item.state === 'draft' || item.state === 'cancelled');
+        if (open) {
+          this.loadInstallation(open.id);
+        } else {
+          this.continueFromKind();
+        }
+      },
+      error: () => this.continueFromKind(),
+    });
   }
 
   kindHint(kind: ConnectorKind): string {

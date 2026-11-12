@@ -323,6 +323,9 @@ model Tenant {
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
+  aiProviderSetting              AiProviderSetting?
+  copilotThreads                 CopilotThread[]
+  copilotMessages                CopilotMessage[]
   topics                         Topic[]
   facts                          Fact[]
   contentText                    ContentText[]
@@ -2661,4 +2664,66 @@ model WaitlistSignup {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("waitlist_signups")
+}
+
+// ────────────────────────────────────────────────────────────── Studio Copilot
+
+/// One persisted copilot conversation, private to the Studio user who opened it.
+model CopilotThread {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  studioUserId String   @map("studio_user_id") @db.Uuid
+  siteId       String?  @map("site_id") @db.Uuid
+  title        String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages CopilotMessage[]
+
+  @@index([tenantId, studioUserId, updatedAt])
+  @@map("copilot_threads")
+}
+
+/// A copilot turn. Assistant turns record the competency run that produced them
+/// (key, inputs, evidence) plus provider, model and measured token usage.
+model CopilotMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  threadId      String   @map("thread_id") @db.Uuid
+  role          String
+  content       String   @db.Text
+  status        String   @default("completed")
+  competencyKey String?  @map("competency_key")
+  context       Json?
+  evidence      Json?
+  provider      String?
+  model         String?
+  tokensInput   Int?     @map("tokens_input")
+  tokensOutput  Int?     @map("tokens_output")
+  durationMs    Int?     @map("duration_ms")
+  error         String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread CopilotThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@index([tenantId, competencyKey, createdAt])
+  @@map("copilot_messages")
+}
+
+/// AI provider and model chosen by a workspace admin (Settings → AI). Keys stay in the server env.
+model AiProviderSetting {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @unique @map("tenant_id") @db.Uuid
+  provider        String
+  model           String
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_provider_settings")
 }

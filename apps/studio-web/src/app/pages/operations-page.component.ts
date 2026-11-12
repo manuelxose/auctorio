@@ -257,7 +257,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
               </div>
               <div class="au-field" *ngIf="budgetForm.action === 'degrade'">
                 <label class="au-field__label" for="budget-model">Fallback model</label>
-                <input id="budget-model" class="au-input" type="text" placeholder="deepseek-chat" [(ngModel)]="budgetForm.degradeModel" />
+                <input id="budget-model" class="au-input" type="text" placeholder="model name" [(ngModel)]="budgetForm.degradeModel" />
               </div>
             </div>
             <div class="au-form__actions">

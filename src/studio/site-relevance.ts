@@ -238,6 +238,13 @@ export function computeSiteRelevanceScore(
     );
   }
 
+  // Nothing read from the site yet (empty crawl): there is no vocabulary to judge against, so
+  // scoring would reject everything. Keep the item at the threshold; off-topic terms above still reject.
+  if (profileTopicTokens.length === 0 && profile.topicClusters.length === 0 && profile.contentTypes.length === 0) {
+    reasons.push("site profile has no topics yet; relevance not judged");
+    return { score: DEFAULT_RELEVANCE_THRESHOLD, reasons, rejected: false };
+  }
+
   // ── Topic overlap with site profile (0-35)
   const similarity = topicSimilarity(titleTokens, profileTopicTokens);
   const topicPoints = Math.round(similarity * 35);

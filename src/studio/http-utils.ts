@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { tenantRepository } from "../infrastructure/db/repositories";
 import { sha256 } from "../shared/utils/hash";
+import { enterAiTenant } from "../infrastructure/ai/ai-settings";
 import { getEnv } from "../shared/utils/env";
 import {
   buildStudioProxySignature,
@@ -167,6 +168,8 @@ export async function requireStudioContext(
 ): Promise<StudioRequestContext | null> {
   const signed = readSignedStudioContext(request);
   if (signed) {
+    // Model calls made while handling this request use the workspace's AI choice.
+    await enterAiTenant(signed.tenantId);
     return signed;
   }
 
@@ -174,6 +177,7 @@ export async function requireStudioContext(
   if (!tenantId) {
     return null;
   }
+  await enterAiTenant(tenantId);
 
   request.studioAuthMode = "api_key";
   request.studioPermissions = [...STUDIO_PERMISSIONS];

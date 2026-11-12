@@ -65,7 +65,7 @@ function isPlatformBrowserSafe(): boolean {
         <button class="au-rich-editor__btn" type="button" title="Bullet list" aria-label="Bullet list" (mousedown)="exec('insertUnorderedList')">• List</button>
         <button class="au-rich-editor__btn" type="button" title="Numbered list" aria-label="Numbered list" (mousedown)="exec('insertOrderedList')">1. List</button>
         <button class="au-rich-editor__btn" type="button" title="Blockquote" aria-label="Blockquote" (mousedown)="exec('formatBlock', '<blockquote>')">❝</button>
-        <button class="au-rich-editor__btn" type="button" title="Link" aria-label="Link" (mousedown)="insertLink()">🔗</button>
+        <button class="au-rich-editor__btn" type="button" title="Link" aria-label="Link" (mousedown)="insertLink()"><app-icon name="link"></app-icon></button>
         <button class="au-rich-editor__btn" type="button" title="Insert table" aria-label="Insert table" (mousedown)="insertTable()">▦</button>
         <span class="au-rich-editor__sep" aria-hidden="true"></span>
         <button class="au-rich-editor__btn" type="button" title="Clear formatting" aria-label="Clear formatting" (mousedown)="exec('removeFormat')">Tx</button>

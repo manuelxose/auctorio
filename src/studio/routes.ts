@@ -145,6 +145,8 @@ import { registerWaitlistRoutes } from "./waitlist";
 import { registerOperationRoutes } from "./routes-operations";
 import { registerPhase5OpsRoutes } from "./routes-phase5-ops";
 import { registerNotificationRoutes } from "./routes-notifications";
+import { registerCopilotRoutes } from "./routes-copilot";
+import { registerAiSettingsRoutes } from "./routes-ai";
 import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
 import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
@@ -417,6 +419,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerOperationRoutes(fastify);
   registerPhase5OpsRoutes(fastify);
   registerNotificationRoutes(fastify);
+  registerCopilotRoutes(fastify);
+  registerAiSettingsRoutes(fastify);
   registerEventRoutes(fastify);
 
   fastify.get("/health/live", async () => ({ status: "ok" }));

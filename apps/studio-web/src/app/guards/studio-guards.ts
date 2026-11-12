@@ -1,32 +1,44 @@
-import { inject } from '@angular/core';
+import { isPlatformServer } from '@angular/common';
+import { Injector, PLATFORM_ID, inject } from '@angular/core';
 import type { ActivatedRouteSnapshot, CanActivateFn, RouterStateSnapshot } from '@angular/router';
 import { Router } from '@angular/router';
-import { AppContextService } from '../services/app-context.service';
 
-const DEFAULT_RETURN_TO = '/studio/overview';
+/**
+ * The SSR server only renders /studio pages after validating the session cookie itself,
+ * and the browser session is not available to the server render, so checks run in the browser.
+ */
+const onServer = () => isPlatformServer(inject(PLATFORM_ID));
 
-function resolveReturnTo(value: string | null | undefined): string {
-  const normalized = String(value || '').trim();
-  return normalized.startsWith('/studio/') ? normalized : DEFAULT_RETURN_TO;
+/** Loads the Studio context on demand so public pages never download the Studio API client. */
+async function studioContext(injector: Injector) {
+  const { AppContextService } = await import('../services/app-context.service');
+  return injector.get(AppContextService);
+}
+
+function loginRedirect(router: Router, returnTo: string) {
+  return router.createUrlTree(['/login'], {
+    queryParams: {
+      reason: 'session_expired',
+      returnTo,
+    },
+  });
 }
 
 export const studioAuthGuard: CanActivateFn = async (
   _route: ActivatedRouteSnapshot,
   state: RouterStateSnapshot,
 ) => {
+  if (onServer()) {
+    return true;
+  }
   const router = inject(Router);
-  const appContext = inject(AppContextService);
+  const injector = inject(Injector);
 
   try {
-    await appContext.ensureSession();
+    await (await studioContext(injector)).ensureSession();
     return true;
   } catch {
-    return router.createUrlTree(['/login'], {
-      queryParams: {
-        reason: 'session_expired',
-        returnTo: state.url,
-      },
-    });
+    return loginRedirect(router, state.url);
   }
 };
 
@@ -34,19 +46,18 @@ export const studioRoleGuard: CanActivateFn = async (
   route: ActivatedRouteSnapshot,
   state: RouterStateSnapshot,
 ) => {
+  if (onServer()) {
+    return true;
+  }
   const router = inject(Router);
-  const appContext = inject(AppContextService);
+  const injector = inject(Injector);
   const requiredRole = route.data['requiredRole'] as 'admin' | 'editor' | 'viewer' | undefined;
 
+  const appContext = await studioContext(injector);
   try {
     await appContext.ensureSession();
   } catch {
-    return router.createUrlTree(['/login'], {
-      queryParams: {
-        reason: 'session_expired',
-        returnTo: state.url,
-      },
-    });
+    return loginRedirect(router, state.url);
   }
 
   if (!requiredRole) {
