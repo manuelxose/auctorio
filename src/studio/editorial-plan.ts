@@ -20,7 +20,7 @@ import {
 import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
-import { MAX_PLAN_SLOTS, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
+import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
 const CHANNELS = ["website", "x", "instagram"] as const;
@@ -70,6 +70,8 @@ type PlanAppendMode = {
   keepUnfilled: UnfilledSlot[];
   /** Regeneration: delete this item in the same transaction that inserts its replacement. */
   replaceItemId?: string;
+  /** Extension: the plan's new end and cadence, written in the same transaction as the new items. */
+  extendTo?: { dateTo: Date; cadence: Omit<PlanSlotRequest, "now"> };
 };
 
 export type UnfilledSlot = { localDate: string; localTime: string; scheduledFor: string; reason: string };
@@ -753,6 +755,12 @@ async function executeEditorialPlanGeneration(
             unfilledSlots,
           } as unknown as Prisma.InputJsonObject,
           error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
+          ...(append?.extendTo
+            ? {
+                dateTo: append.extendTo.dateTo,
+                configuration: { ...((plan.configuration ?? {}) as Record<string, unknown>), cadence: append.extendTo.cadence } as unknown as Prisma.InputJsonObject,
+              }
+            : {}),
         },
       });
     });
@@ -782,7 +790,7 @@ async function executeEditorialPlanGeneration(
       tenantId: input.tenantId,
       actorType: input.userId ? "user" : "system",
       actorUserId: input.userId,
-      action: append ? (append.replaceItemId ? "editorial_plan.item_regenerated" : "editorial_plan.slots_filled") : "editorial_plan.generated",
+      action: append ? (append.replaceItemId ? "editorial_plan.item_regenerated" : append.extendTo ? "editorial_plan.extended" : "editorial_plan.slots_filled") : "editorial_plan.generated",
       entityType: "editorial_plan",
       entityId: plan.id,
       metadata: {
@@ -800,7 +808,7 @@ async function executeEditorialPlanGeneration(
     await prisma.editorialPlan.update({
       where: { id: plan.id },
       data: input.append
-        ? { status: input.append.previousStatus, error: `Last ${input.append.replaceItemId ? "regeneration" : "fill"} failed: ${message}` }
+        ? { status: input.append.previousStatus, error: `Last ${input.append.replaceItemId ? "regeneration" : input.append.extendTo ? "extension" : "fill"} failed: ${message}` }
         : { status: "failed", error: message },
     });
     structuredEvent("editorial_plan.generation.failed", {
@@ -835,7 +843,7 @@ async function runPlanGenerationInBackground(
   input: GenerateEditorialPlanInput,
   strategy: PlanningStrategy,
   accounts: Array<{ id: string; platform: string }>,
-  type: "editorial_plan_generation" | "editorial_plan_fill" | "editorial_plan_item_regeneration",
+  type: "editorial_plan_generation" | "editorial_plan_fill" | "editorial_plan_item_regeneration" | "editorial_plan_extension",
 ) {
   const { createOperation, startOperation, completeOperation, failOperation, touchOperationProgress } = await import("./operations");
   const operation = await createOperation({
@@ -995,6 +1003,88 @@ export async function enqueueRegeneratePlanItem(tenantId: string, itemId: string
   );
 }
 
+/**
+ * Slot request for extending a plan: only dates strictly after the plan's current local end date,
+ * with the plan's stored cadence (articlesPerDay may be overridden). Pure, so it is unit-tested.
+ */
+export function buildExtensionSlotRequest(
+  plan: { dateTo: Date; timezone: string; configuration: unknown },
+  input: { dateTo: string; articlesPerDay?: number },
+  now?: Date,
+): PlanSlotRequest {
+  const stored = ((plan.configuration ?? {}) as { cadence?: Partial<PlanSlotRequest> | null }).cadence ?? null;
+  const dateFrom = nextLocalDate(localDateInZone(plan.dateTo, plan.timezone));
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateTo) || input.dateTo < dateFrom) throw new Error("editorial_plan_extend_date_not_after_plan_end");
+  const articlesPerDay = input.articlesPerDay ?? stored?.articlesPerDay;
+  if (articlesPerDay === undefined) throw new Error("editorial_plan_extend_cadence_required");
+  return {
+    dateFrom,
+    dateTo: input.dateTo,
+    timezone: plan.timezone,
+    articlesPerDay,
+    weekdays: stored?.weekdays,
+    // An explicit new cadence replaces per-weekday overrides; otherwise the stored ones carry over.
+    weekdayQuotas: input.articlesPerDay === undefined ? stored?.weekdayQuotas : undefined,
+    excludedDates: stored?.excludedDates,
+    publishTimes: stored?.publishTimes,
+    now,
+  };
+}
+
+/** Extends a plan to a later end date: only the NEW slots are generated; existing items are untouched. */
+export async function enqueueExtendPlan(tenantId: string, planId: string, input: { dateTo: string; articlesPerDay?: number }, userId?: string | null) {
+  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, planId, userId);
+  const request = buildExtensionSlotRequest(plan, input);
+  const { slots, skippedPast } = computePlanSlotsDetailed(request);
+  if (slots.length === 0) throw new Error("editorial_plan_extend_no_slots");
+  if (plan.items.length + slots.length > MAX_PLAN_SLOTS) throw new Error("editorial_plan_extend_too_many_items");
+  const bounds = planRangeBounds(request.dateFrom, request.dateTo, plan.timezone);
+  const previousStatus = plan.status as "ready" | "partial";
+  await claimPlan(plan.id, previousStatus);
+  const { now: _now, ...cadence } = request;
+  const accepted = await runPlanGenerationInBackground(
+    plan,
+    {
+      ...base,
+      dateFrom: bounds.from,
+      dateTo: bounds.to,
+      publicationCount: slots.length,
+      slots,
+      append: {
+        previousStatus,
+        previous,
+        totalRequested: (previous.requestedCount ?? plan.items.length) + slots.length,
+        avoidTitles: plan.items.map((item) => item.title),
+        keepUnfilled: previous.unfilledSlots ?? [],
+        // The stored cadence keeps describing the whole plan, so its start stays the original one.
+        extendTo: { dateTo: bounds.to, cadence: { ...cadence, dateFrom: localDateInZone(plan.dateFrom, plan.timezone) } },
+      },
+    },
+    strategy,
+    accounts,
+    "editorial_plan_extension",
+  );
+  return { ...accepted, skippedPast: skippedPast.length };
+}
+
+/** Rename and/or archive a plan. Archiving is refused while a generation run owns the plan. */
+export async function updateEditorialPlan(tenantId: string, planId: string, input: { name?: string; status?: "archived" }, userId?: string | null) {
+  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId } });
+  if (!plan) return null;
+  if (input.status === "archived" && plan.status === "generating") throw new Error("editorial_plan_busy");
+  const updated = await prisma.editorialPlan.update({ where: { id: plan.id }, data: { name: input.name?.trim() || undefined, status: input.status } });
+  await writeAudit({
+    tenantId,
+    actorType: userId ? "user" : "system",
+    actorUserId: userId,
+    action: input.status === "archived" ? "editorial_plan.archived" : "editorial_plan.updated",
+    entityType: "editorial_plan",
+    entityId: plan.id,
+    metadata: { name: updated.name },
+  });
+  return updated;
+}
+
 async function recordGenerationAttempts(
   tenantId: string,
   planId: string,
@@ -1108,14 +1198,41 @@ export async function updateEditorialPlanItem(
     confidence?: number | null;
     rationale?: string | null;
     freshnessRequirement?: string | null;
+    secondaryKeywords?: string[] | null;
+    relatedEntities?: string[] | null;
+    audience?: string | null;
+    suggestedSlug?: string | null;
+    sourceEvidence?: Array<{ title: string; url?: string; sourceType?: string }> | null;
+    /** Merged into metadata.generation; null clears it. */
+    generation?: PlanItemGenerationSettings | null;
   },
 ) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
   if (!item) return null;
-  const jsonOrNull = (value: unknown) => (value === undefined ? undefined : value === null ? Prisma.JsonNull : (value as Prisma.InputJsonArray));
+  // The app owns URLs: internal links must be indexed pages, evidence must be indexed or a known source item.
+  // URLs already on the item (from validated generation) stay allowed so edits can keep or reorder them.
+  const existingUrls = new Set([
+    ...jsonStrings(item.suggestedInternalLinks),
+    ...jsonArray(item.sourceEvidence).map((entry) => (entry && typeof entry === "object" ? String((entry as Record<string, unknown>).url ?? "") : "")),
+  ]);
+  const newLinks = (input.suggestedInternalLinks ?? []).filter((url) => !existingUrls.has(url));
+  const newEvidence = (input.sourceEvidence ?? []).map((entry) => entry.url).filter((url): url is string => Boolean(url) && !existingUrls.has(url!));
+  if (newLinks.length || newEvidence.length) {
+    if (!item.siteId) throw new Error("editorial_plan_item_url_not_in_inventory");
+    const { findUninventoriedUrls } = await import("./planning-settings");
+    const missing = await findUninventoriedUrls(tenantId, item.siteId, { internalLinks: newLinks, evidence: newEvidence });
+    if (missing.length) throw new Error(`editorial_plan_item_url_not_in_inventory: ${missing.slice(0, 3).join(", ")}`);
+  }
+  const metadata = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata : {}) as Record<string, unknown>;
   return prisma.editorialPlanItem.update({
     where: { id: item.id },
     data: {
+      secondaryKeywords: input.secondaryKeywords === undefined ? undefined : input.secondaryKeywords?.length ? (input.secondaryKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
+      relatedEntities: input.relatedEntities === undefined ? undefined : input.relatedEntities?.length ? (input.relatedEntities as Prisma.InputJsonArray) : Prisma.JsonNull,
+      audience: input.audience === undefined ? undefined : input.audience?.trim() || null,
+      suggestedSlug: input.suggestedSlug === undefined ? undefined : input.suggestedSlug?.trim() || null,
+      sourceEvidence: input.sourceEvidence === undefined ? undefined : input.sourceEvidence?.length ? (input.sourceEvidence as unknown as Prisma.InputJsonArray) : Prisma.JsonNull,
+      metadata: input.generation === undefined ? undefined : ({ ...metadata, generation: input.generation ?? undefined } as Prisma.InputJsonObject),
       title: input.title?.trim() || undefined,
       workingTitle: input.workingTitle === undefined ? undefined : input.workingTitle?.trim() || null,
       finalSuggestedTitle: input.finalSuggestedTitle === undefined ? undefined : input.finalSuggestedTitle?.trim() || null,
@@ -1208,56 +1325,127 @@ export async function deleteEditorialPlanItem(tenantId: string, itemId: string, 
   return { ok: true as const };
 }
 
-export async function generateContentFromEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
-  const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { project: true } });
-  if (!item) return null;
-  if (item.projectId && item.project) return { item, project: item.project };
-  if (item.status !== "approved") throw new Error("editorial_plan_item_must_be_approved");
-  if (!item.siteId) throw new Error("editorial_plan_item_site_required");
+/** Per-item writing settings edited in the Studio drawer; stored in item.metadata.generation. */
+export type PlanItemGenerationSettings = {
+  tone?: string | null;
+  includeFaq?: boolean | null;
+  includeImage?: boolean | null;
+  instructions?: string | null;
+};
 
-  const outline = Array.isArray(item.outline) ? item.outline : [];
+function jsonArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function jsonStrings(value: unknown): string[] {
+  return jsonArray(value).filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0);
+}
+
+/** Reads metadata.generation defensively: only known keys with the right types survive. */
+export function readGenerationSettings(metadata: unknown): PlanItemGenerationSettings {
+  const raw = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>).generation : null;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const record = raw as Record<string, unknown>;
+  const settings: PlanItemGenerationSettings = {};
+  if (typeof record.tone === "string" && record.tone.trim()) settings.tone = record.tone.trim();
+  if (typeof record.includeFaq === "boolean") settings.includeFaq = record.includeFaq;
+  if (typeof record.includeImage === "boolean") settings.includeImage = record.includeImage;
+  if (typeof record.instructions === "string" && record.instructions.trim()) settings.instructions = record.instructions.trim();
+  return settings;
+}
+
+type BriefSourceItem = Pick<
+  Prisma.EditorialPlanItemGetPayload<Record<string, never>>,
+  | "id" | "planId" | "siteId" | "channel" | "title" | "workingTitle" | "finalSuggestedTitle" | "angle" | "topic" | "topicCluster" | "pillarPage"
+  | "primaryIntent" | "searchIntent" | "secondaryIntents" | "funnelStage" | "targetQuery" | "primaryKeyword" | "secondaryKeywords" | "semanticKeywords"
+  | "relatedEntities" | "questionsToAnswer" | "audience" | "editorialObjective" | "competitorAngle" | "suggestedInternalLinks" | "suggestedExternalEvidenceTypes"
+  | "faqCandidates" | "schemaTypes" | "outline" | "recommendedWordCountMin" | "recommendedWordCountMax" | "cannibalizationRisk" | "seoTitle"
+  | "metaDescription" | "suggestedSlug" | "freshnessRequirement" | "imageConcept" | "contentType" | "sourceEvidence" | "notes" | "metadata"
+>;
+
+/**
+ * Pure: turns an (edited) plan item into the project the writer receives. Everything the editor can change in
+ * the Studio drawer lands either in the brief text (what the text model reads) or in metadata (what QA reads).
+ */
+export function buildProjectInputFromPlanItem(item: BriefSourceItem, options: { language?: string } = {}) {
+  const outline = jsonArray(item.outline);
+  const generation = readGenerationSettings(item.metadata);
+  const secondaryKeywords = jsonStrings(item.secondaryKeywords);
+  const relatedEntities = jsonStrings(item.relatedEntities);
+  const questions = jsonStrings(item.questionsToAnswer);
+  const internalLinks = jsonStrings(item.suggestedInternalLinks);
+  const evidence = jsonArray(item.sourceEvidence)
+    .map((entry) => (entry && typeof entry === "object" ? (entry as Record<string, unknown>) : null))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const outlineText = outline
+    .map((entry, index) => {
+      if (!entry || typeof entry !== "object") return `${index + 1}. ${String(entry)}`;
+      const record = entry as Record<string, unknown>;
+      const subpoints = jsonStrings(record.subpoints);
+      return [`${index + 1}. ${String(record.heading ?? "")}`, ...subpoints.map((point) => `   - ${point}`)].join("\n");
+    })
+    .join("\n");
+  const yesNo = (value: boolean) => (value ? "si" : "no");
   const briefSections = [
-    `Titulo: ${item.workingTitle || item.title}`,
+    `Titulo: ${item.finalSuggestedTitle || item.workingTitle || item.title}`,
     item.angle ? `Angulo: ${item.angle}` : null,
     item.topic ? `Tema: ${item.topic}` : null,
     item.topicCluster ? `Cluster: ${item.topicCluster}` : null,
+    item.contentType ? `Formato: ${item.contentType}` : null,
+    item.audience ? `Audiencia: ${item.audience}` : null,
+    item.editorialObjective ? `Objetivo editorial: ${item.editorialObjective}` : null,
     item.primaryIntent ? `Intencion de busqueda: ${item.primaryIntent}` : null,
+    jsonStrings(item.secondaryIntents).length ? `Intenciones secundarias: ${jsonStrings(item.secondaryIntents).join(", ")}` : null,
     item.targetQuery ? `Query objetivo: ${item.targetQuery}` : null,
     item.primaryKeyword ? `Keyword principal: ${item.primaryKeyword}` : null,
+    secondaryKeywords.length ? `Keywords secundarias: ${secondaryKeywords.join(", ")}` : null,
+    relatedEntities.length ? `Entidades relacionadas: ${relatedEntities.join(", ")}` : null,
     item.recommendedWordCountMin ? `Extension objetivo: ${item.recommendedWordCountMin}-${item.recommendedWordCountMax ?? item.recommendedWordCountMin} palabras` : null,
-    outline.length > 0
-      ? `Estructura sugerida:\n${outline.map((entry, index) => `${index + 1}. ${typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).heading ?? "") : String(entry)}`).join("\n")}`
-      : null,
+    outlineText ? `Estructura sugerida:\n${outlineText}` : null,
+    questions.length ? `Preguntas a responder:\n${questions.map((question) => `- ${question}`).join("\n")}` : null,
+    item.seoTitle ? `SEO title sugerido: ${item.seoTitle}` : null,
     item.metaDescription ? `Meta description sugerida: ${item.metaDescription}` : null,
-    item.imageConcept ? `Concepto de imagen: ${item.imageConcept}` : null,
+    internalLinks.length ? `Enlaces internos (solo estas URLs):\n${internalLinks.map((url) => `- ${url}`).join("\n")}` : null,
+    evidence.length
+      ? `Evidencias (no inventes datos fuera de ellas):\n${evidence.map((entry) => `- ${String(entry.title ?? entry.url ?? "")}${entry.url ? ` (${String(entry.url)})` : ""}`).join("\n")}`
+      : null,
+    generation.tone ? `Tono: ${generation.tone}` : null,
+    generation.includeFaq !== undefined && generation.includeFaq !== null ? `Incluir seccion FAQ: ${yesNo(generation.includeFaq)}` : null,
+    generation.includeImage !== undefined && generation.includeImage !== null ? `Imagen destacada: ${yesNo(generation.includeImage)}` : null,
+    item.imageConcept && generation.includeImage !== false ? `Concepto de imagen: ${item.imageConcept}` : null,
+    generation.instructions ? `Instrucciones adicionales: ${generation.instructions}` : null,
+    item.notes ? `Notas del editor: ${item.notes}` : null,
   ].filter((section): section is string => Boolean(section));
 
-  const project = await createProject(tenantId, {
-    siteId: item.siteId,
+  return {
+    siteId: item.siteId!,
     title: item.finalSuggestedTitle || item.workingTitle || item.title,
     brief: briefSections.join("\n\n"),
-    goal: item.channel === "website" ? "article" : "social_pack",
-    primaryLanguage: "es",
+    goal: (item.channel === "website" ? "article" : "social_pack") as "article" | "social_pack",
+    primaryLanguage: options.language ?? "es",
     metadata: {
       editorialPlanId: item.planId,
       editorialPlanItemId: item.id,
       channel: item.channel,
       contentType: item.contentType ?? null,
+      audience: item.audience ?? null,
       primaryIntent: item.primaryIntent ?? item.searchIntent ?? null,
       secondaryIntents: item.secondaryIntents ?? [],
       funnelStage: item.funnelStage ?? null,
       targetQuery: item.targetQuery ?? null,
       primaryKeyword: item.primaryKeyword ?? null,
+      secondaryKeywords,
       semanticKeywords: item.semanticKeywords ?? [],
-      relatedEntities: item.relatedEntities ?? [],
+      relatedEntities,
       questionsToAnswer: item.questionsToAnswer ?? [],
       topicCluster: item.topicCluster ?? null,
       pillarPage: item.pillarPage ?? null,
-      suggestedInternalLinks: item.suggestedInternalLinks ?? [],
+      suggestedInternalLinks: internalLinks,
       suggestedExternalEvidenceTypes: item.suggestedExternalEvidenceTypes ?? [],
-      faqCandidates: item.faqCandidates ?? [],
+      sourceEvidence: evidence,
+      faqCandidates: generation.includeFaq === false ? [] : item.faqCandidates ?? [],
       schemaTypes: item.schemaTypes ?? [],
-      outline: outline,
+      outline,
       recommendedWordCountMin: item.recommendedWordCountMin ?? null,
       recommendedWordCountMax: item.recommendedWordCountMax ?? null,
       cannibalizationRisk: item.cannibalizationRisk ?? null,
@@ -1266,8 +1454,21 @@ export async function generateContentFromEditorialPlanItem(tenantId: string, ite
       suggestedSlug: item.suggestedSlug ?? null,
       freshnessRequirement: item.freshnessRequirement ?? null,
       angle: item.angle ?? null,
+      editorNotes: item.notes ?? null,
+      generation,
     } as Prisma.InputJsonObject,
-  });
+  };
+}
+
+export async function generateContentFromEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
+  const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { project: true, plan: { select: { configuration: true } } } });
+  if (!item) return null;
+  if (item.projectId && item.project) return { item, project: item.project };
+  if (item.status !== "approved") throw new Error("editorial_plan_item_must_be_approved");
+  if (!item.siteId) throw new Error("editorial_plan_item_site_required");
+
+  const language = ((item.plan.configuration ?? {}) as { language?: unknown }).language;
+  const project = await createProject(tenantId, buildProjectInputFromPlanItem(item, { language: typeof language === "string" ? language : "es" }));
   await prisma.editorialPlanItem.update({ where: { id: item.id }, data: { projectId: project.id, status: "generating", contentGenerationStatus: "generating" } });
   await startProjectGeneration(project.id, tenantId);
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.content_generation_started", entityType: "editorial_plan_item", entityId: item.id, metadata: { projectId: project.id } });

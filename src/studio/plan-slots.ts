@@ -9,6 +9,8 @@
 
 export const MAX_PLAN_SLOTS = 200;
 export const MAX_PLAN_DAYS = 366;
+/** A slot must start at least this far in the future to be planned. */
+export const PLAN_SLOT_LEAD_MINUTES = 30;
 const DEFAULT_TIMES = ["09:00", "13:00", "18:00", "11:00", "16:00", "20:00", "08:00", "21:00"];
 const DAY_MS = 86_400_000;
 const LOCAL_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -26,6 +28,8 @@ export type PlanSlotRequest = {
   excludedDates?: string[];
   /** Local HH:mm publication times; padded with defaults when fewer than the day's quota. */
   publishTimes?: string[];
+  /** Reference "now"; slots earlier than now + PLAN_SLOT_LEAD_MINUTES are skipped. Defaults to the current time. */
+  now?: Date;
 };
 
 export type PlanSlot = {
@@ -67,6 +71,11 @@ export function zonedTimeToUtc(localDate: string, localTime: string, timeZone: s
 }
 
 export function computePlanSlots(request: PlanSlotRequest): PlanSlot[] {
+  return computePlanSlotsDetailed(request).slots;
+}
+
+/** Same as computePlanSlots, plus the slots skipped because their instant is already in the past. */
+export function computePlanSlotsDetailed(request: PlanSlotRequest): { slots: PlanSlot[]; skippedPast: Array<{ localDate: string; localTime: string; scheduledFor: Date }> } {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: request.timezone });
   } catch {
@@ -86,7 +95,9 @@ export function computePlanSlots(request: PlanSlotRequest): PlanSlot[] {
   const excluded = new Set(request.excludedDates ?? []);
   const times = [...new Set([...(request.publishTimes ?? []).filter((time) => LOCAL_TIME.test(time)), ...DEFAULT_TIMES])];
 
+  const notBefore = (request.now ?? new Date()).getTime() + PLAN_SLOT_LEAD_MINUTES * 60_000;
   const slots: PlanSlot[] = [];
+  const skippedPast: Array<{ localDate: string; localTime: string; scheduledFor: Date }> = [];
   for (let day = from; day <= to; day += DAY_MS) {
     const localDate = new Date(day).toISOString().slice(0, 10);
     const weekday = new Date(day).getUTCDay();
@@ -94,11 +105,26 @@ export function computePlanSlots(request: PlanSlotRequest): PlanSlot[] {
     const quota = request.weekdayQuotas?.[String(weekday)] ?? request.articlesPerDay;
     if (!Number.isInteger(quota) || quota < 0 || quota > DEFAULT_TIMES.length) throw new Error("plan_slots_invalid_articles_per_day");
     for (const localTime of times.slice(0, quota).sort()) {
-      slots.push({ index: slots.length, localDate, localTime, scheduledFor: zonedTimeToUtc(localDate, localTime, request.timezone) });
+      const scheduledFor = zonedTimeToUtc(localDate, localTime, request.timezone);
+      if (scheduledFor.getTime() < notBefore) {
+        skippedPast.push({ localDate, localTime, scheduledFor });
+        continue;
+      }
+      slots.push({ index: slots.length, localDate, localTime, scheduledFor });
       if (slots.length > MAX_PLAN_SLOTS) throw new Error("plan_slots_too_many");
     }
   }
-  return slots;
+  return { slots, skippedPast };
+}
+
+/** Local calendar date (YYYY-MM-DD) of an instant in an IANA timezone. */
+export function localDateInZone(instant: Date, timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(instant);
+}
+
+/** The local date after `localDate`. */
+export function nextLocalDate(localDate: string): string {
+  return new Date(parseLocalDate(localDate) + DAY_MS).toISOString().slice(0, 10);
 }
 
 /** Inclusive local range → [start of first day, end of last day] as UTC instants. */
