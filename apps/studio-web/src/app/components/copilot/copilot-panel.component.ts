@@ -8,7 +8,6 @@ import { AssistantApiService } from '../../services/assistant-api.service';
 import { EditorialContextService } from '../../services/editorial-context.service';
 import type { AssistantContextView } from '../../models/assistant.models';
 import { AssistantActionCardComponent } from './assistant-action-card.component';
-import { activeNavItem } from '../../layout/studio-nav';
 import { CopilotService, type CopilotMessage } from '../../services/copilot.service';
 import { renderCopilotMarkdown } from '../../utils/copilot-markdown';
 
@@ -31,7 +30,7 @@ type Suggestion = { label: string; prompt: string; competency: string };
           </button>
           <h2 id="cp-title" class="cp__title">Conversations</h2>
         } @else {
-          <h2 id="cp-title" class="cp__title">Assistant</h2>
+          <h2 id="cp-title" class="cp__title">Copilot</h2>
           <button class="au-icon-button" type="button" (click)="openHistory()" aria-label="Conversation history" title="Conversation history">
             <app-icon name="history"></app-icon>
           </button>
@@ -39,7 +38,10 @@ type Suggestion = { label: string; prompt: string; competency: string };
             <app-icon name="plus"></app-icon>
           </button>
         }
-        <button class="au-icon-button" type="button" (click)="closed.emit()" aria-label="Hide assistant" title="Hide assistant">
+        <button class="au-icon-button cp__wide" type="button" (click)="copilot.wide.set(!copilot.wide())" [attr.aria-pressed]="copilot.wide()" aria-label="Wider panel" title="Wider panel">
+          <app-icon name="expand"></app-icon>
+        </button>
+        <button class="au-icon-button" type="button" (click)="closed.emit()" aria-label="Close copilot" title="Close (Esc)">
           <app-icon name="close"></app-icon>
         </button>
       </header>
@@ -211,7 +213,7 @@ export class CopilotPanelComponent implements AfterViewChecked {
   /** Prompts for the area the operator is in; the server's intent router maps them to tools. */
   readonly suggestions = computed<Suggestion[]>(() => {
     const sel = this.editorial.selection();
-    const area = sel.area ?? activeNavItem(this.copilot.route())?.group.id ?? 'operations';
+    const area = sel.area ?? this.areaOf(this.copilot.route());
     const ask = (label: string, prompt = label): Suggestion => ({ label, prompt, competency: '' });
     if (this.copilot.projectId()) {
       return [
@@ -227,6 +229,14 @@ export class CopilotPanelComponent implements AfterViewChecked {
     if (area === 'production') return [{ label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts.', competency: 'publication-status' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
     return [{ label: 'What needs my attention on this site?', prompt: 'What needs my attention on this site?', competency: 'workspace-brief' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
   });
+
+  private areaOf(route: string): string {
+    if (route.includes('/calendar')) return 'calendar';
+    if (route.includes('/editorial-plan')) return 'plan';
+    if (/\/(site-intelligence|sources|competitors)/.test(route)) return 'intelligence';
+    if (/\/(content|media|publications|publishing)/.test(route)) return 'production';
+    return 'operations';
+  }
 
   constructor() {
     // A new site means a new conversation: answers never mix two sites' data.
