@@ -8,6 +8,8 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppContextService } from '../services/app-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
+import { ProductionApiService } from '../services/production-api.service';
+import { ProductionStatusComponent } from '../components/production/production-status.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type {
   StudioGenerationDetail,
@@ -43,7 +45,7 @@ const OUTCOME_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-editorial-engine-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -175,6 +177,7 @@ const OUTCOME_LABELS: Record<string, string> = {
                   {{ generatingClusterId === cluster.id ? 'Generating…' : 'Generate article' }}
                 </button>
               </div>
+              <app-production-status [clusterId]="cluster.id" (changed)="loadGenerations()"></app-production-status>
             </div>
           </article>
         </div>
@@ -414,6 +417,7 @@ const OUTCOME_LABELS: Record<string, string> = {
 export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly toast = inject(ToastService);
+  private readonly production = inject(ProductionApiService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly appContext = inject(AppContextService);
   private subscription: Subscription | null = null;
@@ -503,15 +507,13 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
     });
   }
 
+  /** Starts (or returns the active) cluster production job; progress is shown by app-production-status. */
   generateFromCluster(cluster: StudioStoryCluster): void {
     this.generatingClusterId = cluster.id;
-    this.api.generateFromCluster(cluster.id, {}).subscribe({
-      next: (detail) => {
+    this.production.start({ kind: 'cluster', clusterId: cluster.id }).subscribe({
+      next: () => {
         this.generatingClusterId = null;
-        this.toast.success('Article generated');
-        this.mode = 'generations';
-        this.loadGenerations();
-        this.openDetail(detail);
+        this.toast.success('Production started');
       },
       error: (error) => {
         this.generatingClusterId = null;
