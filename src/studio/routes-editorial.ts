@@ -84,7 +84,6 @@ import {
   enqueueRegeneratePlanItem,
   enqueueExtendPlan,
   updateEditorialPlan,
-  generateContentFromEditorialPlanItem,
   generateEditorialPlan,
   getEditorialPlan,
   listEditorialPlans,
@@ -93,6 +92,7 @@ import {
   type GenerateEditorialPlanInput,
 } from "./editorial-plan";
 import { CONTENT_FORMATS, SEARCH_INTENTS, STRATEGY_MODES } from "./editorial-plan-schema";
+import { startProductionForPlanItem } from "./production/pipeline";
 
 const prisma = getPrismaClient();
 
@@ -1948,7 +1948,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const itemId = (request.params as { id: string }).id;
     if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
     try {
-      const result = await generateContentFromEditorialPlanItem(context.tenantId, itemId, context.userId);
+      const result = await startProductionForPlanItem(context.tenantId, itemId, context.userId);
       if (!result) return notFound(reply, "editorial plan item not found");
       return reply.code(202).send(result);
     } catch (error) {
