@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { AfterViewInit, Component, ElementRef, EventEmitter, HostListener, Input, OnChanges, OnDestroy, Output, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import { Subject, Subscription, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
+import { Observable, Subject, Subscription, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
 import { AppIconComponent } from '../ui/app-icon.component';
 import { ConfirmService } from '../../services/confirm.service';
 import { PlanningApiService, apiMessage, isRunning } from '../../services/planning-api.service';
@@ -551,7 +551,7 @@ export class PlanItemDrawerComponent implements OnChanges, AfterViewInit, OnDest
 
   setStatus(status: 'approved' | 'rejected'): void {
     this.pending = true;
-    const request = status === 'approved' ? this.api.approveItem(this.item.id) : this.api.bulkStatus([this.item.id], 'rejected');
+    const request: Observable<unknown> = status === 'approved' ? this.api.approveItem(this.item.id) : this.api.bulkStatus([this.item.id], 'rejected');
     request.subscribe({
       next: () => {
         this.pending = false;
@@ -559,7 +559,7 @@ export class PlanItemDrawerComponent implements OnChanges, AfterViewInit, OnDest
         this.say(status === 'approved' ? 'Proposal approved.' : 'Proposal rejected.');
         this.changed.emit({ item: this.item });
       },
-      error: (err) => {
+      error: (err: unknown) => {
         this.pending = false;
         this.say(apiMessage(err, 'The status could not be changed.'), true);
       },
