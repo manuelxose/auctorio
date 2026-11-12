@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Observable, Subject, Subscription, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
 import { AppIconComponent } from '../ui/app-icon.component';
+import { ProductionStatusComponent } from '../production/production-status.component';
 import { ConfirmService } from '../../services/confirm.service';
 import { PlanningApiService, apiMessage, isRunning } from '../../services/planning-api.service';
 import type { OperationItem } from '../../models/studio.models';
@@ -54,7 +55,7 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
 @Component({
   selector: 'app-plan-item-drawer',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, ProductionStatusComponent],
   styles: [
     `
       .pd-backdrop { position: fixed; inset: 0; background: var(--au-overlay); z-index: 40; }
@@ -311,6 +312,8 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
         </fieldset>
       </form>
 
+      <app-production-status *ngIf="item.projectId || item.status === 'generating'" [planItemId]="item.id" (changed)="onProductionChanged()"></app-production-status>
+
       <footer class="pd__foot">
         <p class="pd__status" [class.is-error]="statusIsError" role="status" aria-live="polite">{{ status }}</p>
         <span class="pd__foot-spacer"></span>
@@ -565,6 +568,11 @@ export class PlanItemDrawerComponent implements OnChanges, AfterViewInit, OnDest
         this.say(apiMessage(err, 'The status could not be changed.'), true);
       },
     });
+  }
+
+  /** The production job moved on: tell the page to reload the plan so status/project links are fresh. */
+  onProductionChanged(): void {
+    this.changed.emit({ item: this.item, regenerated: true });
   }
 
   generateDraft(): void {
