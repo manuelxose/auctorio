@@ -19,6 +19,8 @@ export type WriterPromptInput = {
   previousArticle?: { title: string; bodyHtml: string } | null;
   updateDelta?: { newFacts: string[]; changedFacts: Array<{ factKey: string; before: string; after: string }> } | null;
   language: "es" | "en";
+  /** Editorial plan guidance (outline, questions, CTA…) — planning data, treated as untrusted. */
+  editorialGuidance?: string[];
 };
 
 export type WriterPrompt = {
@@ -116,6 +118,12 @@ export function buildWriterPrompt(input: WriterPromptInput): WriterPrompt {
   userLines.push("STRUCTURE TEMPLATE:");
   userLines.push(renderStructureSpec(getStructureSpec(brief.articleType)));
   userLines.push("");
+
+  if (input.editorialGuidance && input.editorialGuidance.length > 0) {
+    userLines.push("EDITORIAL PLAN GUIDANCE (structure and coverage only — it never licenses facts):");
+    userLines.push(wrapUntrustedContent("editorial-plan", clampUntrustedContent(input.editorialGuidance.join("\n"), 6000)));
+    userLines.push("");
+  }
 
   if (input.previousArticle) {
     userLines.push(`PREVIOUS ARTICLE «${input.previousArticle.title}» (update it — keep its URL identity and add the new facts):`);

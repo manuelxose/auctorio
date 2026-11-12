@@ -398,6 +398,8 @@ model Tenant {
   articleGenerations             ArticleGeneration[]
   costBudgets                    CostBudget[]
   aiSpendEvents                  AiSpendEvent[]
+  // production (agent D)
+  productionJobs                 ProductionJob[]
 
   @@map("tenants")
 }
@@ -591,6 +593,8 @@ model Site {
   articleGenerations     ArticleGeneration[]
   costBudgets            CostBudget[]
   aiSpendEvents          AiSpendEvent[]
+  // production (agent D)
+  productionJobs         ProductionJob[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -644,6 +648,56 @@ model ContentProject {
   @@index([tenantId, sourceItemId])
   @@index([tenantId, automationSubstate], map: "content_projects_tenant_id_automation_substate_idx")
   @@map("content_projects")
+}
+
+// production (agent D): one durable job per governed production run.
+enum ProductionJobStatus {
+  queued
+  running
+  needs_review
+  ready
+  failed
+  cancelled
+}
+
+model ProductionJob {
+  id                String              @id @default(uuid()) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  siteId            String              @map("site_id") @db.Uuid
+  kind              String
+  planItemId        String?             @map("plan_item_id") @db.Uuid
+  clusterId         String?             @map("cluster_id") @db.Uuid
+  projectId         String?             @map("project_id") @db.Uuid
+  versionId         String?             @map("version_id") @db.Uuid
+  generationId      String?             @map("generation_id") @db.Uuid
+  operationId       String?             @map("operation_id") @db.Uuid
+  status            ProductionJobStatus @default(queued)
+  stage             String              @default("prepare")
+  attempts          Int                 @default(0)
+  error             String?             @db.Text
+  errorCode         String?             @map("error_code")
+  idempotencyKey    String              @unique @map("idempotency_key")
+  request           Json
+  artifacts         Json?
+  initiatorUserId   String?             @map("initiator_user_id") @db.Uuid
+  reviewDecision    String?             @map("review_decision")
+  reviewNotes       String?             @map("review_notes") @db.Text
+  reviewedByUserId  String?             @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt        DateTime?           @map("reviewed_at")
+  cancelRequestedAt DateTime?           @map("cancel_requested_at")
+  startedAt         DateTime?           @map("started_at")
+  finishedAt        DateTime?           @map("finished_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, planItemId])
+  @@index([tenantId, clusterId])
+  @@map("production_jobs")
 }
 
 model ContentVersion {
