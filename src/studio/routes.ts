@@ -153,6 +153,7 @@ import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
 import { registerSourceRegistryRoutes } from "./routes-source-registry";
 import { registerIntelligenceRoutes } from "./routes-intelligence";
 import { registerEditorialEngineRoutes } from "./routes-editorial-engine";
+import { registerProductionRoutes } from "./routes-production";
 
 const SITE_TYPES: SiteType[] = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS: ProjectGoal[] = [
@@ -414,6 +415,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerSourceRegistryRoutes(fastify);
   registerIntelligenceRoutes(fastify);
   registerEditorialEngineRoutes(fastify);
+  registerProductionRoutes(fastify);
   registerConnectorRoutes(fastify);
   registerWaitlistRoutes(fastify);
   registerOperationRoutes(fastify);
