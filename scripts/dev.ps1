@@ -3,8 +3,8 @@ Set-Location (Join-Path $PSScriptRoot '..')
 
 if (-not (Test-Path .env)) {
   $config = Get-Content .env.example -Raw
-  $config = $config.Replace('postgresql://user:pass@localhost:5432/content_ai', 'postgresql://auctorio:auctorio@localhost:55432/content_ai')
-  $config = $config.Replace('redis://localhost:6379', 'redis://localhost:56379')
+  $config = $config.Replace('postgresql://user:pass@localhost:5432/content_ai', 'postgresql://auctorio:auctorio@127.0.0.1:55432/content_ai')  # IPv4: Windows tries ::1 first and Docker only forwards IPv4, costing ~2s per new DB connection
+  $config = $config.Replace('redis://localhost:6379', 'redis://127.0.0.1:56379')
   $config = $config.Replace('PORT=3000', 'PORT=4301').Replace('http://localhost:3000', 'http://localhost:4301').Replace('http://127.0.0.1:3000', 'http://127.0.0.1:4301').Replace('HOST=0.0.0.0', 'HOST=127.0.0.1')
   $config = $config.Replace('TEXT_PROVIDER=deepseek', 'TEXT_PROVIDER=mock').Replace('IMAGE_PROVIDER=siliconflow', 'IMAGE_PROVIDER=mock')
   $config = $config.Replace('STORAGE_ROOT=/var/www/auctorio/storage', 'STORAGE_ROOT=./storage')
