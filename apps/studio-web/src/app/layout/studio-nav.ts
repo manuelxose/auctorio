@@ -26,6 +26,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
       { label: 'Calendar', path: '/studio/calendar', icon: 'calendar' },
       { label: 'Editorial engine', path: '/studio/editorial-engine', icon: 'sparkles' },
       { label: 'Sources', path: '/studio/sources', icon: 'sources' },
+      { label: 'Competitors', path: '/studio/competitors', icon: 'competency' },
       { label: 'Media', path: '/studio/media', icon: 'media' },
     ],
   },

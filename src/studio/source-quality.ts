@@ -335,8 +335,9 @@ export async function recommendSource(input: {
   minScore: number;
   language: string;
 }): Promise<{ accepted: boolean; sourceId: string | null }> {
-  const existing = await prisma.sourceRecommendation.findUnique({
-    where: { tenantId_domain: { tenantId: input.tenantId, domain: input.domain } },
+  // Legacy web-discovery rows are tenant-wide (siteId null); site-scoped rows live in source-registry-discovery.
+  const existing = await prisma.sourceRecommendation.findFirst({
+    where: { tenantId: input.tenantId, domain: input.domain, siteId: null },
   });
   const recommendation = existing
     ? await prisma.sourceRecommendation.update({
@@ -451,6 +452,7 @@ export async function listSourceRecommendations(tenantId: string, input: { statu
   const skip = (input.page - 1) * input.pageSize;
   const where: Prisma.SourceRecommendationWhereInput = {
     tenantId,
+    siteId: null,
     ...(input.status ? { status: input.status } : {}),
   };
   const [total, items] = await prisma.$transaction([

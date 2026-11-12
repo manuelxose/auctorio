@@ -404,6 +404,10 @@ model Tenant {
   // onboarding + strategy (agent B)
   siteOnboardingRuns             SiteOnboardingRun[]
   siteEditorialStrategies        SiteEditorialStrategy[]
+  // sources + competitors (agent C)
+  competitors                    Competitor[]
+  competitorCoverageSnapshots    CompetitorCoverageSnapshot[]
+  contentOpportunities           ContentOpportunity[]
 
   @@map("tenants")
 }
@@ -604,6 +608,11 @@ model Site {
   // onboarding + strategy (agent B)
   onboardingRun          SiteOnboardingRun?
   editorialStrategy      SiteEditorialStrategy?
+  // sources + competitors (agent C)
+  sourceRecommendations       SourceRecommendation[]
+  competitors                 Competitor[]
+  competitorCoverageSnapshots CompetitorCoverageSnapshot[]
+  contentOpportunities        ContentOpportunity[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -2459,12 +2468,114 @@ model SourceRecommendation {
   lastSeenAt    DateTime @default(now()) @map("last_seen_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
+  // Site-scoped recommendation fields (agent C). Legacy web-discovery rows keep siteId null.
+  siteId             String?   @map("site_id") @db.Uuid
+  name               String?
+  url                String?
+  canonicalUrl       String?   @map("canonical_url")
+  type               String?
+  category           String?
+  relationship       String?
+  topics             Json?
+  trustLevel         String?   @map("trust_level")
+  relevance          String?
+  assessmentReason   String?   @map("assessment_reason") @db.Text
+  language           String?
+  geography          String?
+  verificationStatus String?   @map("verification_status")
+  lastCheckedAt      DateTime? @map("last_checked_at")
+  expectedFreshness  String?   @map("expected_freshness")
+  limitations        Json?
+  discoveryMethod    String?   @map("discovery_method")
+  evidence           Json?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, domain])
+  @@unique([tenantId, siteId, canonicalUrl])
+  @@index([tenantId, domain])
   @@index([tenantId, status, score])
+  @@index([tenantId, siteId, status])
   @@map("source_recommendations")
+}
+
+/// A competing publication for one site. Shortlisted only from observable
+/// evidence; "verified" means reachable + sitemap/feed fetched + overlap measured.
+model Competitor {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  siteId        String    @map("site_id") @db.Uuid
+  domain        String
+  origin        String
+  name          String
+  status        String    @default("suggested")
+  verification  String    @default("speculative")
+  evidence      Json?
+  overlapTopics Json?     @map("overlap_topics")
+  overlapScore  Float?    @map("overlap_score")
+  notes         String?   @db.Text
+  sitemapUrl    String?   @map("sitemap_url")
+  feedUrl       String?   @map("feed_url")
+  lastCheckedAt DateTime? @map("last_checked_at")
+  lastError     String?   @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site                         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  snapshots     CompetitorCoverageSnapshot[]
+  opportunities ContentOpportunity[]
+
+  @@unique([siteId, domain])
+  @@index([tenantId, siteId, status])
+  @@map("competitors")
+}
+
+/// Public sitemap/feed entries observed on a competitor: url + title only.
+model CompetitorCoverageSnapshot {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  competitorId String   @map("competitor_id") @db.Uuid
+  url          String
+  title        String?
+  topic        String?
+  observedAt   DateTime @default(now()) @map("observed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site       Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorId, url])
+  @@index([siteId, topic])
+  @@map("competitor_coverage_snapshots")
+}
+
+model ContentOpportunity {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  competitorId    String?   @map("competitor_id") @db.Uuid
+  kind            String
+  topic           String
+  dedupeKey       String    @map("dedupe_key")
+  rationale       String    @db.Text
+  evidence        Json?
+  relatedSiteUrls Json?     @map("related_site_urls")
+  targetUrl       String?   @map("target_url")
+  status          String    @default("open")
+  planItemId      String?   @map("plan_item_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site       Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  competitor Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
+
+  @@unique([siteId, dedupeKey])
+  @@index([tenantId, siteId, status])
+  @@map("content_opportunities")
 }
 
 model WebRetrieval {
