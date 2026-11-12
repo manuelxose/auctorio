@@ -11,6 +11,9 @@ import { notify } from "../notifications";
 import { completeOperation, createOperation, failOperation, startOperation, touchOperationProgress } from "../operations";
 import { ONBOARDING_STEPS, getOnboardingStep, type OnboardingStepId } from "./contracts";
 import { registerBuiltInOnboardingSteps } from "./steps";
+// Side-effect imports: these modules register the "sources" and "competitors" steps; without them the run skips both.
+import "../source-registry-discovery";
+import "../competitors";
 
 const prisma = getPrismaClient();
 
