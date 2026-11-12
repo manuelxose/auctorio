@@ -1,6 +1,9 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { getPrismaClient } from "../infrastructure/db/prisma";
 import {
   badRequest,
+  conflict,
+  errorBody,
   isUuid,
   notFound,
   parseBody,
@@ -17,8 +20,37 @@ import {
   refreshSiteIntelligence,
 } from "./site-intelligence";
 import { suggestInternalLinks } from "./internal-linking";
-import { completeOperation, createOperation, failOperation, startOperation } from "./operations";
+import { completeOperation, createOperation, failOperation, getOperation, startOperation } from "./operations";
 import { publishEvent } from "./events";
+import { getSiteOnboarding, retrySiteOnboarding, startSiteOnboarding } from "./onboarding/orchestrator";
+import {
+  getStrategyLayers,
+  listStrategyVersions,
+  regenerateStrategySuggestion,
+  restoreStrategyVersion,
+  saveApprovedStrategy,
+  upsertApprovedPillar,
+} from "./site-intelligence/strategy";
+import { getClusterCoverage } from "./site-intelligence/cluster-coverage";
+
+const prisma = getPrismaClient();
+
+const ERROR_STATUS: Record<string, number> = {
+  site_not_found: 404,
+  onboarding_not_found: 404,
+  strategy_version_not_found: 404,
+  cluster_not_found: 404,
+  onboarding_running: 409,
+  onboarding_nothing_to_retry: 409,
+  pillar_name_required: 400,
+};
+
+function sendDomainError(reply: FastifyReply, error: unknown) {
+  const code = error instanceof Error ? error.message : String(error);
+  const status = ERROR_STATUS[code] ?? 500;
+  if (status === 500) throw error;
+  return reply.code(status).send(errorBody(reply, code, code.replace(/_/g, " ")));
+}
 
 
 /**
@@ -123,11 +155,12 @@ export function registerSiteIntelligenceRoutes(fastify: FastifyInstance) {
     if (!context) return;
     const siteId = await loadSiteForParams(request, reply, context.tenantId);
     if (!siteId) return;
-    const query = request.query as { q?: string; crawlState?: string; page?: string; pageSize?: string };
+    const query = request.query as { q?: string; crawlState?: string; contentType?: string; page?: string; pageSize?: string };
     return reply.send(
       await listIndexedPages(context.tenantId, siteId, {
         query: parseOptionalString(query.q) ?? undefined,
         crawlState: parseOptionalString(query.crawlState) ?? undefined,
+        contentType: parseOptionalString(query.contentType) ?? undefined,
         page: parsePage(query.page, 1),
         pageSize: parsePageSize(query.pageSize, 25),
       }),
@@ -150,4 +183,164 @@ export function registerSiteIntelligenceRoutes(fastify: FastifyInstance) {
     });
     return reply.send({ items: suggestions });
   });
+
+  // ── Website editorial onboarding
+
+  fastify.get("/v2/sites/:siteId/onboarding", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    try {
+      const site = await findSite(context.tenantId, siteId);
+      if (!site) return notFound(reply, "site not found");
+      const run = await getSiteOnboarding(context.tenantId, siteId);
+      const operation = run?.operationId ? await getOperation(context.tenantId, run.operationId) : null;
+      return reply.send({ run, operation });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/onboarding", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    try {
+      const start = await startSiteOnboarding(context.tenantId, siteId, context.userId, { trigger: "manual" });
+      start.promise.catch(() => undefined);
+      return reply.code(start.started ? 202 : 200).send({ started: start.started, operationId: start.operationId, run: start.run });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/onboarding/retry", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    try {
+      const start = await retrySiteOnboarding(context.tenantId, siteId, context.userId);
+      start.promise.catch(() => undefined);
+      return reply.code(202).send({ started: true, operationId: start.operationId, fromStep: start.fromStep, run: start.run });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  // ── Editorial strategy (detected / suggested / approved)
+
+  fastify.get("/v2/sites/:siteId/strategy", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    try {
+      return reply.send(await getStrategyLayers(context.tenantId, siteId));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.put("/v2/sites/:siteId/strategy", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    const body = parseBody<{ config?: unknown; note?: string }>(request);
+    if (!body.config || typeof body.config !== "object") return badRequest(reply, "config is required");
+    try {
+      const saved = await saveApprovedStrategy(context.tenantId, siteId, body.config, { userId: context.userId, note: parseOptionalString(body.note) });
+      return reply.send({ version: saved.version, config: saved.config, layers: await getStrategyLayers(context.tenantId, siteId) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/strategy/suggest", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    try {
+      const result = await regenerateStrategySuggestion(context.tenantId, siteId);
+      if (!result.generated) return conflict(reply, result.reason ?? "no site profile yet");
+      return reply.send({ ...result, layers: await getStrategyLayers(context.tenantId, siteId) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.get("/v2/sites/:siteId/strategy/versions", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    return reply.send({ items: await listStrategyVersions(context.tenantId, siteId) });
+  });
+
+  fastify.post("/v2/sites/:siteId/strategy/versions/:version/restore", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    const version = Number.parseInt((request.params as { version: string }).version, 10);
+    if (!Number.isInteger(version) || version < 1) return badRequest(reply, "invalid version");
+    try {
+      const saved = await restoreStrategyVersion(context.tenantId, siteId, version, context.userId);
+      return reply.send({ version: saved.version, layers: await getStrategyLayers(context.tenantId, siteId) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  // Topic cluster actions: edit / include / exclude write the approved layer (new version).
+  fastify.patch("/v2/sites/:siteId/strategy/pillars", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    const body = parseBody<{ clusterSlug?: string; name?: string; description?: string; keywords?: string[]; subtopics?: string[]; included?: boolean; weight?: number }>(request);
+    if (!parseOptionalString(body.clusterSlug) && !parseOptionalString(body.name)) return badRequest(reply, "clusterSlug or name is required");
+    try {
+      const saved = await upsertApprovedPillar(
+        context.tenantId,
+        siteId,
+        {
+          clusterSlug: parseOptionalString(body.clusterSlug),
+          name: parseOptionalString(body.name),
+          description: body.description === undefined ? undefined : parseOptionalString(body.description),
+          keywords: Array.isArray(body.keywords) ? body.keywords : undefined,
+          subtopics: Array.isArray(body.subtopics) ? body.subtopics : undefined,
+          included: typeof body.included === "boolean" ? body.included : undefined,
+          weight: typeof body.weight === "number" ? body.weight : undefined,
+        },
+        context.userId,
+      );
+      return reply.send({ version: saved.version, layers: await getStrategyLayers(context.tenantId, siteId) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  // "Investigate gap": indexed coverage per subtopic + a link to the plan generator for this pillar.
+  fastify.get("/v2/sites/:siteId/strategy/clusters/:slug/coverage", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = await loadSiteForParams(request, reply, context.tenantId);
+    if (!siteId) return;
+    const slug = parseOptionalString((request.params as { slug: string }).slug);
+    if (!slug) return badRequest(reply, "invalid cluster");
+    try {
+      return reply.send(await getClusterCoverage(context.tenantId, siteId, slug));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+}
+
+async function findSite(tenantId: string, siteId: string) {
+  return prisma.site.findFirst({ where: { id: siteId, tenantId }, select: { id: true } });
 }

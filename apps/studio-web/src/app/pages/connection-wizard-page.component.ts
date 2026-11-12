@@ -9,6 +9,7 @@ import { ToastService } from '../services/toast.service';
 import { ConfirmService } from '../services/confirm.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { SocialSetupGuideComponent } from '../components/social-setup-guide.component';
+import { OnboardingTimelineComponent } from '../components/intelligence/onboarding-timeline.component';
 import { detectConnectTarget, type ConnectTarget } from '../utils/connect-target';
 import type {
   ConfigSchemaField,
@@ -24,7 +25,7 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
 @Component({
   selector: 'app-connection-wizard-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, SocialSetupGuideComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, SocialSetupGuideComponent, OnboardingTimelineComponent],
   styles: [
     `
 /* Destination cards */
@@ -386,7 +387,19 @@ type Step = { id: number; label: string; state: 'done' | 'current' | 'todo' };
       </section>
 
       <!-- Step 6: Review & activate -->
-      <section class="au-panel au-panel--padded" *ngIf="panel === 5">
+      <!-- After a website activates: live editorial onboarding of the new destination -->
+      <ng-container *ngIf="onboardingSiteId">
+        <div class="au-banner au-banner--success au-mb-3">
+          <app-icon name="circle-check"></app-icon>
+          <span class="au-banner__text">Destination activated. Auctorio is now learning the website; this runs in the background and you can leave this page.</span>
+        </div>
+        <app-onboarding-timeline [siteId]="onboardingSiteId" [showStrategyLink]="true"></app-onboarding-timeline>
+        <div class="au-form__actions au-mt-3">
+          <button class="au-btn au-btn--ghost" type="button" (click)="goToConnections()">Back to connections</button>
+        </div>
+      </ng-container>
+
+      <section class="au-panel au-panel--padded" *ngIf="panel === 5 && !onboardingSiteId">
         <h2 class="au-panel__title">Review and activate</h2>
         <dl class="au-detail-grid">
           <dt>Destination</dt><dd>{{ installation?.displayName || kindLabel(installation?.kind) }}</dd>
@@ -450,6 +463,8 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
   targetInput = '';
   detected: ConnectTarget | null = null;
   socialHandle: string | null = null;
+  /** Set once a website activates: the wizard then shows that site's onboarding timeline. */
+  onboardingSiteId: string | null = null;
 
   /** Panels follow the website numbering; the 3-step social flow maps onto authorize (3) and review (5). */
   get panel(): number {
@@ -1001,16 +1016,27 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
 
   private doActivate(payload: { socialAccountId?: string }): void {
     this.api.activateInstallation(this.installation!.id, payload).subscribe({
-      next: () => {
+      next: (response) => {
         this.activating = false;
         this.toast.success('Destination activated.');
-        void this.router.navigate(['/studio/connections'], { queryParams: { activated: '1' } });
+        // Website activation starts onboarding (see routes-connectors.ts); show its live timeline here.
+        const initialization = (response as ConnectorInstallation & { initialization?: { siteId?: string } | null }).initialization;
+        if (this.installation?.kind === 'website' && initialization?.siteId) {
+          this.installation = response;
+          this.onboardingSiteId = initialization.siteId;
+          return;
+        }
+        this.goToConnections();
       },
       error: (err) => {
         this.activating = false;
         this.activateError = err?.error?.error?.message || 'Activation failed.';
       },
     });
+  }
+
+  goToConnections(): void {
+    void this.router.navigate(['/studio/connections'], { queryParams: { activated: '1' } });
   }
 
   stateLabel(state: string | undefined): string {

@@ -217,7 +217,7 @@ export async function getSiteIntelligenceOverview(tenantId: string, siteId: stri
 export async function listIndexedPages(
   tenantId: string,
   siteId: string,
-  options: { query?: string; crawlState?: string; page?: number; pageSize?: number } = {},
+  options: { query?: string; crawlState?: string; contentType?: string; page?: number; pageSize?: number } = {},
 ) {
   const page = Math.max(1, options.page ?? 1);
   const pageSize = Math.min(100, Math.max(1, options.pageSize ?? 25));
@@ -230,6 +230,10 @@ export async function listIndexedPages(
   }
   if (options.crawlState && options.crawlState !== "all") {
     where.crawlState = options.crawlState;
+  }
+  if (options.contentType) {
+    // Topic clusters are grouped by content type (see profile.ts), so this lists a cluster's pages.
+    where.contentType = options.contentType;
   }
   const [total, items] = await prisma.$transaction([
     prisma.siteIndexedPage.count({ where }),

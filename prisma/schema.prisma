@@ -398,6 +398,9 @@ model Tenant {
   articleGenerations             ArticleGeneration[]
   costBudgets                    CostBudget[]
   aiSpendEvents                  AiSpendEvent[]
+  // onboarding + strategy (agent B)
+  siteOnboardingRuns             SiteOnboardingRun[]
+  siteEditorialStrategies        SiteEditorialStrategy[]
 
   @@map("tenants")
 }
@@ -591,6 +594,9 @@ model Site {
   articleGenerations     ArticleGeneration[]
   costBudgets            CostBudget[]
   aiSpendEvents          AiSpendEvent[]
+  // onboarding + strategy (agent B)
+  onboardingRun          SiteOnboardingRun?
+  editorialStrategy      SiteEditorialStrategy?
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -2168,6 +2174,70 @@ model SiteIntelligenceProfile {
 
   @@unique([siteId])
   @@map("site_intelligence_profiles")
+}
+
+/// Website editorial onboarding (one row per site; retries resume it in place).
+model SiteOnboardingRun {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  siteId      String    @map("site_id") @db.Uuid
+  operationId String?   @map("operation_id") @db.Uuid
+  status      String    @default("running")
+  trigger     String    @default("manual")
+  steps       Json
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@index([tenantId, status])
+  @@map("site_onboarding_runs")
+}
+
+/// Editable editorial strategy: suggested layer (regenerated) + approved layer (operator, versioned).
+model SiteEditorialStrategy {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  siteId           String    @map("site_id") @db.Uuid
+  suggested        Json?
+  suggestedSource  String?   @map("suggested_source")
+  suggestedAt      DateTime? @map("suggested_at")
+  approved         Json?
+  approvedVersion  Int       @default(0) @map("approved_version")
+  approvedAt       DateTime? @map("approved_at")
+  approvedByUserId String?   @map("approved_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site                           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  versions SiteEditorialStrategyVersion[]
+
+  @@unique([siteId])
+  @@map("site_editorial_strategies")
+}
+
+model SiteEditorialStrategyVersion {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  siteId              String   @map("site_id") @db.Uuid
+  strategyId          String   @map("strategy_id") @db.Uuid
+  version             Int
+  config              Json
+  note                String?
+  restoredFromVersion Int?     @map("restored_from_version")
+  createdByUserId     String?  @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  strategy SiteEditorialStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@unique([strategyId, version])
+  @@index([tenantId, siteId])
+  @@map("site_editorial_strategy_versions")
 }
 
 model SearchTarget {
