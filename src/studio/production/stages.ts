@@ -97,6 +97,11 @@ async function brief(ctx: StageContext): Promise<BriefArtifact> {
   return buildPlanBrief(ctx.input, factSafety, ctx.now);
 }
 
+/** The writer returns a JSON envelope (HTML body, claims, SEO); too tight a cap truncates it and parseWriterOutput silently falls back to raw text. */
+export function writerMaxTokens(targetWordMax: number): number {
+  return Math.min(8000, Math.max(3000, Math.round(targetWordMax * 5)));
+}
+
 async function write(ctx: StageContext): Promise<WriteArtifact> {
   const briefArtifact = need(ctx.artifacts.brief, "brief");
   const factSafety = need(ctx.artifacts.evidence, "evidence");
@@ -120,7 +125,7 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     factLicenses: factSafety.licenses as unknown as Prisma.InputJsonValue,
     writerPrompt: writerPrompt.userPrompt,
   });
-  const maxTokens = Math.min(8000, Math.max(1400, Math.round(briefArtifact.brief.targetLengthRange.max * 2.2)));
+  const maxTokens = writerMaxTokens(briefArtifact.brief.targetLengthRange.max);
   const result = await getArticleWriter().generate({
     prompt: writerPrompt.userPrompt,
     systemPrompt: writerPrompt.systemPrompt,
