@@ -49,10 +49,10 @@ function outlineHeadings(item: Pick<EditorialPlanItem, "outline">): string[] {
 
 // ────────────────────────────────────────────────────────────── Project shell
 
-function planItemBriefText(item: EditorialPlanItem): string {
+export function planItemBriefText(item: EditorialPlanItem): string {
   const outline = outlineHeadings(item);
   return [
-    `Titulo: ${item.workingTitle || item.title}`,
+    `Titulo: ${item.finalSuggestedTitle || item.workingTitle || item.title}`,
     item.angle ? `Angulo: ${item.angle}` : null,
     item.topic ? `Tema: ${item.topic}` : null,
     item.topicCluster ? `Cluster: ${item.topicCluster}` : null,
