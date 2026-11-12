@@ -218,7 +218,7 @@ test("propose_source stores an open recommendation and never activates it", asyn
   assert.equal(await prisma.sourceRecommendation.count({ where: { tenantId: b.tenantId } }), 0);
   const { action: done } = await confirmAction(actor, action.id);
   assert.equal(done.status, "confirmed");
-  const row = await prisma.sourceRecommendation.findUniqueOrThrow({ where: { tenantId_domain: { tenantId: b.tenantId, domain: "fixtures-example.org" } } });
+  const row = await prisma.sourceRecommendation.findFirstOrThrow({ where: { tenantId: b.tenantId, siteId: null, domain: "fixtures-example.org" } });
   assert.equal(row.status, "open");
   assert.equal(row.sourceId, null);
   assert.match(row.reasonSummary ?? "", /^\[competitor\] it covers local fixtures/);

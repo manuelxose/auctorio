@@ -499,7 +499,7 @@ const proposeSource: WriteTool = {
     const relationship = text(args.relationship, "relationship", 40) ?? "reference";
     const reason = text(args.reason, "reason", 600);
     if (!reason) throw new CopilotError(400, "Give a reason for proposing this source.");
-    const existing = await prisma.sourceRecommendation.findUnique({ where: { tenantId_domain: { tenantId: ctx.tenantId, domain } } });
+    const existing = await prisma.sourceRecommendation.findFirst({ where: { tenantId: ctx.tenantId, siteId: null, domain } });
     return {
       args: { domain, relationship, reason },
       summary: existing
@@ -511,7 +511,7 @@ const proposeSource: WriteTool = {
     const domain = normalizeDomain(args.domain);
     const relationship = text(args.relationship, "relationship", 40) ?? "reference";
     const reason = text(args.reason, "reason", 600) ?? "";
-    const existing = await prisma.sourceRecommendation.findUnique({ where: { tenantId_domain: { tenantId, domain } } });
+    const existing = await prisma.sourceRecommendation.findFirst({ where: { tenantId, siteId: null, domain } });
     if (existing) return { result: { recommendationId: existing.id, domain, status: existing.status, alreadyExisted: true }, links: [{ label: "Review in Sources", path: "/studio/sources" }] };
     try {
       const created = await prisma.sourceRecommendation.create({
