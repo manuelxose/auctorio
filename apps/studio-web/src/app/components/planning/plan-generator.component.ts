@@ -174,6 +174,7 @@ export class PlanGeneratorComponent implements OnInit {
   private readonly api = inject(PlanningApiService);
   @Input() sites: StudioSite[] = [];
   @Input() initialSiteId = '';
+  @Input() initialPillar = '';
   @Input() busy = false;
   @Output() generate = new EventEmitter<Record<string, unknown>>();
 
@@ -213,6 +214,7 @@ export class PlanGeneratorComponent implements OnInit {
 
   ngOnInit(): void {
     this.siteId = this.initialSiteId || this.sites[0]?.id || '';
+    if (this.initialPillar) this.topics = this.initialPillar;
     this.onSite();
   }
 
@@ -306,7 +308,7 @@ export class PlanGeneratorComponent implements OnInit {
     this.market = p.market ?? '';
     this.objective = p.objective ?? '';
     this.audience = p.audience ?? '';
-    this.topics = (p.topics ?? []).join(', ');
+    this.topics = this.initialPillar || (p.topics ?? []).join(', ');
     this.excludedTopics = (p.excludedTopics ?? []).join(', ');
     this.keywordSeeds = (p.keywordSeeds ?? []).join(', ');
     this.seasonalEvents = (p.seasonalEvents ?? []).join(', ');

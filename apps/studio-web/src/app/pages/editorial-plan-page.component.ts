@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Observable, Subscription, forkJoin, of } from 'rxjs';
 import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
@@ -89,7 +89,7 @@ type View = 'calendar' | 'backlog' | 'pipeline';
           </div>
         </header>
         <div class="au-panel--padded">
-          <app-plan-generator [sites]="sites" [initialSiteId]="siteId" [busy]="!!activeOp" (generate)="generate($event)"></app-plan-generator>
+          <app-plan-generator [sites]="sites" [initialSiteId]="siteId" [initialPillar]="initialPillar" [busy]="!!activeOp" (generate)="generate($event)"></app-plan-generator>
         </div>
       </section>
 
@@ -187,6 +187,7 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly context = inject(EditorialContextService);
+  private readonly route = inject(ActivatedRoute);
   private opSub: Subscription | null = null;
 
   sites: StudioSite[] = [];
@@ -201,6 +202,8 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   notice = '';
   announce = '';
   showGenerator = false;
+  /** From ?pillar=: prefills the generator's priority topic. */
+  initialPillar = '';
   showArchived = false;
   extending = false;
   extendTo = '';
@@ -217,6 +220,11 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.sites = this.appContext.sites();
     this.siteId = this.appContext.activeSite()?.id ?? this.sites[0]?.id ?? '';
+    const query = this.route.snapshot.queryParamMap;
+    const querySite = query.get('siteId');
+    if (querySite && this.sites.some((site) => site.id === querySite)) this.siteId = querySite;
+    this.initialPillar = query.get('pillar')?.trim() ?? '';
+    if (this.initialPillar) this.showGenerator = true;
     this.context.update({ area: 'plan', siteId: this.siteId || null });
     this.load();
   }
