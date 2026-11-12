@@ -2,8 +2,46 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import type { SiteIntelligenceProfileSummary } from "./site-intelligence/profile";
 import { rebuildSiteProfile } from "./site-intelligence/profile";
 import type { SiteTopicCluster } from "@prisma/client";
+import { getApprovedStrategy, strategyExclusions, type StrategyConfig } from "./site-intelligence/strategy";
 
 const prisma = getPrismaClient();
+
+/** Detected profile with the approved strategy layered on top (exclusions enforced by site-relevance). */
+export type PlanningProfile = SiteIntelligenceProfileSummary & { strategyExclusions?: string[] };
+
+/**
+ * Approved strategy beats inferred defaults: approved pillars lead the topic space, excluded
+ * pillars/topics leave it (and become hard exclusions), audience/language/tone/formats override.
+ * Pure: never mutates the persisted detected profile.
+ */
+export function applyApprovedStrategy(profile: SiteIntelligenceProfileSummary, config: StrategyConfig): PlanningProfile {
+  const exclusions = strategyExclusions(config);
+  const banned = new Set(exclusions.map((term) => term.toLowerCase()));
+  const keep = (value: string) => !banned.has(value.toLowerCase());
+  const included = config.pillars.filter((pillar) => pillar.included).sort((a, b) => b.weight - a.weight);
+  const excludedSlugs = new Set(config.pillars.filter((pillar) => !pillar.included).map((pillar) => pillar.clusterSlug ?? pillar.name.toLowerCase()));
+  const pillarTopics = included.flatMap((pillar) => [pillar.name, ...pillar.subtopics]);
+  const contentTypes = [...(profile.contentTypes ?? [])];
+  for (const format of config.preferredFormats) {
+    if (!contentTypes.some((entry) => entry.type === format)) contentTypes.push({ type: format, count: 0 });
+  }
+  return {
+    ...profile,
+    mainTopics: Array.from(new Set([...pillarTopics, ...(profile.mainTopics ?? [])])).filter(keep),
+    categories: Array.from(new Set([...config.priorityCategories, ...(profile.categories ?? [])])).filter(keep),
+    commercialTopics: (profile.commercialTopics ?? []).filter(keep),
+    evergreenTopics: (profile.evergreenTopics ?? []).filter(keep),
+    newsTopics: (profile.newsTopics ?? []).filter(keep),
+    sportsTopics: (profile.sportsTopics ?? []).filter(keep),
+    topicClusters: (profile.topicClusters ?? []).filter((cluster) => !excludedSlugs.has(cluster.slug) && !excludedSlugs.has(cluster.name.toLowerCase()) && keep(cluster.name)),
+    contentTypes,
+    excludedTopics: Array.from(new Set([...(profile.excludedTopics ?? []), ...exclusions])),
+    detectedAudience: config.primaryAudience ?? profile.detectedAudience,
+    detectedLanguage: config.languages[0] ?? profile.detectedLanguage,
+    editorialTone: config.writingStyle ?? profile.editorialTone,
+    strategyExclusions: exclusions,
+  };
+}
 
 export type PlanningEvidence = {
   sourceType: "source" | "indexed-page" | "profile";
@@ -14,7 +52,9 @@ export type PlanningEvidence = {
 
 export type EditorialPlanningContext = {
   site: { id: string; name: string; type: string; baseUrl: string | null; locale: string };
-  profile: SiteIntelligenceProfileSummary | null;
+  profile: PlanningProfile | null;
+  /** Operator-approved editorial strategy (versioned); null until someone approves one. */
+  approvedStrategy?: { version: number; config: StrategyConfig; exclusions: string[] } | null;
   profileWarnings: string[];
   topIndexedPages: Array<{ url: string; title: string; contentType: string | null }>;
   indexedUrlInventory: string[];
@@ -64,8 +104,9 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
     throw new Error("site_not_found");
   }
 
-  const [profile, topPages, indexedUrls, searchTargets, futureItems, recentProjects, siteSources, sharedSources, clusters] = await Promise.all([
+  const [detectedProfile, approved, topPages, indexedUrls, searchTargets, futureItems, recentProjects, siteSources, sharedSources, allClusters] = await Promise.all([
     loadProfile(tenantId, siteId),
+    getApprovedStrategy(tenantId, siteId),
     prisma.siteIndexedPage.findMany({
       where: { tenantId, siteId, crawlState: { in: ["extracted", "stale"] } },
       orderBy: [{ modifiedAt: "desc" }, { wordCount: "desc" }],
@@ -101,6 +142,10 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
     }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId }, orderBy: { pagesCount: "desc" }, take: 25 }),
   ]);
+  const profile: PlanningProfile | null = detectedProfile && approved ? applyApprovedStrategy(detectedProfile, approved.config) : detectedProfile;
+  const exclusions = approved ? strategyExclusions(approved.config) : [];
+  const excludedSlugs = new Set(approved?.config.pillars.filter((pillar) => !pillar.included).map((pillar) => pillar.clusterSlug ?? pillar.name.toLowerCase()) ?? []);
+  const clusters = allClusters.filter((cluster) => !excludedSlugs.has(cluster.slug) && !excludedSlugs.has(cluster.name.toLowerCase()));
 
   const sourceItems = await prisma.sourceItem.findMany({
     where: {
@@ -130,6 +175,7 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
   return {
     site: { id: site.id, name: site.name, type: site.type, baseUrl: site.baseUrl, locale: site.locale },
     profile,
+    approvedStrategy: approved ? { version: approved.version, config: approved.config, exclusions } : null,
     profileWarnings: profile?.warnings ?? [],
     topIndexedPages: topPages.map((page) => ({ url: page.url, title: page.title ?? page.url, contentType: page.contentType })),
     indexedUrlInventory: indexedUrls.map((page) => page.url),
@@ -199,7 +245,35 @@ export function renderPlanningContext(context: EditorialPlanningContext, strateg
     lines.push("SITE INTELLIGENCE: none available. Propose only topics that clearly belong to the destination site type and language.");
   }
 
-  lines.push(`EXISTING INDEXED PAGES (sample): ${context.topIndexedPages.slice(0, 25).map((page) => page.title).join(" | ") || "n/a"}`);
+  const approved = context.approvedStrategy?.config ?? null;
+  if (approved && context.approvedStrategy) {
+    lines.push(`APPROVED EDITORIAL STRATEGY (operator-approved v${context.approvedStrategy.version}; overrides the inferred site intelligence above):`);
+    if (approved.description) lines.push(`- editorial line: ${approved.description}`);
+    if (approved.primaryAudience) lines.push(`- primary audience: ${approved.primaryAudience}`);
+    if (approved.languages.length) lines.push(`- languages: ${approved.languages.join(", ")}`);
+    if (approved.markets.length) lines.push(`- markets: ${approved.markets.join(", ")}`);
+    const included = approved.pillars.filter((pillar) => pillar.included).sort((a, b) => b.weight - a.weight);
+    if (included.length) {
+      const total = included.reduce((sum, pillar) => sum + pillar.weight, 0) || 1;
+      lines.push(`- content pillars (distribute items by weight): ${included
+        .map((pillar) => `${pillar.name} [${Math.round((pillar.weight / total) * 100)}%]${pillar.subtopics.length ? ` (${pillar.subtopics.slice(0, 6).join(", ")})` : ""}`)
+        .join("; ")}`);
+    }
+    if (approved.priorityCategories.length) lines.push(`- priority categories: ${approved.priorityCategories.join(", ")}`);
+    if (approved.preferredFormats.length) lines.push(`- preferred formats: ${approved.preferredFormats.join(", ")}`);
+    if (approved.searchIntents.length) lines.push(`- search-intent strategy: ${approved.searchIntents.join(", ")}`);
+    if (approved.writingStyle) lines.push(`- writing style: ${approved.writingStyle}`);
+    if (approved.seoObjectives.length) lines.push(`- SEO objectives: ${approved.seoObjectives.join("; ")}`);
+    if (approved.sourcePolicy) lines.push(`- source policy: ${approved.sourcePolicy}`);
+    if (approved.cadenceNotes) lines.push(`- cadence: ${approved.cadenceNotes}`);
+    if (approved.editorialRestrictions.length) lines.push(`- editorial restrictions: ${approved.editorialRestrictions.join("; ")}`);
+    if (approved.internalLinkingRules.length) lines.push(`- internal linking rules: ${approved.internalLinkingRules.join("; ")}`);
+    if (context.approvedStrategy.exclusions.length) {
+      lines.push(`- NEVER propose items about (items mentioning these are rejected): ${context.approvedStrategy.exclusions.join(", ")}`);
+    }
+  }
+
+  lines.push(`EXISTING INDEXED PAGES (sample):${context.topIndexedPages.slice(0, 25).map((page) => page.title).join(" | ") || "n/a"}`);
   lines.push(`ALREADY TARGETED QUERIES: ${context.searchTargets.slice(0, 40).join(", ") || "none"}`);
   lines.push(`EXISTING PLAN QUERIES: ${context.existingPlanQueries.slice(0, 40).join(", ") || "none"}`);
   lines.push(`EXISTING PLAN TITLES: ${context.existingPlanTitles.slice(0, 40).join(" | ") || "none"}`);
@@ -216,18 +290,22 @@ export function renderPlanningContext(context: EditorialPlanningContext, strateg
 
   lines.push(`STRATEGY: mode=${strategy.mode}${strategy.primaryIntent ? `, primaryIntent=${strategy.primaryIntent}` : ""}${strategy.campaignName ? `, campaign=${strategy.campaignName}` : ""}`);
   lines.push(`OBJECTIVE: ${strategy.objective ?? "editorial growth aligned with the destination"}`);
-  lines.push(`AUDIENCE: ${strategy.audience ?? context.profile?.detectedAudience ?? "site audience"}`);
-  if (strategy.market) {
-    lines.push(`MARKET: ${strategy.market}`);
+  // Per-plan request values win; then the approved strategy; then what the crawl inferred.
+  lines.push(`AUDIENCE: ${strategy.audience ?? approved?.primaryAudience ?? context.profile?.detectedAudience ?? "site audience"}`);
+  const market = strategy.market ?? approved?.markets.join(", ");
+  if (market) {
+    lines.push(`MARKET: ${market}`);
   }
-  if (strategy.contentFormats?.length) {
-    lines.push(`PREFERRED CONTENT FORMATS: ${strategy.contentFormats.join(", ")}`);
+  const formats = strategy.contentFormats?.length ? strategy.contentFormats : (approved?.preferredFormats ?? []);
+  if (formats.length) {
+    lines.push(`PREFERRED CONTENT FORMATS: ${formats.join(", ")}`);
   }
   if (strategy.priorityTopics?.length) {
     lines.push(`PRIORITY TOPICS: ${strategy.priorityTopics.join(", ")}`);
   }
-  if (strategy.excludedTopics?.length) {
-    lines.push(`EXCLUDED TOPICS: ${strategy.excludedTopics.join(", ")}`);
+  const excludedTopics = Array.from(new Set([...(strategy.excludedTopics ?? []), ...(context.approvedStrategy?.exclusions ?? [])]));
+  if (excludedTopics.length) {
+    lines.push(`EXCLUDED TOPICS: ${excludedTopics.join(", ")}`);
   }
   if (strategy.keywordSeeds?.length) {
     lines.push(`KEYWORD SEEDS: ${strategy.keywordSeeds.join(", ")}`);

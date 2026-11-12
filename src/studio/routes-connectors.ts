@@ -1,4 +1,4 @@
-import { startSiteIndexOperation } from "./routes-site-intelligence";
+import { startSiteOnboarding } from "./onboarding/orchestrator";
 import type { FastifyInstance } from "fastify";
 import crypto from "node:crypto";
 import {
@@ -493,19 +493,16 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       actionUrl: "/studio/connections",
       dedupeKey: `installation.${id}.active`,
     });
-    // Editorial initialization: start read-only site discovery right away (durable operation,
-    // de-duplicated per site). Publishing stays manual; connecting never publishes anything.
-    let initialization: { operationId: string } | null = null;
+    // Editorial onboarding: index → profile → sources → competitors → strategy → first-plan offer,
+    // as one durable operation, one run per site (re-activation joins or resumes it, never duplicates).
+    // Read-only: publishing stays manual; connecting never generates or publishes anything.
+    let initialization: { operationId: string; siteId: string; onboardingRunId: string } | null = null;
     try {
-      const run = await startSiteIndexOperation(context.tenantId, site.id, context.userId, {
-        crawl: true,
-        changedOnly: Boolean(installation.siteId),
-        trigger: "connection_activated",
-      });
+      const run = await startSiteOnboarding(context.tenantId, site.id, context.userId, { trigger: "connection_activated" });
       run.promise.catch(() => undefined);
-      initialization = { operationId: run.operationId };
+      if (run.operationId) initialization = { operationId: run.operationId, siteId: site.id, onboardingRunId: run.run.id };
     } catch {
-      // Activation already succeeded; indexing can be restarted from Site intelligence.
+      // Activation already succeeded; onboarding can be retried from Site intelligence.
     }
     return reply.send({ ...sanitizeInstallation(activated), initialization });
   });

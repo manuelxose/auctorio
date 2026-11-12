@@ -186,16 +186,38 @@ function topicSimilarity(titleTokens: string[], topicTokens: string[]): number {
 }
 
 /**
+ * Pure check against the operator-approved strategy: returns the first excluded
+ * term found as a whole word/phrase in the candidate's title, topic or cluster.
+ */
+export function isExcludedByStrategy(
+  title: string,
+  topic: string | null | undefined,
+  exclusions: string[] | null | undefined,
+  extra: Array<string | null | undefined> = [],
+): string | null {
+  if (!exclusions?.length) return null;
+  const haystack = ` ${normalize([title, topic ?? "", ...extra.map((value) => value ?? "")].join(" ")).replace(/[^a-z0-9]+/g, " ")} `;
+  for (const term of exclusions) {
+    const needle = normalize(term).replace(/[^a-z0-9]+/g, " ").trim();
+    if (needle.length >= 3 && haystack.includes(` ${needle} `)) return term;
+  }
+  return null;
+}
+
+/** Profile as seen by the planner; `strategyExclusions` comes from the approved editorial strategy. */
+export type RelevanceProfile = Pick<
+  SiteIntelligenceProfileSummary,
+  "mainTopics" | "categories" | "commercialTopics" | "evergreenTopics" | "newsTopics" | "sportsTopics" | "topicClusters" | "contentTypes" | "detectedSiteType"
+> & { strategyExclusions?: string[] };
+
+/**
  * Deterministic site-relevance scoring. Scores 0-100; items below the
  * threshold are rejected or flagged. Absurd off-topic candidates are
  * hard-rejected by the negative lexicon.
  */
 export function computeSiteRelevanceScore(
   brief: Pick<EditorialPlanBriefV2, "topic" | "topicCluster" | "contentType" | "primaryIntent" | "targetQuery" | "primaryKeyword">,
-  profile: Pick<
-    SiteIntelligenceProfileSummary,
-    "mainTopics" | "categories" | "commercialTopics" | "evergreenTopics" | "newsTopics" | "sportsTopics" | "topicClusters" | "contentTypes" | "detectedSiteType"
-  >,
+  profile: RelevanceProfile,
   title: string,
   options: { allowedContentFormats?: string[] } = {},
 ): RelevanceVerdict {
@@ -204,6 +226,13 @@ export function computeSiteRelevanceScore(
 
   const blob = `${title} ${brief.topic ?? ""} ${brief.primaryKeyword ?? ""} ${brief.targetQuery ?? ""}`;
   const normalizedBlob = normalize(blob);
+
+  // ── Hard guardrail: excluded by the operator-approved editorial strategy
+  const excluded = isExcludedByStrategy(title, brief.topic, profile.strategyExclusions, [brief.topicCluster, brief.primaryKeyword, brief.targetQuery]);
+  if (excluded) {
+    reasons.push(`excluded by approved strategy: ${excluded}`);
+    return { score: 0, reasons, rejected: true };
+  }
 
   // ── Hard guardrail: explicit off-topic domain
   const offTopicHits = OFF_TOPIC_TERMS.filter((term) => normalizedBlob.includes(normalize(term)));
