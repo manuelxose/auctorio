@@ -2,6 +2,7 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import type { SiteIntelligenceProfileSummary } from "./site-intelligence/profile";
 import { rebuildSiteProfile } from "./site-intelligence/profile";
 import type { SiteTopicCluster } from "@prisma/client";
+import { getSourceEvidenceForPlanning } from "./source-registry-discovery";
 import { getApprovedStrategy, strategyExclusions, type StrategyConfig } from "./site-intelligence/strategy";
 
 const prisma = getPrismaClient();
@@ -44,7 +45,7 @@ export function applyApprovedStrategy(profile: SiteIntelligenceProfileSummary, c
 }
 
 export type PlanningEvidence = {
-  sourceType: "source" | "indexed-page" | "profile";
+  sourceType: "source" | "source_item" | "indexed-page" | "profile";
   url?: string;
   title: string;
   trustScore?: number;
@@ -147,11 +148,12 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
   const excludedSlugs = new Set(approved?.config.pillars.filter((pillar) => !pillar.included).map((pillar) => pillar.clusterSlug ?? pillar.name.toLowerCase()) ?? []);
   const clusters = allClusters.filter((cluster) => !excludedSlugs.has(cluster.slug) && !excludedSlugs.has(cluster.name.toLowerCase()));
 
+  const registryEvidence = await getSourceEvidenceForPlanning(tenantId, siteId, 20);
   const sourceItems = await prisma.sourceItem.findMany({
     where: {
       tenantId,
       processingStatus: "candidate",
-      source: { OR: [{ siteId }, { siteId: null }] },
+      source: { enabled: true, archivedAt: null, OR: [{ siteId }, { siteId: null }] },
     },
     orderBy: [{ score: "desc" }, { discoveredAt: "desc" }],
     take: 15,
@@ -165,6 +167,7 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
       title: item.title,
       trustScore: item.score ?? undefined,
     })),
+    ...registryEvidence.map((item) => ({ sourceType: "source_item" as const, url: item.url, title: item.title })),
     ...topPages.slice(0, 12).map((page) => ({
       sourceType: "indexed-page" as const,
       url: page.url,
