@@ -54,5 +54,7 @@ test("buildImageDerivatives creates hero, og and thumbnail webp variants", async
     assert.equal(metadata.height, derivative.height);
   }
 
-  await fs.rm(root, { recursive: true, force: true });
+  // libvips keeps decoded files open in its cache; on Windows that locks them until released.
+  sharp.cache(false);
+  await fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });

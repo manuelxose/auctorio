@@ -283,6 +283,7 @@ enum EditorialPlanStatus {
   draft
   generating
   ready
+  partial
   failed
   archived
 }
@@ -323,6 +324,9 @@ model Tenant {
   createdAt  DateTime     @default(now()) @map("created_at")
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
+  aiProviderSetting              AiProviderSetting?
+  copilotThreads                 CopilotThread[]
+  copilotMessages                CopilotMessage[]
   topics                         Topic[]
   facts                          Fact[]
   contentText                    ContentText[]
@@ -394,6 +398,20 @@ model Tenant {
   articleGenerations             ArticleGeneration[]
   costBudgets                    CostBudget[]
   aiSpendEvents                  AiSpendEvent[]
+  // planning (agent A)
+  editorialPlanPresets           EditorialPlanPreset[]
+  sitePlanningSettings           SitePlanningSettings[]
+  // onboarding + strategy (agent B)
+  siteOnboardingRuns             SiteOnboardingRun[]
+  siteEditorialStrategies        SiteEditorialStrategy[]
+  // sources + competitors (agent C)
+  competitors                    Competitor[]
+  competitorCoverageSnapshots    CompetitorCoverageSnapshot[]
+  contentOpportunities           ContentOpportunity[]
+  // production (agent D)
+  productionJobs                 ProductionJob[]
+  // assistant (agent E)
+  copilotActions                 CopilotAction[]
 
   @@map("tenants")
 }
@@ -587,6 +605,20 @@ model Site {
   articleGenerations     ArticleGeneration[]
   costBudgets            CostBudget[]
   aiSpendEvents          AiSpendEvent[]
+  // planning (agent A)
+  timezone               String                   @default("Europe/Madrid")
+  editorialPlanPresets   EditorialPlanPreset[]
+  planningSettings       SitePlanningSettings?
+  // onboarding + strategy (agent B)
+  onboardingRun          SiteOnboardingRun?
+  editorialStrategy      SiteEditorialStrategy?
+  // sources + competitors (agent C)
+  sourceRecommendations       SourceRecommendation[]
+  competitors                 Competitor[]
+  competitorCoverageSnapshots CompetitorCoverageSnapshot[]
+  contentOpportunities        ContentOpportunity[]
+  // production (agent D)
+  productionJobs         ProductionJob[]
 
   @@unique([tenantId, key])
   @@index([tenantId, type])
@@ -640,6 +672,56 @@ model ContentProject {
   @@index([tenantId, sourceItemId])
   @@index([tenantId, automationSubstate], map: "content_projects_tenant_id_automation_substate_idx")
   @@map("content_projects")
+}
+
+// production (agent D): one durable job per governed production run.
+enum ProductionJobStatus {
+  queued
+  running
+  needs_review
+  ready
+  failed
+  cancelled
+}
+
+model ProductionJob {
+  id                String              @id @default(uuid()) @db.Uuid
+  tenantId          String              @map("tenant_id") @db.Uuid
+  siteId            String              @map("site_id") @db.Uuid
+  kind              String
+  planItemId        String?             @map("plan_item_id") @db.Uuid
+  clusterId         String?             @map("cluster_id") @db.Uuid
+  projectId         String?             @map("project_id") @db.Uuid
+  versionId         String?             @map("version_id") @db.Uuid
+  generationId      String?             @map("generation_id") @db.Uuid
+  operationId       String?             @map("operation_id") @db.Uuid
+  status            ProductionJobStatus @default(queued)
+  stage             String              @default("prepare")
+  attempts          Int                 @default(0)
+  error             String?             @db.Text
+  errorCode         String?             @map("error_code")
+  idempotencyKey    String              @unique @map("idempotency_key")
+  request           Json
+  artifacts         Json?
+  initiatorUserId   String?             @map("initiator_user_id") @db.Uuid
+  reviewDecision    String?             @map("review_decision")
+  reviewNotes       String?             @map("review_notes") @db.Text
+  reviewedByUserId  String?             @map("reviewed_by_user_id") @db.Uuid
+  reviewedAt        DateTime?           @map("reviewed_at")
+  cancelRequestedAt DateTime?           @map("cancel_requested_at")
+  startedAt         DateTime?           @map("started_at")
+  finishedAt        DateTime?           @map("finished_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, status, createdAt])
+  @@index([tenantId, planItemId])
+  @@index([tenantId, clusterId])
+  @@map("production_jobs")
 }
 
 model ContentVersion {
@@ -1997,6 +2079,45 @@ model EditorialPlanItem {
   @@map("editorial_plan_items")
 }
 
+/// Saved generator settings (cadence + strategy). siteId null = available for every site of the tenant.
+model EditorialPlanPreset {
+  id        String   @id @default(uuid()) @db.Uuid
+  tenantId  String   @map("tenant_id") @db.Uuid
+  siteId    String?  @map("site_id") @db.Uuid
+  name      String
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  tenant          Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site            Site?                  @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  defaultForSites SitePlanningSettings[]
+
+  @@index([tenantId, siteId])
+  @@map("editorial_plan_presets")
+}
+
+/// Per-site planning defaults that prefill the plan generator.
+model SitePlanningSettings {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @map("tenant_id") @db.Uuid
+  siteId          String   @unique @map("site_id") @db.Uuid
+  articlesPerDay  Int      @default(1) @map("articles_per_day")
+  weekdays        Json
+  publishTimes    Json     @map("publish_times")
+  channels        Json
+  defaultPresetId String?  @map("default_preset_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant        Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site                 @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  defaultPreset EditorialPlanPreset? @relation(fields: [defaultPresetId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@map("site_planning_settings")
+}
+
 // ────────────────────────────────────────────────────────────── Site intelligence
 
 model SiteSitemap {
@@ -2164,6 +2285,70 @@ model SiteIntelligenceProfile {
 
   @@unique([siteId])
   @@map("site_intelligence_profiles")
+}
+
+/// Website editorial onboarding (one row per site; retries resume it in place).
+model SiteOnboardingRun {
+  id          String    @id @default(uuid()) @db.Uuid
+  tenantId    String    @map("tenant_id") @db.Uuid
+  siteId      String    @map("site_id") @db.Uuid
+  operationId String?   @map("operation_id") @db.Uuid
+  status      String    @default("running")
+  trigger     String    @default("manual")
+  steps       Json
+  startedAt   DateTime  @default(now()) @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@index([tenantId, status])
+  @@map("site_onboarding_runs")
+}
+
+/// Editable editorial strategy: suggested layer (regenerated) + approved layer (operator, versioned).
+model SiteEditorialStrategy {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  siteId           String    @map("site_id") @db.Uuid
+  suggested        Json?
+  suggestedSource  String?   @map("suggested_source")
+  suggestedAt      DateTime? @map("suggested_at")
+  approved         Json?
+  approvedVersion  Int       @default(0) @map("approved_version")
+  approvedAt       DateTime? @map("approved_at")
+  approvedByUserId String?   @map("approved_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant   Tenant                         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site                           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  versions SiteEditorialStrategyVersion[]
+
+  @@unique([siteId])
+  @@map("site_editorial_strategies")
+}
+
+model SiteEditorialStrategyVersion {
+  id                  String   @id @default(uuid()) @db.Uuid
+  tenantId            String   @map("tenant_id") @db.Uuid
+  siteId              String   @map("site_id") @db.Uuid
+  strategyId          String   @map("strategy_id") @db.Uuid
+  version             Int
+  config              Json
+  note                String?
+  restoredFromVersion Int?     @map("restored_from_version")
+  createdByUserId     String?  @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  strategy SiteEditorialStrategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@unique([strategyId, version])
+  @@index([tenantId, siteId])
+  @@map("site_editorial_strategy_versions")
 }
 
 model SearchTarget {
@@ -2339,12 +2524,114 @@ model SourceRecommendation {
   lastSeenAt    DateTime @default(now()) @map("last_seen_at")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
+  // Site-scoped recommendation fields (agent C). Legacy web-discovery rows keep siteId null.
+  siteId             String?   @map("site_id") @db.Uuid
+  name               String?
+  url                String?
+  canonicalUrl       String?   @map("canonical_url")
+  type               String?
+  category           String?
+  relationship       String?
+  topics             Json?
+  trustLevel         String?   @map("trust_level")
+  relevance          String?
+  assessmentReason   String?   @map("assessment_reason") @db.Text
+  language           String?
+  geography          String?
+  verificationStatus String?   @map("verification_status")
+  lastCheckedAt      DateTime? @map("last_checked_at")
+  expectedFreshness  String?   @map("expected_freshness")
+  limitations        Json?
+  discoveryMethod    String?   @map("discovery_method")
+  evidence           Json?
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site?  @relation(fields: [siteId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, domain])
+  @@unique([tenantId, siteId, canonicalUrl])
+  @@index([tenantId, domain])
   @@index([tenantId, status, score])
+  @@index([tenantId, siteId, status])
   @@map("source_recommendations")
+}
+
+/// A competing publication for one site. Shortlisted only from observable
+/// evidence; "verified" means reachable + sitemap/feed fetched + overlap measured.
+model Competitor {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  siteId        String    @map("site_id") @db.Uuid
+  domain        String
+  origin        String
+  name          String
+  status        String    @default("suggested")
+  verification  String    @default("speculative")
+  evidence      Json?
+  overlapTopics Json?     @map("overlap_topics")
+  overlapScore  Float?    @map("overlap_score")
+  notes         String?   @db.Text
+  sitemapUrl    String?   @map("sitemap_url")
+  feedUrl       String?   @map("feed_url")
+  lastCheckedAt DateTime? @map("last_checked_at")
+  lastError     String?   @map("last_error")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  tenant        Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site          Site                         @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  snapshots     CompetitorCoverageSnapshot[]
+  opportunities ContentOpportunity[]
+
+  @@unique([siteId, domain])
+  @@index([tenantId, siteId, status])
+  @@map("competitors")
+}
+
+/// Public sitemap/feed entries observed on a competitor: url + title only.
+model CompetitorCoverageSnapshot {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  competitorId String   @map("competitor_id") @db.Uuid
+  url          String
+  title        String?
+  topic        String?
+  observedAt   DateTime @default(now()) @map("observed_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site       Site       @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  competitor Competitor @relation(fields: [competitorId], references: [id], onDelete: Cascade)
+
+  @@unique([competitorId, url])
+  @@index([siteId, topic])
+  @@map("competitor_coverage_snapshots")
+}
+
+model ContentOpportunity {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  competitorId    String?   @map("competitor_id") @db.Uuid
+  kind            String
+  topic           String
+  dedupeKey       String    @map("dedupe_key")
+  rationale       String    @db.Text
+  evidence        Json?
+  relatedSiteUrls Json?     @map("related_site_urls")
+  targetUrl       String?   @map("target_url")
+  status          String    @default("open")
+  planItemId      String?   @map("plan_item_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site       Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  competitor Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
+
+  @@unique([siteId, dedupeKey])
+  @@index([tenantId, siteId, status])
+  @@map("content_opportunities")
 }
 
 model WebRetrieval {
@@ -2661,4 +2948,97 @@ model WaitlistSignup {
   updatedAt  DateTime @updatedAt @map("updated_at")
 
   @@map("waitlist_signups")
+}
+
+// ────────────────────────────────────────────────────────────── Studio Copilot
+
+/// One persisted copilot conversation, private to the Studio user who opened it.
+model CopilotThread {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  studioUserId String   @map("studio_user_id") @db.Uuid
+  siteId       String?  @map("site_id") @db.Uuid
+  title        String
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages CopilotMessage[]
+  actions  CopilotAction[]
+
+  @@index([tenantId, studioUserId, updatedAt])
+  @@map("copilot_threads")
+}
+
+/// A copilot turn. Assistant turns record the competency run that produced them
+/// (key, inputs, evidence) plus provider, model and measured token usage.
+model CopilotMessage {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  threadId      String   @map("thread_id") @db.Uuid
+  role          String
+  content       String   @db.Text
+  status        String   @default("completed")
+  competencyKey String?  @map("competency_key")
+  context       Json?
+  evidence      Json?
+  provider      String?
+  model         String?
+  tokensInput   Int?     @map("tokens_input")
+  tokensOutput  Int?     @map("tokens_output")
+  durationMs    Int?     @map("duration_ms")
+  error         String?  @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread  CopilotThread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  actions CopilotAction[]
+
+  @@index([threadId, createdAt])
+  @@index([tenantId, competencyKey, createdAt])
+  @@map("copilot_messages")
+}
+
+/// A write the assistant proposed. Nothing runs until its Studio user confirms it;
+/// the claim pending -> executing is atomic, so a confirm executes at most once.
+model CopilotAction {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  studioUserId String    @map("studio_user_id") @db.Uuid
+  threadId     String?   @map("thread_id") @db.Uuid
+  messageId    String?   @map("message_id") @db.Uuid
+  tool         String
+  args         Json
+  summary      String    @db.Text
+  /// pending | executing | confirmed | failed | cancelled
+  status       String    @default("pending")
+  result       Json?
+  error        String?   @db.Text
+  confirmedAt  DateTime? @map("confirmed_at")
+  cancelledAt  DateTime? @map("cancelled_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread  CopilotThread?  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message CopilotMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, studioUserId, status, createdAt])
+  @@index([messageId])
+  @@map("copilot_actions")
+}
+
+/// AI provider and model chosen by a workspace admin (Settings → AI). Keys stay in the server env.
+model AiProviderSetting {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @unique @map("tenant_id") @db.Uuid
+  provider        String
+  model           String
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_provider_settings")
 }

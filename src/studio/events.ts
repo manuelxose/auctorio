@@ -18,6 +18,12 @@ function getPublisher(): Redis {
   return publisher;
 }
 
+export async function closeEventPublisher(): Promise<void> {
+  const current = publisher;
+  publisher = null;
+  if (current) await current.quit().catch(() => undefined);
+}
+
 function streamKey(tenantId: string): string {
   return `studio:events:${tenantId}`;
 }

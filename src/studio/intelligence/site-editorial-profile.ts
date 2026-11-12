@@ -118,8 +118,17 @@ export async function buildSiteEditorialProfile(
   const existingTitles = projects.map((project) => project.title);
 
   const topics = intelligence ? readProfileTopicArray(intelligence.mainTopics) : [];
-  const audience = intelligence && Array.isArray(intelligence.detectedAudience) ? readStringArray(intelligence.detectedAudience) : [];
+  // What the owner confirmed in the connection wizard (Site.brandVoice + Site.locale) wins over detection.
+  const voice = site.brandVoice && typeof site.brandVoice === "object" && !Array.isArray(site.brandVoice)
+    ? (site.brandVoice as Record<string, unknown>)
+    : {};
+  const confirmed = typeof voice.confirmedAt === "string";
+  const confirmedAudience = readStringArray(voice.audience);
+  const audience = confirmedAudience.length
+    ? confirmedAudience
+    : intelligence && Array.isArray(intelligence.detectedAudience) ? readStringArray(intelligence.detectedAudience) : [];
   const language =
+    (confirmed ? site.locale.split("-")[0] : null) ??
     indexedPages.find((page) => page.language)?.language ??
     intelligence?.detectedLanguage ??
     site.locale.split("-")[0] ??
@@ -151,7 +160,7 @@ export async function buildSiteEditorialProfile(
     taxonomy: taxonomy.slice(0, 80),
     audience,
     language,
-    location: [],
+    location: readStringArray(voice.location),
     editorialDescription: site.brandVoice && typeof site.brandVoice === "object" ? readEditorialDescription(site.brandVoice) : null,
     contentGaps,
     existingTitles: existingTitles.slice(0, maxTitles),

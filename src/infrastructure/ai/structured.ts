@@ -128,6 +128,14 @@ function useJsonResponseFormat(): boolean {
 }
 
 /**
+ * Opt-in: send the JSON schema itself so a provider that supports structured outputs constrains
+ * generation to it. Off by default because not every OpenAI-compatible provider accepts json_schema.
+ */
+function useJsonSchemaResponseFormat(): boolean {
+  return getBooleanEnv("STRUCTURED_JSON_SCHEMA_FORMAT", false);
+}
+
+/**
  * Reliable structured generation: provider-native JSON mode where supported,
  * safe extraction, controlled repair, strict schema validation, and a single
  * corrective retry carrying the validation errors. Fails with a typed domain
@@ -161,7 +169,11 @@ export async function generateStructured<T>(options: StructuredGenerationOptions
         model: options.model,
         temperature: options.temperature ?? 0,
         maxTokens: options.maxTokens,
-        responseFormat: useJsonResponseFormat() ? { type: "json_object" } : undefined,
+        responseFormat: useJsonSchemaResponseFormat()
+          ? { type: "json_schema", json_schema: { name: options.schemaName.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64), schema: options.schema.jsonSchema(), strict: true } }
+          : useJsonResponseFormat()
+            ? { type: "json_object" }
+            : undefined,
       });
     } catch (error) {
       structuredEvent(

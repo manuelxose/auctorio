@@ -17,6 +17,7 @@ import type {
   StudioSocialContent,
 } from '../models/studio.models';
 import { stageLabel, stageTone } from '../utils/content-status';
+import { articlePipeline, type PipelineStep } from '../utils/article-pipeline';
 
 type WorkspaceTab = 'content' | 'media' | 'seo' | 'social' | 'schedule' | 'history';
 type ProjectPublication = {
@@ -90,6 +91,32 @@ function strOf(value: unknown): string {
           <button class="au-btn au-btn--danger" type="button" *ngIf="canUnpublish" (click)="unpublish()">Unpublish</button>
         </div>
       </header>
+
+      <ol class="au-stepper au-stepper--article" aria-label="Article pipeline">
+        @for (step of pipeline(); track step.id; let i = $index) {
+          <li
+            class="au-step"
+            [class.is-done]="step.state === 'done'"
+            [class.is-current]="step.state === 'current'"
+            [class.is-failed]="step.state === 'failed'"
+            [attr.aria-current]="step.state === 'current' || step.state === 'failed' ? 'step' : null"
+          >
+            <span class="au-step__dot">
+              @if (step.state === 'done') {
+                <app-icon name="check"></app-icon>
+              } @else if (step.state === 'failed') {
+                <app-icon name="warning"></app-icon>
+              } @else {
+                {{ i + 1 }}
+              }
+            </span>
+            <span class="au-step__label">{{ step.label }}</span>
+            @if (step.state === 'failed') {
+              <span class="au-step__meta">Needs attention</span>
+            }
+          </li>
+        }
+      </ol>
 
       <div class="au-banner au-banner--error" *ngIf="error">
         <app-icon name="warning"></app-icon>
@@ -1343,4 +1370,8 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   stageLabel = stageLabel;
   stageTone = stageTone;
+
+  pipeline(): PipelineStep[] {
+    return this.project ? articlePipeline(this.project.reviewGate.stage) : [];
+  }
 }

@@ -1,3 +1,4 @@
+import { withAiTenant } from "../ai/ai-settings";
 import { Prisma } from "@prisma/client";
 import { Worker } from "bullmq";
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
@@ -42,12 +43,12 @@ export async function runTextWorker() {
   }
 
   const prisma = getPrismaClient();
-  const provider = getTextProvider();
-
   const worker = new Worker(
     QUEUE_NAMES.text,
-    async (job) => {
+    async (job) => withAiTenant((job.data as TextJobData).tenantId, async () => {
       const data = job.data as TextJobData;
+      // Resolved per job: each workspace may have chosen a different provider (Settings → AI).
+      const provider = getTextProvider();
       await markJobProcessing(data.jobId);
       await prisma.contentText.update({
         where: { id: data.contentTextId },
@@ -170,7 +171,7 @@ export async function runTextWorker() {
       });
 
       await syncTextResultToStudio(data.tenantId, data.contentTextId);
-    },
+    }),
     {
       connection: getRedisConnectionOptions(),
       ...bullWorkerOptions("text", 1),

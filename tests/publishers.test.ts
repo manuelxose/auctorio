@@ -127,6 +127,7 @@ function buildContext(siteType: Site["type"], overrides?: Partial<PublisherConte
     taxonomyMap: null,
     publishingCredentialsRef: null,
     siteValueConfig: null,
+    timezone: "Europe/Madrid",
     createdAt: now,
     updatedAt: now,
   } satisfies Site;

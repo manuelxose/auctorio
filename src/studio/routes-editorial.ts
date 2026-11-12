@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import {
@@ -42,6 +42,17 @@ import {
   updatePublicationSchedule,
 } from "./publication";
 import { listCalendarEvents } from "./calendar";
+import { computePlanSlotsDetailed, PLAN_SLOT_LEAD_MINUTES, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
+import {
+  createPlanPreset,
+  deletePlanPreset,
+  getSitePlanningSettings,
+  listPlanningInventory,
+  listPlanPresets,
+  putSitePlanningSettings,
+  siteTimezone,
+  updatePlanPreset,
+} from "./planning-settings";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
 import { getEnv } from "../shared/utils/env";
@@ -69,7 +80,10 @@ import {
   bulkSetEditorialPlanItemStatus,
   deleteEditorialPlanItem,
   enqueueEditorialPlanGeneration,
-  generateContentFromEditorialPlanItem,
+  enqueueFillMissingSlots,
+  enqueueRegeneratePlanItem,
+  enqueueExtendPlan,
+  updateEditorialPlan,
   generateEditorialPlan,
   getEditorialPlan,
   listEditorialPlans,
@@ -78,6 +92,7 @@ import {
   type GenerateEditorialPlanInput,
 } from "./editorial-plan";
 import { CONTENT_FORMATS, SEARCH_INTENTS, STRATEGY_MODES } from "./editorial-plan-schema";
+import { startProductionForPlanItem } from "./production/pipeline";
 
 const prisma = getPrismaClient();
 
@@ -1489,16 +1504,58 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       keywordSeeds?: string[];
       allowWithoutIntelligence?: boolean;
       async?: boolean;
+      articlesPerDay?: number;
+      weekdays?: number[];
+      weekdayQuotas?: Record<string, number>;
+      excludedDates?: string[];
+      publishTimes?: string[];
     }>(request);
-    const dateFrom = parseIsoDate(body.dateFrom);
-    const dateTo = parseIsoDate(body.dateTo);
+    let dateFrom = parseIsoDate(body.dateFrom);
+    let dateTo = parseIsoDate(body.dateTo);
     const channels = (body.channels ?? []).filter((channel): channel is (typeof PUBLICATION_CHANNELS)[number] =>
       isOneOf(channel, PUBLICATION_CHANNELS),
     );
     if (!dateFrom || !dateTo) return badRequest(reply, "dateFrom and dateTo are required ISO dates");
     if (!body.siteId || !isUuid(body.siteId)) return badRequest(reply, "siteId is required and must be a valid id");
     if (channels.length === 0) return badRequest(reply, "channels must include website, x, or instagram");
-    if (!body.publicationCount) return badRequest(reply, "publicationCount must be greater than zero");
+    // Plans are scheduled in the destination site's timezone unless the request names one explicitly.
+    const siteTz = await siteTimezone(context.tenantId, body.siteId);
+    if (!siteTz) return notFound(reply, "site not found");
+    const timezone = parseOptionalString(body.timezone) ?? siteTz;
+    // Cadence mode: the app computes exact local-date slots; publicationCount is derived, never trusted.
+    let slotRequest: PlanSlotRequest | undefined;
+    let slots: PlanSlot[] | undefined;
+    let skippedPast: Array<{ localDate: string; localTime: string }> = [];
+    if (body.articlesPerDay !== undefined) {
+      slotRequest = {
+        dateFrom: String(body.dateFrom).slice(0, 10),
+        dateTo: String(body.dateTo).slice(0, 10),
+        timezone,
+        articlesPerDay: Number(body.articlesPerDay),
+        weekdays: Array.isArray(body.weekdays) ? body.weekdays.map(Number).filter((day) => Number.isInteger(day) && day >= 0 && day <= 6) : undefined,
+        weekdayQuotas: body.weekdayQuotas && typeof body.weekdayQuotas === "object" ? body.weekdayQuotas : undefined,
+        excludedDates: Array.isArray(body.excludedDates) ? body.excludedDates.map(String) : undefined,
+        publishTimes: Array.isArray(body.publishTimes) ? body.publishTimes.map(String) : undefined,
+      };
+      try {
+        const computed = computePlanSlotsDetailed(slotRequest);
+        slots = computed.slots;
+        skippedPast = computed.skippedPast.map((slot) => ({ localDate: slot.localDate, localTime: slot.localTime }));
+      } catch (error) {
+        return badRequest(reply, error instanceof Error ? error.message : String(error));
+      }
+      if (slots.length === 0) {
+        return badRequest(
+          reply,
+          skippedPast.length
+            ? `all ${skippedPast.length} slots in the selected range are in the past (or start within ${PLAN_SLOT_LEAD_MINUTES} minutes); pick later dates`
+            : "the selected dates, weekdays and quotas produce no publication slots",
+        );
+      }
+      ({ from: dateFrom, to: dateTo } = planRangeBounds(slotRequest.dateFrom, slotRequest.dateTo, timezone));
+    } else if (!body.publicationCount) {
+      return badRequest(reply, "articlesPerDay (or legacy publicationCount) must be greater than zero");
+    }
     try {
       const generationInput: GenerateEditorialPlanInput = {
         tenantId: context.tenantId,
@@ -1508,9 +1565,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         dateTo,
         objective: parseOptionalString(body.objective),
         channels,
-        publicationCount: body.publicationCount,
-        frequency: parseOptionalString(body.frequency),
-        timezone: parseOptionalString(body.timezone) ?? "Europe/Madrid",
+        publicationCount: slots ? slots.length : Number(body.publicationCount),
+        slots,
+        slotRequest,
+        frequency: parseOptionalString(body.frequency) ?? (slotRequest ? `${slotRequest.articlesPerDay}/day` : null),
+        timezone,
         accountIds: body.accountIds ?? [],
         language: parseOptionalString(body.language) ?? "es",
         audience: parseOptionalString(body.audience),
@@ -1540,7 +1599,15 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
 
       if (body.async !== false) {
         const enqueued = await enqueueEditorialPlanGeneration(generationInput);
-        return reply.code(202).send({ planId: enqueued.planId, status: "generating" });
+        return reply.code(202).send({
+          planId: enqueued.planId,
+          operationId: enqueued.operationId,
+          status: "generating",
+          expectedCount: enqueued.expectedCount,
+          slots: slots?.map((slot) => ({ localDate: slot.localDate, localTime: slot.localTime, scheduledFor: slot.scheduledFor.toISOString() })) ?? null,
+          skippedPast,
+          timezone,
+        });
       }
 
       const plan = await generateEditorialPlan(generationInput);
@@ -1563,6 +1630,181 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // Missing-slot recovery and single-proposal regeneration: same durable runner, other items untouched.
+  const extensionErrors: Record<string, number> = {
+    editorial_plan_not_found: 404,
+    editorial_plan_item_not_found: 404,
+    editorial_plan_busy: 409,
+    editorial_plan_not_extendable: 409,
+    editorial_plan_has_no_unfilled_slots: 409,
+    editorial_plan_item_not_replaceable: 409,
+    editorial_plan_extend_too_many_items: 409,
+  };
+  const sendExtension = async (reply: FastifyReply, run: () => Promise<{ planId: string; operationId: string; expectedCount: number; skippedPast?: number }>) => {
+    try {
+      const accepted = await run();
+      return reply.code(202).send({ ...accepted, status: "generating" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const code = extensionErrors[message];
+      if (code === 404) return notFound(reply, message);
+      if (code === 409) return conflict(reply, message);
+      return badRequest(reply, message);
+    }
+  };
+
+  fastify.post("/v2/editorial-plans/:id/fill", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    return sendExtension(reply, () => enqueueFillMissingSlots(context.tenantId, planId, context.userId));
+  });
+
+  fastify.post("/v2/editorial-plan-items/:id/regenerate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    return sendExtension(reply, () => enqueueRegeneratePlanItem(context.tenantId, itemId, context.userId));
+  });
+
+  // Extend: generates only the slots after the plan's current end date with the plan's stored cadence.
+  fastify.post("/v2/editorial-plans/:id/extend", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    const body = parseBody<{ dateTo?: string; articlesPerDay?: number }>(request);
+    if (typeof body.dateTo !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(body.dateTo)) return badRequest(reply, "dateTo must be a local date (YYYY-MM-DD)");
+    if (body.articlesPerDay !== undefined && (!Number.isInteger(body.articlesPerDay) || body.articlesPerDay < 1 || body.articlesPerDay > 8)) {
+      return badRequest(reply, "articlesPerDay must be an integer between 1 and 8");
+    }
+    return sendExtension(reply, () => enqueueExtendPlan(context.tenantId, planId, { dateTo: body.dateTo!, articlesPerDay: body.articlesPerDay }, context.userId));
+  });
+
+  fastify.patch("/v2/editorial-plans/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    const body = parseBody<{ name?: unknown; status?: unknown }>(request);
+    if (body.status !== undefined && body.status !== "archived") return badRequest(reply, "status can only be set to archived");
+    if (body.name !== undefined && (typeof body.name !== "string" || !body.name.trim() || body.name.length > 160)) return badRequest(reply, "name must be 1-160 characters");
+    try {
+      const updated = await updateEditorialPlan(context.tenantId, planId, { name: body.name as string | undefined, status: body.status as "archived" | undefined }, context.userId);
+      if (!updated) return notFound(reply, "editorial plan not found");
+      return reply.send(updated);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  // ──────────────────────────────────────────────────────────── Planning presets & site defaults
+
+  fastify.get("/v2/editorial-plan-presets", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.query as { siteId?: string }).siteId;
+    if (siteId && !isUuid(siteId)) return badRequest(reply, "invalid site id");
+    return reply.send({ items: await listPlanPresets(context.tenantId, siteId) });
+  });
+
+  fastify.post("/v2/editorial-plan-presets", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const body = parseBody<{ name?: unknown; siteId?: unknown; payload?: unknown }>(request);
+    if (typeof body.name !== "string") return badRequest(reply, "name is required");
+    if (body.siteId !== undefined && body.siteId !== null && (typeof body.siteId !== "string" || !isUuid(body.siteId))) return badRequest(reply, "invalid site id");
+    try {
+      return reply.code(201).send(await createPlanPreset(context.tenantId, { name: body.name, siteId: (body.siteId as string | null) ?? null, payload: body.payload }, context.userId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message === "site_not_found" ? notFound(reply, message) : badRequest(reply, message);
+    }
+  });
+
+  fastify.patch("/v2/editorial-plan-presets/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const presetId = (request.params as { id: string }).id;
+    if (!isUuid(presetId)) return badRequest(reply, "invalid preset id");
+    const body = parseBody<{ name?: unknown; payload?: unknown }>(request);
+    if (body.name !== undefined && typeof body.name !== "string") return badRequest(reply, "name must be a string");
+    try {
+      const updated = await updatePlanPreset(context.tenantId, presetId, { name: body.name as string | undefined, payload: body.payload }, context.userId);
+      if (!updated) return notFound(reply, "preset not found");
+      return reply.send(updated);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.delete("/v2/editorial-plan-presets/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const presetId = (request.params as { id: string }).id;
+    if (!isUuid(presetId)) return badRequest(reply, "invalid preset id");
+    const deleted = await deletePlanPreset(context.tenantId, presetId, context.userId);
+    if (!deleted) return notFound(reply, "preset not found");
+    return reply.send(deleted);
+  });
+
+  fastify.get("/v2/sites/:id/planning-settings", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    try {
+      return reply.send(await getSitePlanningSettings(context.tenantId, siteId));
+    } catch {
+      return notFound(reply, "site not found");
+    }
+  });
+
+  fastify.put("/v2/sites/:id/planning-settings", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const body = parseBody<Record<string, unknown>>(request);
+    const numbers = (value: unknown) => (Array.isArray(value) ? value.map(Number) : undefined);
+    const strings = (value: unknown) => (Array.isArray(value) ? value.map(String) : undefined);
+    if (body.defaultPresetId !== undefined && body.defaultPresetId !== null && (typeof body.defaultPresetId !== "string" || !isUuid(body.defaultPresetId))) {
+      return badRequest(reply, "invalid defaultPresetId");
+    }
+    try {
+      return reply.send(
+        await putSitePlanningSettings(
+          context.tenantId,
+          siteId,
+          {
+            timezone: typeof body.timezone === "string" ? body.timezone : undefined,
+            articlesPerDay: body.articlesPerDay === undefined ? undefined : Number(body.articlesPerDay),
+            weekdays: numbers(body.weekdays),
+            publishTimes: strings(body.publishTimes),
+            channels: strings(body.channels),
+            defaultPresetId: body.defaultPresetId as string | null | undefined,
+          },
+          context.userId,
+        ),
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message === "site_not_found" ? notFound(reply, message) : badRequest(reply, message);
+    }
+  });
+
+  // Inventory the drawer may pick internal links / evidence from; PATCH re-validates every new URL server-side.
+  fastify.get("/v2/sites/:id/planning-inventory", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const query = request.query as { q?: string; limit?: string };
+    return reply.send(await listPlanningInventory(context.tenantId, siteId, parseOptionalString(query.q) ?? null, Math.min(50, Math.max(1, Number(query.limit) || 20))));
+  });
+
   fastify.patch("/v2/editorial-plan-items/:id", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "projects.manage");
     if (!context) return;
@@ -1571,11 +1813,41 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const body = parseBody<Record<string, unknown>>(request);
     const stringOrNull = (value: unknown) => (typeof value === "string" || value === null ? value : undefined);
     const stringArrayOrNull = (value: unknown) => (Array.isArray(value) && value.every((entry) => typeof entry === "string") ? value : value === null ? null : undefined);
+    // Omitted scheduledFor must leave the date alone (it used to be cleared on every partial PATCH).
+    const scheduledFor = body.scheduledFor === undefined ? undefined : body.scheduledFor === null ? null : parseIsoDate(body.scheduledFor);
+    if (body.scheduledFor !== undefined && body.scheduledFor !== null && !scheduledFor) return badRequest(reply, "scheduledFor must be an ISO date");
+    const evidence = body.sourceEvidence === null ? null : Array.isArray(body.sourceEvidence) ? body.sourceEvidence : undefined;
+    if (evidence && !evidence.every((entry) => entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).title === "string" && ((entry as Record<string, unknown>).url === undefined || typeof (entry as Record<string, unknown>).url === "string"))) {
+      return badRequest(reply, "sourceEvidence entries need a title and an optional url");
+    }
+    const outline = Array.isArray(body.outline) ? body.outline : body.outline === null ? null : undefined;
+    if (outline && !outline.every((entry) => entry && typeof entry === "object" && typeof (entry as Record<string, unknown>).heading === "string")) {
+      return badRequest(reply, "outline entries need a heading");
+    }
+    const generation = body.generation === null ? null : body.generation && typeof body.generation === "object" && !Array.isArray(body.generation) ? (body.generation as Record<string, unknown>) : undefined;
+    const optionalBool = (value: unknown) => (typeof value === "boolean" ? value : null);
+    const optionalText = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
+    const wordMin = body.recommendedWordCountMin;
+    const wordMax = body.recommendedWordCountMax;
+    if (typeof wordMin === "number" && typeof wordMax === "number" && wordMin > wordMax) return badRequest(reply, "recommendedWordCountMin cannot exceed recommendedWordCountMax");
     const updated = await updateEditorialPlanItem(context.tenantId, itemId, {
       title: typeof body.title === "string" ? body.title : undefined,
       workingTitle: stringOrNull(body.workingTitle),
       topic: stringOrNull(body.topic),
-      scheduledFor: body.scheduledFor === null ? null : parseIsoDate(body.scheduledFor),
+      scheduledFor,
+      secondaryKeywords: stringArrayOrNull(body.secondaryKeywords),
+      relatedEntities: stringArrayOrNull(body.relatedEntities),
+      audience: stringOrNull(body.audience),
+      suggestedSlug: stringOrNull(body.suggestedSlug),
+      sourceEvidence: evidence?.map((entry) => {
+        const record = entry as Record<string, unknown>;
+        return { title: String(record.title), ...(typeof record.url === "string" && record.url ? { url: record.url } : {}), ...(typeof record.sourceType === "string" ? { sourceType: record.sourceType } : {}) };
+      }) ?? (evidence === null ? null : undefined),
+      generation: generation === undefined
+        ? undefined
+        : generation === null
+          ? null
+          : { tone: optionalText(generation.tone, 80), includeFaq: optionalBool(generation.includeFaq), includeImage: optionalBool(generation.includeImage), instructions: optionalText(generation.instructions, 2000) },
       primaryKeyword: stringOrNull(body.primaryKeyword),
       seoTitle: stringOrNull(body.seoTitle),
       metaDescription: stringOrNull(body.metaDescription),
@@ -1601,14 +1873,18 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       suggestedExternalEvidenceTypes: stringArrayOrNull(body.suggestedExternalEvidenceTypes),
       faqCandidates: Array.isArray(body.faqCandidates) ? body.faqCandidates : body.faqCandidates === null ? null : undefined,
       schemaTypes: stringArrayOrNull(body.schemaTypes),
-      outline: Array.isArray(body.outline) ? body.outline : body.outline === null ? null : undefined,
+      outline: outline as Array<{ heading: string; subpoints?: string[] }> | null | undefined,
       recommendedWordCountMin: typeof body.recommendedWordCountMin === "number" || body.recommendedWordCountMin === null ? body.recommendedWordCountMin : undefined,
       recommendedWordCountMax: typeof body.recommendedWordCountMax === "number" || body.recommendedWordCountMax === null ? body.recommendedWordCountMax : undefined,
       difficultyEstimate: typeof body.difficultyEstimate === "number" || body.difficultyEstimate === null ? body.difficultyEstimate : undefined,
       confidence: typeof body.confidence === "number" || body.confidence === null ? body.confidence : undefined,
       rationale: stringOrNull(body.rationale),
       freshnessRequirement: stringOrNull(body.freshnessRequirement),
+    }).catch((error: unknown) => {
+      if (error instanceof Error && error.message.startsWith("editorial_plan_item_url_not_in_inventory")) return error;
+      throw error;
     });
+    if (updated instanceof Error) return badRequest(reply, updated.message);
     if (!updated) return notFound(reply, "editorial plan item not found");
     return reply.send(updated);
   });
@@ -1672,7 +1948,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const itemId = (request.params as { id: string }).id;
     if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
     try {
-      const result = await generateContentFromEditorialPlanItem(context.tenantId, itemId, context.userId);
+      const result = await startProductionForPlanItem(context.tenantId, itemId, context.userId);
       if (!result) return notFound(reply, "editorial plan item not found");
       return reply.code(202).send(result);
     } catch (error) {

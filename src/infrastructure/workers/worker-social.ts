@@ -1,3 +1,4 @@
+import { withAiTenant } from "../ai/ai-settings";
 import { Worker } from "bullmq";
 import { getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
@@ -204,7 +205,7 @@ export async function runSocialWorker() {
 
   const worker = new Worker(
     QUEUE_NAMES.social,
-    async (job) => {
+    async (job) => withAiTenant((job.data as SocialJobData).kind === "generate" ? (job.data as SocialGenerateJobData).tenantId : null, async () => {
       const data = job.data as SocialJobData;
       if (data.kind === "generate") {
         await runSocialGenerationJob(data);
@@ -215,7 +216,7 @@ export async function runSocialWorker() {
         return;
       }
       await processPublish(data);
-    },
+    }),
     {
       connection: getRedisConnectionOptions(),
       ...bullWorkerOptions("social", 1),

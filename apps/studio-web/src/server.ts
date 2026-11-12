@@ -7,6 +7,7 @@ import {
 import crypto from 'node:crypto';
 import http from 'node:http';
 import https from 'node:https';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
 import {
@@ -203,6 +204,7 @@ type AuthStatePayload = {
 };
 
 const browserDistFolder = join(import.meta.dirname, '../browser');
+const csrShellPath = join(browserDistFolder, 'index.csr.html');
 const app = express();
 
 app.set('trust proxy', 1);
@@ -877,6 +879,10 @@ async function validateSessionToken(
       body: JSON.stringify({ sessionToken }),
     });
 
+    // Only a definite rejection ends a session; an API that is down or restarting must not log people out.
+    if (response.status >= 500) {
+      throw new StudioBackendUnavailable();
+    }
     if (!response.ok) {
       return null;
     }
@@ -887,9 +893,30 @@ async function validateSessionToken(
       expiresAt: Date.now() + 60_000,
     });
     return value;
-  } catch {
-    return null;
+  } catch (error) {
+    if (error instanceof StudioBackendUnavailable) throw error;
+    throw new StudioBackendUnavailable();
   }
+}
+
+/** The Studio API could not be reached; the session may still be valid. */
+class StudioBackendUnavailable extends Error {
+  constructor() {
+    super('studio_backend_unavailable');
+  }
+}
+
+function sendBackendUnavailable(res: express.Response, json: boolean): void {
+  if (res.headersSent) return;
+  res.setHeader('Retry-After', '5');
+  if (json) {
+    res.status(503).json({ error: 'backend_unavailable', message: 'The Studio API is restarting. Try again in a few seconds.' });
+    return;
+  }
+  res
+    .status(503)
+    .type('html')
+    .send('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>Auctorio</title><p style="font:16px system-ui;margin:20vh auto;max-width:28rem;text-align:center">Auctorio is restarting. This page reloads in a few seconds.</p>');
 }
 
 const sessionValidationCache = new Map<
@@ -1176,8 +1203,16 @@ function proxyToBackend(): express.RequestHandler {
         }
       });
 
+      // Browser went away (Stop, closed tab): drop the upstream call so the API can see the abort.
+      res.on('close', () => {
+        if (!res.writableEnded) upstream.destroy();
+      });
       req.pipe(upstream);
     })().catch((error) => {
+      if (error instanceof StudioBackendUnavailable) {
+        sendBackendUnavailable(res, true);
+        return;
+      }
       if (!res.headersSent) {
         res.status(500).json({
           error: 'internal_error',
@@ -1878,6 +1913,10 @@ app.get(`${studioBasePath}/api/session/me`, (req, res) => {
 
     res.json(buildSessionView(resolved.payload));
   })().catch((error) => {
+    if (error instanceof StudioBackendUnavailable) {
+      sendBackendUnavailable(res, true);
+      return;
+    }
     res.status(500).json({
       error: 'internal_error',
       message: error instanceof Error ? error.message : 'Unexpected error',
@@ -2022,8 +2061,11 @@ app.use((req, res, next) => {
       res.setHeader('Cache-Control', 'no-store');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');
-      res.sendFile(join(browserDistFolder, 'index.csr.html'));
-      return;
+      // Built servers ship index.csr.html; `ng serve` has none on disk, so the engine renders the page instead.
+      if (existsSync(csrShellPath)) {
+        res.sendFile(csrShellPath);
+        return;
+      }
     }
 
     angularApp
@@ -2031,6 +2073,15 @@ app.use((req, res, next) => {
       .then((response) => (response ? writeResponseToNodeResponse(response, res) : next()))
       .catch(next);
   })().catch(next);
+});
+
+// A Studio page requested while the API restarts: show a short retry page and keep the session cookie.
+app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (error instanceof StudioBackendUnavailable) {
+    sendBackendUnavailable(res, req.path.startsWith(`${studioBasePath}/api/`));
+    return;
+  }
+  next(error);
 });
 
 if (isMainModule(import.meta.url) || process.env['pm_id']) {

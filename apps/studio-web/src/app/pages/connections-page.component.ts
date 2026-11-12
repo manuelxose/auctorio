@@ -7,6 +7,7 @@ import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { ConnectBoxComponent } from '../components/connect-box.component';
 import type {
   ConnectorInstallation,
   PublishingAccount,
@@ -35,20 +36,18 @@ type ConnectionRow = {
 @Component({
   selector: 'app-connections-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ConnectBoxComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header au-page__header--split">
         <div>
           <p class="au-page__eyebrow">Publishing destinations</p>
           <h1 class="au-page__title">Connections</h1>
-          <p class="au-page__subtitle">Discover, verify and manage the websites and social accounts Auctorio publishes to.</p>
+          <p class="au-page__subtitle">The websites and social accounts Auctorio publishes to, with their verification status</p>
         </div>
-        <a class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">
-          <app-icon name="plug"></app-icon>
-          Connect destination
-        </a>
       </header>
+
+      <app-connect-box title="Connect a site or account"></app-connect-box>
 
       <div class="au-banner au-banner--error" *ngIf="loadError">
         <app-icon name="warning"></app-icon>

@@ -325,3 +325,11 @@ test("postValidatePlanItems records cannibalization risk from existing targets",
   assert.equal(result.kept.length, 1);
   assert.equal(result.kept[0].cannibalizationRisk, "high");
 });
+
+test("an empty site profile keeps plan ideas but still blocks off-topic ones", () => {
+  const emptyProfile = { ...guiatvProfile, detectedSiteType: "generic-content-site", mainTopics: [], categories: [], commercialTopics: [], evergreenTopics: [], newsTopics: [], sportsTopics: [], topicClusters: [], contentTypes: [] };
+  const kept = computeSiteRelevanceScore(brief({ topic: "editorial workflow" }), emptyProfile, "How to plan an editorial calendar");
+  assert.equal(kept.rejected, false, kept.reasons.join("; "));
+  const blocked = computeSiteRelevanceScore(brief({ topic: "loans" }), emptyProfile, "Best payday loans this year");
+  assert.equal(blocked.rejected, true);
+});

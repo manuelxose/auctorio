@@ -1,6 +1,6 @@
 import { HttpHandlerFn, HttpInterceptorFn, HttpRequest } from '@angular/common/http';
 import { inject } from '@angular/core';
-import { AppContextService } from '../../services/app-context.service';
+import { ActiveSiteStore } from '../../services/active-site.store';
 
 /**
  * Tags backend API calls with the active site so the server-side BFF can scope
@@ -11,11 +11,10 @@ export const studioSiteInterceptor: HttpInterceptorFn = (req: HttpRequest<unknow
     return next(req);
   }
 
-  const appContext = inject(AppContextService);
-  const activeSite = appContext.activeSite();
-  if (!activeSite) {
+  const siteId = inject(ActiveSiteStore).siteId();
+  if (!siteId) {
     return next(req);
   }
 
-  return next(req.clone({ setHeaders: { 'x-studio-site-id': activeSite.id } }));
+  return next(req.clone({ setHeaders: { 'x-studio-site-id': siteId } }));
 };

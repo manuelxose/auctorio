@@ -97,54 +97,77 @@ test('1. Site intelligence: index the destination and confirm real crawl data', 
   expect(overview.profile!.mainTopics.length).toBeGreaterThan(0);
 });
 
-test('2. Editorial plan: SEO growth strategy produces site-aware structured briefs', async () => {
-  const from = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
-  const to = new Date(Date.now() + 8 * 86400000).toISOString().slice(0, 10);
-  const response = await api.post('/studio/api/backend/v2/editorial-plans/generate', {
-    data: {
-      siteId: guiatvSiteId,
-      dateFrom: from,
-      dateTo: to,
-      channels: ['website'],
-      publicationCount: 7,
-      strategyMode: 'seo-growth',
-      primaryIntent: 'informational',
-      contentFormats: ['guide', 'ranking', 'where-to-watch'],
-      language: 'es',
-      async: true,
-    },
-    timeout: 120_000,
+function madridDate(offsetDays: number): string {
+  // Local calendar date in Europe/Madrid, the plan's timezone.
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date(Date.now() + offsetDays * 86400000));
+}
+
+for (const perDay of [1, 2, 3]) {
+  test(`2.${perDay} Editorial plan: 7 days × ${perDay}/day yields exactly ${7 * perDay} site-aware briefs on their dates`, async () => {
+    test.skip(perDay > 1 && process.env.E2E_PLAN_ALL_CADENCES !== '1', 'set E2E_PLAN_ALL_CADENCES=1 to also run the 2/day and 3/day live cadences');
+    const from = madridDate(1);
+    const to = madridDate(7);
+    const expected = 7 * perDay;
+    const response = await api.post('/studio/api/backend/v2/editorial-plans/generate', {
+      data: {
+        siteId: guiatvSiteId,
+        dateFrom: from,
+        dateTo: to,
+        timezone: 'Europe/Madrid',
+        channels: ['website'],
+        articlesPerDay: perDay,
+        strategyMode: 'seo-growth',
+        primaryIntent: 'informational',
+        contentFormats: ['guide', 'ranking', 'where-to-watch'],
+        language: 'es',
+      },
+      timeout: 120_000,
+    });
+    expect(response.status(), `plan generation must be accepted (${await response.text()})`).toBe(202);
+    const accepted = (await response.json()) as { planId: string; operationId: string; expectedCount: number; slots: Array<{ localDate: string }> };
+    expect(accepted.planId).toBeTruthy();
+    expect(accepted.operationId, 'async contract exposes a durable operation').toBeTruthy();
+    expect(accepted.expectedCount).toBe(expected);
+    expect(new Set(accepted.slots.map((slot) => slot.localDate)).size).toBe(7);
+
+    // Poll the durable operation (the same contract the Studio uses) to a terminal state.
+    let operation: { status: string; completedSteps: number; totalSteps: number } | null = null;
+    await waitFor(async () => {
+      const opResponse = await api.get(`/studio/api/backend/v2/operations/${accepted.operationId}`);
+      if (opResponse.status() !== 200) return false;
+      operation = await opResponse.json();
+      return !['queued', 'running', 'retrying'].includes(operation!.status);
+    }, 'plan generation operation');
+    const planResponse = await api.get(`/studio/api/backend/v2/editorial-plans/${accepted.planId}`);
+    const plan = (await planResponse.json()) as PlanView & { items: Array<PlanView['items'][number] & { scheduledFor: string }> };
+
+    // No tolerance: every slot must be filled, otherwise the plan is partial and this fails.
+    expect(plan.status, `plan error: ${plan.error}`).toBe('ready');
+    expect(operation!.status).toBe('succeeded');
+    expect(plan.items.length).toBe(expected);
+    const perDate = new Map<string, number>();
+    for (const item of plan.items) {
+      const date = madridLocalDate(item.scheduledFor);
+      perDate.set(date, (perDate.get(date) ?? 0) + 1);
+      expect(item.relevanceScore ?? 0).toBeGreaterThanOrEqual(45);
+      expect(item.contentType).toBeTruthy();
+      expect(item.primaryIntent).toBeTruthy();
+      expect(item.recommendedWordCountMin ?? 0).toBeGreaterThan(0);
+      expect(item.outline).toBeTruthy();
+    }
+    expect([...perDate.keys()].sort()).toEqual(accepted.slots.map((slot) => slot.localDate).filter((d, i, all) => all.indexOf(d) === i));
+    expect([...perDate.values()].every((count) => count === perDay)).toBe(true);
+
+    // CAL-01: proposals appear in the calendar before any publication exists.
+    const calendar = await api.get(`/studio/api/backend/v2/calendar?from=${encodeURIComponent(plan.items[0].scheduledFor)}&to=${encodeURIComponent(new Date(Date.parse(plan.items[plan.items.length - 1].scheduledFor) + 1).toISOString())}&siteId=${guiatvSiteId}`);
+    const events = ((await calendar.json()) as { items: Array<{ kind: string; planId: string | null }> }).items.filter((event) => event.kind === 'plan_item' && event.planId === plan.id);
+    expect(events.length).toBe(expected);
   });
-  expect(response.status(), `plan generation must be accepted (${await response.text()})`).toBe(202);
-  const accepted = (await response.json()) as { planId: string };
-  expect(accepted.planId).toBeTruthy();
+}
 
-  // Poll until the background generation reaches a terminal state.
-  let plan: PlanView | null = null;
-  await waitFor(async () => {
-    const detailResponse = await api.get(`/studio/api/backend/v2/editorial-plans/${accepted.planId}`);
-    if (detailResponse.status() !== 200) return false;
-    const current = (await detailResponse.json()) as PlanView;
-    if (current.status === 'generating') return false;
-    plan = current;
-    return true;
-  }, 'plan generation completion');
-
-  expect(plan!.status).toBe('ready');
-  expect(plan!.error).toBeNull();
-  // Provider-side truncation variance is mitigated by chunked generation +
-  // top-up retries; demand the majority of the requested volume with every
-  // surviving row above the relevance threshold.
-  expect(plan!.items.length).toBeGreaterThanOrEqual(4);
-
-  for (const item of plan!.items) {
-    expect(item.relevanceScore ?? 0).toBeGreaterThanOrEqual(45);
-    expect(item.contentType).toBeTruthy();
-    expect(item.primaryIntent).toBeTruthy();
-    expect(item.recommendedWordCountMin ?? 0).toBeGreaterThan(0);
-    expect(item.outline).toBeTruthy();
-  }
-});
+function madridLocalDate(iso: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date(iso));
+}
 
 test('3. Brief → content: approve one row and generate a deep, semantic article', async () => {
   const plans = await api.get('/studio/api/backend/v2/editorial-plans?page=1&pageSize=5');

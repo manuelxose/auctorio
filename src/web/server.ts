@@ -4,6 +4,7 @@ import { registerRoutes } from "./routes";
 import { getEnv, getNumberEnv, isProductionEnv } from "../shared/utils/env";
 import { structuredEvent } from "../shared/utils/logger";
 import { startMetricsLogging } from "../studio/metrics";
+import { aiRequestContextHook } from "../infrastructure/ai/ai-settings";
 
 /**
  * Phase 5: lightweight fixed-window rate limiter (no heavy platform).
@@ -39,6 +40,9 @@ export function buildServer() {
     // documentation and to guard against oversized JSON bodies.
     bodyLimit: 1_048_576,
   });
+
+  // Per-request context so model calls use the workspace's AI choice (Settings → AI).
+  server.addHook("onRequest", aiRequestContextHook);
 
   // Global per-IP rate limiting; enabled by default in production, disabled
   // in tests/dev unless explicitly configured.

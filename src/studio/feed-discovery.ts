@@ -102,13 +102,17 @@ function classifySitemapUrl(url: string): FeedCandidateType {
 }
 
 /** Verify a candidate endpoint: fetch (bounded) and try to parse it. */
-export async function verifyFeedCandidate(url: string): Promise<{
+export type FeedSampleItem = { title: string; url: string | null; publishedAt: string | null };
+
+export async function verifyFeedCandidate(url: string, options: { sampleSize?: number } = {}): Promise<{
   verified: boolean;
   status: number | null;
   contentType: string | null;
   itemCount: number | null;
   type: FeedCandidateType | null;
   note: string | null;
+  /** Up to `sampleSize` parsed entries (title/url/date only, never bodies). */
+  sample?: FeedSampleItem[];
 }> {
   const parsedUrl = normalizeCanonicalUrl(url);
   if (!parsedUrl) {
@@ -134,20 +138,29 @@ export async function verifyFeedCandidate(url: string): Promise<{
     }
     // Try the three document families in order; count items without keeping
     // raw payloads in memory beyond this call.
+    let emptyMatch: Awaited<ReturnType<typeof verifyFeedCandidate>> | null = null;
     for (const [family, parser] of [
       ["rss", (xml: string, base: string, max: number) => parseRssItems(xml, base, max)],
       ["atom", (xml: string, base: string, max: number) => parseAtomItems(xml, base, max)],
       ["sitemap", (xml: string, base: string, max: number) => parseSitemapItems(xml, base, max)],
     ] as const) {
       try {
-        const items = parser(response.body, response.finalUrl, 5);
+        const items = parser(response.body, response.finalUrl, Math.max(5, options.sampleSize ?? 5));
         const sitemapFamily = family === "sitemap" && /news:news/i.test(response.body);
         const type: FeedCandidateType = family === "sitemap" ? (sitemapFamily ? "news_sitemap" : "sitemap") : family;
-        return { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null };
+        const sample = items.slice(0, options.sampleSize ?? 5).map((item) => ({ title: item.title, url: item.canonicalUrl ?? item.sourceUrl, publishedAt: item.publishedAt }));
+        const result = { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null, sample };
+        // The lenient atom parser accepts a sitemap index with zero items; keep trying so the sitemap family can claim it.
+        if (items.length === 0) {
+          emptyMatch ??= result;
+          continue;
+        }
+        return result;
       } catch {
         // next family
       }
     }
+    if (emptyMatch) return emptyMatch;
     return { verified: false, status: response.status, contentType: response.contentType, itemCount: null, type: null, note: "unparseable_xml" };
   } catch (error) {
     if (error instanceof SourceNotModifiedError) {

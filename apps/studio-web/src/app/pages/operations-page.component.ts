@@ -7,14 +7,17 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { ProductionApiService } from '../services/production-api.service';
+import type { ProductionJob } from '../models/production.models';
 import type { CostBudgetView, CostControlsView, OperationsHealth } from '../models/studio.models';
 
-type TabId = 'overview' | 'workers' | 'queues' | 'failures' | 'cost';
+type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'cost';
 
 const TABS: Array<{ id: TabId; label: string }> = [
   { id: 'overview', label: 'Overview' },
   { id: 'workers', label: 'Workers' },
   { id: 'queues', label: 'Queues' },
+  { id: 'production', label: 'Production jobs' },
   { id: 'failures', label: 'Failures' },
   { id: 'cost', label: 'Cost controls' },
 ];
@@ -161,6 +164,43 @@ const TABS: Array<{ id: TabId; label: string }> = [
           </div>
         </div>
 
+        <!-- ── Production jobs ─────────────────────────────────────── -->
+        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'production'">
+          <div class="au-panel__header">
+            <h2 class="au-panel__title">Production jobs</h2>
+            <select class="au-select au-filter-select" [(ngModel)]="jobStatus" (ngModelChange)="loadJobs()" aria-label="Filter by status">
+              <option value="">All statuses</option>
+              <option *ngFor="let status of jobStatuses" [value]="status">{{ status }}</option>
+            </select>
+            <select class="au-select au-filter-select" [(ngModel)]="jobKind" (ngModelChange)="loadJobs()" aria-label="Filter by kind">
+              <option value="">All kinds</option>
+              <option value="plan_item">Plan item</option>
+              <option value="cluster">Cluster</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+          <app-empty-state *ngIf="jobs.length === 0" icon="activity" title="No production jobs" text="Articles produced from the plan, story clusters or manual briefs are tracked here."></app-empty-state>
+          <div class="au-table-wrap au-table-wrap--scrollable" *ngIf="jobs.length > 0">
+            <table class="au-table au-table--hover">
+              <thead><tr><th scope="col">Kind</th><th scope="col">Status</th><th scope="col">Stage</th><th scope="col">Error</th><th scope="col">Updated</th><th scope="col" class="au-table__actions"><span class="au-visually-hidden">Actions</span></th></tr></thead>
+              <tbody>
+                <tr *ngFor="let job of jobs">
+                  <td>{{ job.kind }}</td>
+                  <td><span class="au-badge" [class]="jobBadge(job.status)">{{ job.status }}</span></td>
+                  <td class="au-mono">{{ job.stage }} · {{ job.progress }}%</td>
+                  <td class="au-muted">{{ job.errorCode ? job.errorCode + ': ' : '' }}{{ truncate(job.error, 90) }}</td>
+                  <td>{{ job.updatedAt | date: 'short' }}</td>
+                  <td class="au-table__actions">
+                    <button *ngIf="job.retryable" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="jobAction(job, 'retry')">Retry</button>
+                    <button *ngIf="job.cancellable" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="jobAction(job, 'cancel')">Cancel</button>
+                    <a *ngIf="job.links.editorUrl" class="au-btn au-btn--ghost au-btn--sm" [routerLink]="'/studio' + job.links.editorUrl">Open</a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- ── Failures ────────────────────────────────────────────── -->
         <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'failures'">
           <div class="au-panel__header">
@@ -257,7 +297,7 @@ const TABS: Array<{ id: TabId; label: string }> = [
               </div>
               <div class="au-field" *ngIf="budgetForm.action === 'degrade'">
                 <label class="au-field__label" for="budget-model">Fallback model</label>
-                <input id="budget-model" class="au-input" type="text" placeholder="deepseek-chat" [(ngModel)]="budgetForm.degradeModel" />
+                <input id="budget-model" class="au-input" type="text" placeholder="model name" [(ngModel)]="budgetForm.degradeModel" />
               </div>
             </div>
             <div class="au-form__actions">
@@ -273,6 +313,12 @@ const TABS: Array<{ id: TabId; label: string }> = [
 export class OperationsPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly toasts = inject(ToastService);
+  private readonly production = inject(ProductionApiService);
+
+  jobs: ProductionJob[] = [];
+  jobStatus = '';
+  jobKind = '';
+  readonly jobStatuses = ['queued', 'running', 'needs_review', 'ready', 'failed', 'cancelled'];
 
   readonly tabs = TABS;
   activeTab: TabId = 'overview';
@@ -309,10 +355,33 @@ export class OperationsPageComponent implements OnInit, OnDestroy {
       ]);
       this.health = health ?? null;
       this.costControls = cost ?? null;
+      await this.loadJobs();
     } catch {
       this.loadError = 'Could not load system health. Is the backend reachable?';
     } finally {
       this.loading = false;
+    }
+  }
+
+  async loadJobs(): Promise<void> {
+    try {
+      const list = await lastValueFrom(this.production.list({ status: this.jobStatus, kind: this.jobKind, pageSize: 50 }));
+      this.jobs = list.items;
+    } catch {
+      this.jobs = [];
+    }
+  }
+
+  jobBadge(status: string): string {
+    return { ready: 'au-badge--success', failed: 'au-badge--danger', needs_review: 'au-badge--warning', running: 'au-badge--info' }[status] ?? 'au-badge--neutral';
+  }
+
+  async jobAction(job: ProductionJob, action: 'retry' | 'cancel'): Promise<void> {
+    try {
+      await lastValueFrom(action === 'retry' ? this.production.retry(job.id) : this.production.cancel(job.id));
+      await this.loadJobs();
+    } catch {
+      this.toasts.error(`Could not ${action} the job.`);
     }
   }
 

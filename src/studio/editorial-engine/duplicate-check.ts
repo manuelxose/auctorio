@@ -14,7 +14,10 @@ const prisma = getPrismaClient();
 export type DuplicateCheckInput = {
   tenantId: string;
   siteId: string;
-  clusterId: string;
+  /** Null for plan-item / manual production (no story cluster). */
+  clusterId: string | null;
+  /** Projects owned by the running production job (never a duplicate of itself). */
+  excludeProjectIds?: string[];
   headline: string;
   summary: string | null;
   /** Primary entity names of the cluster (movie/tv work names preferred). */
@@ -46,7 +49,8 @@ export async function decideCreateUpdateOrSkip(input: DuplicateCheckInput): Prom
   const evidence: DuplicateCheckResult["evidence"] = [];
 
   // 1) Same cluster already has a managed project → update it.
-  const clusterProject = await prisma.contentProject.findFirst({
+  const excluded = input.excludeProjectIds?.length ? { id: { notIn: input.excludeProjectIds } } : {};
+  const clusterProject = input.clusterId === null ? null : await prisma.contentProject.findFirst({
     where: { tenantId: input.tenantId, siteId: input.siteId, clusterId: input.clusterId, deletedAt: null },
     orderBy: { updatedAt: "desc" },
     include: { versions: { orderBy: { versionNumber: "desc" }, take: 1 } },
@@ -68,6 +72,7 @@ export async function decideCreateUpdateOrSkip(input: DuplicateCheckInput): Prom
       tenantId: input.tenantId,
       siteId: input.siteId,
       deletedAt: null,
+      ...excluded,
       updatedAt: { gte: new Date(Date.now() - lookbackHours * 3_600_000) },
     },
     orderBy: { updatedAt: "desc" },

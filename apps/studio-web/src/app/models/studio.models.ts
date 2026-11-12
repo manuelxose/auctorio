@@ -991,11 +991,26 @@ export type StudioPublication = {
   }>;
 };
 
+export type EditorialPlanGenerationAccepted = {
+  planId: string;
+  operationId: string;
+  status: 'generating';
+  expectedCount: number;
+  slots: Array<{ localDate: string; localTime: string; scheduledFor: string }> | null;
+};
+
+/** One schedule projection: plan items until their content has a publication, then the publication. */
 export type CalendarEvent = {
+  kind: 'plan_item' | 'publication';
   id: string;
-  projectId: string;
+  projectId: string | null;
+  planId: string | null;
+  planItemId: string | null;
+  priority: number | null;
+  contentType: string | null;
   channel: PublicationChannel;
-  status: PublicationState;
+  /** PublicationState for publications, EditorialPlanItem status for plan items. */
+  status: string;
   scheduledFor: string | null;
   publishedAt: string | null;
   externalUrl: string | null;
@@ -1178,7 +1193,7 @@ export type EditorialPlanItem = {
 export type EditorialPlan = {
   id: string;
   name: string;
-  status: 'draft' | 'generating' | 'ready' | 'failed' | 'archived';
+  status: 'draft' | 'generating' | 'ready' | 'partial' | 'failed' | 'archived';
   dateFrom: string;
   dateTo: string;
   objective: string | null;
@@ -1194,7 +1209,14 @@ export type EditorialPlan = {
   channelCounts?: { website?: number; x?: number; instagram?: number };
   statusCounts?: Record<string, number>;
   items?: EditorialPlanItem[];
-  generatedOutput?: { items?: unknown[]; dropped?: Array<{ title: string; reason: string }>; warnings?: string[] } | null;
+  generatedOutput?: {
+    items?: unknown[];
+    dropped?: Array<{ title: string; reason: string }>;
+    warnings?: string[];
+    requestedCount?: number;
+    filledCount?: number;
+    unfilledSlots?: Array<{ localDate: string; localTime: string; scheduledFor: string; reason: string }>;
+  } | null;
   _count?: { items: number };
 };
 

@@ -44,6 +44,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Editorial Plan', title: 'Editorial Plan' } },
       },
       {
+        path: 'competencies',
+        loadComponent: () => import('./pages/competencies-page.component').then((m) => m.CompetenciesPageComponent),
+        data: { studioMeta: { section: 'Competencies', title: 'Competencies' } },
+      },
+      {
         path: 'site-intelligence',
         loadComponent: () => import('./pages/site-intelligence-page.component').then((m) => m.SiteIntelligencePageComponent),
         data: { studioMeta: { section: 'Site Intelligence', title: 'Site Intelligence' } },
@@ -68,6 +73,7 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/sources-page.component').then((m) => m.SourcesPageComponent),
         data: { studioMeta: { section: 'Sources', title: 'Sources' } },
       },
+      { path: 'competitors', loadComponent: () => import('./pages/competitors-page.component').then((m) => m.CompetitorsPageComponent), data: { studioMeta: { section: 'Competitors', title: 'Competitors' } } },
       {
         path: 'automation',
         loadComponent: () => import('./pages/automation-page.component').then((m) => m.AutomationPageComponent),

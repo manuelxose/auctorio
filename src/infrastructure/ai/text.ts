@@ -1,5 +1,7 @@
 import { getEnv, getNumberEnv, isProductionEnv } from "../../shared/utils/env";
 import { fetchJson } from "../../shared/utils/http";
+import { activeAiSelection } from "./ai-settings";
+import { AnthropicTextProvider } from "./anthropic-text";
 
 export type TextGenerationInput = {
   prompt: string;
@@ -7,8 +9,8 @@ export type TextGenerationInput = {
   model?: string;
   temperature?: number;
   maxTokens?: number;
-  /** OpenAI-compatible response_format passthrough (e.g. { type: "json_object" }). */
-  responseFormat?: { type: "json_object" };
+  /** OpenAI-compatible response_format passthrough: JSON mode, or a JSON schema the server enforces while generating. */
+  responseFormat?: { type: "json_object" } | { type: "json_schema"; json_schema: { name: string; schema: unknown; strict?: boolean } };
 };
 
 export type TextUsage = {
@@ -34,16 +36,19 @@ class OpenAICompatibleTextProvider implements TextProvider {
   private apiKey: string;
   private defaultModel: string;
   private providerName: string;
+  private forceModel: boolean;
 
-  constructor(providerName: string, baseUrl: string, apiKey: string, model: string) {
+  /** forceModel: an admin picked the model, so per-call model overrides are ignored. */
+  constructor(providerName: string, baseUrl: string, apiKey: string, model: string, forceModel = false) {
     this.providerName = providerName;
     this.baseUrl = baseUrl.replace(/\/$/, "");
     this.apiKey = apiKey;
     this.defaultModel = model;
+    this.forceModel = forceModel;
   }
 
   async generate(input: TextGenerationInput): Promise<TextGenerationResult> {
-    const model = input.model || this.defaultModel;
+    const model = this.forceModel ? this.defaultModel : input.model || this.defaultModel;
     if (!model) {
       throw new Error("TEXT_MODEL is required");
     }
@@ -103,6 +108,14 @@ class MockTextProvider implements TextProvider {
 }
 
 export function getTextProvider(): TextProvider {
+  // A workspace admin's choice (Settings → AI) wins over the environment default.
+  const selected = activeAiSelection();
+  if (selected) {
+    return selected.provider === "anthropic"
+      ? new AnthropicTextProvider(selected.apiKey, selected.model)
+      : new OpenAICompatibleTextProvider(selected.provider, selected.baseUrl ?? "", selected.apiKey, selected.model, true);
+  }
+
   const provider = getEnv("TEXT_PROVIDER", "mock").toLowerCase();
   if (provider === "mock") {
     if (isProductionEnv()) {

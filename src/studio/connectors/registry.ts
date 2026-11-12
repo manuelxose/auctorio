@@ -207,6 +207,41 @@ const GENERIC_WEBHOOK_DESCRIPTOR: ConnectorDescriptor = {
   requiresDestinationUrl: true,
 };
 
+/**
+ * Pull integration: the site's own code reads `GET /api/integrations/v1/articles` with a key issued for this
+ * installation only (same contract BabyLoveGrowth exposes). Verified once Auctorio sees the site use the key.
+ */
+const AUCTORIO_FEED_DESCRIPTOR: ConnectorDescriptor = {
+  id: "auctorio_feed",
+  kind: "website",
+  name: "Auctorio API (your site pulls)",
+  description: "Your site fetches finished articles from Auctorio's API on a schedule and stores them. For custom sites and frameworks.",
+  authMethods: [
+    {
+      id: "api_token",
+      label: "Integration API key",
+      description: "A read-only key for this website only. Shown once; rotate it any time.",
+      available: true,
+      requiredFields: [],
+    },
+  ],
+  capabilities: ["discovery", "publish", "canonical_url", "status_check"],
+  configSchemaVersion: 1,
+  configSchema: {
+    type: "object",
+    version: 1,
+    fields: [
+      { key: "baseUrl", label: "Site URL", kind: "url", required: true, placeholder: "https://example.com", help: "Canonical origin of the website." },
+    ],
+  },
+  verification: {
+    probes: ["auth", "status"],
+    reversible: true,
+    notes: "Verification passes once your site has called the API with this key. Nothing is published.",
+  },
+  requiresDestinationUrl: true,
+};
+
 // ────────────────────────────────────────────────────────────── Registry
 
 const registry = new Map<string, ConnectorDescriptor>();
@@ -215,6 +250,7 @@ function register(descriptor: ConnectorDescriptor): void {
   registry.set(descriptor.id, descriptor);
 }
 
+register(AUCTORIO_FEED_DESCRIPTOR);
 register(GENERIC_REST_DESCRIPTOR);
 register(GENERIC_WEBHOOK_DESCRIPTOR);
 register(socialDescriptor("x"));
