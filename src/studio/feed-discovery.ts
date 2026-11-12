@@ -102,13 +102,17 @@ function classifySitemapUrl(url: string): FeedCandidateType {
 }
 
 /** Verify a candidate endpoint: fetch (bounded) and try to parse it. */
-export async function verifyFeedCandidate(url: string): Promise<{
+export type FeedSampleItem = { title: string; url: string | null; publishedAt: string | null };
+
+export async function verifyFeedCandidate(url: string, options: { sampleSize?: number } = {}): Promise<{
   verified: boolean;
   status: number | null;
   contentType: string | null;
   itemCount: number | null;
   type: FeedCandidateType | null;
   note: string | null;
+  /** Up to `sampleSize` parsed entries (title/url/date only, never bodies). */
+  sample?: FeedSampleItem[];
 }> {
   const parsedUrl = normalizeCanonicalUrl(url);
   if (!parsedUrl) {
@@ -140,10 +144,11 @@ export async function verifyFeedCandidate(url: string): Promise<{
       ["sitemap", (xml: string, base: string, max: number) => parseSitemapItems(xml, base, max)],
     ] as const) {
       try {
-        const items = parser(response.body, response.finalUrl, 5);
+        const items = parser(response.body, response.finalUrl, Math.max(5, options.sampleSize ?? 5));
         const sitemapFamily = family === "sitemap" && /news:news/i.test(response.body);
         const type: FeedCandidateType = family === "sitemap" ? (sitemapFamily ? "news_sitemap" : "sitemap") : family;
-        return { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null };
+        const sample = items.slice(0, options.sampleSize ?? 5).map((item) => ({ title: item.title, url: item.canonicalUrl ?? item.sourceUrl, publishedAt: item.publishedAt }));
+        return { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null, sample };
       } catch {
         // next family
       }

@@ -314,6 +314,7 @@ export async function listDueSources(tenantId: string, now: Date = new Date()) {
     where: {
       tenantId,
       enabled: true,
+      archivedAt: null,
       type: { notIn: ["manual", "webhook"] },
       OR: [
         { lastFetchedAt: null },

@@ -36,6 +36,211 @@ import {
   updateEnrichmentProvider,
 } from "./enrichment-providers";
 import { listAdapterTypes } from "./adapters/registry";
+import {
+  acceptSiteSourceRecommendation,
+  addManualSiteSource,
+  discoverSourceRecommendations,
+  getSiteSourceDiagnostics,
+  getSourceEvidenceForPlanning,
+  listSiteSourceItems,
+  listSiteSourceRecommendations,
+  listSiteSources,
+  rejectSiteSourceRecommendation,
+  runAsOperation,
+  setSiteSourceState,
+  testSiteSource,
+  updateSiteSourceConfig,
+  type SourceConfigPatch,
+} from "./source-registry-discovery";
+import { registerCompetitorRoutes } from "./competitors/routes";
+import type { FastifyReply } from "fastify";
+
+const SOURCE_STATE_ACTIONS = ["pause", "resume", "archive", "restore"] as const;
+
+/** Map domain errors to HTTP codes for the site-scoped endpoints. */
+function sendDomainError(reply: FastifyReply, error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/_not_found$/.test(message)) {
+    return notFound(reply, message);
+  }
+  return badRequest(reply, message);
+}
+
+function siteParams(request: { params: unknown }, reply: FastifyReply): { siteId: string; id?: string } | null {
+  const params = request.params as { siteId: string; id?: string };
+  if (!isUuid(params.siteId) || (params.id !== undefined && !isUuid(params.id))) {
+    badRequest(reply, "invalid id");
+    return null;
+  }
+  return params;
+}
+
+function registerSiteSourceRoutes(fastify: FastifyInstance) {
+  fastify.post("/v2/sites/:siteId/source-recommendations/discover", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    const site = await listSiteSourceRecommendations(context.tenantId, params.siteId, { status: "__none__" }).catch((error: unknown) => error);
+    if (site instanceof Error) return sendDomainError(reply, site);
+    const started = await runAsOperation(
+      { tenantId: context.tenantId, siteId: params.siteId, type: "source_discovery", userId: context.userId, entityType: "site" },
+      () => discoverSourceRecommendations(context.tenantId, params.siteId),
+    );
+    return reply.code(202).send(started);
+  });
+
+  fastify.get("/v2/sites/:siteId/source-recommendations", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    const query = request.query as { status?: string; relationship?: string };
+    try {
+      return reply.send({ items: await listSiteSourceRecommendations(context.tenantId, params.siteId, query) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/source-recommendations/bulk", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    const body = parseBody<{ ids?: unknown; action?: string }>(request);
+    if (!Array.isArray(body.ids) || body.ids.length === 0 || body.ids.length > 100 || !body.ids.every((id) => typeof id === "string" && isUuid(id))) {
+      return badRequest(reply, "ids must be 1-100 uuids");
+    }
+    if (body.action !== "accept" && body.action !== "reject") return badRequest(reply, "action must be accept or reject");
+    const results: Array<{ id: string; ok: boolean; error: string | null }> = [];
+    for (const id of body.ids as string[]) {
+      try {
+        if (body.action === "accept") await acceptSiteSourceRecommendation(context.tenantId, params.siteId, id, context.userId);
+        else await rejectSiteSourceRecommendation(context.tenantId, params.siteId, id, context.userId);
+        results.push({ id, ok: true, error: null });
+      } catch (error) {
+        results.push({ id, ok: false, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
+    return reply.send({ results, succeeded: results.filter((entry) => entry.ok).length, failed: results.filter((entry) => !entry.ok).length });
+  });
+
+  for (const action of ["accept", "reject"] as const) {
+    fastify.post(`/v2/sites/:siteId/source-recommendations/:id/${action}`, async (request, reply) => {
+      const context = await requireStudioPermission(request, reply, "integrations.manage");
+      const params = context && siteParams(request, reply);
+      if (!context || !params?.id) return;
+      try {
+        const result =
+          action === "accept"
+            ? await acceptSiteSourceRecommendation(context.tenantId, params.siteId, params.id, context.userId)
+            : await rejectSiteSourceRecommendation(context.tenantId, params.siteId, params.id, context.userId);
+        return reply.send(result);
+      } catch (error) {
+        return sendDomainError(reply, error);
+      }
+    });
+  }
+
+  fastify.get("/v2/sites/:siteId/sources", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    const query = request.query as { state?: string; search?: string };
+    try {
+      return reply.send({ items: await listSiteSources(context.tenantId, params.siteId, { state: query.state, search: parseOptionalString(query.search) ?? undefined }) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/sources", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    const body = parseBody<{ url?: string; name?: string; topics?: unknown; language?: string }>(request);
+    const url = parseOptionalString(body.url);
+    if (!url) return badRequest(reply, "url is required");
+    try {
+      const source = await addManualSiteSource(
+        context.tenantId,
+        params.siteId,
+        { url, name: parseOptionalString(body.name), topics: Array.isArray(body.topics) ? body.topics.map(String) : [], language: parseOptionalString(body.language) },
+        context.userId,
+      );
+      return reply.code(201).send(source);
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.patch("/v2/sites/:siteId/sources/:id/config", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params?.id) return;
+    const body = parseBody<SourceConfigPatch>(request);
+    for (const key of ["topics", "pillars", "relevanceKeywords"] as const) {
+      if (body[key] !== undefined && !Array.isArray(body[key])) return badRequest(reply, `${key} must be an array`);
+    }
+    if (body.selectors !== undefined && (typeof body.selectors !== "object" || Array.isArray(body.selectors))) return badRequest(reply, "selectors must be an object");
+    try {
+      return reply.send(await updateSiteSourceConfig(context.tenantId, params.siteId, params.id, body));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/sources/:id/state", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params?.id) return;
+    const action = parseBody<{ action?: string }>(request).action ?? "";
+    if (!(SOURCE_STATE_ACTIONS as readonly string[]).includes(action)) return badRequest(reply, `action must be one of ${SOURCE_STATE_ACTIONS.join(", ")}`);
+    try {
+      return reply.send(await setSiteSourceState(context.tenantId, params.siteId, params.id, action as (typeof SOURCE_STATE_ACTIONS)[number], context.userId));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.post("/v2/sites/:siteId/sources/:id/test", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    const params = context && siteParams(request, reply);
+    if (!context || !params?.id) return;
+    try {
+      return reply.send(await testSiteSource(context.tenantId, params.siteId, params.id));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.get("/v2/sites/:siteId/sources/:id/items", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    const params = context && siteParams(request, reply);
+    if (!context || !params?.id) return;
+    try {
+      return reply.send({ items: await listSiteSourceItems(context.tenantId, params.siteId, params.id, parsePageSize((request.query as { limit?: string }).limit, 50, 200)) });
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.get("/v2/sites/:siteId/sources/:id/diagnostics", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    const params = context && siteParams(request, reply);
+    if (!context || !params?.id) return;
+    try {
+      return reply.send(await getSiteSourceDiagnostics(context.tenantId, params.siteId, params.id));
+    } catch (error) {
+      return sendDomainError(reply, error);
+    }
+  });
+
+  fastify.get("/v2/sites/:siteId/source-evidence", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    const params = context && siteParams(request, reply);
+    if (!context || !params) return;
+    return reply.send({ items: await getSourceEvidenceForPlanning(context.tenantId, params.siteId, parsePageSize((request.query as { limit?: string }).limit, 20, 100)) });
+  });
+}
 
 const BULK_ACTIONS: BulkSourceAction[] = [
   "enable",
@@ -52,6 +257,9 @@ const BULK_ACTIONS: BulkSourceAction[] = [
 ];
 
 export function registerSourceRegistryRoutes(fastify: FastifyInstance) {
+  registerSiteSourceRoutes(fastify);
+  registerCompetitorRoutes(fastify);
+
   // ── Source packs
 
   fastify.get("/v2/source-packs", async (request, reply) => {
