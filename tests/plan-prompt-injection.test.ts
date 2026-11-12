@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { renderPlanningContext, type EditorialPlanningContext } from "../src/studio/editorial-plan-context";
+import { withoutReplacedBriefs } from "../src/studio/editorial-plan";
 import { UNTRUSTED_BLOCK_OPEN } from "../src/studio/prompt-injection";
 
 test("planning context wraps hostile source titles as untrusted data", () => {
@@ -22,4 +23,9 @@ test("planning context wraps hostile source titles as untrusted data", () => {
   const end = out.indexOf("END OF UNTRUSTED SOURCE DATA>>>");
   assert.ok(begin >= 0 && end > begin);
   assert.ok(out.indexOf(hostile) > begin && out.lastIndexOf(hostile) < end, "every hostile title sits inside the wrapper");
+});
+
+test("replacing a proposal drops its stored brief from the plan output", () => {
+  const kept = withoutReplacedBriefs([{ workingTitle: "Old" }, { workingTitle: "Keep" }], ["Old"]);
+  assert.deepEqual(kept, [{ workingTitle: "Keep" }]);
 });
