@@ -168,6 +168,25 @@ async function probeGenericRest(config: WebsiteConfig): Promise<ProbeResult[]> {
   return results;
 }
 
+/** The pull API has nothing to call on the site: it is verified by the site having used its key. */
+export function probeAuctorioFeed(config: WebsiteConfig): ProbeResult[] {
+  const attemptedAt = new Date().toISOString();
+  const pulledAt = asString(config.lastPulledAt);
+  if (!asString(config.feedKeyHash)) {
+    return [{ probe: "auth", outcome: "failed", message: "Generate the integration API key first.", attemptedAt }];
+  }
+  if (!pulledAt) {
+    return [
+      { probe: "auth", outcome: "passed", message: "Integration API key issued.", attemptedAt },
+      { probe: "status", outcome: "failed", message: "Auctorio has not received a request from your site with this key yet. Run your sync once and verify again.", attemptedAt },
+    ];
+  }
+  return [
+    { probe: "auth", outcome: "passed", message: "Integration API key issued.", attemptedAt },
+    { probe: "status", outcome: "passed", message: `Your site fetched the article feed at ${pulledAt}.`, attemptedAt },
+  ];
+}
+
 async function probeGenericWebhook(config: WebsiteConfig): Promise<ProbeResult[]> {
   const results: ProbeResult[] = [];
   const baseUrl = asString(config.baseUrl);
@@ -231,9 +250,11 @@ export async function verifyWebsiteConnector(
 ): Promise<VerificationResult> {
   structuredEvent("connector.verify.started", { connectorId });
   const results =
-    connectorId === "generic_webhook"
-      ? await probeGenericWebhook(config)
-      : await probeGenericRest(config);
+    connectorId === "auctorio_feed"
+      ? probeAuctorioFeed(config)
+      : connectorId === "generic_webhook"
+        ? await probeGenericWebhook(config)
+        : await probeGenericRest(config);
   const { verified, summary } = summarize(results);
   structuredEvent("connector.verify.finished", { connectorId, verified });
   return {

@@ -123,7 +123,7 @@ function extractMetaContent(html: string, name: string, property = false): strin
   return safeText(match?.[1]);
 }
 
-function detectCms(html: string, origin: string): { cms: string | null; signals: string[]; endpoints: Array<{ url: string; kind: string; status: number | null; note: string | null }> } {
+export function detectCms(html: string, origin: string): { cms: string | null; signals: string[]; endpoints: Array<{ url: string; kind: string; status: number | null; note: string | null }> } {
   const signals: string[] = [];
   const endpoints: Array<{ url: string; kind: string; status: number | null; note: string | null }> = [];
   let cms: string | null = null;
@@ -140,7 +140,8 @@ function detectCms(html: string, origin: string): { cms: string | null; signals:
     endpoints.push({ url: `${origin}/wp-json/wp/v2/posts`, kind: "posts", status: null, note: "WordPress posts endpoint" });
     endpoints.push({ url: `${origin}/wp-json/wp/v2/media`, kind: "media", status: null, note: "WordPress media endpoint" });
     endpoints.push({ url: `${origin}/wp-json/wp/v2/users/me?context=edit`, kind: "identity", status: null, note: "Identity endpoint (requires authentication)" });
-  } else if (/ghost|ghost\.io/i.test(html)) {
+  } else if (/ghost/i.test(generator ?? "") || /ghost\.io|\/ghost\/api\/|data-ghost=/i.test(html)) {
+    // Not a bare /ghost/: that also matches Angular's `_nghost-ng-…` attributes.
     cms = "ghost";
     signals.push("ghost");
     endpoints.push({ url: `${origin}/ghost/api/admin/pages`, kind: "pages", status: null, note: "Ghost Admin API (requires JWT)" });

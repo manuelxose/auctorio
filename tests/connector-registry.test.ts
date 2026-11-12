@@ -58,3 +58,13 @@ test("website connectors require a destination URL; social connectors do not", (
 test("unknown connector ids resolve to null", () => {
   assert.equal(getConnectorDescriptor("does_not_exist"), null);
 });
+
+test("auctorio_feed verifies only after the site has pulled with its key", async () => {
+  const { probeAuctorioFeed } = await import("../src/studio/connectors/verification");
+  assert.ok(getConnectorDescriptor("auctorio_feed"), "pull connector registered");
+  assert.equal(probeAuctorioFeed({})[0].outcome, "failed");
+  const waiting = probeAuctorioFeed({ feedKeyHash: "abc" });
+  assert.deepEqual(waiting.map((probe) => probe.outcome), ["passed", "failed"]);
+  const pulled = probeAuctorioFeed({ feedKeyHash: "abc", lastPulledAt: "2026-11-12T10:00:00.000Z" });
+  assert.deepEqual(pulled.map((probe) => probe.outcome), ["passed", "passed"]);
+});

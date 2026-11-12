@@ -1082,6 +1082,14 @@ export class StudioApiService {
     return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations`, payload);
   }
 
+  /** Issues the pull-API key for an `auctorio_feed` installation. The key is returned once and never again. */
+  issueInstallationFeedKey(id: string, baseUrl: string): Observable<{ installation: ConnectorInstallation; key: string; siteKey: string | null; feedBaseUrl: string }> {
+    return this.http.post<{ installation: ConnectorInstallation; key: string; siteKey: string | null; feedBaseUrl: string }>(
+      `${this.apiBase}/backend/v2/connector-installations/${id}/feed-key`,
+      { baseUrl },
+    );
+  }
+
   getConnectorInstallation(id: string): Observable<InstallationDetailResponse> {
     return this.http.get<InstallationDetailResponse>(`${this.apiBase}/backend/v2/connector-installations/${id}`);
   }

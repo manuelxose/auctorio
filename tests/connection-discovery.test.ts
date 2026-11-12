@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  detectCms,
   normalizeDestinationUrl,
   validateDestinationUrl,
 } from "../src/studio/connectors/discovery";
@@ -40,4 +41,10 @@ test("validateDestinationUrl blocks loopback and private targets (SSRF)", async 
 test("validateDestinationUrl accepts a public origin", async () => {
   const parsed = await validateDestinationUrl("https://example.com");
   assert.equal(parsed.origin, "https://example.com");
+});
+
+test("detectCms does not mistake Angular _nghost attributes for Ghost", () => {
+  const angular = '<app-root _nghost-ng-c3402167941><style>[_nghost-ng-c3402167941]{display:block}</style></app-root>';
+  assert.equal(detectCms(angular, "https://example.com").cms, null);
+  assert.equal(detectCms('<meta name="generator" content="Ghost 5.80">', "https://example.com").cms, "ghost");
 });

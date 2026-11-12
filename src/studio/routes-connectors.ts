@@ -13,6 +13,7 @@ import {
   requireStudioPermission,
 } from "./http-utils";
 import { structuredEvent } from "../shared/utils/logger";
+import { getEnv } from "../shared/utils/env";
 import {
   connectorCapabilityView,
   getConnectorDescriptor,
@@ -59,6 +60,27 @@ function siteKeyForOrigin(origin: string): string {
   } catch {
     return `site-${crypto.randomBytes(4).toString("hex")}`;
   }
+}
+
+function originOf(url: string | null | undefined): string | null {
+  try {
+    return url ? new URL(url).origin.toLowerCase().replace("://www.", "://") : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function findSiteIdByOrigin(tenantId: string, baseUrl: string): Promise<string | null> {
+  const origin = originOf(baseUrl);
+  if (!origin) return null;
+  const sites = await prisma.site.findMany({ where: { tenantId }, select: { id: true, baseUrl: true } });
+  return sites.find((site) => originOf(site.baseUrl) === origin)?.id ?? null;
+}
+
+/** Saving credentials makes a draft verifiable; without this a draft can never reach `verifying`. */
+async function markCredentialsStored(tenantId: string, installation: InstallationView, userId: string | null): Promise<InstallationView> {
+  if (installation.state !== "draft" && installation.state !== "failed") return installation;
+  return transitionInstallation(tenantId, installation.id, "credentials_required", { userId });
 }
 
 export function registerConnectorRoutes(fastify: FastifyInstance) {
@@ -264,11 +286,12 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "config object is required");
     }
     try {
-      const updated = await storeInstallationCredentials(context.tenantId, id, {
+      const stored = await storeInstallationCredentials(context.tenantId, id, {
         secrets: body.secrets,
         config: body.config,
         userId: context.userId,
       });
+      const updated = await markCredentialsStored(context.tenantId, stored, context.userId);
       await publishEvent({
         tenantId: context.tenantId,
         type: "connection.installation.state",
@@ -278,6 +301,50 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
     } catch (error) {
       return badRequest(reply, String(error));
     }
+  });
+
+  // ── Issue the pull-API key (auctorio_feed). Shown once; only its SHA-256 is kept in config for lookups.
+
+  fastify.post("/v2/connector-installations/:id/feed-key", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) {
+      return;
+    }
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) {
+      return badRequest(reply, "invalid installation id");
+    }
+    const installation = await getInstallation(context.tenantId, id);
+    if (!installation) {
+      return notFound(reply, "installation not found");
+    }
+    if (installation.provider !== "auctorio_feed") {
+      return badRequest(reply, "only Auctorio API installations issue feed keys");
+    }
+    const body = parseBody<{ baseUrl?: string }>(request);
+    const current = (installation.config ?? {}) as Record<string, unknown>;
+    let baseUrl = String(current.baseUrl ?? "");
+    try {
+      baseUrl = normalizeDestinationUrl(parseOptionalString(body.baseUrl) ?? baseUrl);
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+    const key = `auc_${crypto.randomBytes(24).toString("base64url")}`;
+    const siteId = installation.siteId ?? (await findSiteIdByOrigin(context.tenantId, baseUrl));
+    const site = siteId ? await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { key: true } }) : null;
+    const config = {
+      ...current,
+      baseUrl,
+      feedKeyHash: crypto.createHash("sha256").update(key).digest("hex"),
+      feedKeyHint: key.slice(-4),
+      feedKeyIssuedAt: new Date().toISOString(),
+      feedSiteKey: site?.key ?? null,
+      lastPulledAt: null,
+    };
+    const stored = await storeInstallationCredentials(context.tenantId, id, { secrets: { feedKey: key }, config, userId: context.userId });
+    const updated = await markCredentialsStored(context.tenantId, stored, context.userId);
+    const feedBaseUrl = `${getEnv("PUBLIC_BASE_URL", "https://auctorio.com").replace(/\/+$/, "")}/api/integrations`;
+    return reply.send({ installation: sanitizeInstallation(updated), key, siteKey: site?.key ?? null, feedBaseUrl });
   });
 
   // ── Start verification (async)
@@ -452,11 +519,13 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "a destination URL is required to activate a website installation");
     }
     const siteType = installation.provider === "generic_webhook" ? "webhook" : "generic_rest";
-    const key = installation.siteId
+    // Reconnecting a site the workspace already has (same origin) reuses it instead of creating a duplicate.
+    const linkedSiteId = installation.siteId ?? (await findSiteIdByOrigin(context.tenantId, baseUrl));
+    const key = linkedSiteId
       ? undefined
       : `${siteKeyForOrigin(baseUrl)}-${crypto.randomBytes(3).toString("hex")}`;
-    const site = installation.siteId
-      ? await prisma.site.findFirst({ where: { id: installation.siteId, tenantId: context.tenantId } })
+    const site = linkedSiteId
+      ? await prisma.site.findFirst({ where: { id: linkedSiteId, tenantId: context.tenantId } })
       : await prisma.site.upsert({
           where: { tenantId_key: { tenantId: context.tenantId, key: key! } },
           update: {},
