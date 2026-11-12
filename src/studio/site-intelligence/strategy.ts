@@ -507,10 +507,13 @@ export async function upsertApprovedPillar(
   let index = pillars.findIndex((entry) => (slug && entry.clusterSlug === slug) || (input.name && entry.name.toLowerCase() === input.name.toLowerCase()));
   if (index < 0) {
     // Seed from the suggestion (or the detected cluster) so unspecified fields keep their evidence.
+    const dbCluster = slug && !layers.detected?.clusters.some((entry) => entry.slug === slug) ? await prisma.siteTopicCluster.findFirst({ where: { tenantId, siteId, slug } }) : null;
     const seed =
       layers.suggested?.config.pillars.find((entry) => (slug && entry.clusterSlug === slug) || (input.name && entry.name === input.name)) ??
       (() => {
-        const cluster = layers.detected?.clusters.find((entry) => entry.slug === slug);
+        const cluster =
+          layers.detected?.clusters.find((entry) => entry.slug === slug) ??
+          (dbCluster ? { name: dbCluster.name, slug: dbCluster.slug, keywords: strings(dbCluster.keywords) } : undefined);
         return cluster
           ? { name: cluster.name, description: null, subtopics: cluster.keywords.slice(0, 6), keywords: cluster.keywords, weight: 1, included: true, clusterSlug: cluster.slug }
           : null;

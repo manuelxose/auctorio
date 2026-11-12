@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import Fastify from "fastify";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
+import { closeEventPublisher } from "../src/studio/events";
 import { sha256 } from "../src/shared/utils/hash";
 import { registerStudioRoutes } from "../src/studio/routes";
 import { createInstallation, storeInstallationCredentials, transitionInstallation } from "../src/studio/connectors/installation";
@@ -94,6 +95,7 @@ test.before(() => {
 });
 
 test.after(async () => {
+  await closeEventPublisher();
   await prisma.$disconnect();
 });
 
