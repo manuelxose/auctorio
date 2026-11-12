@@ -86,6 +86,7 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
       .pd__results small { display: block; color: var(--au-muted); overflow-wrap: anywhere; }
       .pd__status { font-size: var(--au-fs-body-sm); color: var(--au-muted); }
       .pd__status.is-error { color: var(--au-danger); }
+      @media (pointer: coarse) { .pd .au-btn, .pd .au-input, .pd .au-select { min-height: 44px; } }
       @media (max-width: 560px) {
         .pd__grid { grid-template-columns: 1fr; }
         .pd .au-btn { min-height: 40px; }

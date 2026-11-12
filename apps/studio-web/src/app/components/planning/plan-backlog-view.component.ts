@@ -34,6 +34,7 @@ type SortKey = 'date-asc' | 'date-desc' | 'priority' | 'title';
       .pb__row.is-selected { background: var(--au-surface-selected); }
       .pb__row--head { font-size: var(--au-fs-caption); color: var(--au-muted); font-weight: 600; background: var(--au-surface-2); }
       .pb__when { font-variant-numeric: tabular-nums; font-size: var(--au-fs-body-sm); color: var(--au-text-2); }
+      .pb__title:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 2px; }
       .pb__title { text-align: left; border: 0; background: transparent; font: inherit; color: var(--au-text); cursor: pointer; padding: 2px 0; min-width: 0; }
       .pb__title strong { display: block; font-weight: 560; overflow-wrap: anywhere; }
       .pb__title small { display: block; color: var(--au-muted); font-size: var(--au-fs-caption); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

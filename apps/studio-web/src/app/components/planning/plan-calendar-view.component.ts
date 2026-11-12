@@ -30,6 +30,8 @@ type Day = { date: string; inMonth: boolean; items: PlanItem[] };
       .pc__card-title { font-size: var(--au-fs-body-sm); line-height: 1.35; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
       .pc__chip { display: flex; gap: 6px; align-items: center; width: 100%; text-align: left; border: 0; border-left: 3px solid var(--pc-tone, var(--au-border-strong)); border-radius: 4px; background: var(--au-surface-2); padding: 3px 6px; font: inherit; font-size: var(--au-fs-caption); color: var(--au-text); cursor: pointer; min-width: 0; }
       .pc__chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pc__card:focus-visible, .pc__chip:focus-visible, .pc__more:focus-visible, .pc__count:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 1px; }
+      @media (pointer: coarse) { .pc__more, .pc__chip { min-height: 44px; } .pc__grid--month .pc__count { min-height: 44px; } }
       .pc__more { border: 0; background: transparent; color: var(--au-brand); font: inherit; font-size: var(--au-fs-caption); font-weight: 600; text-align: left; padding: 2px 4px; cursor: pointer; border-radius: 4px; }
       .pc__count { display: none; }
       .pc__panel { margin-top: var(--au-s3); border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface); padding: var(--au-s3); }
