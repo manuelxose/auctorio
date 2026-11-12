@@ -16,6 +16,8 @@ const BADGE: Record<string, string> = {
 };
 
 /** Live stage progress of a production job, with retry / cancel / review / open-in-editor. Give it jobId, planItemId or clusterId. */
+const TERMINAL: string[] = ['ready', 'failed', 'cancelled'];
+
 @Component({
   selector: 'app-production-status',
   standalone: true,
@@ -64,6 +66,10 @@ export class ProductionStatusComponent implements OnChanges, OnDestroy {
   private poll: Subscription | null = null;
 
   ngOnChanges(): void {
+    this.startPolling();
+  }
+
+  private startPolling(): void {
     this.poll?.unsubscribe();
     this.poll = timer(0, 4000).subscribe(() => this.refresh());
   }
@@ -86,6 +92,8 @@ export class ProductionStatusComponent implements OnChanges, OnDestroy {
         const prev = this.job();
         this.job.set(job);
         if (job && prev && prev.status !== job.status) this.changed.emit(job);
+        // Nothing changes a finished job on its own; user actions (run) resume polling.
+        if (job && TERMINAL.includes(job.status)) this.poll?.unsubscribe();
       },
       error: () => undefined,
     });
@@ -98,6 +106,7 @@ export class ProductionStatusComponent implements OnChanges, OnDestroy {
         this.job.set(job);
         this.busy.set(false);
         this.changed.emit(job);
+        if (!TERMINAL.includes(job.status)) this.startPolling();
       },
       error: (err) => {
         this.busy.set(false);
