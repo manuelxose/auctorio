@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { computePlanSlots, planRangeBounds, zonedTimeToUtc } from "../src/studio/plan-slots";
+import { computePlanSlots, computePlanSlotsDetailed, nextLocalDate, localDateInZone, planRangeBounds, zonedTimeToUtc } from "../src/studio/plan-slots";
 import { assignBriefsToSlots, mergePlanBatches, topUpPlanItems, type PostValidationResult } from "../src/studio/editorial-plan";
 import type { EditorialPlanBriefV2 } from "../src/studio/editorial-plan-schema";
 
+// Fixed reference time so the suite does not depend on the wall clock.
+const NOW = new Date("2026-01-01T00:00:00.000Z");
+
 const madrid = (articlesPerDay: number, extra: Partial<Parameters<typeof computePlanSlots>[0]> = {}) =>
-  computePlanSlots({ dateFrom: "2026-11-16", dateTo: "2026-11-22", timezone: "Europe/Madrid", articlesPerDay, ...extra });
+  computePlanSlots({ dateFrom: "2026-11-16", dateTo: "2026-11-22", timezone: "Europe/Madrid", articlesPerDay, now: NOW, ...extra });
 
 function perDay(slots: ReturnType<typeof computePlanSlots>): Map<string, number> {
   const counts = new Map<string, number>();
@@ -43,13 +46,13 @@ test("PLAN-02: seven eligible days at three proposals/day produce 21 slots, thre
 });
 
 test("PLAN-02b: 30 days at three per day produce 90 slots (no arbitrary 100-item horizon cut)", () => {
-  const slots = computePlanSlots({ dateFrom: "2026-12-01", dateTo: "2026-12-30", timezone: "Europe/Madrid", articlesPerDay: 3 });
+  const slots = computePlanSlots({ dateFrom: "2026-12-01", dateTo: "2026-12-30", timezone: "Europe/Madrid", articlesPerDay: 3, now: NOW });
   assert.equal(slots.length, 90);
 });
 
 test("PLAN-03: local times are converted with the right offset on both sides of the DST change", () => {
   // Europe/Madrid leaves summer time on 2026-10-25 at 03:00 local.
-  const slots = computePlanSlots({ dateFrom: "2026-10-24", dateTo: "2026-10-26", timezone: "Europe/Madrid", articlesPerDay: 1, publishTimes: ["10:00"] });
+  const slots = computePlanSlots({ dateFrom: "2026-10-24", dateTo: "2026-10-26", timezone: "Europe/Madrid", articlesPerDay: 1, publishTimes: ["10:00"], now: NOW });
   assert.deepEqual(slots.map((slot) => slot.scheduledFor.toISOString()), [
     "2026-10-24T08:00:00.000Z", // CEST, UTC+2
     "2026-10-25T09:00:00.000Z", // CET, UTC+1
@@ -69,6 +72,7 @@ test("PLAN-03b: month boundary, weekdays, per-weekday quotas and excluded dates"
     weekdays: [1, 2, 3, 4, 5, 6], // no Sundays
     weekdayQuotas: { "6": 1 }, // Saturdays: one
     excludedDates: ["2026-12-02"],
+    now: NOW,
   });
   assert.deepEqual(Object.fromEntries(perDay(slots)), {
     "2026-11-28": 1, // Saturday
@@ -86,7 +90,7 @@ test("PLAN-03c: inclusive range bounds and invalid input", () => {
   assert.throws(() => madrid(1, { dateTo: "2026-11-01" }), /plan_slots_invalid_date_range/);
   assert.throws(() => madrid(1, { dateFrom: "2026-02-30" }), /plan_slots_invalid_date/);
   assert.throws(() => madrid(1, { timezone: "Mars/Olympus" }), /plan_slots_invalid_timezone/);
-  assert.throws(() => computePlanSlots({ dateFrom: "2026-01-01", dateTo: "2026-12-31", timezone: "UTC", articlesPerDay: 3 }), /plan_slots_too_many/);
+  assert.throws(() => computePlanSlots({ dateFrom: "2026-01-01", dateTo: "2026-12-31", timezone: "UTC", articlesPerDay: 3, now: NOW }), /plan_slots_too_many/);
 });
 
 test("PLAN-04: rejected candidates trigger bounded top-up until every slot is filled", async () => {
@@ -133,4 +137,32 @@ test("PLAN-03d: explicit empty weekdays and oversized ranges are rejected before
   const started = Date.now();
   assert.throws(() => computePlanSlots({ dateFrom: "1000-01-01", dateTo: "9999-12-31", timezone: "UTC", articlesPerDay: 0 }), /plan_slots_range_too_long/);
   assert.ok(Date.now() - started < 200);
+});
+
+test("PLAN-04: slots already in the past (or inside the 30 min lead) are skipped and reported", () => {
+  // now = 2026-11-16 09:40 Madrid (08:40Z): 09:00 is past, 11:05 local is 85 min ahead.
+  const now = new Date("2026-11-16T08:40:00.000Z");
+  const { slots, skippedPast } = computePlanSlotsDetailed({
+    dateFrom: "2026-11-16",
+    dateTo: "2026-11-17",
+    timezone: "Europe/Madrid",
+    articlesPerDay: 2,
+    publishTimes: ["09:00", "11:05"],
+    now,
+  });
+  assert.deepEqual(skippedPast.map((slot) => `${slot.localDate} ${slot.localTime}`), ["2026-11-16 09:00"]);
+  assert.deepEqual(slots.map((slot) => `${slot.localDate} ${slot.localTime}`), ["2026-11-16 11:05", "2026-11-17 09:00", "2026-11-17 11:05"]);
+  assert.deepEqual(slots.map((slot) => slot.index), [0, 1, 2]);
+  // 10:15 local is 35 min ahead of now (outside the lead) but 10:05 is inside it.
+  const lead = computePlanSlotsDetailed({ dateFrom: "2026-11-16", dateTo: "2026-11-16", timezone: "Europe/Madrid", articlesPerDay: 2, publishTimes: ["10:05", "10:15"], now });
+  assert.deepEqual(lead.skippedPast.map((slot) => slot.localTime), ["10:05"]);
+  assert.deepEqual(lead.slots.map((slot) => slot.localTime), ["10:15"]);
+  // Default reference is the real clock: a range in the past yields nothing.
+  assert.equal(computePlanSlots({ dateFrom: "2020-01-01", dateTo: "2020-01-07", timezone: "UTC", articlesPerDay: 1 }).length, 0);
+});
+
+test("PLAN-04b: local date helpers", () => {
+  assert.equal(localDateInZone(new Date("2026-11-22T22:59:59.999Z"), "Europe/Madrid"), "2026-11-22");
+  assert.equal(localDateInZone(new Date("2026-11-22T23:00:00.000Z"), "Europe/Madrid"), "2026-11-23");
+  assert.equal(nextLocalDate("2026-12-31"), "2027-01-01");
 });
