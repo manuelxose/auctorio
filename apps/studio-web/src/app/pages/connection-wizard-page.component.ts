@@ -1,9 +1,11 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, OnDestroy, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription, interval } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
+import { IntelligenceApiService } from '../services/intelligence-api.service';
+import type { StrategyConfig } from '../models/intelligence.models';
 import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
 import { ConfirmService } from '../services/confirm.service';
@@ -53,7 +55,7 @@ const PLATFORM_GROUPS: Array<{ label: string; items: Platform[] }> = [
 @Component({
   selector: 'app-connection-wizard-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, SocialSetupGuideComponent, OnboardingTimelineComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, SocialSetupGuideComponent, OnboardingTimelineComponent, RouterLink],
   styles: [
     `
 /* Destination cards */
@@ -584,18 +586,19 @@ curl "{{ feedBase }}/v1/articles/ARTICLE_ID" \\
               <span class="au-field__label">Target audience</span>
               <textarea class="au-input" name="profileAudience" rows="4" [(ngModel)]="profileAudience"
                 placeholder="One group per line, e.g. viewers who want to know what's on TV tonight"></textarea>
-              <span class="au-field__hint">One audience per line.</span>
+              <span class="au-field__hint">Who the articles are for; one group per line works well.</span>
             </label>
             <label class="au-field">
               <span class="au-field__label">Target location</span>
-              <input class="au-input" name="profileLocation" [(ngModel)]="profileLocation" placeholder="e.g. Spain" />
-              <span class="au-field__hint">Countries or cities, separated by commas.</span>
+              <input class="au-input" name="profileLocation" [(ngModel)]="profileLocation" placeholder="e.g. ES" />
+              <span class="au-field__hint">Markets (countries or regions), separated by commas.</span>
             </label>
             <p class="au-error" *ngIf="profileError">{{ profileError }}</p>
             <div class="au-form__actions">
               <button class="au-btn au-btn--primary" type="submit" [disabled]="profileSaving">
                 {{ profileSaving ? 'Saving…' : profileSavedAt ? 'Saved' : 'Looks good, save' }}
               </button>
+              <a class="au-btn au-btn--ghost" routerLink="/studio/site-intelligence">Full profile in Website Intelligence</a>
             </div>
           </form>
         </section>
@@ -631,6 +634,7 @@ curl "{{ feedBase }}/v1/articles/ARTICLE_ID" \\
 })
 export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
+  private readonly intelligence = inject(IntelligenceApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
   private readonly confirm = inject(ConfirmService);
@@ -787,26 +791,24 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
       : [{ value: this.profileLocale, label: this.profileLocale }, ...options];
   }
 
+  /** The profile shown here is the site strategy (Website Intelligence → Profile & audience), one source of truth. */
+  private profileStrategy: StrategyConfig | null = null;
+
   private loadSiteProfile(siteId: string): void {
     this.api.getSite(siteId).subscribe({
       next: (site) => {
-        const voice = (site.brandVoice ?? {}) as Record<string, unknown>;
-        const list = (value: unknown): string[] => (Array.isArray(value) ? value.map(String).filter(Boolean) : []);
         this.profileSite = site;
         this.profileLocale = site.locale || this.discovery?.locale?.replace('_', '-') || 'es-ES';
-        this.profileDescription = typeof voice['description'] === 'string' ? voice['description'] : '';
-        this.profileAudience = list(voice['audience']).join('\n');
-        this.profileLocation = list(voice['location']).join(', ');
-        if (!this.profileDescription || !this.profileAudience) {
-          // Not confirmed yet: prefill from what onboarding detected, when it has run.
-          this.api.getEditorialProfile(siteId).subscribe({
-            next: (profile) => {
-              this.profileDescription ||= profile.editorialDescription ?? '';
-              this.profileAudience ||= profile.audience.join('\n');
-            },
-            error: () => undefined,
-          });
-        }
+      },
+      error: () => undefined,
+    });
+    // `effective` = approved values, falling back to what onboarding suggested.
+    this.intelligence.getStrategy(siteId).subscribe({
+      next: (layers) => {
+        this.profileStrategy = layers.effective;
+        this.profileDescription = layers.effective.description ?? '';
+        this.profileAudience = layers.effective.primaryAudience ?? '';
+        this.profileLocation = layers.effective.markets.join(', ');
       },
       error: () => undefined,
     });
@@ -817,26 +819,41 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
     if (!site) return;
     this.profileSaving = true;
     this.profileError = '';
-    const lines = (value: string, separator: RegExp) => value.split(separator).map((entry) => entry.trim()).filter(Boolean);
-    const brandVoice = {
-      ...(site.brandVoice ?? {}),
-      description: this.profileDescription.trim(),
-      audience: lines(this.profileAudience, /\n/),
-      location: lines(this.profileLocation, /,/),
-      confirmedAt: new Date().toISOString(),
+    const language = this.profileLocale.split('-')[0];
+    const base = this.profileStrategy;
+    const config = {
+      ...(base ?? {}),
+      description: this.profileDescription.trim() || null,
+      primaryAudience: this.profileAudience.trim() || null,
+      languages: [language, ...(base?.languages ?? []).filter((entry) => entry !== language)],
+      markets: this.profileLocation.split(',').map((entry) => entry.trim()).filter(Boolean),
+    } as StrategyConfig;
+    const fail = (err: { error?: { message?: string } }) => {
+      this.profileSaving = false;
+      this.profileError = err?.error?.message || 'The profile could not be saved.';
     };
-    this.api.updateSite(site.id, { name: site.name, type: site.type, locale: this.profileLocale, brandVoice }).subscribe({
+    const saveStrategy = () =>
+      this.intelligence.saveStrategy(site.id, config, 'Confirmed in the connection wizard').subscribe({
+        next: (response) => {
+          this.profileStrategy = response.layers.effective;
+          this.profileSaving = false;
+          this.profileSavedAt = new Date().toISOString();
+          this.toast.success(`Site profile saved (version ${response.version})`);
+          this.api.rebuildEditorialProfile(site.id).subscribe({ error: () => undefined });
+        },
+        error: fail,
+      });
+    if (this.profileLocale === site.locale) {
+      saveStrategy();
+      return;
+    }
+    // The publishing locale lives on the site itself.
+    this.api.updateSite(site.id, { name: site.name, type: site.type, locale: this.profileLocale }).subscribe({
       next: (updated) => {
         this.profileSite = updated;
-        this.profileSaving = false;
-        this.profileSavedAt = new Date().toISOString();
-        this.toast.success('Site profile saved');
-        this.api.rebuildEditorialProfile(site.id).subscribe({ error: () => undefined });
+        saveStrategy();
       },
-      error: (err) => {
-        this.profileSaving = false;
-        this.profileError = err?.error?.message || 'The profile could not be saved.';
-      },
+      error: fail,
     });
   }
 
@@ -981,6 +998,14 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
         break;
       case 'ready':
         this.stepIndex = 5;
+        break;
+      case 'active':
+        // Reopening a live website connection shows its profile and onboarding, not the setup steps.
+        this.stepIndex = 5;
+        if (this.installation?.siteId) {
+          this.onboardingSiteId = this.installation.siteId;
+          this.loadSiteProfile(this.installation.siteId);
+        }
         break;
       case 'failed':
         this.verificationSummary = this.installation?.lastError ?? '';
