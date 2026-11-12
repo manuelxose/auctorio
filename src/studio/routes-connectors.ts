@@ -1,3 +1,4 @@
+import { startSiteIndexOperation } from "./routes-site-intelligence";
 import type { FastifyInstance } from "fastify";
 import crypto from "node:crypto";
 import {
@@ -492,7 +493,21 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       actionUrl: "/studio/connections",
       dedupeKey: `installation.${id}.active`,
     });
-    return reply.send(sanitizeInstallation(activated));
+    // Editorial initialization: start read-only site discovery right away (durable operation,
+    // de-duplicated per site). Publishing stays manual; connecting never publishes anything.
+    let initialization: { operationId: string } | null = null;
+    try {
+      const run = await startSiteIndexOperation(context.tenantId, site.id, context.userId, {
+        crawl: true,
+        changedOnly: Boolean(installation.siteId),
+        trigger: "connection_activated",
+      });
+      run.promise.catch(() => undefined);
+      initialization = { operationId: run.operationId };
+    } catch {
+      // Activation already succeeded; indexing can be restarted from Site intelligence.
+    }
+    return reply.send({ ...sanitizeInstallation(activated), initialization });
   });
 
   // ── Cancel / resume / delete

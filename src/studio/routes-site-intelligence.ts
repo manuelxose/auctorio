@@ -20,6 +20,46 @@ import { suggestInternalLinks } from "./internal-linking";
 import { completeOperation, createOperation, failOperation, startOperation } from "./operations";
 import { publishEvent } from "./events";
 
+
+/**
+ * Starts a durable, observable site index. Safe to call repeatedly: an in-flight
+ * run for the same site is reused by refreshSiteIntelligence, so nothing is duplicated.
+ * Read-only discovery; it never grants or uses publishing rights.
+ */
+export async function startSiteIndexOperation(
+  tenantId: string,
+  siteId: string,
+  userId: string | null,
+  options: { crawl?: boolean; budget?: number; changedOnly?: boolean; force?: boolean; trigger?: string } = {},
+) {
+  const started = !isSiteIndexing(siteId);
+  const operation = await createOperation({
+    tenantId,
+    siteId,
+    type: "site_index",
+    initiatorUserId: userId,
+    entityType: "site",
+    entityId: siteId,
+    metadata: { crawl: options.crawl ?? true, budget: options.budget ?? null, trigger: options.trigger ?? "manual" },
+  });
+  await startOperation(operation.id, "discovering");
+  await publishEvent({ tenantId, siteId, type: "operation.created", payload: { operationId: operation.id, type: "site_index" } });
+  const promise = refreshSiteIntelligence(tenantId, siteId, options)
+    .then(async (result) => {
+      await completeOperation(operation.id);
+      await publishEvent({ tenantId, siteId, type: "operation.completed", payload: { operationId: operation.id } });
+      return result;
+    })
+    .catch(async (error) => {
+      await failOperation(operation.id, {
+        errorCode: "site_index_failed",
+        errorSummary: error instanceof Error ? error.message : String(error),
+        retryable: true,
+      });
+      throw error;
+    });
+  return { started, operationId: operation.id, promise };
+}
 async function loadSiteForParams(request: FastifyRequest, reply: FastifyReply, tenantId: string) {
   const siteId = (request.params as { siteId: string }).siteId;
   if (!isUuid(siteId)) {
@@ -60,44 +100,11 @@ export function registerSiteIntelligenceRoutes(fastify: FastifyInstance) {
       force: body.force === true,
     };
 
-    const running = isSiteIndexing(siteId);
-
-    const operation = await createOperation({
-      tenantId: context.tenantId,
-      siteId,
-      type: "site_index",
-      initiatorUserId: context.userId,
-      entityType: "site",
-      entityId: siteId,
-      metadata: { crawl: options.crawl, budget: options.budget ?? null },
-    });
-    await startOperation(operation.id, "discovering");
-    await publishEvent({
-      tenantId: context.tenantId,
-      siteId,
-      type: "operation.created",
-      payload: { operationId: operation.id, type: "site_index" },
-    });
-
-    const promise = refreshSiteIntelligence(context.tenantId, siteId, options)
-      .then(async (result) => {
-        await completeOperation(operation.id);
-        await publishEvent({
-          tenantId: context.tenantId,
-          siteId,
-          type: "operation.completed",
-          payload: { operationId: operation.id },
-        });
-        return result;
-      })
-      .catch(async (error) => {
-        await failOperation(operation.id, {
-          errorCode: "site_index_failed",
-          errorSummary: error instanceof Error ? error.message : String(error),
-          retryable: true,
-        });
-        throw error;
-      });
+    const { started, operationId, promise } = await startSiteIndexOperation(context.tenantId, siteId, context.userId, options);
+    const operation = { id: operationId };
+    const running = !started;
+    // Callers that do not wait must not leave a rejected promise unhandled; the operation records the failure.
+    promise.catch(() => undefined);
 
     if (body.wait === true) {
       try {
