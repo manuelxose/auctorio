@@ -1,17 +1,20 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
-import { badRequest, errorBody, notFound, parseBody, parsePageSize, requireStudioContext } from "./http-utils";
+import { badRequest, conflict, errorBody, notFound, parseBody, parsePageSize, requireStudioContext } from "./http-utils";
 import {
   CopilotError,
   competencyRuns,
   competencyStats,
   deleteThread,
+  describeContext,
   getThread,
   listCompetencies,
   listThreads,
+  listTools,
   retryMessage,
   sendMessage,
   type CopilotActor,
 } from "./copilot/copilot";
+import { cancelAction, confirmAction, listActions } from "./copilot/assistant";
 
 /** Copilot threads are per Studio user, so API-key (machine) access is refused. */
 async function requireActor(request: FastifyRequest, reply: FastifyReply): Promise<CopilotActor | null> {
@@ -27,6 +30,7 @@ async function requireActor(request: FastifyRequest, reply: FastifyReply): Promi
 function handle(reply: FastifyReply, error: unknown) {
   if (error instanceof CopilotError) {
     if (error.status === 404) return notFound(reply, error.message);
+    if (error.status === 409) return conflict(reply, error.message);
     if (error.status === 403) return reply.code(403).send(errorBody(reply, "forbidden", error.message));
     return badRequest(reply, error.message);
   }
@@ -100,6 +104,51 @@ export function registerCopilotRoutes(fastify: FastifyInstance) {
     const isAborted = abortedProbe(reply);
     try {
       return reply.send(await retryMessage(actor, (request.params as { id: string }).id, isAborted));
+    } catch (error) {
+      return handle(reply, error);
+    }
+  });
+
+  fastify.get("/v2/copilot/tools", async (request, reply) => {
+    const actor = await requireActor(request, reply);
+    if (!actor) return;
+    return reply.send({ items: listTools(actor) });
+  });
+
+  /** Resolves the client's selection (ids only) server-side, with tenant checks, for the context chip. */
+  fastify.post("/v2/copilot/context", async (request, reply) => {
+    const actor = await requireActor(request, reply);
+    if (!actor) return;
+    try {
+      return reply.send(await describeContext(actor, parseBody(request)));
+    } catch (error) {
+      return handle(reply, error);
+    }
+  });
+
+  fastify.get("/v2/copilot/actions", async (request, reply) => {
+    const actor = await requireActor(request, reply);
+    if (!actor) return;
+    const status = (request.query as { status?: string }).status;
+    if (status && !["pending", "executing", "confirmed", "failed", "cancelled"].includes(status)) return badRequest(reply, "invalid status");
+    return reply.send({ items: await listActions(actor, status) });
+  });
+
+  fastify.post("/v2/copilot/actions/:id/confirm", async (request, reply) => {
+    const actor = await requireActor(request, reply);
+    if (!actor) return;
+    try {
+      return reply.send(await confirmAction(actor, (request.params as { id: string }).id));
+    } catch (error) {
+      return handle(reply, error);
+    }
+  });
+
+  fastify.post("/v2/copilot/actions/:id/cancel", async (request, reply) => {
+    const actor = await requireActor(request, reply);
+    if (!actor) return;
+    try {
+      return reply.send({ action: await cancelAction(actor, (request.params as { id: string }).id) });
     } catch (error) {
       return handle(reply, error);
     }

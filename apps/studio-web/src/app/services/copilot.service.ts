@@ -4,6 +4,8 @@ import { NavigationEnd, Router } from '@angular/router';
 import { Subscription, filter } from 'rxjs';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import { AppContextService } from './app-context.service';
+import { EditorialContextService } from './editorial-context.service';
+import type { AssistantAction } from '../models/assistant.models';
 
 export type CopilotMessageStatus = 'completed' | 'failed' | 'cancelled' | 'pending';
 
@@ -22,6 +24,8 @@ export type CopilotMessage = {
   durationMs: number | null;
   error: string | null;
   createdAt: string;
+  /** Pending/finished write actions the assistant staged for this answer. */
+  actions?: AssistantAction[];
 };
 
 export type CopilotThreadSummary = { id: string; title: string; siteId: string | null; updatedAt: string };
@@ -50,6 +54,7 @@ export class CopilotService {
   private readonly http = inject(HttpClient);
   private readonly router = inject(Router);
   private readonly appContext = inject(AppContextService);
+  private readonly editorial = inject(EditorialContextService);
   private readonly base = `${inject(STUDIO_ORIGIN)}/studio/api/backend/v2/copilot`;
 
   readonly open = signal(false);
@@ -153,7 +158,7 @@ export class CopilotService {
         threadId: this.activeThreadId(),
         content: text,
         competencyKey,
-        context: { siteId: this.siteId(), projectId: this.projectId(), route: this.route() },
+        context: { ...this.editorial.selection(), siteId: this.siteId(), projectId: this.editorial.selection().projectId ?? this.projectId(), route: this.route() },
       })
       .subscribe({
         next: (response) => {
@@ -174,6 +179,11 @@ export class CopilotService {
           );
         },
       });
+  }
+
+  /** Swaps in the server's latest state of an action after confirm/cancel. */
+  replaceAction(action: AssistantAction): void {
+    this.messages.update((items) => items.map((item) => (item.actions?.some((a) => a.id === action.id) ? { ...item, actions: item.actions.map((a) => (a.id === action.id ? action : a)) } : item)));
   }
 
   /** Stops waiting for the answer. The server stores it as cancelled. */

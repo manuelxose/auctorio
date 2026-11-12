@@ -410,6 +410,8 @@ model Tenant {
   contentOpportunities           ContentOpportunity[]
   // production (agent D)
   productionJobs                 ProductionJob[]
+  // assistant (agent E)
+  copilotActions                 CopilotAction[]
 
   @@map("tenants")
 }
@@ -2962,6 +2964,7 @@ model CopilotThread {
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   messages CopilotMessage[]
+  actions  CopilotAction[]
 
   @@index([tenantId, studioUserId, updatedAt])
   @@map("copilot_threads")
@@ -2988,11 +2991,41 @@ model CopilotMessage {
   createdAt     DateTime @default(now()) @map("created_at")
 
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  thread CopilotThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  thread  CopilotThread   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  actions CopilotAction[]
 
   @@index([threadId, createdAt])
   @@index([tenantId, competencyKey, createdAt])
   @@map("copilot_messages")
+}
+
+/// A write the assistant proposed. Nothing runs until its Studio user confirms it;
+/// the claim pending -> executing is atomic, so a confirm executes at most once.
+model CopilotAction {
+  id           String    @id @default(uuid()) @db.Uuid
+  tenantId     String    @map("tenant_id") @db.Uuid
+  studioUserId String    @map("studio_user_id") @db.Uuid
+  threadId     String?   @map("thread_id") @db.Uuid
+  messageId    String?   @map("message_id") @db.Uuid
+  tool         String
+  args         Json
+  summary      String    @db.Text
+  /// pending | executing | confirmed | failed | cancelled
+  status       String    @default("pending")
+  result       Json?
+  error        String?   @db.Text
+  confirmedAt  DateTime? @map("confirmed_at")
+  cancelledAt  DateTime? @map("cancelled_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  tenant  Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  thread  CopilotThread?  @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  message CopilotMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, studioUserId, status, createdAt])
+  @@index([messageId])
+  @@map("copilot_actions")
 }
 
 /// AI provider and model chosen by a workspace admin (Settings → AI). Keys stay in the server env.
