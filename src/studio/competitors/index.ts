@@ -122,7 +122,7 @@ function titleFromUrl(url: string | null): string | null {
 }
 
 /** Sample public titles from a competitor's feed or sitemap (robots respected). */
-async function sampleCompetitorCoverage(origin: string, known: { feedUrl: string | null; sitemapUrl: string | null }, sampleSize: number): Promise<CoverageSample> {
+export async function sampleCompetitorCoverage(origin: string, known: { feedUrl: string | null; sitemapUrl: string | null }, sampleSize: number): Promise<CoverageSample> {
   let endpoints = [known.feedUrl, known.sitemapUrl].filter((url): url is string => Boolean(url));
   if (endpoints.length === 0) {
     const discovered = await discoverFeedsForUrl({ url: origin });
@@ -150,6 +150,11 @@ async function sampleCompetitorCoverage(origin: string, known: { feedUrl: string
       const children = items.map((item) => item.url as string).sort((a, b) => Number(/post|news|article/i.test(b)) - Number(/post|news|article/i.test(a))).slice(0, 2);
       items = [];
       for (const child of children) {
+        // Child sitemaps can live on a path the parent's robots check did not cover.
+        if (!(await robotsAllows(new URL(child)).catch(() => false))) {
+          lastError = "robots_disallow";
+          continue;
+        }
         check = await verifyFeedCandidate(child, { sampleSize });
         items.push(...(check.sample ?? []));
       }

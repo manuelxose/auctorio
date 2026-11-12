@@ -138,6 +138,7 @@ export async function verifyFeedCandidate(url: string, options: { sampleSize?: n
     }
     // Try the three document families in order; count items without keeping
     // raw payloads in memory beyond this call.
+    let emptyMatch: Awaited<ReturnType<typeof verifyFeedCandidate>> | null = null;
     for (const [family, parser] of [
       ["rss", (xml: string, base: string, max: number) => parseRssItems(xml, base, max)],
       ["atom", (xml: string, base: string, max: number) => parseAtomItems(xml, base, max)],
@@ -148,11 +149,18 @@ export async function verifyFeedCandidate(url: string, options: { sampleSize?: n
         const sitemapFamily = family === "sitemap" && /news:news/i.test(response.body);
         const type: FeedCandidateType = family === "sitemap" ? (sitemapFamily ? "news_sitemap" : "sitemap") : family;
         const sample = items.slice(0, options.sampleSize ?? 5).map((item) => ({ title: item.title, url: item.canonicalUrl ?? item.sourceUrl, publishedAt: item.publishedAt }));
-        return { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null, sample };
+        const result = { verified: true, status: response.status, contentType: response.contentType, itemCount: items.length, type, note: null, sample };
+        // The lenient atom parser accepts a sitemap index with zero items; keep trying so the sitemap family can claim it.
+        if (items.length === 0) {
+          emptyMatch ??= result;
+          continue;
+        }
+        return result;
       } catch {
         // next family
       }
     }
+    if (emptyMatch) return emptyMatch;
     return { verified: false, status: response.status, contentType: response.contentType, itemCount: null, type: null, note: "unparseable_xml" };
   } catch (error) {
     if (error instanceof SourceNotModifiedError) {
