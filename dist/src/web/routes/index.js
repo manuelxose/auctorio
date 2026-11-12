@@ -5,7 +5,6 @@ const topic_controller_1 = require("../controllers/topic-controller");
 const content_image_controller_1 = require("../controllers/content-image-controller");
 const content_text_controller_1 = require("../controllers/content-text-controller");
 const routes_1 = require("../../studio/routes");
-const integrations_1 = require("./integrations");
 function registerRoutes(fastify) {
     fastify.get("/health", async () => ({ status: "ok" }));
     fastify.post("/v1/topics", topic_controller_1.createTopic);
@@ -17,6 +16,4 @@ function registerRoutes(fastify) {
     fastify.get("/v1/text/:id", content_text_controller_1.getContentText);
     fastify.get("/v1/images/:id", content_image_controller_1.getContentImage);
     (0, routes_1.registerStudioRoutes)(fastify);
-    // Client pull feed (GuíaTV and any other site that syncs instead of receiving a push).
-    (0, integrations_1.registerIntegrationRoutes)(fastify);
 }

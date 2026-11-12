@@ -62,12 +62,9 @@ const views_1 = require("./views");
 const routes_editorial_1 = require("./routes-editorial");
 const routes_connections_1 = require("./routes-connections");
 const routes_connectors_1 = require("./routes-connectors");
-const waitlist_1 = require("./waitlist");
 const routes_operations_1 = require("./routes-operations");
 const routes_phase5_ops_1 = require("./routes-phase5-ops");
 const routes_notifications_1 = require("./routes-notifications");
-const routes_copilot_1 = require("./routes-copilot");
-const routes_ai_1 = require("./routes-ai");
 const routes_events_1 = require("./routes-events");
 const routes_discovery_1 = require("./routes-discovery");
 const routes_site_intelligence_1 = require("./routes-site-intelligence");
@@ -155,9 +152,7 @@ function parsePublicationTargetStatus(value) {
 async function handleReadyCheck() {
     const prisma = (0, prisma_1.getPrismaClient)();
     await prisma.$queryRaw `SELECT 1`;
-    // The shared options disable the offline queue so a CLI call cannot wait minutes for Redis; a readiness probe
-    // is the opposite case, so it queues the PING until the socket is up (connectTimeout still bounds the wait).
-    const redis = new ioredis_1.default({ ...(0, redis_1.getRedisConnectionOptions)(), enableOfflineQueue: true });
+    const redis = new ioredis_1.default((0, redis_1.getRedisConnectionOptions)());
     try {
         await redis.ping();
     }
@@ -304,12 +299,9 @@ function registerStudioRoutes(fastify) {
     (0, routes_intelligence_1.registerIntelligenceRoutes)(fastify);
     (0, routes_editorial_engine_1.registerEditorialEngineRoutes)(fastify);
     (0, routes_connectors_1.registerConnectorRoutes)(fastify);
-    (0, waitlist_1.registerWaitlistRoutes)(fastify);
     (0, routes_operations_1.registerOperationRoutes)(fastify);
     (0, routes_phase5_ops_1.registerPhase5OpsRoutes)(fastify);
     (0, routes_notifications_1.registerNotificationRoutes)(fastify);
-    (0, routes_copilot_1.registerCopilotRoutes)(fastify);
-    (0, routes_ai_1.registerAiSettingsRoutes)(fastify);
     (0, routes_events_1.registerEventRoutes)(fastify);
     fastify.get("/health/live", async () => ({ status: "ok" }));
     fastify.get("/health/ready", async (_request, reply) => {

@@ -11,7 +11,6 @@ const routes_1 = require("./routes");
 const env_1 = require("../shared/utils/env");
 const logger_1 = require("../shared/utils/logger");
 const metrics_1 = require("../studio/metrics");
-const ai_settings_1 = require("../infrastructure/ai/ai-settings");
 /**
  * Phase 5: lightweight fixed-window rate limiter (no heavy platform).
  * Default 300 req/min per IP; auth/session routes get a stricter window.
@@ -44,8 +43,6 @@ function buildServer() {
         // documentation and to guard against oversized JSON bodies.
         bodyLimit: 1_048_576,
     });
-    // Per-request context so model calls use the workspace's AI choice (Settings → AI).
-    server.addHook("onRequest", ai_settings_1.aiRequestContextHook);
     // Global per-IP rate limiting; enabled by default in production, disabled
     // in tests/dev unless explicitly configured.
     const rateLimitMax = (0, env_1.getNumberEnv)("API_RATE_LIMIT_MAX_PER_MIN", (0, env_1.isProductionEnv)() ? 300 : 0);
