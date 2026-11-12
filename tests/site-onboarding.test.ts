@@ -252,3 +252,22 @@ test("onboarding routes are tenant-scoped", async () => {
   assert.equal((await foreign.inject({ method: "POST", url: `/v2/sites/${site.id}/onboarding` })).statusCode, 404);
   assert.equal(await prisma.siteOnboardingRun.count({ where: { siteId: site.id } }), 0);
 });
+
+test("a hung step handler times out, fails the step and ends the run as retryable", async () => {
+  const tenant = await createTenant();
+  const site = await createSite(tenant.id);
+  process.env.ONBOARDING_STEP_TIMEOUT_MS = "100";
+  registerOnboardingStep("strategy", () => new Promise(() => undefined));
+  try {
+    await (await startSiteOnboarding(tenant.id, site.id, null)).promise;
+  } finally {
+    registerOnboardingStep("strategy", realStrategy);
+    delete process.env.ONBOARDING_STEP_TIMEOUT_MS;
+  }
+  const run = await waitForRun(tenant.id, site.id);
+  assert.equal(run.status, "failed");
+  const step = run.steps.find((entry) => entry.id === "strategy");
+  assert.equal(step?.status, "failed");
+  assert.match(step?.error ?? "", /timed out/);
+  assert.equal((await prisma.operation.findUniqueOrThrow({ where: { id: run.operationId! } })).status, "failed");
+});
