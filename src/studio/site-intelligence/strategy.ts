@@ -437,7 +437,24 @@ export async function saveApprovedStrategy(
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId }, select: { id: true } });
   if (!site) throw new Error("site_not_found");
   const config = sanitizeStrategyConfig(input);
-  const strategy = await ensureStrategyRow(tenantId, siteId);
+  // A concurrent save can take the same version number; the unique constraint rejects one, which retries on the new version.
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await saveStrategyVersion((await ensureStrategyRow(tenantId, siteId)).id, tenantId, siteId, config, meta);
+    } catch (error) {
+      if (attempt >= 3 || !(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
+    }
+  }
+}
+
+async function saveStrategyVersion(
+  strategyId: string,
+  tenantId: string,
+  siteId: string,
+  config: StrategyConfig,
+  meta: { userId: string | null; note?: string | null; restoredFromVersion?: number | null },
+): Promise<{ version: number; config: StrategyConfig }> {
+  const strategy = { id: strategyId };
   return prisma.$transaction(async (tx) => {
     // Re-read inside the transaction so concurrent saves get distinct versions (unique constraint backs it).
     const current = await tx.siteEditorialStrategy.findUniqueOrThrow({ where: { id: strategy.id } });
