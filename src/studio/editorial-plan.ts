@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { EditorialPlanItemStatus, PublicationChannel } from "@prisma/client";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { SOURCE_DATA_RULES } from "./prompt-injection";
 import { writeAudit } from "./audit";
 import { createProject } from "./repository";
 import { startProjectGeneration } from "./orchestration";
@@ -457,7 +458,9 @@ async function executeEditorialPlanGeneration(
 
     const systemPrompt =
       "You are a site-aware editorial strategy engine. You plan content ONLY for the destination site described by the evidence. " +
-      `Your output MUST match ${EDITORIAL_PLAN_SCHEMA_NAME}. Never output prose outside the JSON object.`;
+      `Your output MUST match ${EDITORIAL_PLAN_SCHEMA_NAME}. Never output prose outside the JSON object.
+
+${SOURCE_DATA_RULES}`;
 
     let validated: PostValidationResult | null = null;
     let attempts: StructuredGenerationAttempt[] = [];
