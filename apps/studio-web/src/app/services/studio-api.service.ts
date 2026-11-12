@@ -36,6 +36,7 @@ import type {
   SocialSetupInfo,
   SourceRecommendation,
   EditorialPlan,
+  EditorialPlanGenerationAccepted,
   InternalLinkSuggestion,
   SiteIndexedPageRow,
   SiteIntelligenceOverview,
@@ -879,7 +880,11 @@ export class StudioApiService {
     dateTo: string;
     objective?: string;
     channels: Array<'website' | 'x' | 'instagram'>;
-    publicationCount: number;
+    publicationCount?: number;
+    articlesPerDay?: number;
+    weekdays?: number[];
+    excludedDates?: string[];
+    publishTimes?: string[];
     frequency?: string;
     timezone?: string;
     language?: string;
@@ -897,8 +902,8 @@ export class StudioApiService {
     seasonalEvents?: string[];
     brandsOrEntities?: string[];
     keywordSeeds?: string[];
-  }): Observable<EditorialPlan> {
-    return this.http.post<EditorialPlan>(`${this.apiBase}/backend/v2/editorial-plans/generate`, payload);
+  }): Observable<EditorialPlanGenerationAccepted> {
+    return this.http.post<EditorialPlanGenerationAccepted>(`${this.apiBase}/backend/v2/editorial-plans/generate`, payload);
   }
 
   updateEditorialPlanItem(itemId: string, payload: Record<string, unknown>): Observable<EditorialPlan['items'] extends Array<infer Item> ? Item : never> {

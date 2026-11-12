@@ -3319,7 +3319,8 @@ tr.is-selected {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
 }
 
-.au-calendar-grid--month { grid-template-columns: repeat(7, 1fr); }
+.au-calendar-grid--month { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.au-calendar-grid--month > * { min-width: 0; }
 
 .au-calendar-col {
   background: var(--au-surface);
@@ -4644,3 +4645,33 @@ html[data-theme="dark"] .au-app {
   letter-spacing: 0;
   font-weight: 500;
 }
+
+/* Month cells show real headlines; proposals are dashed until they become content. */
+.au-calendar-chip {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 2px 6px;
+  border: 1px solid var(--au-border);
+  border-radius: var(--au-r-sm);
+  background: var(--au-surface);
+  color: var(--au-text);
+  font: inherit;
+  font-size: var(--au-fs-caption);
+  text-align: left;
+  cursor: pointer;
+}
+.au-calendar-chip.is-proposal { border-style: dashed; }
+.au-calendar-chip:hover { border-color: var(--au-border-strong); }
+.au-calendar-chip:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 1px; }
+.au-calendar-chip__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.au-calendar-chip--more { justify-content: center; color: var(--au-muted); border-style: none; background: transparent; }
+.au-calendar-day { cursor: default; min-height: 96px; }
+@media (max-width: 640px) {
+  .au-calendar-grid--month { grid-template-columns: minmax(0, 1fr); }
+  .au-calendar-grid--month > * { grid-column-start: auto !important; }
+  .au-calendar-day { min-height: 0; }
+}
+.au-calendar-chip .au-channel-dot { flex: none; }

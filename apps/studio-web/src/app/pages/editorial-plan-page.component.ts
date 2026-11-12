@@ -1,14 +1,15 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
+import { Subscription, switchMap, takeWhile, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../models/studio.models';
+import type { EditorialPlan, OperationItem, SiteIntelligenceOverview, StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-editorial-plan-page',
@@ -157,10 +158,26 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
               </select>
             </label>
             <label class="au-field">
-              <span class="au-field__label">Publications</span>
-              <input class="au-input" type="number" name="publicationCount" min="1" max="100" [(ngModel)]="draft.publicationCount" required />
+              <span class="au-field__label">Proposals per day</span>
+              <select class="au-select" name="articlesPerDay" [(ngModel)]="draft.articlesPerDay">
+                <option [ngValue]="1">1 per day</option>
+                <option [ngValue]="2">2 per day</option>
+                <option [ngValue]="3">3 per day</option>
+              </select>
             </label>
           </div>
+          <fieldset class="au-plan-channels">
+            <legend class="au-field__label">Publishing days</legend>
+            <label class="au-checkbox" *ngFor="let day of weekdayOptions">
+              <input type="checkbox" [name]="'weekday' + day.value" [checked]="draft.weekdays.includes(day.value)" (change)="toggleWeekday(day.value)" /> {{ day.label }}
+            </label>
+          </fieldset>
+          <p class="au-hint" role="status" aria-live="polite">
+            <strong>{{ expectedProposals() }} proposals</strong> · {{ activeDays() }} publishing day{{ activeDays() === 1 ? '' : 's' }} × {{ draft.articlesPerDay }} per day.
+            Planning creates briefs to review; articles are only written after you approve and generate them.
+            <span class="au-error" *ngIf="expectedProposals() === 0"> Pick at least one publishing day in the range.</span>
+            <span class="au-error" *ngIf="expectedProposals() > 200"> One plan holds at most 200 proposals; shorten the range or lower the cadence.</span>
+          </p>
           <fieldset class="au-plan-channels">
             <legend class="au-field__label">Channels</legend>
             <label class="au-checkbox"><input type="checkbox" name="website" [(ngModel)]="channels.website" /> Website</label>
@@ -168,7 +185,8 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
             <label class="au-checkbox"><input type="checkbox" name="instagram" [(ngModel)]="channels.instagram" /> Instagram</label>
           </fieldset>
 
-          <h3 class="au-panel__subtitle au-mt-2 au-mb-1"><strong>Strategy</strong></h3>
+          <details class="au-mt-2">
+          <summary class="au-panel__subtitle au-mb-1"><strong>Advanced strategy</strong> · defaults come from the site's intelligence profile</summary>
           <div class="au-field-grid">
             <label class="au-field">
               <span class="au-field__label">Editorial strategy mode</span>
@@ -226,19 +244,23 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
               <input class="au-input" name="seasonalEvents" [(ngModel)]="strategy.seasonalEvents" placeholder="Comma-separated events" />
             </label>
           </div>
+          </details>
 
           <p class="au-error" *ngIf="error">{{ error }}</p>
 
-          <div class="au-progress-steps" *ngIf="generating">
-            <span class="au-progress-step" *ngFor="let step of progressSteps" [class.is-active]="progressIndex === step.index" [class.is-done]="progressIndex > step.index">
-              <app-icon name="circle-check" *ngIf="progressIndex > step.index"></app-icon>
-              <app-icon name="sparkles" *ngIf="progressIndex === step.index"></app-icon>
-              {{ step.label }}
-            </span>
+          <!-- Real backend state from the durable operation, never a timer. -->
+          <div class="au-mt-2" *ngIf="generating" role="status" aria-live="polite">
+            <div class="au-progress" role="progressbar" [attr.aria-valuenow]="generationPercent()" aria-valuemin="0" aria-valuemax="100">
+              <span class="au-progress__bar" [style.width.%]="generationPercent()"></span>
+            </div>
+            <p class="au-hint au-mt-1">
+              {{ generationOp?.phase || 'Queued' }}
+              <ng-container *ngIf="generationOp?.totalSteps"> · {{ generationOp?.completedSteps }} of {{ generationOp?.totalSteps }} proposals validated</ng-container>
+            </p>
           </div>
 
           <div class="au-form__actions">
-            <button class="au-btn au-btn--primary" type="submit" [disabled]="generating || intelRefreshing">
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="generating || intelRefreshing || expectedProposals() === 0 || expectedProposals() > 200">
               <app-icon name="sparkles"></app-icon>
               {{ generating ? 'Building plan…' : 'Generate plan with AI' }}
             </button>
@@ -302,6 +324,13 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
 
                       <ng-container *ngIf="!planDetailLoading && selectedPlan?.id === plan.id">
                         <!-- Summary -->
+                        <div class="au-banner au-banner--warning" *ngIf="selectedPlan?.status === 'partial'" role="status">
+                          <app-icon name="warning"></app-icon>
+                          <span class="au-banner__text">
+                            {{ selectedPlan?.generatedOutput?.filledCount }} of {{ selectedPlan?.generatedOutput?.requestedCount }} slots filled.
+                            <ng-container *ngIf="selectedPlan?.generatedOutput?.unfilledSlots?.length">Unfilled:</ng-container> <ng-container *ngFor="let slot of selectedPlan?.generatedOutput?.unfilledSlots; let last = last">{{ slot.localDate }} {{ slot.localTime }}{{ last ? '' : ', ' }}</ng-container>
+                          </span>
+                        </div>
                         <div class="au-plan-summary">
                           <div class="au-plan-summary__bar" role="progressbar" [attr.aria-valuenow]="planProgress()" aria-valuemin="0" aria-valuemax="100">
                             <span class="au-plan-summary__fill au-plan-summary__fill--approved" [style.width.%]="planShare('approved')"></span>
@@ -548,7 +577,7 @@ import type { EditorialPlan, SiteIntelligenceOverview, StudioSite } from '../mod
     </section>
   `,
 })
-export class EditorialPlanPageComponent implements OnInit {
+export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
@@ -575,7 +604,7 @@ export class EditorialPlanPageComponent implements OnInit {
   planPageSize = 8;
   filteredPlanRows: Array<NonNullable<EditorialPlan['items']>[number]> = [];
   channels = { website: true, x: true, instagram: false };
-  draft = { dateFrom: new Date().toISOString().slice(0, 10), dateTo: new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10), siteId: '', objective: '', audience: '', topics: '', excludedTopics: '', publicationCount: 7 };
+  draft = { dateFrom: new Date().toISOString().slice(0, 10), dateTo: new Date(Date.now() + 6 * 86400000).toISOString().slice(0, 10), siteId: '', objective: '', audience: '', topics: '', excludedTopics: '', articlesPerDay: 1, weekdays: [0, 1, 2, 3, 4, 5, 6] };
   strategy = { mode: 'balanced', primaryIntent: '', contentFormats: [] as string[], campaignName: '', market: '', keywordSeeds: '', seasonalEvents: '' };
   strategyModes = [
     { value: 'balanced', label: 'Balanced' },
@@ -591,16 +620,38 @@ export class EditorialPlanPageComponent implements OnInit {
   contentFormats = ['guide', 'news', 'ranking', 'comparison', 'analysis', 'explainer', 'tutorial', 'faq', 'review', 'preview', 'match-preview', 'match-report', 'schedule', 'where-to-watch', 'streaming-recommendation', 'evergreen-pillar', 'cluster-article'];
   siteIntel: SiteIntelligenceOverview | null = null;
   intelRefreshing = false;
-  progressIndex = -1;
-  progressSteps = [
-    { index: 0, label: 'Loading site profile' },
-    { index: 1, label: 'Analyzing existing coverage' },
-    { index: 2, label: 'Checking content gaps' },
-    { index: 3, label: 'Generating ideas' },
-    { index: 4, label: 'Validating relevance' },
-    { index: 5, label: 'Checking cannibalization' },
-    { index: 6, label: 'Building plan' },
+  generationOp: OperationItem | null = null;
+  private generationPoll: Subscription | null = null;
+  weekdayOptions = [
+    { value: 1, label: 'Mon' }, { value: 2, label: 'Tue' }, { value: 3, label: 'Wed' }, { value: 4, label: 'Thu' },
+    { value: 5, label: 'Fri' }, { value: 6, label: 'Sat' }, { value: 0, label: 'Sun' },
   ];
+
+  ngOnDestroy(): void {
+    this.generationPoll?.unsubscribe();
+  }
+  toggleWeekday(day: number): void {
+    this.draft.weekdays = this.draft.weekdays.includes(day) ? this.draft.weekdays.filter((entry) => entry !== day) : [...this.draft.weekdays, day];
+  }
+  /** Inclusive calendar dates in the range that fall on an active weekday (mirrors the server's slot rule). */
+  activeDays(): number {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(this.draft.dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(this.draft.dateTo)) return 0;
+    const from = Date.parse(`${this.draft.dateFrom}T00:00:00Z`);
+    const to = Date.parse(`${this.draft.dateTo}T00:00:00Z`);
+    let count = 0;
+    for (let day = from; day <= to && count <= 400; day += 86400000) {
+      if (this.draft.weekdays.includes(new Date(day).getUTCDay())) count += 1;
+    }
+    return count;
+  }
+  expectedProposals(): number {
+    return this.activeDays() * Number(this.draft.articlesPerDay);
+  }
+  generationPercent(): number {
+    const op = this.generationOp;
+    if (!op || !op.totalSteps) return 0;
+    return Math.round((op.completedSteps / op.totalSteps) * 100);
+  }
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
@@ -704,7 +755,7 @@ export class EditorialPlanPageComponent implements OnInit {
   planStatusTone(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
     if (status === 'ready') return 'success';
     if (status === 'failed') return 'danger';
-    if (status === 'generating') return 'warning';
+    if (status === 'generating' || status === 'partial') return 'warning';
     return 'neutral';
   }
   channelList(plan: EditorialPlan): string[] {
@@ -812,10 +863,8 @@ export class EditorialPlanPageComponent implements OnInit {
     const channels = (Object.keys(this.channels) as Array<'website' | 'x' | 'instagram'>).filter((channel) => this.channels[channel]);
     if (channels.length === 0) { this.error = 'Select at least one channel.'; return; }
     this.generating = true;
-    this.progressIndex = 0;
-    const progressTimer = setInterval(() => {
-      if (this.progressIndex < this.progressSteps.length - 1) this.progressIndex += 1;
-    }, 1400);
+    this.generationOp = null;
+    this.generationPoll?.unsubscribe();
     this.api.generateEditorialPlan({
       dateFrom: this.draft.dateFrom,
       dateTo: this.draft.dateTo,
@@ -825,7 +874,9 @@ export class EditorialPlanPageComponent implements OnInit {
       topics: this.draft.topics.split(',').map((topic) => topic.trim()).filter(Boolean),
       excludedTopics: this.draft.excludedTopics.split(',').map((topic) => topic.trim()).filter(Boolean),
       channels,
-      publicationCount: Number(this.draft.publicationCount),
+      articlesPerDay: Number(this.draft.articlesPerDay),
+      weekdays: this.draft.weekdays,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/Madrid',
       strategyMode: this.strategy.mode,
       primaryIntent: this.strategy.primaryIntent || undefined,
       contentFormats: this.strategy.contentFormats.length > 0 ? this.strategy.contentFormats : undefined,
@@ -834,26 +885,55 @@ export class EditorialPlanPageComponent implements OnInit {
       keywordSeeds: this.strategy.keywordSeeds.split(',').map((seed) => seed.trim()).filter(Boolean),
       seasonalEvents: this.strategy.seasonalEvents.split(',').map((event) => event.trim()).filter(Boolean),
     }).subscribe({
-      next: (plan) => {
-        clearInterval(progressTimer);
+      next: (accepted) => {
+        this.generationOp = { phase: 'Queued', completedSteps: 0, totalSteps: accepted.expectedCount } as OperationItem;
+        // Poll the durable operation until it reaches a terminal state, then load the persisted plan.
+        this.generationPoll = timer(0, 2000)
+          .pipe(
+            switchMap(() => this.api.getOperation(accepted.operationId)),
+            takeWhile((op) => op.status === 'queued' || op.status === 'running' || op.status === 'retrying', true),
+          )
+          .subscribe({
+            next: (op) => {
+              this.generationOp = op;
+              if (op.status === 'queued' || op.status === 'running' || op.status === 'retrying') return;
+              this.finishGeneration(accepted.planId, op);
+            },
+            error: () => {
+              this.generating = false;
+              this.error = 'Lost track of the plan generation. It keeps running; refresh the list to see its result.';
+            },
+          });
+      },
+      error: (err) => {
         this.generating = false;
-        this.progressIndex = -1;
-        this.plans = [plan, ...this.plans];
+        this.error = err?.error?.error?.message || err?.error?.message || 'The editorial plan could not be generated.';
+      },
+    });
+  }
+  private finishGeneration(planId: string, op: OperationItem): void {
+    this.api.getEditorialPlan(planId).subscribe({
+      next: (plan) => {
+        this.generating = false;
+        this.plans = [plan, ...this.plans.filter((entry) => entry.id !== plan.id)];
         this.planPage = 1;
         this.expandedPlanId = plan.id;
         this.selectedPlan = plan;
         this.planDetailLoading = false;
         this.filterPlanRows();
-        const dropped = plan.generatedOutput?.dropped?.length ?? 0;
-        if (dropped > 0) {
-          this.toast.success(`Plan ready with ${plan.items?.length ?? 0} rows. ${dropped} irrelevant row(s) were filtered by relevance guardrails.`);
+        const filled = plan.items?.length ?? 0;
+        const requested = plan.generatedOutput?.requestedCount ?? filled;
+        if (plan.status === 'failed' || op.status === 'failed') {
+          this.error = plan.error || op.errorSummary || 'The editorial plan could not be generated.';
+        } else if (plan.status === 'partial') {
+          this.error = `Partial plan: ${filled} of ${requested} slots filled. Unfilled dates: ${(plan.generatedOutput?.unfilledSlots ?? []).map((slot) => slot.localDate).join(', ')}.`;
+        } else {
+          this.toast.success(`Plan ready: ${filled} of ${requested} proposals scheduled.`);
         }
       },
-      error: (err) => {
-        clearInterval(progressTimer);
+      error: () => {
         this.generating = false;
-        this.progressIndex = -1;
-        this.error = err?.error?.error?.message || err?.error?.message || 'The editorial plan could not be generated.';
+        this.error = 'The plan finished but could not be loaded. Refresh the list.';
       },
     });
   }

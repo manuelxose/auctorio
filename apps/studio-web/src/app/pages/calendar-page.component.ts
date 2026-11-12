@@ -23,7 +23,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <div>
           <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
-          <p class="au-page__subtitle">Every scheduled article and social post, in one timeline.</p>
+          <p class="au-page__subtitle">Proposals, briefs, drafts and publications on one timeline. Drag a card to another day to move it.</p>
         </div>
         <div class="au-page__actions">
           <select class="au-select au-filter-select" [(ngModel)]="channelFilter" (ngModelChange)="load()" aria-label="Filter by channel">
@@ -122,7 +122,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <h3 class="au-calendar-group__date">{{ group.label }}</h3>
           <div
             class="au-calendar-card"
-            [draggable]="entry.item.status !== 'published' && !isRescheduling(entry.item.id)"
+            [draggable]="canDrag(entry.item)"
             (dragstart)="onDragStart($event, entry.item)"
             (dragend)="onDragEnd($event)"
             (dragover)="$event.preventDefault()"
@@ -140,7 +140,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           (dragover)="$event.preventDefault()" (drop)="onDropOnDay($event, day.date)">
           <h3 class="au-calendar-group__date">{{ day.label }}</h3>
           <div class="au-calendar-card" *ngFor="let event of day.events"
-            [draggable]="event.status !== 'published' && !isRescheduling(event.id)"
+            [draggable]="canDrag(event)"
             (dragstart)="onDragStart($event, event)"
             (dragend)="onDragEnd($event)"
             (dragover)="$event.preventDefault()"
@@ -154,14 +154,20 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
 
       <!-- Month -->
       <section class="au-calendar-grid au-calendar-grid--month" *ngIf="viewMode === 'month'">
-        <div class="au-calendar-day" *ngFor="let day of monthDays" (click)="focusDay(day.date)">
+        <div class="au-calendar-day" *ngFor="let day of monthDays" [style.grid-column-start]="day.dayNum === 1 ? ((day.date.getDay() + 6) % 7) + 1 : null"
+          (dragover)="$event.preventDefault()" (drop)="onDropOnDay($event, day.date)">
           <span class="au-calendar-day__num" [class.is-today]="isToday(day.date)">{{ day.dayNum }}</span>
-          <span class="au-calendar-day__count" *ngIf="day.count > 0">{{ day.count }}</span>
-          <span class="au-calendar-day__markers">
-            <i class="au-channel-dot au-channel-dot--website" *ngIf="day.hasWebsite"></i>
-            <i class="au-channel-dot au-channel-dot--x" *ngIf="day.hasX"></i>
-            <i class="au-channel-dot au-channel-dot--instagram" *ngIf="day.hasInstagram"></i>
-          </span>
+          <span class="au-calendar-day__count" *ngIf="day.events.length > 0">{{ day.events.length }} planned</span>
+          <button type="button" class="au-calendar-chip" *ngFor="let event of day.events.slice(0, 3)"
+            [class.is-proposal]="event.kind === 'plan_item'"
+            [draggable]="canDrag(event)" (dragstart)="onDragStart($event, event)" (dragend)="onDragEnd($event)"
+            (click)="focusDay(day.date)" [title]="event.title" [attr.aria-label]="event.title + ', ' + statusLabel(event)">
+            <i class="au-channel-dot" [class]="'au-channel-dot au-channel-dot--' + event.channel"></i>
+            <span class="au-calendar-chip__text">{{ event.title }}</span>
+          </button>
+          <button type="button" class="au-calendar-chip au-calendar-chip--more" *ngIf="day.events.length > 3" (click)="focusDay(day.date)">
+            +{{ day.events.length - 3 }} more
+          </button>
         </div>
       </section>
     </section>
@@ -175,15 +181,28 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <strong>{{ event.title }}</strong>
           <span class="au-calendar-card__meta">{{ event.destination }} · {{ event.projectTitle }}</span>
           <span class="au-inline au-mt-1">
-            <span class="au-badge" [class]="statusClass(event.status)">{{ event.status }}</span>
+            <span class="au-badge" [class]="statusClass(event.status)">{{ statusLabel(event) }}</span>
+            <span class="au-badge au-badge--neutral" *ngIf="event.contentType">{{ event.contentType }}</span>
             <span class="au-badge au-badge--brand" *ngIf="event.automated">automatic</span>
           </span>
           <span class="au-calendar-card__error" *ngIf="event.lastError">{{ event.lastError }}</span>
         </div>
         <div class="au-calendar-card__actions" (click)="$event.stopPropagation()">
-          <button class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
+          <button *ngIf="event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
             Open
           </button>
+          <ng-container *ngIf="event.kind === 'plan_item'">
+            <button *ngIf="!event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" routerLink="/studio/editorial-plan">Open plan</button>
+            <button *ngIf="event.status === 'proposed'" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="approve(event)">
+              <app-icon name="circle-check"></app-icon>
+              Approve
+            </button>
+            <button *ngIf="event.status === 'approved' && !event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="generateDraft(event)">
+              <app-icon name="sparkles"></app-icon>
+              Generate draft
+            </button>
+          </ng-container>
+          <ng-container *ngIf="event.kind === 'publication'">
           <button
             *ngIf="event.status === 'scheduled' || event.status === 'failed'"
             class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="publishNow(event)"
@@ -204,6 +223,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
             <app-icon name="refresh"></app-icon>
             Retry
           </button>
+          </ng-container>
         </div>
       </div>
     </ng-template>
@@ -221,7 +241,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     { key: 'week', label: 'Week' },
     { key: 'month', label: 'Month' },
   ];
-  viewMode: CalendarView = 'list';
+  viewMode: CalendarView = 'week';
   events: CalendarEvent[] = [];
   sites: StudioSite[] = [];
   channelFilter = '';
@@ -367,20 +387,39 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  get monthDays(): Array<{ date: Date; dayNum: number; count: number; hasWebsite: boolean; hasX: boolean; hasInstagram: boolean }> {
+  get monthDays(): Array<{ date: Date; dayNum: number; events: CalendarEvent[] }> {
     const { from } = this.range();
     const daysInMonth = new Date(from.getFullYear(), from.getMonth() + 1, 0).getDate();
     return Array.from({ length: daysInMonth }, (_value, index) => {
       const date = new Date(from.getFullYear(), from.getMonth(), index + 1);
-      const dayEvents = this.events.filter((event) => event.scheduledFor && new Date(event.scheduledFor).toDateString() === date.toDateString());
       return {
         date,
         dayNum: index + 1,
-        count: dayEvents.length,
-        hasWebsite: dayEvents.some((event) => event.channel === 'website'),
-        hasX: dayEvents.some((event) => event.channel === 'x'),
-        hasInstagram: dayEvents.some((event) => event.channel === 'instagram'),
+        events: this.events.filter((event) => event.scheduledFor && new Date(event.scheduledFor).toDateString() === date.toDateString()),
       };
+    });
+  }
+
+  canDrag(event: CalendarEvent): boolean {
+    return !['published', 'generating', 'canceled'].includes(event.status) && !this.reschedulingIds.has(event.id);
+  }
+
+  statusLabel(event: CalendarEvent): string {
+    if (event.kind === 'publication') return event.status;
+    return ({ proposed: 'proposal', approved: 'approved brief', generating: 'writing draft', content_ready: 'draft ready', review_required: 'in review' } as Record<string, string>)[event.status] ?? event.status.replace(/_/g, ' ');
+  }
+
+  approve(event: CalendarEvent): void {
+    this.api.approveEditorialPlanItem(event.id).subscribe({
+      next: () => { this.toast.success('Proposal approved.'); this.load(true); },
+      error: () => { this.error = 'The proposal could not be approved.'; },
+    });
+  }
+
+  generateDraft(event: CalendarEvent): void {
+    this.api.generateContentFromEditorialPlanItem(event.id).subscribe({
+      next: () => { this.toast.success('Draft generation started.'); this.load(true); },
+      error: (err) => { this.error = err?.error?.error?.message || 'The draft could not be generated.'; },
     });
   }
 
@@ -401,7 +440,13 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   statusClass(status: string): string {
     switch (status) {
       case 'published':
+      case 'approved':
+      case 'content_ready':
         return 'au-badge--success';
+      case 'proposed':
+      case 'generating':
+      case 'review_required':
+        return 'au-badge--brand';
       case 'failed':
         return 'au-badge--danger';
       case 'scheduled':
@@ -473,16 +518,20 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     this.reschedulingIds.add(eventItem.id);
     // Optimistic update.
     eventItem.scheduledFor = optimisticSchedule;
-    this.api.reschedulePublication(eventItem.id, optimisticSchedule).subscribe({
+    // Plan items keep their own proposal date; publications own the real delivery time.
+    const request = eventItem.kind === 'plan_item'
+      ? this.api.updateEditorialPlanItem(eventItem.id, { scheduledFor: optimisticSchedule })
+      : this.api.reschedulePublication(eventItem.id, optimisticSchedule);
+    request.subscribe({
       next: () => {
         this.reschedulingIds.delete(eventItem.id);
-        this.toast.success('Publication rescheduled.');
+        this.toast.success(eventItem.kind === 'plan_item' ? 'Proposal moved.' : 'Publication rescheduled.');
         this.load(true);
       },
       error: () => {
         if (eventItem.scheduledFor === optimisticSchedule) eventItem.scheduledFor = previous;
         this.reschedulingIds.delete(eventItem.id);
-        this.error = 'The publication could not be rescheduled.';
+        this.error = eventItem.kind === 'plan_item' ? 'The proposal could not be moved.' : 'The publication could not be rescheduled.';
         this.load(true);
       },
     });
