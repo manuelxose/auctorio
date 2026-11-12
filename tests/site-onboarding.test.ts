@@ -112,10 +112,10 @@ test("ONB-01: activating a website creates one onboarding run whose steps run in
 
   const run = await waitForRun(tenant.id, siteId);
   assert.deepEqual(run.steps.map((step) => step.id), ["index", "profile", "sources", "competitors", "strategy", "first_plan_offer"]);
-  assert.deepEqual(run.steps.map((step) => step.status), ["succeeded", "succeeded", "skipped", "skipped", "succeeded", "succeeded"]);
+  assert.deepEqual(run.steps.map((step) => step.status), ["succeeded", "succeeded", "succeeded", "succeeded", "succeeded", "succeeded"]);
   assert.equal(run.status, "succeeded");
   assert.ok(run.steps.every((step) => step.status === "skipped" || (step.startedAt && step.finishedAt)));
-  assert.match(run.steps[2].summary ?? "", /not available/i);
+  assert.ok(run.steps[2].summary, "the registered sources step ran and reported");
 
   const operation = await prisma.operation.findUniqueOrThrow({ where: { id: body.initialization.operationId } });
   assert.equal(operation.type, "site_onboarding");
@@ -213,7 +213,7 @@ test("retry re-runs from the first failed/skipped step and keeps earlier results
   assert.equal(operation.status, "failed");
 
   const retried = await retrySiteOnboarding(tenant.id, site.id, null);
-  assert.equal(retried.fromStep, "sources");
+  assert.equal(retried.fromStep, "strategy");
   await retried.promise;
   const after = await waitForRun(tenant.id, site.id);
   assert.equal(after.status, "succeeded");
