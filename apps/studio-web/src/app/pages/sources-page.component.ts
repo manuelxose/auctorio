@@ -8,13 +8,14 @@ import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
+import { SiteSourceRegistryComponent } from '../components/sources/site-source-registry.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType, StudioEnrichmentProvider, StudioFeedCandidate, StudioFeedDiscoveryResult, StudioSite, StudioSource, StudioSourcePack } from '../models/studio.models';
 
 @Component({
   selector: 'app-sources-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppPopoverComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppPopoverComponent, AppEmptyStateComponent, SiteSourceRegistryComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -32,6 +33,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       </header>
 
       <nav class="au-tabs au-mb-3" aria-label="Source sections">
+        <button class="au-tab" type="button" [class.is-active]="view === 'registry'" (click)="setView('registry')">Site registry</button>
         <button class="au-tab" type="button" [class.is-active]="view === 'active'" (click)="setView('active')">Active sources</button>
         <button class="au-tab" type="button" [class.is-active]="view === 'packs'" (click)="setView('packs')">Source packs</button>
         <button class="au-tab" type="button" [class.is-active]="view === 'enrichment'" (click)="setView('enrichment')">Enrichment providers</button>
@@ -42,6 +44,8 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
         <button class="au-tab" type="button" [class.is-active]="view === 'discovered'" (click)="setView('discovered')">Recently discovered</button>
         <button class="au-tab" type="button" [class.is-active]="view === 'blocked'" (click)="setView('blocked')">Blocked sources</button>
       </nav>
+
+      <app-site-source-registry *ngIf="view === 'registry'"></app-site-source-registry>
 
       <!-- AI recommendations -->
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'recommendations'">
@@ -653,7 +657,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   editingId: string | null = null;
   fetching: Record<string, boolean> = {};
   feedback = '';
-  view: 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked' = 'active';
+  view: 'registry' | 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked' = 'registry';
   recommendations: SourceRecommendation[] = [];
   domains: DiscoveredDomain[] = [];
   blockedDomains: BlockedDomain[] = [];
@@ -737,7 +741,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.load(true));
   }
 
-  setView(view: 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked'): void {
+  setView(view: 'registry' | 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked'): void {
     this.view = view;
     if (view === 'recommendations') this.loadRecommendations();
     if (view === 'discovered') this.loadDiscovered();

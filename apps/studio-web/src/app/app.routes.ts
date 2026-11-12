@@ -73,6 +73,7 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/sources-page.component').then((m) => m.SourcesPageComponent),
         data: { studioMeta: { section: 'Sources', title: 'Sources' } },
       },
+      { path: 'competitors', loadComponent: () => import('./pages/competitors-page.component').then((m) => m.CompetitorsPageComponent), data: { studioMeta: { section: 'Competitors', title: 'Competitors' } } },
       {
         path: 'automation',
         loadComponent: () => import('./pages/automation-page.component').then((m) => m.AutomationPageComponent),
