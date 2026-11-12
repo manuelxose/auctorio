@@ -14,23 +14,20 @@ import { writeAudit } from "../audit";
 import { hasStudioPermission } from "../security";
 import { SOURCE_DATA_RULES, clampUntrustedContent, neutralizeInlineControlCharacters, wrapUntrustedContent } from "../prompt-injection";
 import { availableCompetencies, findCompetency, selectCompetency, type CompetencyDefinition, type CompetencyEvidence } from "./competencies";
+import { CopilotError } from "./errors";
+import { loadEditorialContext, type EditorialSelectionInput } from "./assistant-context";
+import { chooseTool, proposeAction, runToolTurn, serializeAction, type ActionView } from "./assistant";
+import { findTool, toolRegistry } from "./tools";
 
 const prisma = getPrismaClient();
 
 export const MAX_MESSAGE_LENGTH = 4000;
 
-export class CopilotError extends Error {
-  constructor(
-    readonly status: 400 | 403 | 404,
-    message: string,
-  ) {
-    super(message);
-  }
-}
+export { CopilotError };
 
 export type CopilotActor = { tenantId: string; userId: string; permissions: string[] };
 
-export type CopilotPageContext = {
+export type CopilotPageContext = EditorialSelectionInput & {
   siteId?: string | null;
   projectId?: string | null;
   route?: string | null;
@@ -72,8 +69,9 @@ export async function resolveContext(tenantId: string, input: CopilotPageContext
   return { siteId, siteName, projectId, projectTitle, route };
 }
 
-function serializeMessage(message: Prisma.CopilotMessageGetPayload<object>) {
+function serializeMessage(message: Prisma.CopilotMessageGetPayload<object>, actions: ActionView[] = []) {
   return {
+    actions,
     id: message.id,
     threadId: message.threadId,
     role: message.role,
@@ -115,7 +113,26 @@ export async function competencyRuns(actor: CopilotActor, input: { key?: string;
     orderBy: { createdAt: "desc" },
     take: input.limit,
   });
-  return rows.map(serializeMessage);
+  return rows.map((row) => serializeMessage(row));
+}
+
+/** The assistant's structured tools, with whether this user may run each one. */
+export function listTools(actor: CopilotActor) {
+  return toolRegistry(actor.permissions, hasStudioPermission);
+}
+
+/** The server-resolved view of the operator's selection (names for the context chip). */
+export async function describeContext(actor: CopilotActor, input: CopilotPageContext | undefined) {
+  const ctx = await loadEditorialContext(actor.tenantId, input);
+  return {
+    selection: ctx.selection,
+    site: ctx.site,
+    plan: ctx.plan ? { id: ctx.plan.id, name: ctx.plan.name, status: ctx.plan.status, itemCount: ctx.plan.itemCount, unfilledSlots: ctx.plan.unfilledSlots, countsByStatus: ctx.plan.countsByStatus } : null,
+    proposal: ctx.proposal ? { id: ctx.proposal.id, title: ctx.proposal.title, status: ctx.proposal.status } : null,
+    period: ctx.period ? { from: ctx.period.from, to: ctx.period.to, itemCount: ctx.period.items.length } : null,
+    activeSources: ctx.activeSources,
+    recentFailures: ctx.recentFailures.length,
+  };
 }
 
 export async function competencyStats(actor: CopilotActor) {
@@ -160,8 +177,12 @@ async function ownThread(actor: CopilotActor, threadId: string) {
 
 export async function getThread(actor: CopilotActor, threadId: string) {
   const thread = await ownThread(actor, threadId);
-  const messages = await prisma.copilotMessage.findMany({ where: { threadId: thread.id }, orderBy: { createdAt: "asc" } });
-  return { id: thread.id, title: thread.title, siteId: thread.siteId, createdAt: thread.createdAt, updatedAt: thread.updatedAt, messages: messages.map(serializeMessage) };
+  const [messages, actions] = await Promise.all([
+    prisma.copilotMessage.findMany({ where: { threadId: thread.id }, orderBy: { createdAt: "asc" } }),
+    prisma.copilotAction.findMany({ where: { threadId: thread.id, tenantId: actor.tenantId }, orderBy: { createdAt: "asc" } }),
+  ]);
+  const byMessage = (id: string) => actions.filter((action) => action.messageId === id).map(serializeAction);
+  return { id: thread.id, title: thread.title, siteId: thread.siteId, createdAt: thread.createdAt, updatedAt: thread.updatedAt, messages: messages.map((message) => serializeMessage(message, byMessage(message.id))) };
 }
 
 export async function deleteThread(actor: CopilotActor, threadId: string) {
@@ -277,9 +298,49 @@ export async function sendMessage(
         data: { tenantId: actor.tenantId, studioUserId: actor.userId, siteId: context.siteId, title: content.replace(/\s+/g, " ").slice(0, 80) },
       });
 
+  // An explicitly requested competency keeps the competency path; otherwise a structured tool may answer.
+  const editorial = input.competencyKey || competency ? null : await loadEditorialContext(actor.tenantId, { ...input.context, siteId: context.siteId, projectId: context.projectId });
+  const choice = editorial ? await chooseTool(content, editorial) : null;
+  const storedContext = { ...context, editorial: editorial?.selection ?? null } as unknown as Prisma.InputJsonObject;
+
   const userMessage = await prisma.copilotMessage.create({
-    data: { tenantId: actor.tenantId, threadId: thread.id, role: "user", content, competencyKey: competency?.key ?? null, context: context as unknown as Prisma.InputJsonObject },
+    data: { tenantId: actor.tenantId, threadId: thread.id, role: "user", content, competencyKey: choice ? `tool:${choice.tool}` : competency?.key ?? null, context: storedContext },
   });
+
+  if (editorial && choice) {
+    const started = Date.now();
+    const turn = await runToolTurn(actor, editorial, choice);
+    const assistant = await prisma.copilotMessage.create({
+      data: {
+        tenantId: actor.tenantId,
+        threadId: thread.id,
+        role: "assistant",
+        content: turn.content,
+        status: isAborted() ? "cancelled" : turn.status,
+        competencyKey: `tool:${turn.tool}`,
+        context: storedContext,
+        evidence: { sources: turn.sources, findings: turn.findings ?? [], tool: turn.tool, answeredBy: turn.via } as unknown as Prisma.InputJsonObject,
+        provider: turn.provider,
+        model: turn.model,
+        durationMs: Date.now() - started,
+        error: turn.error,
+      },
+    });
+    const actions = [];
+    for (const prepared of turn.stage) actions.push(await proposeAction(actor, prepared, { threadId: thread.id, messageId: assistant.id }));
+    await prisma.copilotThread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } });
+    await writeAudit({
+      tenantId: actor.tenantId,
+      action: "copilot.tool.run",
+      entityType: editorial.selection.planItemId ? "editorial_plan_item" : editorial.selection.planId ? "editorial_plan" : "site",
+      entityId: editorial.selection.planItemId ?? editorial.selection.planId ?? editorial.selection.siteId,
+      actorType: "user",
+      actorUserId: actor.userId,
+      metadata: { tool: turn.tool, kind: findTool(turn.tool)?.kind, via: turn.via, status: assistant.status, messageId: assistant.id, stagedActions: actions.map((action) => action.id) },
+    });
+    return { threadId: thread.id, userMessage: serializeMessage(userMessage), message: serializeMessage(assistant, actions) };
+  }
+
   const answer = await generateAnswer(actor, thread.id, content, context, competency, isAborted);
   const assistant = await prisma.copilotMessage.create(answer);
   await prisma.copilotThread.update({ where: { id: thread.id }, data: { updatedAt: new Date() } });
@@ -307,6 +368,30 @@ export async function retryMessage(actor: CopilotActor, messageId: string, isAbo
   if (!question) throw new CopilotError(404, "question not found");
   const stored = (failed.context ?? {}) as CopilotPageContext;
   const context = await resolveContext(actor.tenantId, { siteId: stored.siteId ?? null, projectId: stored.projectId ?? null, route: stored.route ?? null });
+  if (failed.competencyKey?.startsWith("tool:")) {
+    // Tool answers re-run against the current data of the same selection.
+    const editorialSelection = (failed.context as { editorial?: EditorialSelectionInput } | null)?.editorial ?? {};
+    const editorial = await loadEditorialContext(actor.tenantId, { ...editorialSelection, siteId: context.siteId, projectId: context.projectId });
+    const choice = await chooseTool(question.content, editorial);
+    if (!choice) throw new CopilotError(400, "the question no longer maps to a tool");
+    const turn = await runToolTurn(actor, editorial, choice);
+    const updated = await prisma.copilotMessage.update({
+      where: { id: failed.id },
+      data: {
+        content: turn.content,
+        status: isAborted() ? "cancelled" : turn.status,
+        competencyKey: `tool:${turn.tool}`,
+        evidence: { sources: turn.sources, findings: turn.findings ?? [], tool: turn.tool, answeredBy: turn.via } as unknown as Prisma.InputJsonObject,
+        provider: turn.provider,
+        model: turn.model,
+        error: turn.error,
+        createdAt: new Date(),
+      },
+    });
+    const actions = [];
+    for (const prepared of turn.stage) actions.push(await proposeAction(actor, prepared, { threadId: failed.threadId, messageId: failed.id }));
+    return { threadId: failed.threadId, message: serializeMessage(updated, actions) };
+  }
   const competency = failed.competencyKey ? pickCompetency(actor, failed.competencyKey, question.content, context) : null;
   const answer = await generateAnswer(actor, failed.threadId, question.content, context, competency, isAborted);
   const { tenantId: _tenant, threadId: _thread, role: _role, ...changes } = answer.data;
