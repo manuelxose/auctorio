@@ -221,6 +221,8 @@ async function beginPass(run: SiteOnboardingRun, fromIndex: number, userId: stri
   return { started: true, run: toRunView(updated), operationId: operation.id, promise };
 }
 
+const stepTimeoutMs = () => Number(process.env.ONBOARDING_STEP_TIMEOUT_MS) || 10 * 60_000;
+
 async function runSteps(
   runId: string,
   tenantId: string,
@@ -242,7 +244,11 @@ async function runSteps(
         steps[index] = { ...steps[index], status: "skipped", summary: "Not available yet: this workspace has no handler for this step.", finishedAt: new Date().toISOString() };
       } else {
         try {
-          const result = await handler({ tenantId, siteId, userId, operationId });
+          let timer: NodeJS.Timeout | undefined;
+          const result = await Promise.race([
+            handler({ tenantId, siteId, userId, operationId }),
+            new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`step timed out after ${stepTimeoutMs()} ms`)), stepTimeoutMs()); }),
+          ]).finally(() => clearTimeout(timer));
           steps[index] = { ...steps[index], status: "succeeded", summary: result.summary, counts: result.counts ?? null, finishedAt: new Date().toISOString() };
         } catch (error) {
           const message = (error instanceof Error ? error.message : String(error)).slice(0, 500);

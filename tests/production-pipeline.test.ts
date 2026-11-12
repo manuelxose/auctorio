@@ -146,3 +146,30 @@ test("cancel rules and review; OPS-01 failed and cancelled jobs are visible in o
     await cleanup(f.tenantId);
   }
 });
+
+test("a stale queued job is retryable and a concurrent review has one winner", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  try {
+    setArticleWriterFactory(() => ({ generate: async () => { throw new Error("boom"); } }));
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    await prisma.productionJob.update({ where: { id: job.id }, data: { status: "queued" } });
+    const fresh = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, {});
+    assert.equal(fresh.job.id, job.id);
+    await prisma.$executeRaw`UPDATE production_jobs SET updated_at = now() - interval '2 hours' WHERE id = ${job.id}::uuid`;
+    setArticleWriterFactory(() => new FakeWriter());
+    const retried = await retryProductionJob(f.tenantId, job.id, { wait: true });
+    assert.notEqual(retried.status, "queued");
+
+    await prisma.productionJob.update({ where: { id: job.id }, data: { status: "needs_review" } });
+    const results = await Promise.allSettled([
+      reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null),
+      reviewProductionJob(f.tenantId, job.id, { decision: "reject", notes: "no" }, null),
+    ]);
+    assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
+    const loser = results.find((r): r is PromiseRejectedResult => r.status === "rejected")!;
+    assert.equal((loser.reason as { httpStatus?: number }).httpStatus, 409);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});

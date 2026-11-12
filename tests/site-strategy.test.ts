@@ -110,6 +110,13 @@ test("isExcludedByStrategy matches whole words/phrases, accent-insensitive", () 
   assert.deepEqual(exclusions.sort(), ["futbol", "liga"]);
 });
 
+test("concurrent strategy saves both succeed with distinct versions", async () => {
+  const { tenantId, siteId } = await fixture();
+  const config = { primaryAudience: "cocineros", languages: ["es"], pillars: [] };
+  const saved = await Promise.all([1, 2, 3].map(() => saveApprovedStrategy(tenantId, siteId, config, { userId: null })));
+  assert.deepEqual(saved.map((entry) => entry.version).sort(), [1, 2, 3]);
+});
+
 test("INT-01: the approved strategy drives the planning context and rejects excluded candidates", async () => {
   const { tenantId, siteId } = await fixture();
 

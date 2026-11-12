@@ -3,6 +3,7 @@ import type { SiteIntelligenceProfileSummary } from "./site-intelligence/profile
 import { rebuildSiteProfile } from "./site-intelligence/profile";
 import type { SiteTopicCluster } from "@prisma/client";
 import { getSourceEvidenceForPlanning } from "./source-registry-discovery";
+import { sanitizeUntrustedText, wrapUntrustedContent } from "./prompt-injection";
 import { getApprovedStrategy, strategyExclusions, type StrategyConfig } from "./site-intelligence/strategy";
 
 const prisma = getPrismaClient();
@@ -276,20 +277,22 @@ export function renderPlanningContext(context: EditorialPlanningContext, strateg
     }
   }
 
-  lines.push(`EXISTING INDEXED PAGES (sample):${context.topIndexedPages.slice(0, 25).map((page) => page.title).join(" | ") || "n/a"}`);
+  const untrusted: string[] = [];
+  untrusted.push(`EXISTING INDEXED PAGES (sample):${context.topIndexedPages.slice(0, 25).map((page) => page.title).join(" | ") || "n/a"}`);
+  untrusted.push(`SITE SOURCES: ${context.sourceTitles.map((source) => source.title).join(" | ") || "none"}`);
+  untrusted.push(`ALLOWED EVIDENCE URLS (use ONLY these in sourceEvidence.url):`);
+  for (const entry of context.evidence.slice(0, 25)) {
+    untrusted.push(`- [${entry.sourceType}] ${entry.title} ${entry.url ? `(${entry.url})` : ""}`);
+  }
+  if (context.evidence.length === 0) {
+    untrusted.push("- none; use sourceType 'site' or 'profile' without url");
+  }
+  // External titles/descriptions are DATA, never instructions.
+  lines.push(wrapUntrustedContent("site-evidence", sanitizeUntrustedText(untrusted.join("\n"))));
   lines.push(`ALREADY TARGETED QUERIES: ${context.searchTargets.slice(0, 40).join(", ") || "none"}`);
   lines.push(`EXISTING PLAN QUERIES: ${context.existingPlanQueries.slice(0, 40).join(", ") || "none"}`);
   lines.push(`EXISTING PLAN TITLES: ${context.existingPlanTitles.slice(0, 40).join(" | ") || "none"}`);
   lines.push(`RECENT CONTENT: ${context.recentProjectTitles.slice(0, 15).join(" | ") || "none"}`);
-  lines.push(`SITE SOURCES: ${context.sourceTitles.map((source) => source.title).join(" | ") || "none"}`);
-
-  lines.push(`ALLOWED EVIDENCE URLS (use ONLY these in sourceEvidence.url):`);
-  for (const entry of context.evidence.slice(0, 25)) {
-    lines.push(`- [${entry.sourceType}] ${entry.title} ${entry.url ? `(${entry.url})` : ""}`);
-  }
-  if (context.evidence.length === 0) {
-    lines.push("- none; use sourceType 'site' or 'profile' without url");
-  }
 
   lines.push(`STRATEGY: mode=${strategy.mode}${strategy.primaryIntent ? `, primaryIntent=${strategy.primaryIntent}` : ""}${strategy.campaignName ? `, campaign=${strategy.campaignName}` : ""}`);
   lines.push(`OBJECTIVE: ${strategy.objective ?? "editorial growth aligned with the destination"}`);

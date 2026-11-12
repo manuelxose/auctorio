@@ -192,6 +192,8 @@ async function ownAction(actor: AssistantActor, actionId: string) {
  * conditional update, so a double click or a retried request gets the stored
  * outcome back (replayed: true) instead of a second execution.
  */
+const EXECUTING_STALE_MS = 5 * 60_000;
+
 export async function confirmAction(actor: AssistantActor, actionId: string): Promise<{ action: ActionView; replayed: boolean }> {
   const row = await ownAction(actor, actionId);
   const definition = (WRITE_TOOLS as Record<string, (typeof WRITE_TOOLS)[WriteToolName]>)[row.tool];
@@ -199,8 +201,17 @@ export async function confirmAction(actor: AssistantActor, actionId: string): Pr
   if (!hasStudioPermission(actor.permissions, definition.permission)) throw new CopilotError(403, `Missing permission: ${definition.permission}`);
   const claimed = await prisma.copilotAction.updateMany({ where: { id: row.id, status: "pending" }, data: { status: "executing" } });
   if (claimed.count !== 1) {
-    const current = await prisma.copilotAction.findUniqueOrThrow({ where: { id: row.id } });
+    let current = await prisma.copilotAction.findUniqueOrThrow({ where: { id: row.id } });
     if (current.status === "cancelled") throw new CopilotError(409, "This action was cancelled and cannot be confirmed.");
+    if (current.status === "executing") {
+      // A crash mid-execution would leave it executing forever. It is failed, never re-run: the tool may have
+      // partly applied, so the user re-proposes instead (the confirm-once guarantee stays intact).
+      const recovered = await prisma.copilotAction.updateMany({
+        where: { id: row.id, status: "executing", updatedAt: { lt: new Date(Date.now() - EXECUTING_STALE_MS) } },
+        data: { status: "failed", error: "The action was interrupted before it finished. Check the result and propose it again if needed." },
+      });
+      if (recovered.count === 1) current = await prisma.copilotAction.findUniqueOrThrow({ where: { id: row.id } });
+    }
     return { action: serializeAction(current), replayed: true };
   }
   try {

@@ -690,20 +690,40 @@ export async function getSourceEvidenceForPlanning(tenantId: string, siteId: str
 
 // ────────────────────────────────────────────────────────────── Background runs
 
-/** Run `work` detached from the request, tracked as a durable Operation. */
+const OPERATION_STALE_MS = 30 * 60_000;
+const operationTimeoutMs = () => Number(process.env.SOURCE_OPERATION_TIMEOUT_MS) || 25 * 60_000;
+
+/**
+ * Run `work` detached from the request, tracked as a durable Operation. An active operation of the
+ * same type for the site is reused; ones left queued/running past OPERATION_STALE_MS (dead process)
+ * are failed as retryable first.
+ */
 export async function runAsOperation(
   input: { tenantId: string; siteId: string; type: string; userId: string | null; entityType: string },
   work: () => Promise<object>,
 ): Promise<{ operationId: string }> {
+  const scope = { tenantId: input.tenantId, siteId: input.siteId, type: input.type };
+  const stale = await prisma.operation.findMany({ where: { ...scope, status: { in: ["queued", "running"] }, updatedAt: { lt: new Date(Date.now() - OPERATION_STALE_MS) } }, select: { id: true } });
+  for (const row of stale) {
+    await failOperation(row.id, { errorCode: "stale", errorSummary: "Operation made no progress and was marked failed; retry it.", retryable: true }).catch(() => undefined);
+  }
+  const active = await prisma.operation.findFirst({ where: { ...scope, status: { in: ["queued", "running"] } }, orderBy: { createdAt: "desc" }, select: { id: true } });
+  if (active) return { operationId: active.id };
   const operation = await createOperation({ tenantId: input.tenantId, siteId: input.siteId, type: input.type, initiatorUserId: input.userId, entityType: input.entityType, entityId: input.siteId, totalSteps: 1 });
   setImmediate(async () => {
+    let timer: NodeJS.Timeout | undefined;
     try {
       await startOperation(operation.id, "running");
-      const outcome = await work();
+      const outcome = await Promise.race([
+        work(),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("operation_timeout")), operationTimeoutMs()); }),
+      ]);
       await recordAuditForOperation(operation.id, `${input.type}.completed`, outcome as Record<string, unknown>);
       await completeOperation(operation.id, { phase: "done" });
     } catch (error) {
       await failOperation(operation.id, { errorCode: "failed", errorSummary: (error instanceof Error ? error.message : String(error)).slice(0, 500), retryable: true }).catch(() => undefined);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   });
   return { operationId: operation.id };

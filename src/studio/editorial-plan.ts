@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { EditorialPlanItemStatus, PublicationChannel } from "@prisma/client";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { SOURCE_DATA_RULES } from "./prompt-injection";
 import { writeAudit } from "./audit";
 import { createProject } from "./repository";
 import { startProjectGeneration } from "./orchestration";
@@ -457,7 +458,9 @@ async function executeEditorialPlanGeneration(
 
     const systemPrompt =
       "You are a site-aware editorial strategy engine. You plan content ONLY for the destination site described by the evidence. " +
-      `Your output MUST match ${EDITORIAL_PLAN_SCHEMA_NAME}. Never output prose outside the JSON object.`;
+      `Your output MUST match ${EDITORIAL_PLAN_SCHEMA_NAME}. Never output prose outside the JSON object.
+
+${SOURCE_DATA_RULES}`;
 
     let validated: PostValidationResult | null = null;
     let attempts: StructuredGenerationAttempt[] = [];
@@ -664,8 +667,11 @@ async function executeEditorialPlanGeneration(
     const requestedTotal = append?.totalRequested ?? input.publicationCount;
     let filledTotal = items.length;
     let finalStatus: "ready" | "partial" = "ready";
+    let replacedTitles: string[] = [];
     await prisma.$transaction(async (tx) => {
       if (append?.replaceItemId) {
+        const replaced = await tx.editorialPlanItem.findFirst({ where: { id: append.replaceItemId, tenantId: input.tenantId }, select: { title: true, workingTitle: true } });
+        replacedTitles = [replaced?.title, replaced?.workingTitle].filter((value): value is string => Boolean(value));
         // Only an untouched proposal may be replaced; approved or produced items are never discarded.
         const removed = await tx.editorialPlanItem.deleteMany({
           where: { id: append.replaceItemId, tenantId: input.tenantId, projectId: null, status: { in: ["proposed", "rejected"] } },
@@ -747,7 +753,8 @@ async function executeEditorialPlanGeneration(
           model: lastModel,
           siteIntelligenceVersion: context.profile?.version ?? null,
           generatedOutput: {
-            items: [...(append?.previous.items ?? []), ...items],
+            // The replaced proposal's stored brief goes too, so the output never lists a proposal that no longer exists.
+            items: [...withoutReplacedBriefs(append?.previous.items ?? [], replacedTitles), ...items],
             dropped: [...(append?.previous.dropped ?? []), ...validated.dropped],
             warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
             requestedCount: requestedTotal,
@@ -959,6 +966,11 @@ export async function enqueueFillMissingSlots(tenantId: string, planId: string, 
     accounts,
     "editorial_plan_fill",
   );
+}
+
+/** Stored briefs minus the ones whose proposal was just replaced (matched by working title). */
+export function withoutReplacedBriefs<T>(briefs: T[], replacedTitles: string[]): T[] {
+  return briefs.filter((brief) => !replacedTitles.includes((brief as { workingTitle?: string }).workingTitle ?? ""));
 }
 
 /** Regenerates one untouched proposal in its own slot; every other item in the plan is preserved. */

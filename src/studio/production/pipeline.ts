@@ -89,7 +89,8 @@ function artifactsOf(job: Pick<ProductionJob, "artifacts">): ProductionArtifacts
 }
 
 function isStale(job: ProductionJob, now = new Date()): boolean {
-  return job.status === "running" && now.getTime() - job.updatedAt.getTime() > STALE_RUNNING_MS;
+  // A queued job whose runner died between the claim and runProductionJob is just as stuck as a running one.
+  return (job.status === "running" || job.status === "queued") && now.getTime() - job.updatedAt.getTime() > STALE_RUNNING_MS;
 }
 
 function writeCompleted(job: ProductionJob): boolean {
@@ -454,10 +455,13 @@ export async function reviewProductionJob(
   const notes = input.notes?.trim().slice(0, 2000) || null;
   const approved = input.decision === "approve";
   const reviewed = { reviewDecision: input.decision, reviewNotes: notes, reviewedByUserId: userId ?? null, reviewedAt: new Date() };
+  // Atomic claim: concurrent approve/reject cannot both win.
+  const claimed = await prisma.productionJob.updateMany({ where: { id: job.id, tenantId, status: "needs_review" }, data: { ...reviewed, status: approved ? "ready" : "failed" } });
+  if (claimed.count !== 1) throw new ProductionError("production_job_not_reviewable", "job was reviewed concurrently", 409);
   let updated: ProductionJob;
   if (approved) {
     // Approval marks the draft ready; publishing still goes through the authorized publish/schedule flows.
-    updated = await prisma.productionJob.update({ where: { id: job.id }, data: { ...reviewed, status: "ready" } });
+    updated = await prisma.productionJob.findUniqueOrThrow({ where: { id: job.id } });
     if (job.kind === "cluster" && job.versionId) {
       // Same effect the engine's own approve action has always had.
       await prisma.contentVersion.updateMany({ where: { id: job.versionId, tenantId }, data: { status: "qa_passed" } });
