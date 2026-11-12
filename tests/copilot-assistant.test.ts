@@ -223,7 +223,7 @@ test("an action stuck in executing is failed once stale and never re-run", async
 });
 
 test("propose_source stores an open recommendation and never activates it", async () => {
-  const actor = editor(b.tenantId, await makeUser(b.tenantId));
+  const actor = { ...editor(b.tenantId, await makeUser(b.tenantId)), permissions: ["integrations.manage", "analytics.read"] };
   const response = await sendMessage(actor, { content: "Propose source https://www.Fixtures-Example.org/path as competitor because it covers local fixtures", context: { siteId: b.siteId } }, never);
   const action = response.message.actions[0];
   assert.equal(action.tool, "propose_source");
@@ -236,6 +236,11 @@ test("propose_source stores an open recommendation and never activates it", asyn
   assert.equal(row.sourceId, null);
   assert.match(row.reasonSummary ?? "", /^\[competitor\] it covers local fixtures/);
   assert.equal(await prisma.contentSource.count({ where: { tenantId: b.tenantId, name: "fixtures-example.org" } }), 0);
+  await assert.rejects(
+    prisma.sourceRecommendation.create({ data: { tenantId: b.tenantId, domain: "fixtures-example.org", status: "open", score: 0, searchesCount: 0 } }),
+    (error: unknown) => (error as { code?: string }).code === "P2002",
+    "the null-site partial unique index rejects a duplicate domain",
+  );
 });
 
 test("every permission referenced by tools exists", async () => {

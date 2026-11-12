@@ -492,7 +492,7 @@ const proposeSource: WriteTool = {
   kind: "write",
   label: "Propose source",
   description: "Adds a source recommendation for review in Sources. It is never activated automatically.",
-  permission: "projects.manage",
+  permission: "integrations.manage",
   needs: "a domain and a reason",
   async prepare(ctx, args) {
     const domain = normalizeDomain(args.domain);
@@ -520,7 +520,11 @@ const proposeSource: WriteTool = {
       });
       return { result: { recommendationId: created.id, domain, status: created.status, alreadyExisted: false }, links: [{ label: "Review in Sources", path: "/studio/sources" }] };
     } catch (error) {
-      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") throw new CopilotError(409, `${domain} was proposed at the same time by someone else`);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        // Lost a race against the partial unique index on (tenant_id, domain) WHERE site_id IS NULL.
+        const winner = await prisma.sourceRecommendation.findFirst({ where: { tenantId, siteId: null, domain } });
+        if (winner) return { result: { recommendationId: winner.id, domain, status: winner.status, alreadyExisted: true }, links: [{ label: "Review in Sources", path: "/studio/sources" }] };
+      }
       throw error;
     }
   },
