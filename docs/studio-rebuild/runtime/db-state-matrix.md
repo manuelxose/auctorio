@@ -1,11 +1,13 @@
-# Sanitized state matrix — STUDIO-01 (read via authenticated API, QA account)
+# Sanitized state matrix — STUDIO-01 (clean-DB rerun, 2026-11-13)
 
-| Site | Mode | enabled | state | autoApprove | autoPublish | circuitOpen |
-|---|---|---|---|---|---|---|
-| GuiaProgramacionTV (d8e75bac) | assisted | true | active | false | false | false |
-| Auctorio (f76991c2) | manual | false | active | false | false | false |
+Local DB was reset from zero (`prisma migrate reset`, 34 migrations, Redis flushed), then bootstrapped like an operator would: tenant `Auctorio`, one owner/admin QA user, two sites via `scripts/provision-linked-tenants.ts`. API + 9 workers + Studio running. AI provider is the `.env` mock (no real keys).
 
-- `publishing-accounts`: **0 rows**. `social-connections`: **0 rows**. => no destination can publish for either site; Overview shows "No destinations connected" for Auctorio.
-- `connector-installations`: 17 (all kind `website`), 1 linked to a site (GuiaProgramacionTV), 16 unlinked; the API list does not expose a status field (read as `undefined`).
-- Session `admin/me` exposes `isPlatformAdmin`; the QA account's role set was not read.
-- No secrets, credential refs or cookies read. No writes except resetting the password of the local QA account (disposable).
+| Site | key | Mode | enabled | autoPublish |
+|---|---|---|---|---|
+| GuiaProgramacionTV | guiatv-editorial | manual | true | false |
+| Tecnoria (fictitious `tecnoria.example.test`) | tecnoria-main | manual | false | false |
+| E2E Webhook Target (created by the e2e run itself) | httpbin-org-b5b8dc | manual | false | false |
+
+- publishing-accounts 0, social-connections 0, connector-installations 2 (created by e2e). No secrets read.
+- Finding (CONFIRMED CODE + runtime): a brand-new tenant with **zero sites cannot log in with a password** — `completeGlobalAccountLogin` throws `user_not_authorized` when `sites.length === 0` (src/studio/auth.ts ~1866). The first site must be provisioned by an operator script; there is no self-serve first-site path.
+- The earlier dirty-DB snapshot (17 orphan connector installations, GuiaTV `assisted`) is obsolete; do not use it.

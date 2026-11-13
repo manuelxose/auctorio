@@ -1,31 +1,30 @@
-# Confirmed vs unknown — STUDIO-01 (2026-11-13)
+# Confirmed vs unknown — STUDIO-01 (clean-DB rerun, 2026-11-13)
 
-## e2e (`npm run test:e2e`, Chrome from `CHROME_BIN`, base http://localhost:4420, QA account, `E2E_ALLOW_REAL_PUBLISH` NOT set)
-Result: **8 passed, 12 failed, 1 skipped, 5 did not run (5.4 min)**. Nothing was published.
-Specs are written for the production tenant (sites `guiatv-editorial`/`tecnoria-main`, >=2 sites, real providers), so most failures are CURRENT RUNTIME HYPOTHESIS "environment/data mismatch", not proven regressions. Not investigated one by one:
+## Environment rule (project memory)
+Local must be a clean clone of production: empty DB, same migrations, API + workers + Redis. Reset done as described in db-state-matrix.md. Remaining gap vs prod: AI provider is `mock` (no real keys available).
 
-| Failure | Likely cause (unverified) |
+## e2e on the clean DB (`E2E_ALLOW_REAL_PUBLISH` unset, nothing published)
+Run history: dirty DB 8 passed/12 failed; clean DB with no sites 0 passed (login impossible, see below); clean DB + 2 provisioned sites + workers: **16 passed, 7 failed, 3 skipped (2.5 min)**.
+
+| Remaining failure | Cause |
 |---|---|
-| studio-workflow login/site-switching/content (3) | QA tenant has 2 sites but not the expected keys; 401 on site switch; spec stale vs new shell |
-| guiatv-seo 1 (+5 did not run) | site `guiatv-editorial` does not exist in local DB |
-| autopilot health | needs a worker named `*automation*`; only the API process was started (no worker) |
-| autopilot source->project | depends on worker/provider; no worker running |
-| connection-installer 1 | expects connector `auctorio_feed`; metadata returned only generic_rest, generic_webhook, x_oauth, instagram_oauth although code references `auctorio_feed` (src/studio/connectors/registry.ts) — **worth checking, possible real gap** |
-| connection-installer 2, 3 | 2.0 min timeouts in wizard flow |
-| production-journey (2) | expected status 502/400, got 200/202 (mock provider) |
-| notifications-links 2 | plan table has 0 rows for the active site |
+| guiatv-seo 2.1 "plan error: EDITORIAL_PLAN_STRUCTURED_OUTPUT_INVALID" (+ 2.2/2.3 skipped, 3 and 4 fail as consequence) | mock AI provider cannot produce structured plan output; needs real provider |
+| production-journey journey / provider failure (2) | spec expects a real provider failing with 502/400; mock returns 200/202 |
+| autopilot source->project, irreparable (skipped) | depends on AI output from a real provider |
+| autopilot health | spec expects a worker whose name contains "automation"; the live health lists `connection`, `control`, `discovery`, `image`, … — the automation worker registers as `control`. Likely a **stale spec** or a naming bug (unverified) |
 
-## CONFIRMED CODE / RUNTIME
-Typecheck + build pass; unit tests 465/467 (2 flaky); 24 screenshots, all routes 200, no console errors; all permission guards on publish/credential/automation endpoints present (see network-request-map.md).
+Fixed by the clean setup (were failing before): login, site switching, connector installer, notifications, content workflow.
 
-## UNKNOWN
-- Whether any of the 12 e2e failures is a product regression (needs worker running + seeded GuiaTV site).
-- Role set of the QA account; guards of bulk-approve and social-connection endpoints.
-- 16 unlinked connector installations: intended or leftovers.
-- Real publishing readiness: 0 publishing accounts and 0 social connections locally, so PRODUCTION READINESS stays BLOCKED.
-- Full CTA handler -> DB transition trace: not done (static endpoint map only).
+## Unit tests (`node --test --test-force-exit dist/tests/*.test.js`, separate DB `content_ai_test`)
+465/467 in each of two full runs, but the 2 failures were **different tests each run** (run 1: automation-recovery, site-strategy; run 2: site-onboarding ONB-01, phase5 duplicate enqueuePublication) and all pass in isolation => parallel-file flakiness on a shared DB, not deterministic. `npm test` itself hangs (open handle after `autopilot-planner.test.ts`); not fixed.
+
+## CONFIRMED
+Typecheck/build pass; 24 screenshots re-captured on the clean DB: all 8 routes load at 1440/1024/390, no horizontal overflow, zero console errors, zero HTTP >=400. Permission guards on publish/credential/automation endpoints exist (network-request-map.md).
+
+## UNKNOWN / not done
+- Behaviour with a real AI provider and real destination (0 publishing accounts, 0 social connections) => PRODUCTION READINESS BLOCKED.
+- Full CTA handler -> DB transition trace; guards of bulk-approve and social-connection endpoints; QA role set.
+- Visual/a11y review of the 24 images beyond Overview.
 
 ## Hand-off
-- STUDIO-02: sites + connectors metadata above; local DB has no publishing account.
-- STUDIO-03: modes: GuiaProgramacionTV `assisted`, Auctorio `manual`; autoApprove/autoPublish both false.
-- STUDIO-04: not covered.
+STUDIO-02: first-site provisioning gap (zero-site login) and 2 sites above. STUDIO-03: all sites start in `manual`. STUDIO-04: not covered.

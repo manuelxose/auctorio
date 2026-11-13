@@ -15,8 +15,8 @@ Read-only audit. No migrations, publications, token changes or DB writes were ma
 |---|---|
 | `npm run typecheck` | PASS (no output, tsc clean) |
 | `npm run build:studio` | PASS; 1 budget warning: `overview-page.component.ts` CSS 7.51 kB vs 4.00 kB |
-| `npm test` | PARTIAL: plain `npm test` HUNG (no output for 29 min after `tests/autopilot-planner.test.ts`; open handle, stopped). Re-run with `node --test --test-timeout=60000 --test-force-exit dist/tests/*.test.js` on the local disposable DB: **465/467 pass**. Both failures are flaky: `automation-recovery` "live recovery schedules publications" (2!==1) passes in isolation; `site-strategy` "concurrent strategy saves" failed once and passed once in isolation (race). Not fixed |
-| `npm run test:e2e` | PARTIAL: 8 passed / 12 failed / 5 not run against local Studio, no real publish; see confirmed-vs-unknown.md |
+| `npm test` | PARTIAL: plain `npm test` hangs (open handle); with `--test-force-exit` on a separate DB 465/467, failures differ per run (flaky). Details in confirmed-vs-unknown.md |
+| `npm run test:e2e` | PARTIAL: clean DB + 2 sites + workers: 16 passed / 7 failed / 3 skipped; remaining failures need a real AI provider or are stale specs |
 | Screenshots 1440/1024/390 | PASS (captured): 24 files in `runtime/screens/` (an earlier attempt failed only because the dev servers had been stopped; those error-page captures were discarded). See screenshot-manifest.md. Visual/a11y review limited to Overview 1440 |
 | Skills ui-ux-pro-max / unslop | Listed as installed; not read (no UI change in this milestone) |
 
@@ -27,7 +27,7 @@ Read-only audit. No migrations, publications, token changes or DB writes were ma
 `session/me`, `v2/admin/me`, `v2/operations` (x2), `v2/overview`, `v2/automation?siteId=`, `v2/site-intelligence/{site}`, `v2/editorial-plans?siteId=` + 3x `editorial-plans/{id}`, `v2/events/stream` (SSE), `v2/notifications`. Studio proxies through `/studio/api/backend/...`.
 
 ## Sanitized state (via authenticated BFF path)
-> Session identity: the built-in browser was signed in as the local QA account `qa.visual@auctorio.localhost`, NOT `manuelxgon@gmail.com`. Everything below reflects that account's tenant view; re-run as the owner account before trusting it.
+> Superseded: the first-pass numbers below came from a dirty local DB; see db-state-matrix.md and confirmed-vs-unknown.md for the clean-DB rerun.
 
 - Sites: `GuiaProgramacionTV` (d8e75bac…), `Auctorio` (f76991c2…).
 - Automation for GuiaProgramacionTV: `enabled=true`, `mode=assisted`.
