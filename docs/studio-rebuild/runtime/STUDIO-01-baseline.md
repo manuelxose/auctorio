@@ -16,9 +16,8 @@ Read-only audit. No migrations, publications, token changes or DB writes were ma
 | `npm run typecheck` | PASS (no output, tsc clean) |
 | `npm run build:studio` | PASS; 1 budget warning: `overview-page.component.ts` CSS 7.51 kB vs 4.00 kB |
 | `npm test` | PARTIAL: plain `npm test` HUNG (no output for 29 min after `tests/autopilot-planner.test.ts`; open handle, stopped). Re-run with `node --test --test-timeout=60000 --test-force-exit dist/tests/*.test.js` on the local disposable DB: **465/467 pass**. Both failures are flaky: `automation-recovery` "live recovery schedules publications" (2!==1) passes in isolation; `site-strategy` "concurrent strategy saves" failed once and passed once in isolation (race). Not fixed |
-| `npm run test:e2e` | NOT RUN (config defaults to https://auctorio.com) |
-| Screenshots 1440/1024/390 | PARTIAL: only 1440 Overview viewed in the built-in browser; no files saved (tool does not write to disk). Other viewports/routes BLOCKED |
-| Playwright MCP screenshots (8 routes x 3 viewports) | BLOCKED: its browser landed on `chrome-error://chromewebdata/` for localhost:4421 (cannot reach the dev server); 24 error-page captures were discarded, not kept as evidence |
+| `npm run test:e2e` | PARTIAL: 8 passed / 12 failed / 5 not run against local Studio, no real publish; see confirmed-vs-unknown.md |
+| Screenshots 1440/1024/390 | PASS (captured): 24 files in `runtime/screens/` (an earlier attempt failed only because the dev servers had been stopped; those error-page captures were discarded). See screenshot-manifest.md. Visual/a11y review limited to Overview 1440 |
 | Skills ui-ux-pro-max / unslop | Listed as installed; not read (no UI change in this milestone) |
 
 ## Responsive load check (QA account, no image files)
