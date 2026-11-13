@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runTextWorker = runTextWorker;
+const ai_settings_1 = require("../ai/ai-settings");
 const client_1 = require("@prisma/client");
 const bullmq_1 = require("bullmq");
 const env_1 = require("../../shared/utils/env");
@@ -32,9 +33,10 @@ async function runTextWorker() {
         return;
     }
     const prisma = (0, prisma_1.getPrismaClient)();
-    const provider = (0, text_1.getTextProvider)();
-    const worker = new bullmq_1.Worker(queues_1.QUEUE_NAMES.text, async (job) => {
+    const worker = new bullmq_1.Worker(queues_1.QUEUE_NAMES.text, async (job) => (0, ai_settings_1.withAiTenant)(job.data.tenantId, async () => {
         const data = job.data;
+        // Resolved per job: each workspace may have chosen a different provider (Settings → AI).
+        const provider = (0, text_1.getTextProvider)();
         await (0, jobs_1.markJobProcessing)(data.jobId);
         await prisma.contentText.update({
             where: { id: data.contentTextId },
@@ -142,7 +144,7 @@ async function runTextWorker() {
             },
         });
         await (0, orchestration_1.syncTextResultToStudio)(data.tenantId, data.contentTextId);
-    }, {
+    }), {
         connection: (0, redis_1.getRedisConnectionOptions)(),
         ...(0, worker_runtime_1.bullWorkerOptions)("text", 1),
     });

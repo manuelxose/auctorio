@@ -6,6 +6,7 @@ import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
 import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
+import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
 import { createOperation } from "./operations";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
@@ -239,12 +240,14 @@ export async function requestImageGenerationForVersion(
     where: { id: versionId, tenantId },
     include: { project: { include: { site: true } }, contentText: true },
   });
-  if (!version || !version.project.topicId) {
+  if (!version) {
     throw new Error("version_or_topic_not_found");
   }
+  // Production-pipeline projects are created without a topic; images hang off one.
+  const topicId = version.project.topicId ?? (await ensureProjectTopic(tenantId, version.project.id, version.project.title, version.project.brief ?? ""));
 
   const textId = version.contentTextId ?? null;
-  const contentImage = await createQueuedImage(tenantId, version.project.topicId, textId);
+  const contentImage = await createQueuedImage(tenantId, topicId, textId);
   await attachImageToVersion(version.id, contentImage.id);
   const imageJob = await prisma.job.create({
     data: {
@@ -275,7 +278,7 @@ export async function requestImageGenerationForVersion(
     jobId: imageJob.id,
     tenantId,
     operationId: operation.id,
-    topicId: version.project.topicId,
+    topicId,
     contentImageId: contentImage.id,
     mode: textId ? "contextual" : "independent",
     textId: textId ?? undefined,
@@ -321,6 +324,115 @@ export async function syncTextResultToStudio(tenantId: string, contentTextId: st
 
   if (!version.contentImageId) {
     await requestImageGenerationForVersion(tenantId, version.id);
+  }
+  try {
+    await requestInlineImagesForVersion(tenantId, version.id);
+  } catch (error) {
+    // The text is saved; missing inline images show up in QA and can be generated from the Media tab.
+    console.warn("[orchestration] inline image request failed", error instanceof Error ? error.message : String(error));
+  }
+}
+
+/**
+ * Queues the in-body images the version still lacks (INLINE_IMAGE_MIN in total).
+ * Idempotent: images already in the body or still in flight count.
+ */
+export async function requestInlineImagesForVersion(tenantId: string, versionId: string): Promise<string[]> {
+  const version = await prisma.contentVersion.findFirst({
+    where: { id: versionId, tenantId },
+    include: { project: { include: { site: true } } },
+  });
+  if (!version) {
+    throw new Error("version_or_topic_not_found");
+  }
+  const topicId = version.project.topicId ?? (await ensureProjectTopic(tenantId, version.project.id, version.project.title, version.project.brief ?? ""));
+  const body = version.bodyHtml ?? "";
+  const inFlight = await prisma.contentImage.findMany({
+    where: { tenantId, dedupeHash: { startsWith: `inline:${versionId}:` }, status: { in: ["queued", "processing"] } },
+    select: { dedupeHash: true },
+  });
+  const taken = new Set([
+    ...filledInlineSlots(body),
+    ...inFlight.map((image) => parseInlineImageHash(image.dedupeHash)?.slot).filter((slot): slot is number => slot !== undefined),
+  ]);
+  let missing = INLINE_IMAGE_MIN - (body.match(/<img[^>]*>/gi) ?? []).length - inFlight.length;
+  const headings = h2Headings(body);
+  const textId = version.contentTextId ?? null;
+  const mode = textId ? "contextual" : "independent";
+  const projectMetadata = asRecord(version.project.metadata);
+  const ids: string[] = [];
+  for (let slot = 0; missing > 0 && slot < INLINE_IMAGE_MIN * 2; slot++) {
+    if (taken.has(slot)) continue;
+    missing--;
+    const section = headings[headingIndexForSlot(slot, headings.length)] ?? version.title ?? version.project.title;
+    const image = await prisma.contentImage.create({
+      data: { tenantId, topicId, textId, status: "queued", dedupeHash: inlineImageHash(versionId, slot, crypto.randomUUID()) },
+    });
+    const imageJob = await prisma.job.create({ data: { tenantId, type: "image", status: "queued" } });
+    const operation = await createOperation({
+      tenantId,
+      siteId: version.project.siteId,
+      type: "image_generation",
+      initiatorUserId: null,
+      entityType: "content_version",
+      entityId: version.id,
+      queueName: "queue_image",
+      jobKey: imageJob.id,
+      metadata: { mode, role: "inline", slot },
+    });
+    await enqueueImageJob(imageJob.id, {
+      jobId: imageJob.id,
+      tenantId,
+      operationId: operation.id,
+      topicId,
+      contentImageId: image.id,
+      mode,
+      textId: textId ?? undefined,
+      options: {
+        ...projectMetadata,
+        site_id: version.project.siteId,
+        goal: version.project.goal,
+        site_name: version.project.site?.name ?? undefined,
+        image_role: "inline",
+        section,
+      },
+    });
+    ids.push(image.id);
+  }
+  return ids;
+}
+
+/** Places a finished inline image in its version's body and refreshes QA while the piece is still in review. */
+export async function syncInlineImageToVersion(tenantId: string, contentImageId: string): Promise<void> {
+  const image = await prisma.contentImage.findFirst({ where: { id: contentImageId, tenantId }, include: { assetVariants: true } });
+  const ref = parseInlineImageHash(image?.dedupeHash);
+  if (!image || !ref || image.status !== "done") {
+    return;
+  }
+  const version = await prisma.contentVersion.findFirst({
+    where: { id: ref.versionId, tenantId },
+    include: { project: true, contentImage: true },
+  });
+  if (!version) {
+    return;
+  }
+  const variant = image.assetVariants.find((item) => item.kind === "hero") ?? image.assetVariants.find((item) => item.kind === "original");
+  const src = await buildAssetPublicUrl(variant?.storagePath ?? image.storagePath);
+  if (!src) {
+    return;
+  }
+  const body = version.bodyHtml ?? "";
+  const headings = h2Headings(body);
+  const alt = headings[headingIndexForSlot(ref.slot, headings.length)] ?? version.title ?? "";
+  const next = insertInlineFigure(body, inlineFigureHtml(src, alt, ref.slot, image.id), ref.slot);
+  if (next === body) {
+    return;
+  }
+  await prisma.contentVersion.update({ where: { id: version.id }, data: { bodyHtml: next } });
+  // Never pull an approved, scheduled or published piece back into review.
+  const heroSettled = version.contentImage?.status === "done" || version.contentImage?.status === "failed";
+  if (version.contentImageId && heroSettled && ["ai_generated", "qa_failed", "qa_passed", "in_review"].includes(version.project.status)) {
+    await syncImageResultToStudio(tenantId, version.contentImageId);
   }
 }
 

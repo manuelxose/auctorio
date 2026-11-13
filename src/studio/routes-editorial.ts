@@ -1455,11 +1455,12 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   fastify.get("/v2/editorial-plans", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) return;
-    const query = request.query as { page?: string; pageSize?: string };
+    const query = request.query as { page?: string; pageSize?: string; siteId?: string };
     return reply.send(await listEditorialPlans(
       context.tenantId,
       parsePage(query.page, 1),
       parsePageSize(query.pageSize, 20),
+      query.siteId && isUuid(query.siteId) ? query.siteId : undefined,
     ));
   });
 

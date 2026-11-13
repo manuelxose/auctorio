@@ -16,6 +16,8 @@ import {
   acceptSiteSourceRecommendation,
   discoverSourceRecommendations,
   getSourceEvidenceForPlanning,
+  listSiteSourceRecommendations,
+  listSiteSources,
   rejectSiteSourceRecommendation,
   setSiteSourceState,
   testSiteSource,
@@ -235,6 +237,30 @@ test("SRC-02: accept/pause/resume/archive change ingestion and planning evidence
   } finally {
     restoreFetch();
   }
+});
+
+test("SRC-03: the site view merges shared sources and workspace-wide recommendations", async () => {
+  const { tenant, site } = await seed("src03");
+  const shared = await prisma.contentSource.create({ data: { tenantId: tenant.id, name: "Shared wire", type: "rss", url: `https://${RIVAL}/feed/` } });
+  const legacy = await prisma.sourceRecommendation.create({ data: { tenantId: tenant.id, domain: "wire.example.org", score: 80, reasonSummary: "Cited by peers" } });
+  const dismissed = await prisma.sourceRecommendation.create({ data: { tenantId: tenant.id, domain: "noise.example.org", score: 20 } });
+
+  const sources = await listSiteSources(tenant.id, site.id);
+  assert.equal(sources.find((source) => source.id === shared.id)?.shared, true, "shared sources appear in every site's list");
+
+  const recommendations = await listSiteSourceRecommendations(tenant.id, site.id);
+  const mapped = recommendations.find((row) => row.id === legacy.id);
+  assert.ok(mapped && mapped.shared, "workspace-wide recommendations appear in the site list");
+  assert.equal(mapped.url, "https://wire.example.org");
+  assert.equal(mapped.assessmentReason, "Cited by peers");
+
+  await rejectSiteSourceRecommendation(tenant.id, site.id, dismissed.id, null);
+  assert.equal((await prisma.sourceRecommendation.findUnique({ where: { id: dismissed.id } }))?.status, "dismissed", "legacy rows keep their own dismiss state");
+  assert.ok((await listSiteSourceRecommendations(tenant.id, site.id, { status: "rejected" })).some((row) => row.id === dismissed.id));
+
+  const accepted = (await acceptSiteSourceRecommendation(tenant.id, site.id, legacy.id, null)) as { id: string; siteId: string | null };
+  assert.equal(accepted.siteId, null, "accepting a workspace-wide recommendation creates a shared source");
+  assert.equal((await prisma.sourceRecommendation.findUnique({ where: { id: legacy.id } }))?.status, "accepted");
 });
 
 test("CMP-01: competitor accept/edit/remove keeps evidence; Add to plan creates exactly one linked proposal", async () => {

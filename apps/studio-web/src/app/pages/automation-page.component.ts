@@ -62,10 +62,8 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
         <div class="au-field-grid">
           <label class="au-field">
             <span class="au-field__label">Site</span>
-            <select class="au-select" [(ngModel)]="selectedSiteId" (ngModelChange)="load()">
-              <option [ngValue]="null">All sites</option>
-              <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-            </select>
+            <input class="au-input" type="text" [value]="siteName" readonly aria-readonly="true" />
+            <span class="au-field__hint">The policy of the active site. Change it in the top bar.</span>
           </label>
           <label class="au-field">
             <span class="au-field__label">Timezone</span>
@@ -308,7 +306,9 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   status: AutomationStatus | null = null;
   accounts: PublishingAccount[] = [];
   sites: StudioSite[] = [];
-  selectedSiteId: string | null = null;
+  /** The active site policy; the shell re-creates the page when the site changes. */
+  selectedSiteId: string | null = this.appContext.activeSite()?.id ?? null;
+  siteName = this.appContext.activeSite()?.name ?? '';
   categoriesText = '';
   excludedCategoriesText = '';
   priorityTopicsText = '';

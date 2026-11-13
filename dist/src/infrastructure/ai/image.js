@@ -4,6 +4,7 @@ exports.ImageDownloadError = void 0;
 exports.getImageProvider = getImageProvider;
 const http_1 = require("../../shared/utils/http");
 const env_1 = require("../../shared/utils/env");
+const ai_settings_1 = require("./ai-settings");
 const PLACEHOLDER_PNG_BASE64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAASsJTYQAAAAASUVORK5CYII=";
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 class ImageDownloadError extends Error {
@@ -156,10 +157,11 @@ class OpenAICompatibleImageProvider {
             body: {
                 model,
                 prompt: input.prompt,
-                size: input.size ?? "1024x576",
+                size: this.providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
                 image_size: input.size ?? "1024x576",
                 n: 1,
-                response_format: "b64_json",
+                // gpt-image-* always returns base64 and rejects response_format
+                response_format: model.startsWith("gpt-image") ? undefined : "b64_json",
                 seed: input.seed,
             },
             timeoutMs: (0, env_1.getNumberEnv)("IMAGE_TIMEOUT_MS", 90_000),
@@ -247,6 +249,10 @@ class MockImageProvider {
     }
 }
 function getImageProvider() {
+    // A workspace admin's choice (Settings -> AI) wins over the environment default.
+    const selected = (0, ai_settings_1.activeImageSelection)();
+    if (selected)
+        return new OpenAICompatibleImageProvider(selected.provider, selected.baseUrl, selected.apiKey, selected.model);
     const provider = (0, env_1.getEnv)("IMAGE_PROVIDER", "mock").toLowerCase();
     if (provider === "mock") {
         if ((0, env_1.isProductionEnv)()) {

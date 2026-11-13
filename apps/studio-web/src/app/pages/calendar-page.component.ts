@@ -1,16 +1,16 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import { Subscription, timer } from 'rxjs';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Observable, Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
+import { PlanningApiService } from '../services/planning-api.service';
 import { AppContextService } from '../services/app-context.service';
-import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { EditorialContextService } from '../services/editorial-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { CalendarEvent, PublicationChannel, StudioProjectSummary, StudioSite, PublishingAccount } from '../models/studio.models';
+import type { CalendarEvent, PublicationChannel, StudioProjectSummary, PublishingAccount } from '../models/studio.models';
 
 type CalendarView = 'list' | 'day' | 'week' | 'month';
 
@@ -24,10 +24,10 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <div>
           <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
-          <p class="au-page__subtitle">Proposals, briefs, drafts and publications on one timeline. Drag a card to another day, or use Move on a card to pick a date and time.</p>
+          <p class="au-page__subtitle">When each piece goes out on {{ siteName }}. Schedule content, then drag a card or use Move to change its date. Briefs are decided in the plan; publishing, retries and cancellations live in Publications.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--secondary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
+          <button class="au-btn au-btn--primary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
             <app-icon name="plus"></app-icon>
             {{ showScheduleForm ? 'Hide form' : 'Schedule a publication' }}
           </button>
@@ -36,10 +36,6 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
             <option value="website">Website</option>
             <option value="x">X</option>
             <option value="instagram">Instagram</option>
-          </select>
-          <select class="au-select au-filter-select" [(ngModel)]="siteFilter" (ngModelChange)="load()" aria-label="Filter by site">
-            <option value="">All sites</option>
-            <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
           </select>
         </div>
       </header>
@@ -71,39 +67,32 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
 
       <section id="schedule-form" class="au-panel au-panel--padded au-mb-3" *ngIf="showScheduleForm">
         <h2 class="au-panel__title">Schedule a publication</h2>
-        <p class="au-panel__subtitle au-mb-3">Pick content, a channel and a time. Social channels need an approved social piece on the content.</p>
+        <p class="au-panel__subtitle au-mb-3">Three steps: the content, where it goes, and when. Social channels need an approved social piece on the content.</p>
         <form class="au-field-grid au-calendar-form" (ngSubmit)="createFromCalendar()">
           <label class="au-field au-mb-0">
-            <span class="au-field__label">Content</span>
+            <span class="au-field__label">1 · Content</span>
             <select class="au-select" name="projectId" [(ngModel)]="draft.projectId" required>
               <option value="" disabled>Select content</option>
               <option *ngFor="let project of projects" [value]="project.id">{{ project.title }}</option>
             </select>
           </label>
           <label class="au-field au-mb-0">
-            <span class="au-field__label">Channel</span>
+            <span class="au-field__label">2 · Channel</span>
             <select class="au-select" name="channel" [(ngModel)]="draft.channel">
-              <option value="website">Website</option>
+              <option value="website">Website ({{ siteName }})</option>
               <option value="x">X</option>
               <option value="instagram">Instagram</option>
             </select>
           </label>
-          <label class="au-field au-mb-0" *ngIf="draft.channel === 'website'">
-            <span class="au-field__label">Site</span>
-            <select class="au-select" name="siteId" [(ngModel)]="draft.siteId">
-              <option value="">Default site</option>
-              <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-            </select>
-          </label>
           <label class="au-field au-mb-0" *ngIf="draft.channel !== 'website'">
-            <span class="au-field__label">Account</span>
+            <span class="au-field__label">2 · Account</span>
             <select class="au-select" name="accountId" [(ngModel)]="draft.accountId">
               <option value="">Default account</option>
               <option *ngFor="let account of accountsForChannel" [value]="account.id">{{ account.displayName }}</option>
             </select>
           </label>
           <label class="au-field au-mb-0">
-            <span class="au-field__label">When</span>
+            <span class="au-field__label">3 · When</span>
             <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required />
           </label>
           <div class="au-form__actions au-mt-0 au-mb-0">
@@ -201,39 +190,15 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
             <app-icon name="calendar"></app-icon>
             Move
           </button>
-          <ng-container *ngIf="event.kind === 'plan_item'">
-            <button *ngIf="!event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" routerLink="/studio/editorial-plan">Open plan</button>
-            <button *ngIf="event.status === 'proposed'" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="approve(event)">
-              <app-icon name="circle-check"></app-icon>
-              Approve
-            </button>
-            <button *ngIf="event.status === 'approved' && !event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="generateDraft(event)">
-              <app-icon name="sparkles"></app-icon>
-              Generate draft
-            </button>
-          </ng-container>
-          <ng-container *ngIf="event.kind === 'publication'">
-          <button
-            *ngIf="event.status === 'scheduled' || event.status === 'failed'"
-            class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="publishNow(event)"
-          >
-            <app-icon name="play"></app-icon>
-            Publish now
-          </button>
-          <button
-            *ngIf="event.status === 'scheduled'"
-            class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="cancel(event)"
-          >
-            Cancel
-          </button>
-          <button
-            *ngIf="event.status === 'failed'"
-            class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="retry(event)"
-          >
-            <app-icon name="refresh"></app-icon>
-            Retry
-          </button>
-          </ng-container>
+          <!-- Single homes: briefs are decided in the plan, publication state in Publications. -->
+          <a *ngIf="event.kind === 'plan_item'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ plan: event.planId, item: event.id }">
+            <app-icon name="plan"></app-icon>
+            {{ event.status === 'proposed' ? 'Review in plan' : 'Open in plan' }}
+          </a>
+          <a *ngIf="event.kind === 'publication'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/publications" [queryParams]="{ id: event.id }">
+            <app-icon name="publications"></app-icon>
+            {{ event.status === 'failed' ? 'Fix in Publications' : 'Manage' }}
+          </a>
         </div>
       </div>
       <form class="au-inline au-mt-2" *ngIf="movingId === event.id" (ngSubmit)="confirmMove(event)" (keydown.escape)="cancelMove()" (click)="$event.stopPropagation()">
@@ -249,10 +214,14 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
 })
 export class CalendarPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
+  private readonly planning = inject(PlanningApiService);
   private readonly appContext = inject(AppContextService);
-  private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly context = inject(EditorialContextService);
+  private readonly route = inject(ActivatedRoute, { optional: true });
+  /** The calendar always shows the top bar's active site; the shell re-creates the page when it changes. */
+  private readonly siteId = this.appContext.activeSite()?.id ?? '';
+  readonly siteName = this.appContext.activeSite()?.name ?? 'this site';
 
   views: Array<{ key: CalendarView; label: string }> = [
     { key: 'list', label: 'List' },
@@ -262,9 +231,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   ];
   viewMode: CalendarView = 'week';
   events: CalendarEvent[] = [];
-  sites: StudioSite[] = [];
   channelFilter = '';
-  siteFilter = '';
   anchor = new Date();
   dragHint = false;
   showScheduleForm = false;
@@ -276,7 +243,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   creating = false;
   projects: StudioProjectSummary[] = [];
   accounts: PublishingAccount[] = [];
-  draft = { projectId: '', channel: 'website' as PublicationChannel, siteId: '', accountId: '', scheduledFor: '' };
+  draft = { projectId: '', channel: 'website' as PublicationChannel, accountId: '', scheduledFor: '' };
 
   get accountsForChannel(): PublishingAccount[] {
     return this.accounts.filter((account) => account.platform === this.draft.channel && account.enabled);
@@ -299,8 +266,13 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     this.context.update({ area: 'calendar' });
-    this.sites = this.appContext.sites();
-    this.api.listProjects({ page: 1, pageSize: 50 }).subscribe({
+    // ?projectId= comes from an article's "Schedule in Calendar": open the form with it preselected.
+    const projectId = this.route?.snapshot.queryParamMap.get('projectId');
+    if (projectId) {
+      this.draft.projectId = projectId;
+      this.showScheduleForm = true;
+    }
+    this.api.listProjects({ page: 1, pageSize: 50, siteId: this.siteId || undefined }).subscribe({
       next: (response) => {
         this.projects = response.items;
       },
@@ -353,9 +325,9 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     if (!silent) this.error = '';
     const { from, to } = this.range();
     const day = (date: Date): string => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-    this.context.update({ siteId: this.siteFilter || null, periodFrom: day(from), periodTo: day(new Date(to.getTime() - 1)) });
+    this.context.update({ siteId: this.siteId || null, periodFrom: day(from), periodTo: day(new Date(to.getTime() - 1)) });
     this.api
-      .listCalendar(from.toISOString(), to.toISOString(), this.channelFilter ? (this.channelFilter as PublicationChannel) : undefined, this.siteFilter || undefined)
+      .listCalendar(from.toISOString(), to.toISOString(), this.channelFilter ? (this.channelFilter as PublicationChannel) : undefined, this.siteId || undefined)
       .subscribe({
         next: (response) => {
           this.events = response.items;
@@ -434,20 +406,6 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   statusLabel(event: CalendarEvent): string {
     if (event.kind === 'publication') return event.status;
     return ({ proposed: 'proposal', approved: 'approved brief', generating: 'writing draft', content_ready: 'draft ready', review_required: 'in review' } as Record<string, string>)[event.status] ?? event.status.replace(/_/g, ' ');
-  }
-
-  approve(event: CalendarEvent): void {
-    this.api.approveEditorialPlanItem(event.id).subscribe({
-      next: () => { this.toast.success('Proposal approved.'); this.load(true); },
-      error: () => { this.error = 'The proposal could not be approved.'; },
-    });
-  }
-
-  generateDraft(event: CalendarEvent): void {
-    this.api.generateContentFromEditorialPlanItem(event.id).subscribe({
-      next: () => { this.toast.success('Draft generation started.'); this.load(true); },
-      error: (err) => { this.error = err?.error?.error?.message || 'The draft could not be generated.'; },
-    });
   }
 
   focusDay(date: Date): void {
@@ -546,8 +504,8 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     // Optimistic update.
     eventItem.scheduledFor = optimisticSchedule;
     // Plan items keep their own proposal date; publications own the real delivery time.
-    const request = eventItem.kind === 'plan_item'
-      ? this.api.updateEditorialPlanItem(eventItem.id, { scheduledFor: optimisticSchedule })
+    const request: Observable<unknown> = eventItem.kind === 'plan_item'
+      ? this.planning.updateItem(eventItem.id, { scheduledFor: optimisticSchedule })
       : this.api.reschedulePublication(eventItem.id, optimisticSchedule);
     request.subscribe({
       next: () => {
@@ -586,43 +544,6 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     this.reschedule(item, target);
   }
 
-  publishNow(eventItem: CalendarEvent): void {
-    this.api.publishNow(eventItem.id).subscribe({
-      next: () => this.load(true),
-      error: () => { this.error = 'The publication could not be published.'; this.load(true); },
-    });
-  }
-
-  cancel(eventItem: CalendarEvent): void {
-    void this.confirmCancel(eventItem);
-  }
-
-  private async confirmCancel(eventItem: CalendarEvent): Promise<void> {
-    const confirmed = await this.confirm.confirm({
-      title: `Cancel this scheduled ${eventItem.channel} publication?`,
-      message: `"${eventItem.title}" — this only cancels the local schedule. Content already published externally is not affected.`,
-      confirmLabel: 'Cancel publication',
-      danger: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-    this.api.cancelPublication(eventItem.id).subscribe({
-      next: () => {
-        this.toast.success('Publication canceled.');
-        this.load(true);
-      },
-      error: () => { this.error = 'The publication could not be canceled.'; this.load(true); },
-    });
-  }
-
-  retry(eventItem: CalendarEvent): void {
-    this.api.retryPublication(eventItem.id).subscribe({
-      next: () => this.load(true),
-      error: () => { this.error = 'The publication could not be retried.'; this.load(true); },
-    });
-  }
-
   createFromCalendar(): void {
     if (!this.draft.projectId || !this.draft.scheduledFor) {
       this.error = 'Select content and a scheduled time.';
@@ -634,14 +555,14 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     this.api.createPublication({
       projectId: this.draft.projectId,
       channel: this.draft.channel,
-      siteId: this.draft.channel === 'website' ? (this.draft.siteId || undefined) : undefined,
+      siteId: this.draft.channel === 'website' ? (this.siteId || undefined) : undefined,
       accountId: this.draft.channel !== 'website' ? (this.draft.accountId || undefined) : undefined,
       scheduledFor: new Date(this.draft.scheduledFor).toISOString(),
     }).subscribe({
       next: () => {
         this.creating = false;
         this.toast.success('Publication added to the calendar.');
-        this.draft = { projectId: '', channel: 'website', siteId: '', accountId: '', scheduledFor: '' };
+        this.draft = { projectId: '', channel: 'website', accountId: '', scheduledFor: '' };
         this.load(true);
       },
       error: (err) => {

@@ -9,7 +9,7 @@ import { AppEmptyStateComponent } from '../components/ui/app-empty-state.compone
 import { OnboardingTimelineComponent } from '../components/intelligence/onboarding-timeline.component';
 import { IntelligenceApiService } from '../services/intelligence-api.service';
 import { EditorialContextService } from '../services/editorial-context.service';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import type { ClusterCoverage, Provenance, StrategyConfig, StrategyField, StrategyLayers, StrategyPillar, StrategyVersion } from '../models/intelligence.models';
 import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '../models/studio.models';
 
@@ -64,9 +64,6 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
           <p class="au-page__subtitle">What Auctorio actually knows about the connected website.</p>
         </div>
         <div class="au-page__actions">
-          <select class="au-select" [(ngModel)]="selectedSiteId" (ngModelChange)="onSiteChange()" aria-label="Select site">
-            <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-          </select>
           <button class="au-btn au-btn--secondary" type="button" [disabled]="indexing" (click)="crawlChanged()">
             <app-icon name="refresh"></app-icon>
             Crawl changes
@@ -343,7 +340,9 @@ export class SiteIntelligencePageComponent implements OnInit {
     { id: 'onboarding', label: 'Onboarding' },
   ];
   readonly fields = FIELDS;
-  tab = 'profile';
+  // ?tab= deep-links a section, e.g. Overview "Read the site again" opens Crawl health.
+  private readonly requestedTab = inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap.get('tab');
+  tab = this.tabs.find((t) => t.id === this.requestedTab)?.id ?? 'profile';
   layers: StrategyLayers | null = null;
   draft: StrategyConfig | null = null;
   versions: StrategyVersion[] = [];
@@ -469,7 +468,7 @@ export class SiteIntelligencePageComponent implements OnInit {
       error: () => this.toast.error('Coverage could not be loaded.'),
     });
   }
-  sites: StudioSite[] = [];
+  /** Always the top bar active site; the shell re-creates the page when it changes. */
   selectedSiteId = '';
   overview: SiteIntelligenceOverview | null = null;
   loading = true;
@@ -486,14 +485,7 @@ export class SiteIntelligencePageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
-    this.selectedSiteId = this.appContext.activeSite()?.id ?? this.sites[0]?.id ?? '';
-    this.load();
-  }
-
-  onSiteChange(): void {
-    this.overview = null;
-    this.pages = [];
+    this.selectedSiteId = this.appContext.activeSite()?.id ?? '';
     this.load();
   }
 

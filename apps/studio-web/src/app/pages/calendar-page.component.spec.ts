@@ -3,12 +3,13 @@ import { Subject, of, throwError } from 'rxjs';
 import { CalendarPageComponent } from './calendar-page.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
-import { ConfirmService } from '../services/confirm.service';
+import { PlanningApiService } from '../services/planning-api.service';
 import { ToastService } from '../services/toast.service';
 import type { CalendarEvent } from '../models/studio.models';
 
 describe('CalendarPageComponent reschedule', () => {
   const event = (): CalendarEvent => ({
+    kind: 'publication', planId: null, planItemId: null, priority: null, contentType: null,
     id: 'publication-1', projectId: 'project-1', channel: 'website', status: 'scheduled',
     scheduledFor: '2026-08-23T10:00:00.000Z', publishedAt: null, externalUrl: null,
     title: 'Planned article', projectTitle: 'Planned article', destination: 'Website', site: null,
@@ -19,8 +20,8 @@ describe('CalendarPageComponent reschedule', () => {
   function create(api: Record<string, jasmine.Spy>) {
     TestBed.configureTestingModule({ providers: [
       { provide: StudioApiService, useValue: api },
-      { provide: AppContextService, useValue: { sites: () => [] } },
-      { provide: ConfirmService, useValue: {} },
+      { provide: AppContextService, useValue: { sites: () => [], activeSite: () => ({ id: 'site-1', name: 'Site one' }) } },
+      { provide: PlanningApiService, useValue: {} },
       { provide: ToastService, useValue: { success: jasmine.createSpy('success') } },
     ] });
     return TestBed.runInInjectionContext(() => new CalendarPageComponent());

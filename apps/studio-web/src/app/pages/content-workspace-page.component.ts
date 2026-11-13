@@ -4,14 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
-import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AuRichEditorComponent } from '../components/ui/au-rich-editor.component';
 import type {
   InternalLinkSuggestion,
   ProjectVersionDetail,
-  PublishingAccount,
   StudioProjectDetailView,
   StudioPublication,
   StudioSocialContent,
@@ -205,8 +203,18 @@ function strOf(value: unknown): string {
               <div class="au-form__actions">
                 <button class="au-btn au-btn--secondary" type="button" (click)="generateAsset()">
                   <app-icon name="media"></app-icon>
-                  {{ project.latestVersion?.assetVariants?.length ? 'Generate new image' : 'Generate image' }}
+                  {{ project.latestVersion?.assetVariants?.length ? 'Generate new hero image' : 'Generate hero image' }}
                 </button>
+              </div>
+              <div class="au-mt-3">
+                <strong>Images in the article: {{ inlineImageCount }}/{{ INLINE_IMAGE_MIN }}</strong>
+                <p class="au-muted">Every article carries at least {{ INLINE_IMAGE_MIN }} images between its sections. They are generated with the article and placed after the first paragraph of a section.</p>
+                <div class="au-form__actions" *ngIf="inlineImageCount < INLINE_IMAGE_MIN">
+                  <button class="au-btn au-btn--primary" type="button" (click)="generateInlineImages()">
+                    <app-icon name="sparkles"></app-icon>
+                    Generate {{ INLINE_IMAGE_MIN - inlineImageCount }} missing {{ INLINE_IMAGE_MIN - inlineImageCount === 1 ? 'image' : 'images' }}
+                  </button>
+                </div>
               </div>
             </section>
 
@@ -397,11 +405,12 @@ function strOf(value: unknown): string {
             </section>
 
             <section class="au-panel" *ngSwitchCase="'schedule'">
-              <p class="au-hint au-panel-pad">Schedule the article and its social posts. Times are in your site timezone.</p>
-              <div class="au-table-wrap">
+              <!-- Read-only summary: dates live in Calendar, publication state in Publications. -->
+              <p class="au-hint au-panel-pad">Where and when this article goes out. Schedule it in Calendar; publish now, retry or cancel it in Publications.</p>
+              <div class="au-table-wrap" *ngIf="publications.length > 0">
                 <table class="au-table">
                   <thead>
-                    <tr><th>Channel</th><th>Destination</th><th>Status</th><th>When</th><th style="width: 220px"></th></tr>
+                    <tr><th>Channel</th><th>Destination</th><th>Status</th><th>When</th></tr>
                   </thead>
                   <tbody>
                     <tr *ngFor="let publication of publications">
@@ -411,56 +420,20 @@ function strOf(value: unknown): string {
                         <span class="au-badge" [class]="statusClass(publication.status)">{{ publication.status }}</span>
                         <span class="au-table__sub" *ngIf="publication.lastError">{{ publication.lastError }}</span>
                       </td>
-                      <td>
-                        <input
-                          class="au-input"
-                          type="datetime-local"
-                          [ngModel]="toLocalInput(publication.scheduledFor)"
-                          (ngModelChange)="reschedule(publication, $event)"
-                        />
-                      </td>
-                      <td>
-                        <div class="au-inline">
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="publication.status === 'failed'" (click)="retryPublication(publication)">
-                            <app-icon name="refresh"></app-icon>
-                            Retry
-                          </button>
-                          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="publication.status === 'scheduled' || publication.status === 'ready' || publication.status === 'draft'" (click)="publishNow(publication)">
-                            Publish now
-                          </button>
-                          <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" *ngIf="publication.status === 'scheduled'" (click)="cancelPublication(publication)">
-                            Cancel
-                          </button>
-                        </div>
-                      </td>
+                      <td>{{ publication.scheduledFor ? (publication.scheduledFor | date: 'medium') : 'Not scheduled' }}</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-
-              <div class="au-form__actions au-panel-pad au-mt-0" *ngIf="publications.length === 0">
-                <label class="au-field au-mb-0">
-                  <span class="au-field__label">Article on</span>
-                  <select class="au-select au-filter-select" [(ngModel)]="newArticleSiteId">
-                    <option *ngFor="let site of scheduleSites" [ngValue]="site.id">{{ site.name }}</option>
-                  </select>
-                </label>
-                <input class="au-input" style="max-width: 220px" type="datetime-local" [(ngModel)]="newScheduleTime" />
-                <button class="au-btn au-btn--secondary" type="button" (click)="scheduleWebsite()">Schedule article</button>
-              </div>
-              <div class="au-form__actions au-panel-pad au-mt-0" *ngIf="publications.length > 0">
-                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('website')" (click)="scheduleWebsite()">
-                  <app-icon name="plus"></app-icon>
-                  Schedule article
-                </button>
-                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('x')" (click)="scheduleSocial('x')">
-                  <app-icon name="plus"></app-icon>
-                  Schedule X
-                </button>
-                <button class="au-btn au-btn--secondary au-btn--sm" type="button" *ngIf="!hasChannel('instagram')" (click)="scheduleSocial('instagram')">
-                  <app-icon name="plus"></app-icon>
-                  Schedule Instagram
-                </button>
+              <div class="au-form__actions au-panel-pad au-mt-0">
+                <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }">
+                  <app-icon name="calendar"></app-icon>
+                  Schedule in Calendar
+                </a>
+                <a class="au-btn au-btn--secondary au-btn--sm" *ngIf="publications.length > 0" routerLink="/studio/publications" [queryParams]="{ projectId: projectId }">
+                  <app-icon name="publications"></app-icon>
+                  Manage in Publications
+                </a>
               </div>
             </section>
 
@@ -546,7 +519,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
-  private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
 
@@ -566,12 +538,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   socialThreadLength = 1;
   socialGenerating = false;
   socialDrafts: Record<string, string> = {};
-  accounts: PublishingAccount[] = [];
-
-  // Schedule tab state.
-  scheduleSites: Array<{ id: string; name: string }> = [];
-  newScheduleTime = '';
-  newArticleSiteId = '';
 
   get social(): StudioSocialContent[] {
     return this.project?.socialContents ?? [];
@@ -703,6 +669,13 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     return Boolean(this.project && this.project.reviewGate.blockerCount > 0 && this.project.versions.length > 0);
   }
 
+  readonly INLINE_IMAGE_MIN = 3;
+  private inlineImagesPending = false;
+
+  get inlineImageCount(): number {
+    return (this.draftBody.match(/<img[^>]*>/gi) ?? []).length;
+  }
+
   get imageNeedsRetry(): boolean {
     const image = this.project?.latestVersion?.image;
     return Boolean(image && (image.status === 'failed' || image.status === 'retryable'));
@@ -738,20 +711,13 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.destroyRef.onDestroy(() => this.stopPolling());
     this.load();
-    this.api.listPublishingAccounts().subscribe({
-      next: (response) => {
-        this.accounts = response.items;
-      },
-    });
-    this.scheduleSites = this.appContext.sites().map((site) => ({ id: site.id, name: site.name }));
-    this.newArticleSiteId = this.scheduleSites[0]?.id ?? '';
   }
 
   ngOnDestroy(): void {
     this.stopPolling();
   }
 
-  private get projectId(): string {
+  get projectId(): string {
     return this.route.snapshot.paramMap.get('id') || '';
   }
 
@@ -796,6 +762,9 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private isWorkInFlight(project: StudioProjectDetailView): boolean {
     const imageStatus = project.latestVersion?.image?.status;
     if (imageStatus === 'queued' || imageStatus === 'processing') {
+      return true;
+    }
+    if (this.inlineImagesPending && (project.latestVersion?.bodyHtml?.match(/<img[^>]*>/gi) ?? []).length < this.INLINE_IMAGE_MIN) {
       return true;
     }
     return ['awaiting_generation', 'publish_queued'].includes(project.reviewGate.stage);
@@ -977,6 +946,20 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     });
   }
 
+  generateInlineImages(): void {
+    const versionId = this.project?.latestVersion?.id;
+    this.api.generateAsset(this.projectId, versionId, 'inline').subscribe({
+      next: () => {
+        this.notice = 'Images queued. They appear in the article as each one finishes.';
+        this.inlineImagesPending = true;
+        this.startPolling();
+      },
+      error: (err) => {
+        this.error = this.describe(err);
+      },
+    });
+  }
+
   retryImage(): void {
     const imageId = this.project?.latestVersion?.image?.id;
     if (!imageId) {
@@ -1088,7 +1071,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
       case 'social':
         return 'Social';
       case 'schedule':
-        return 'Schedule';
+        return 'Publishing';
       case 'history':
         return 'History';
     }
@@ -1228,139 +1211,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
       default:
         return 'neutral';
     }
-  }
-
-  toLocalInput(value: string | null): string {
-    if (!value) {
-      return '';
-    }
-    const date = new Date(value);
-    const pad = (part: number) => String(part).padStart(2, '0');
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
-  }
-
-  reschedule(publication: ProjectPublication, localInput: string): void {
-    if (!localInput) {
-      return;
-    }
-    this.api.reschedulePublication(publication.id, new Date(localInput).toISOString()).subscribe({
-      next: () => {
-        this.notice = 'Publication rescheduled.';
-        this.load();
-      },
-      error: (err) => {
-        this.error = this.describe(err);
-        this.load();
-      },
-    });
-  }
-
-  cancelPublication(publication: ProjectPublication): void {
-    void this.confirmCancelPublication(publication);
-  }
-
-  private async confirmCancelPublication(publication: ProjectPublication): Promise<void> {
-    const confirmed = await this.confirm.confirm({
-      title: `Cancel this ${publication.channel} publication?`,
-      message: 'The scheduled publication is removed and will not run.',
-      confirmLabel: 'Cancel publication',
-      danger: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-    this.api.cancelPublication(publication.id).subscribe({
-      next: () => {
-        this.toast.success('Publication canceled.');
-        this.load();
-      },
-      error: (err) => {
-        this.error = this.describe(err);
-      },
-    });
-  }
-
-  retryPublication(publication: ProjectPublication): void {
-    this.api.retryPublication(publication.id).subscribe({
-      next: () => this.load(),
-      error: (err) => {
-        this.error = this.describe(err);
-      },
-    });
-  }
-
-  publishNow(publication: ProjectPublication): void {
-    this.api.publishNow(publication.id).subscribe({
-      next: () => this.load(),
-      error: (err) => {
-        this.error = this.describe(err);
-      },
-    });
-  }
-
-  scheduleWebsite(): void {
-    if (!this.project) {
-      return;
-    }
-    const versionId = this.project.latestVersion?.id;
-    if (!versionId) {
-      this.error = 'No article version to schedule.';
-      return;
-    }
-    const scheduledFor = this.newScheduleTime ? new Date(this.newScheduleTime).toISOString() : undefined;
-    this.api
-      .createPublication({
-        projectId: this.projectId,
-        versionId,
-        channel: 'website',
-        siteId: this.newArticleSiteId || this.project.siteId,
-        scheduledFor,
-      })
-      .subscribe({
-        next: () => {
-          this.notice = scheduledFor ? 'Article scheduled.' : 'Article publication draft created.';
-          this.load();
-        },
-        error: (err) => {
-          this.error = this.describe(err);
-        },
-      });
-  }
-
-  scheduleSocial(channel: 'x' | 'instagram'): void {
-    if (!this.project) {
-      return;
-    }
-    const versionId = this.project.latestVersion?.id;
-    if (!versionId) {
-      this.error = 'No article version to schedule.';
-      return;
-    }
-    const account = this.accounts.find((entry) => entry.platform === channel && entry.enabled);
-    if (!account) {
-      this.error = `No enabled ${channel} account. Connect one in Automation → Social accounts.`;
-      return;
-    }
-    const piece = this.social.find((entry) => entry.channel === channel && entry.generationStatus === 'done');
-    const scheduledFor = this.newScheduleTime ? new Date(this.newScheduleTime).toISOString() : undefined;
-    this.api
-      .createPublication({
-        projectId: this.projectId,
-        versionId,
-        channel,
-        accountId: account.id,
-        socialContentId: piece?.id,
-        scheduledFor,
-      })
-      .subscribe({
-        next: () => {
-          this.notice = `${channel} publication ${scheduledFor ? 'scheduled' : 'created'}.`;
-          this.load();
-        },
-        error: (err) => {
-          this.error = this.describe(err);
-        },
-      });
   }
 
   private describe(err: unknown): string {

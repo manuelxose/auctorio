@@ -5,6 +5,7 @@ import { getEnv, getNumberEnv, isProductionEnv } from "../shared/utils/env";
 import { structuredEvent } from "../shared/utils/logger";
 import { startMetricsLogging } from "../studio/metrics";
 import { aiRequestContextHook } from "../infrastructure/ai/ai-settings";
+import { siteRequestContextHook } from "../infrastructure/db/prisma";
 
 /**
  * Phase 5: lightweight fixed-window rate limiter (no heavy platform).
@@ -43,6 +44,7 @@ export function buildServer() {
 
   // Per-request context so model calls use the workspace's AI choice (Settings → AI).
   server.addHook("onRequest", aiRequestContextHook);
+  server.addHook("onRequest", siteRequestContextHook);
 
   // Global per-IP rate limiting; enabled by default in production, disabled
   // in tests/dev unless explicitly configured.

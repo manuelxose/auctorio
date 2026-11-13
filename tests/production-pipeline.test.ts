@@ -46,7 +46,7 @@ async function cleanup(tenantId: string) {
 }
 
 function fakeImageQueue() {
-  setProductionStageOverrides({ requestImage: async () => undefined });
+  setProductionStageOverrides({ requestImage: async () => undefined, requestInlineImages: async () => undefined });
 }
 
 test("ENG-01: plan item and manual requests run the same shared QA/gates stage functions", async () => {
@@ -56,6 +56,7 @@ test("ENG-01: plan item and manual requests run the same shared QA/gates stage f
   const seen: string[] = [];
   setProductionStageOverrides({
     requestImage: async () => undefined,
+    requestInlineImages: async () => undefined,
     qa: async (ctx) => (seen.push(`qa:${ctx.kind}`), defaults.qa(ctx)),
     gates: async (ctx) => (seen.push(`gates:${ctx.kind}`), defaults.gates(ctx)),
   });

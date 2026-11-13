@@ -24,11 +24,15 @@ export type SiteSourceRecommendation = {
   score: number;
   status: string;
   sourceId: string | null;
+  /** Workspace-wide web-discovery row (siteId null); accepting it creates a shared source. */
+  shared?: boolean;
 };
 
 export type SiteSource = {
   id: string;
   name: string;
+  /** Feeds every site (siteId null) rather than only the active one. */
+  shared?: boolean;
   url: string;
   type: string;
   state: 'active' | 'paused' | 'archived';

@@ -67,6 +67,7 @@ import {
   buildAssetPublicUrl,
   queuePublication,
   requestImageGenerationForVersion,
+  requestInlineImagesForVersion,
   retryImageGeneration,
   startProjectGeneration,
 } from "./orchestration";
@@ -147,6 +148,7 @@ import { registerPhase5OpsRoutes } from "./routes-phase5-ops";
 import { registerNotificationRoutes } from "./routes-notifications";
 import { registerCopilotRoutes } from "./routes-copilot";
 import { registerAiSettingsRoutes } from "./routes-ai";
+import { registerAdminRoutes } from "./routes-admin";
 import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
 import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
@@ -423,6 +425,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerNotificationRoutes(fastify);
   registerCopilotRoutes(fastify);
   registerAiSettingsRoutes(fastify);
+  registerAdminRoutes(fastify);
   registerEventRoutes(fastify);
 
   fastify.get("/health/live", async () => ({ status: "ok" }));
@@ -1620,7 +1623,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return;
     }
 
-    const body = parseBody<{ projectId?: string; versionId?: string; promptPresetVersionId?: string }>(request);
+    const body = parseBody<{ projectId?: string; versionId?: string; promptPresetVersionId?: string; kind?: string }>(request);
     const projectId = body.projectId?.trim();
     if (!projectId) {
       return badRequest(reply, "projectId is required");
@@ -1636,6 +1639,11 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
 
     if (!version) {
       return notFound(reply, "version not found");
+    }
+
+    if (body.kind === "inline") {
+      const contentImageIds = await requestInlineImagesForVersion(context.tenantId, version.id);
+      return reply.code(202).send({ version_id: version.id, content_image_ids: contentImageIds, status: "queued" });
     }
 
     const contentImageId = await requestImageGenerationForVersion(

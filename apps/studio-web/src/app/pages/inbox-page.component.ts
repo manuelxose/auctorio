@@ -7,6 +7,8 @@ import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { ProductionApiService } from '../services/production-api.service';
+import { ProductionStatusComponent } from '../components/production/production-status.component';
 import type {
   SourceItemStatus,
   StudioMuteRule,
@@ -22,7 +24,7 @@ type InboxTab = 'inbox' | 'clusters';
 @Component({
   selector: 'app-inbox-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -134,20 +136,11 @@ type InboxTab = 'inbox' | 'clusters';
                   <h3 class="au-feed__title">{{ item.title }}</h3>
                   <p class="au-feed__desc">{{ item.description || '—' }}</p>
                   <div class="au-feed__actions">
-                    <select
-                      class="au-select au-filter-select"
-                      [(ngModel)]="siteForItem[item.id]"
-                      (ngModelChange)="onSiteChosen($event, item.id)"
-                      aria-label="Create article on site"
-                    >
-                      <option [ngValue]="null" disabled>Create article on…</option>
-                      <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-                    </select>
                     <button
                       class="au-btn au-btn--primary au-btn--sm"
                       type="button"
                       (click)="createArticle(item)"
-                      [disabled]="!siteForItem[item.id] || creating[item.id]"
+                      [disabled]="!siteId || creating[item.id]"
                     >
                       <app-icon name="sparkles"></app-icon>
                       {{ creating[item.id] ? 'Creating…' : 'Rewrite as news article' }}
@@ -259,6 +252,13 @@ type InboxTab = 'inbox' | 'clusters';
           <div class="au-story-drawer__body">
             <h2 class="au-story-drawer__title">{{ story.headline }}</h2>
             <p class="au-story-drawer__summary">{{ story.summary }}</p>
+            <div class="au-feed__actions">
+              <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="generateArticle(story.id)" [disabled]="generatingStoryId === story.id">
+                <app-icon name="sparkles"></app-icon>
+                {{ generatingStoryId === story.id ? 'Starting…' : 'Generate article' }}
+              </button>
+            </div>
+            <app-production-status [clusterId]="story.id"></app-production-status>
 
             <div class="au-feed__note" *ngIf="story.verificationDetail && story.verificationDetail.reasons && story.verificationDetail.reasons.length > 0">
               Verification: {{ (story.verificationDetail.reasons ?? []).join(', ') }}
@@ -348,11 +348,7 @@ type InboxTab = 'inbox' | 'clusters';
           </div>
 
           <footer class="au-story-drawer__actions">
-            <select class="au-select au-filter-select" [(ngModel)]="articleSiteId" aria-label="Site for article">
-              <option [ngValue]="null" disabled>Create article on…</option>
-              <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-            </select>
-            <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="createArticleFromStory()" [disabled]="!articleSiteId || busy">Create article</button>
+            <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="createArticleFromStory()" [disabled]="!siteId || busy">Create article</button>
             <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="saveStory()" [disabled]="busy">Save</button>
             <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="rejectStory()" [disabled]="busy">Reject</button>
             <span class="au-story-drawer__spacer"></span>
@@ -374,25 +370,26 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
+  private readonly production = inject(ProductionApiService);
+  generatingStoryId: string | null = null;
 
   tab: InboxTab = 'inbox';
   items: StudioSourceItem[] = [];
   clusters: StudioStoryCluster[] = [];
   sources: StudioSource[] = [];
-  sites: StudioSite[] = [];
   mutes: StudioMuteRule[] = [];
   page = 1;
   pageSize = 20;
   total = 0;
   loading = false;
   busy = false;
-  siteForItem: Record<string, string | null> = {};
   creating: Record<string, boolean> = {};
   noticeFor: Record<string, string> = {};
   story: StudioStoryDetail | null = null;
   splitSelection = new Set<string>();
   mergeTargetId: string | null = null;
-  articleSiteId: string | null = null;
+  /** Articles are always created on the top bar active site. */
+  readonly siteId: string | null = inject(AppContextService).activeSite()?.id ?? null;
   Math = Math;
   filters = {
     sourceId: '',
@@ -407,7 +404,6 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
     this.api.listSources(1, 100).subscribe({
       next: (response) => {
         this.sources = response.items;
@@ -504,12 +500,8 @@ export class InboxPageComponent implements OnInit, OnDestroy {
     return new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
-  onSiteChosen(siteId: string | null, itemId: string): void {
-    this.siteForItem[itemId] = siteId;
-  }
-
   createArticle(item: StudioSourceItem): void {
-    const siteId = this.siteForItem[item.id];
+    const siteId = this.siteId;
     if (!siteId || this.creating[item.id]) {
       return;
     }
@@ -576,6 +568,21 @@ export class InboxPageComponent implements OnInit, OnDestroy {
 
   // ── Story detail drawer ────────────────────────────────────────────────
 
+  /** Starts (or returns the active) production job for the story; app-production-status follows it and links to the review. */
+  generateArticle(clusterId: string): void {
+    this.generatingStoryId = clusterId;
+    this.production.start({ kind: 'cluster', clusterId }).subscribe({
+      next: () => {
+        this.generatingStoryId = null;
+        this.toast.success('Writing started. The draft appears in the Review queue.');
+      },
+      error: (error) => {
+        this.generatingStoryId = null;
+        this.toast.error(error?.error?.message ?? 'Could not start the article');
+      },
+    });
+  }
+
   openStory(clusterId: string): void {
     this.story = null;
     this.splitSelection.clear();
@@ -640,7 +647,7 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   }
 
   createArticleFromStory(): void {
-    const siteId = this.articleSiteId;
+    const siteId = this.siteId;
     if (!this.story || !siteId || this.busy) {
       return;
     }

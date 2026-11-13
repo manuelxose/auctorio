@@ -8,14 +8,11 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppContextService } from '../services/app-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
-import { ProductionApiService } from '../services/production-api.service';
-import { ProductionStatusComponent } from '../components/production/production-status.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type {
   StudioGenerationDetail,
   StudioGenerationSummary,
   StudioSite,
-  StudioStoryCluster,
   StudioFactLicense,
 } from '../models/studio.models';
 
@@ -45,53 +42,35 @@ const OUTCOME_LABELS: Record<string, string> = {
 @Component({
   selector: 'app-editorial-engine-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Phase 4 · Evidence-grounded generation</p>
-          <h1 class="au-page__title">Editorial Engine</h1>
+          <h1 class="au-page__title">Review queue</h1>
           <p class="au-page__subtitle">
-            Story clusters → fact ledger → editorial brief → original article → QA → publication decision.
+            Articles autopilot wrote from your stories. Check the evidence and QA, then approve or reject. To start one, open a story in the Inbox.
           </p>
         </div>
+        <a class="au-btn au-btn--secondary" routerLink="/studio/inbox">
+          <app-icon name="inbox"></app-icon>
+          Open Inbox
+        </a>
       </header>
 
-      <div class="au-tabs" role="tablist">
-        <button
-          class="au-tab"
-          [class.au-tab--active]="mode === 'generations'"
-          (click)="mode = 'generations'; loadGenerations()"
-        >
-          Generations ({{ generationTotal }})
-        </button>
-        <button
-          class="au-tab"
-          [class.au-tab--active]="mode === 'candidates'"
-          (click)="mode = 'candidates'; loadCandidates()"
-        >
-          Candidates
-        </button>
-      </div>
-
-      <div class="au-toolbar" *ngIf="mode === 'generations'">
-        <select class="au-select au-filter-select" [(ngModel)]="generationFilters.decision" (ngModelChange)="loadGenerations()" aria-label="Filter by decision">
-          <option value="">All decisions</option>
-          <option value="create_new">Create new</option>
-          <option value="update_existing">Update existing</option>
-          <option value="skip">Skip</option>
-        </select>
+      <div class="au-toolbar">
         <select class="au-select au-filter-select" [(ngModel)]="generationFilters.outcome" (ngModelChange)="loadGenerations()" aria-label="Filter by outcome">
-          <option value="">All outcomes</option>
-          <option value="auto_publish">Auto-publish</option>
-          <option value="review">Review</option>
-          <option value="hold">Hold</option>
-          <option value="reject">Reject</option>
+          <option value="review">Needs review</option>
+          <option value="hold">On hold</option>
+          <option value="auto_publish">Auto-published</option>
+          <option value="reject">Rejected by QA</option>
+          <option value="">All</option>
         </select>
-        <select class="au-select au-filter-select" [(ngModel)]="generationFilters.siteId" (ngModelChange)="loadGenerations()" aria-label="Filter by site">
-          <option value="">All sites</option>
-          <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
+        <select class="au-select au-filter-select" [(ngModel)]="generationFilters.decision" (ngModelChange)="loadGenerations()" aria-label="Filter by decision">
+          <option value="">New and updates</option>
+          <option value="create_new">New articles</option>
+          <option value="update_existing">Updates to existing</option>
+          <option value="skip">Skipped</option>
         </select>
         <button class="au-btn au-btn--ghost" (click)="loadGenerations()">
           <app-icon name="refresh"></app-icon>
@@ -99,29 +78,19 @@ const OUTCOME_LABELS: Record<string, string> = {
         </button>
       </div>
 
-      <div class="au-toolbar" *ngIf="mode === 'candidates'">
-        <select class="au-select au-filter-select" [(ngModel)]="candidateStatus" (ngModelChange)="loadCandidates()" aria-label="Filter by status">
-          <option value="">All active</option>
-          <option value="open">Open</option>
-          <option value="selected">Selected</option>
-          <option value="developing">Developing</option>
-          <option value="updated">Updated</option>
-        </select>
-      </div>
-
       <!-- Generations list -->
-      <ng-container *ngIf="mode === 'generations'">
+      <ng-container>
         <app-empty-state
           *ngIf="generations.length === 0 && !loadingGenerations"
           icon="template"
-          title="No generations yet"
-          message="Generate an article from a story cluster on the Candidates tab."
+          [title]="generationFilters.outcome === 'review' ? 'Nothing waiting for review' : 'No articles match'"
+          message="Open a story in the Inbox and choose Generate article; the draft lands here when it needs a human."
         ></app-empty-state>
         <div class="au-feed">
           <article
             class="au-feed__item au-feed__item--interactive"
             *ngFor="let generation of generations"
-            (click)="openGeneration(generation.id)"
+            (click)="openGeneration(generation)"
             [attr.aria-label]="'Open generation ' + (generation.title ?? generation.id)"
           >
             <div class="au-feed__body">
@@ -146,43 +115,6 @@ const OUTCOME_LABELS: Record<string, string> = {
         </div>
       </ng-container>
 
-      <!-- Candidates list -->
-      <ng-container *ngIf="mode === 'candidates'">
-        <app-empty-state
-          *ngIf="candidates.length === 0 && !loadingCandidates"
-          icon="inbox"
-          title="No candidate stories"
-          message="The discovery and intelligence pipeline will surface candidates here."
-        ></app-empty-state>
-        <div class="au-feed">
-          <article class="au-feed__item" *ngFor="let cluster of candidates">
-            <div class="au-feed__body">
-              <div class="au-feed__meta">
-                <span class="au-badge" [ngClass]="verificationBadgeClass(cluster)">{{ cluster.verificationState ?? 'unverified' }}</span>
-                <span class="au-badge au-badge--neutral" *ngIf="cluster.candidateScore !== null && cluster.candidateScore !== undefined">
-                  relevance {{ Math.round((cluster.candidateScore ?? 0) * 100) }}%
-                </span>
-                <span class="au-feed__date">{{ cluster.lastSeenAt | date: 'short' }}</span>
-              </div>
-              <h3 class="au-feed__title">{{ cluster.headline }}</h3>
-              <p class="au-feed__desc">{{ cluster.summary }}</p>
-              <div class="au-feed__actions">
-                <button
-                  class="au-btn au-btn--primary au-btn--sm"
-                  type="button"
-                  (click)="generateFromCluster(cluster)"
-                  [disabled]="generatingClusterId === cluster.id"
-                >
-                  <app-icon name="sparkles"></app-icon>
-                  {{ generatingClusterId === cluster.id ? 'Generating…' : 'Generate article' }}
-                </button>
-              </div>
-              <app-production-status [clusterId]="cluster.id" (changed)="loadGenerations()"></app-production-status>
-            </div>
-          </article>
-        </div>
-      </ng-container>
-
       <!-- Detail drawer -->
       <div class="au-story-drawer" *ngIf="detail" role="dialog" aria-modal="true" aria-label="Generation review">
         <div class="au-story-drawer__scrim" (click)="closeDetail()"></div>
@@ -200,6 +132,10 @@ const OUTCOME_LABELS: Record<string, string> = {
               </div>
             </div>
             <div class="au-story-drawer__actions">
+              <a class="au-btn au-btn--secondary" *ngIf="detailProjectId" [routerLink]="['/studio/content', detailProjectId]">
+                <app-icon name="edit"></app-icon>
+                Edit
+              </a>
               <button class="au-btn au-btn--primary" (click)="approve(detail)" [disabled]="detail.status === 'approved'">
                 <app-icon name="check"></app-icon>
                 Approve
@@ -417,7 +353,6 @@ const OUTCOME_LABELS: Record<string, string> = {
 export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly toast = inject(ToastService);
-  private readonly production = inject(ProductionApiService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly appContext = inject(AppContextService);
   private subscription: Subscription | null = null;
@@ -427,37 +362,25 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   readonly OUTCOME_LABELS = OUTCOME_LABELS;
   Math = Math;
 
-  mode: 'generations' | 'candidates' = 'generations';
   generations: StudioGenerationSummary[] = [];
   generationTotal = 0;
   generationPage = 1;
-  generationPageSize = 20;
-  generationFilters = { decision: '', outcome: '', siteId: '' };
+  // shortcut: the API cannot filter by outcome, so filters run on the 100 most recent; add server-side filters if the queue outgrows that.
+  generationPageSize = 100;
+  generationFilters = { decision: '', outcome: 'review', siteId: this.appContext.activeSite()?.id ?? '' };
   loadingGenerations = false;
 
-  candidates: StudioStoryCluster[] = [];
-  candidateStatus = '';
-  loadingCandidates = false;
-  generatingClusterId: string | null = null;
 
-  sites: StudioSite[] = [];
   detail: StudioGenerationDetail | null = null;
+  detailProjectId: string | null = null;
   safeBody: SafeHtml = '';
 
   ngOnInit(): void {
-    this.loadSites();
     this.loadGenerations();
   }
 
   ngOnDestroy(): void {
     this.subscription?.unsubscribe();
-  }
-
-  private loadSites(): void {
-    this.api.listSites().subscribe({
-      next: (response) => (this.sites = response.items ?? []),
-      error: () => undefined,
-    });
   }
 
   loadGenerations(): void {
@@ -489,41 +412,9 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
       });
   }
 
-  loadCandidates(): void {
-    this.loadingCandidates = true;
-    this.api.listStoryClusters(1, 50, this.candidateStatus || undefined).subscribe({
-      next: (response) => {
-        this.candidates = response.items.filter(
-          (cluster) =>
-            (cluster.candidateScore ?? 0) >= 0.4 &&
-            ['open', 'selected', 'developing', 'updated'].includes(cluster.status),
-        );
-        this.loadingCandidates = false;
-      },
-      error: () => {
-        this.loadingCandidates = false;
-        this.toast.error('Could not load candidates');
-      },
-    });
-  }
-
-  /** Starts (or returns the active) cluster production job; progress is shown by app-production-status. */
-  generateFromCluster(cluster: StudioStoryCluster): void {
-    this.generatingClusterId = cluster.id;
-    this.production.start({ kind: 'cluster', clusterId: cluster.id }).subscribe({
-      next: () => {
-        this.generatingClusterId = null;
-        this.toast.success('Production started');
-      },
-      error: (error) => {
-        this.generatingClusterId = null;
-        this.toast.error(error?.error?.message ?? 'Generation failed');
-      },
-    });
-  }
-
-  openGeneration(generationId: string): void {
-    this.api.getGeneration(generationId).subscribe({
+  openGeneration(generation: StudioGenerationSummary): void {
+    this.detailProjectId = generation.projectId;
+    this.api.getGeneration(generation.id).subscribe({
       next: (detail) => this.openDetail(detail),
       error: () => this.toast.error('Could not load generation'),
     });
@@ -614,19 +505,6 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
     } as StudioGenerationSummary);
   }
 
-  verificationBadgeClass(cluster: StudioStoryCluster): string {
-    switch (cluster.verificationState) {
-      case 'high_confidence':
-      case 'corroborated':
-        return 'au-badge--success';
-      case 'disputed':
-        return 'au-badge--danger';
-      case 'developing':
-        return 'au-badge--warning';
-      default:
-        return 'au-badge--neutral';
-    }
-  }
 
   usageBadgeClass(license: StudioFactLicense): string {
     switch (license.usage) {

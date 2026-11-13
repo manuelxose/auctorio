@@ -85,11 +85,6 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Media', title: 'Media' } },
       },
       {
-        path: 'publishing',
-        loadComponent: () => import('./pages/publishing-page.component').then((m) => m.PublishingPageComponent),
-        data: { studioMeta: { section: 'Publishing', title: 'Publishing' } },
-      },
-      {
         path: 'connections',
         loadComponent: () => import('./pages/connections-page.component').then((m) => m.ConnectionsPageComponent),
         data: { studioMeta: { section: 'Connections', title: 'Connections' } },
@@ -120,9 +115,17 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Notifications', title: 'Notifications' } },
       },
       {
-        path: 'settings',
-        redirectTo: 'settings/profile',
-        pathMatch: 'full',
+        path: 'profile',
+        loadComponent: () => import('./pages/profile-page.component').then((m) => m.ProfilePageComponent),
+        data: { studioMeta: { section: 'Account', title: 'Profile' } },
+      },
+      { path: 'settings', redirectTo: 'settings/sites', pathMatch: 'full' },
+      { path: 'settings/profile', redirectTo: 'profile', pathMatch: 'full' },
+      { path: 'admin', redirectTo: 'admin/overview', pathMatch: 'full' },
+      {
+        path: 'admin/:section',
+        loadComponent: () => import('./pages/admin-page.component').then((m) => m.AdminPageComponent),
+        data: { studioMeta: { section: 'Admin', title: 'Admin' } },
       },
       {
         path: 'settings/:section',
@@ -139,6 +142,8 @@ export const routes: Routes = [
       { path: 'assets', redirectTo: 'media', pathMatch: 'prefix' },
       { path: 'review', redirectTo: 'content', pathMatch: 'prefix' },
       { path: 'publishing/scheduled', redirectTo: 'calendar', pathMatch: 'prefix' },
+      // Publishing was a read-only subset of Publications (queue, published) and Connections (destinations).
+      { path: 'publishing', redirectTo: 'publications', pathMatch: 'full' },
       { path: 'integrations', redirectTo: 'sources', pathMatch: 'prefix' },
       { path: 'analytics', redirectTo: 'overview', pathMatch: 'prefix' },
     ],

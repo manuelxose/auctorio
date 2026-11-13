@@ -1,8 +1,10 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
+import { Component, Input, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { AppContextService } from '../../services/app-context.service';
+import { ConfirmService } from '../../services/confirm.service';
+import { StudioApiService } from '../../services/studio-api.service';
 import { EditorialContextService } from '../../services/editorial-context.service';
 import { ToastService } from '../../services/toast.service';
 import { AppEmptyStateComponent } from '../ui/app-empty-state.component';
@@ -36,11 +38,10 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
     </p>
 
     <div class="au-toolbar au-toolbar--panel au-mb-3">
-      <button class="au-btn au-btn--primary" type="button" [disabled]="busy()" (click)="discover()"><app-icon name="sparkles"></app-icon>{{ busy() ? 'Discovering...' : 'Discover sources' }}</button>
-      <button class="au-btn au-btn--secondary" type="button" (click)="showAdd.set(!showAdd())"><app-icon name="plus"></app-icon>Add manually</button>
+      <button *ngIf="section === 'recommendations'" class="au-btn au-btn--primary" type="button" [disabled]="busy()" (click)="discover()"><app-icon name="sparkles"></app-icon>{{ busy() ? 'Discovering...' : 'Discover sources' }}</button>
       <span class="au-toolbar__spacer"></span>
       <input class="au-input au-input--search" type="search" placeholder="Filter by name, URL or topic" aria-label="Filter sources" [ngModel]="search()" (ngModelChange)="search.set($event)" />
-      <select class="au-select" aria-label="Relationship" [ngModel]="relationship()" (ngModelChange)="relationship.set($event)">
+      <select *ngIf="section === 'recommendations'" class="au-select" aria-label="Relationship" [ngModel]="relationship()" (ngModelChange)="relationship.set($event)">
         <option value="">All relationships</option>
         <option value="first_party">First-party</option>
         <option value="external">External</option>
@@ -51,16 +52,8 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
       </select>
     </div>
 
-    <form class="au-panel au-panel--padded au-mb-3 reg-form" *ngIf="showAdd()" (ngSubmit)="addManual()">
-      <label class="au-field"><span class="au-field__label">Feed or site URL</span><input class="au-input" name="url" required [(ngModel)]="draft.url" /></label>
-      <label class="au-field"><span class="au-field__label">Name (optional)</span><input class="au-input" name="name" [(ngModel)]="draft.name" /></label>
-      <label class="au-field"><span class="au-field__label">Topics (comma separated)</span><input class="au-input" name="topics" [(ngModel)]="draft.topics" /></label>
-      <label class="au-field"><span class="au-field__label">Language</span><input class="au-input" name="language" [(ngModel)]="draft.language" placeholder="es" /></label>
-      <div class="reg-row"><button class="au-btn au-btn--primary" type="submit" [disabled]="!draft.url.trim()">Add source</button></div>
-    </form>
-
-    <!-- Recommendations -->
-    <section class="au-panel au-panel--padded au-mb-3" aria-labelledby="reg-rec">
+    <!-- Recommendations: the site's own discovery plus workspace-wide web discovery, in one list. -->
+    <section class="au-panel au-panel--padded au-mb-3" aria-labelledby="reg-rec" *ngIf="section === 'recommendations'">
       <div class="reg-row au-mb-2">
         <h2 class="au-panel__title" id="reg-rec">Recommended sources ({{ openRecommendations().length }})</h2>
         <span class="au-toolbar__spacer"></span>
@@ -78,6 +71,7 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
             <h3>{{ rec.name || rec.domain }}</h3>
             <span class="au-badge" [ngClass]="rec.relationship === 'first_party' ? 'au-badge--brand' : 'au-badge--neutral'">{{ rec.relationship === 'first_party' ? 'First-party' : 'External' }}</span>
             <span class="au-badge au-badge--outline">{{ rec.type || 'feed' }}</span>
+            <span class="au-badge au-badge--info" *ngIf="rec.shared" title="Found by workspace web discovery; accepting it creates a source shared by all sites">Shared</span>
           </div>
           <a class="reg-muted" [href]="rec.url" target="_blank" rel="noopener noreferrer">{{ rec.url }}</a>
           <div class="reg-row">
@@ -103,10 +97,19 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
     </section>
 
     <!-- Managed sources -->
-    <section class="au-panel au-panel--padded" aria-labelledby="reg-src">
+    <section class="au-panel au-panel--padded" aria-labelledby="reg-src" *ngIf="section === 'sources'">
       <div class="reg-row au-mb-2">
-        <h2 class="au-panel__title" id="reg-src">Site sources ({{ filteredSources().length }})</h2>
+        <h2 class="au-panel__title" id="reg-src">Sources feeding this site ({{ filteredSources().length }})</h2>
         <span class="au-toolbar__spacer"></span>
+        <ng-container *ngIf="selectedSources().size > 0">
+          <span class="reg-muted">{{ selectedSources().size }} selected</span>
+          <input class="au-input au-input--sm" style="width: 140px" type="text" placeholder="Category" aria-label="Category for selected sources" [ngModel]="bulkCategory()" (ngModelChange)="bulkCategory.set($event)" />
+          <button class="au-btn au-btn--sm au-btn--secondary" type="button" [disabled]="!bulkCategory().trim()" (click)="bulkSources('assign_category')">Assign category</button>
+          <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="bulkSources('assign_site', true)">Share with all sites</button>
+          <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="bulkSources('assign_site', false)">This site only</button>
+          <button class="au-btn au-btn--sm au-btn--ghost" type="button" (click)="bulkSources('archive')">Archive</button>
+          <button class="au-btn au-btn--sm au-btn--danger-ghost" type="button" (click)="bulkSources('delete')">Delete</button>
+        </ng-container>
         <select class="au-select" aria-label="State" [ngModel]="state()" (ngModelChange)="state.set($event)">
           <option value="">All states</option>
           <option value="active">Active</option>
@@ -114,13 +117,15 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
           <option value="archived">Archived</option>
         </select>
       </div>
-      <app-empty-state *ngIf="filteredSources().length === 0" icon="sources" title="No sources for this site" text="Accept a recommendation or add a source manually."></app-empty-state>
+      <app-empty-state *ngIf="filteredSources().length === 0" icon="sources" title="No sources for this site" text="Accept a recommendation or add one in the Add tab."></app-empty-state>
       <div [class.reg-grid]="layout() === 'cards'" [style.display]="layout() === 'list' ? 'grid' : null" [style.gap]="layout() === 'list' ? '8px' : null">
         <article class="reg-card" *ngFor="let src of filteredSources(); trackBy: trackId">
           <div class="reg-row">
+            <input type="checkbox" [attr.aria-label]="'Select ' + src.name" [checked]="selectedSources().has(src.id)" (change)="toggleSource(src.id)" />
             <h3>{{ src.name }}</h3>
             <span class="au-badge" [ngClass]="src.state === 'active' ? 'au-badge--success' : src.state === 'paused' ? 'au-badge--warning' : 'au-badge--neutral'">{{ src.state }}</span>
             <span class="au-badge au-badge--outline">{{ src.type }}</span>
+            <span class="au-badge au-badge--info" *ngIf="src.shared" title="Feeds every site">Shared</span>
           </div>
           <a class="reg-muted" [href]="src.url" target="_blank" rel="noopener noreferrer">{{ src.url }}</a>
           <p class="reg-muted">{{ src.itemsCount }} items - every {{ src.refreshIntervalMinutes }} min - priority {{ src.priority }}<span *ngIf="src.lastFetchedAt"> - last fetch {{ src.lastFetchedAt | date: 'short' }}</span></p>
@@ -135,6 +140,13 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
           </div>
 
           <div class="reg-detail" *ngIf="openId() === src.id">
+            <div class="reg-row">
+              <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="verify(src)">Verify</button>
+              <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="fetchNow(src)">Fetch now</button>
+              <button class="au-btn au-btn--sm au-btn--ghost" type="button" (click)="setScope(src, !src.shared)">{{ src.shared ? 'This site only' : 'Share with all sites' }}</button>
+              <button class="au-btn au-btn--sm au-btn--ghost" type="button" (click)="markUnsupported(src)">Mark unsupported</button>
+              <button class="au-btn au-btn--sm au-btn--danger-ghost" type="button" (click)="remove(src)">Delete</button>
+            </div>
             <p class="reg-muted" *ngIf="testResult() as r"><strong>{{ r.ok ? 'Extraction works' : 'Extraction failed' }}</strong> ({{ r.latencyMs }} ms)<span *ngIf="r.error" class="reg-err"> - {{ r.error }}</span></p>
             <ul *ngIf="testResult()?.items?.length"><li *ngFor="let i of testResult()!.items"><a [href]="i.url" target="_blank" rel="noopener noreferrer">{{ i.title }}</a></li></ul>
 
@@ -170,9 +182,16 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
 })
 export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
   private readonly api = inject(SourcesApiService);
+  private readonly studio = inject(StudioApiService);
+  private readonly confirm = inject(ConfirmService);
   private readonly app = inject(AppContextService);
   private readonly editorial = inject(EditorialContextService);
   private readonly toast = inject(ToastService);
+
+  /** Which subsection of the Sources page this instance renders. */
+  @Input() section: 'sources' | 'recommendations' = 'sources';
+  readonly selectedSources = signal<Set<string>>(new Set());
+  readonly bulkCategory = signal('');
 
   readonly recommendations = signal<SiteSourceRecommendation[]>([]);
   readonly sources = signal<SiteSource[]>([]);
@@ -182,14 +201,12 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
   readonly layout = signal<'cards' | 'list'>('cards');
   readonly selected = signal<Set<string>>(new Set());
   readonly busy = signal(false);
-  readonly showAdd = signal(false);
   readonly openId = signal<string | null>(null);
   readonly testing = signal<string | null>(null);
   readonly testResult = signal<SourceTestResult | null>(null);
   readonly items = signal<SourceItemRow[]>([]);
   readonly diagnostics = signal<SourceDiagnostics | null>(null);
-  draft = { url: '', name: '', topics: '', language: '' };
-  edit = { url: '', refreshIntervalMinutes: 60, language: '', priority: 0, trustLevel: 'medium', topics: '', pillars: '', keywords: '', selectors: '' };
+  edit ={ url: '', refreshIntervalMinutes: 60, language: '', priority: 0, trustLevel: 'medium', topics: '', pillars: '', keywords: '', selectors: '' };
 
   private destroyed = false;
   private siteId: string | null = null;
@@ -238,6 +255,7 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
     if (recs) this.recommendations.set(recs.items);
     if (srcs) this.sources.set(srcs.items);
     this.selected.set(new Set());
+    this.selectedSources.set(new Set());
   }
 
   private message(error: unknown): string {
@@ -296,12 +314,99 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
     }
   }
 
-  async addManual(): Promise<void> {
-    if (!this.siteId) return;
+  toggleSource(id: string): void {
+    this.selectedSources.update((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  }
+
+  /** Bulk actions on the selected sources; "assign_site" moves them between this site and shared. */
+  async bulkSources(action: 'assign_category' | 'assign_site' | 'archive' | 'delete', shared = false): Promise<void> {
+    const ids = Array.from(this.selectedSources());
+    if (ids.length === 0) return;
+    if (action === 'delete') {
+      const confirmed = await this.confirm.confirm({
+        title: `Delete ${ids.length} source(s)?`,
+        message: 'Discovered stories stay in the inbox but these sources stop refreshing. This cannot be undone.',
+        confirmLabel: `Delete ${ids.length} sources`,
+        danger: true,
+      });
+      if (!confirmed) return;
+    }
     try {
-      await firstValueFrom(this.api.addManual(this.siteId, { url: this.draft.url.trim(), name: this.draft.name.trim() || undefined, topics: list(this.draft.topics), language: this.draft.language.trim() || undefined }));
-      this.draft = { url: '', name: '', topics: '', language: '' };
-      this.showAdd.set(false);
+      const result = await firstValueFrom(
+        this.studio.bulkSources({
+          ids,
+          action,
+          category: action === 'assign_category' ? this.bulkCategory().trim() : undefined,
+          siteId: action === 'assign_site' && !shared ? this.siteId ?? undefined : undefined,
+        }),
+      );
+      if (result.failed > 0) this.toast.error(`${result.failed} failed, ${result.succeeded} done`);
+      else this.toast.success(`${result.succeeded} done`);
+      await this.reload();
+    } catch (error) {
+      this.toast.error(this.message(error));
+    }
+  }
+
+  async setScope(src: SiteSource, shared: boolean): Promise<void> {
+    this.selectedSources.set(new Set([src.id]));
+    await this.bulkSources('assign_site', shared);
+  }
+
+  async verify(src: SiteSource): Promise<void> {
+    try {
+      const result = await firstValueFrom(this.studio.verifySource(src.id));
+      if (result.ok) this.toast.success(`${src.name} verified (HTTP ${result.status ?? '?'}, ${result.itemCount ?? 0} items).`);
+      else this.toast.error(`Verification failed: ${result.error}`);
+      await this.reload();
+    } catch (error) {
+      this.toast.error(this.message(error));
+    }
+  }
+
+  async fetchNow(src: SiteSource): Promise<void> {
+    try {
+      const result = await firstValueFrom(this.studio.fetchSource(src.id));
+      if (result.failed) this.toast.error(result.error ?? 'Fetch failed');
+      else this.toast.success(result.notModified ? 'No changes since the last fetch.' : `${result.created} new items, ${result.duplicates} duplicates.`);
+      await this.reload();
+    } catch (error) {
+      this.toast.error(this.message(error));
+    }
+  }
+
+  async markUnsupported(src: SiteSource): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Mark "${src.name}" as unsupported?`,
+      message: 'The source will be disabled and labelled unsupported with the configured restrictions note.',
+      confirmLabel: 'Mark unsupported',
+      danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      await firstValueFrom(this.studio.markSourceUnsupported(src.id, 'unsupported'));
+      this.toast.success('Source marked as unsupported.');
+      await this.reload();
+    } catch (error) {
+      this.toast.error(this.message(error));
+    }
+  }
+
+  async remove(src: SiteSource): Promise<void> {
+    const confirmed = await this.confirm.confirm({
+      title: `Delete "${src.name}"?`,
+      message: src.shared ? 'This source is shared: every site stops using it. Discovered stories stay in the inbox. This cannot be undone.' : 'Discovered stories stay in the inbox. This cannot be undone.',
+      confirmLabel: 'Delete source',
+      danger: true,
+    });
+    if (!confirmed) return;
+    try {
+      await firstValueFrom(this.studio.deleteSource(src.id));
+      this.toast.success('Source deleted.');
       await this.reload();
     } catch (error) {
       this.toast.error(this.message(error));

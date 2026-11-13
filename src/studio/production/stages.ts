@@ -11,7 +11,7 @@ import { getOrCreatePolicy } from "../automation";
 import { createPublication, enqueuePublication } from "../publication";
 import { writeAudit } from "../audit";
 import { runVersionQaV2 } from "../qa";
-import { requestImageGenerationForVersion } from "../orchestration";
+import { requestImageGenerationForVersion, requestInlineImagesForVersion } from "../orchestration";
 import { buildFactSafetyReport, hasCopyrightWarningCues, type FactSafetyReport } from "../editorial-engine/fact-safety";
 import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editorial-engine/duplicate-check";
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
@@ -323,6 +323,14 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   }
 
   if (input.cluster) {
+    // Engine drafts keep their editorial QA (no hero), but still get in-body images unless already published.
+    if (!result.publicationId) {
+      try {
+        await productionStages.requestInlineImages(ctx.tenantId, version.id);
+      } catch (error) {
+        result.imageRequestError = (error instanceof Error ? error.message : String(error)).slice(0, 400);
+      }
+    }
     if (input.cluster.status === "open") {
       await prisma.storyCluster.update({ where: { id: input.cluster.id }, data: { status: "selected" } });
     }
@@ -359,6 +367,10 @@ const defaultStages = {
   materialize,
   requestImage: async (tenantId: string, versionId: string): Promise<void> => {
     await requestImageGenerationForVersion(tenantId, versionId);
+    await requestInlineImagesForVersion(tenantId, versionId);
+  },
+  requestInlineImages: async (tenantId: string, versionId: string): Promise<void> => {
+    await requestInlineImagesForVersion(tenantId, versionId);
   },
 };
 

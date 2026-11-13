@@ -43,6 +43,10 @@ import {
 } from "../src/studio/editorial-engine/writer-provider";
 import { FakeWriter } from "./support/fake-editorial-writer";
 import { generateArticleFromCluster } from "../src/studio/editorial-engine/orchestrator";
+import { setProductionStageOverrides } from "../src/studio/production/stages";
+
+// No image queue in these scenarios: engine drafts would otherwise queue their in-body images for real.
+setProductionStageOverrides({ requestInlineImages: async () => undefined });
 import type {
   FactLicense,
   LedgerFact,

@@ -12,7 +12,8 @@ const qa_1 = require("../src/studio/qa");
         excerpt: "Analizamos precios, catalogo y perfil de uso para ayudarte a elegir la mejor plataforma segun tu caso.",
         bodyHtml: "<p>Intro detallada con suficiente contexto para el lector profesional.</p><h2>Comparativa</h2><p>" +
             "palabra ".repeat(220) +
-            "</p>",
+            "</p>" +
+            '<figure><img src="https://example.test/a.webp" alt="Ilustración" /></figure>'.repeat(3),
         seoTitle: "Comparativa de plataformas de streaming 2026",
         seoDescription: "Guia clara para comparar Netflix, Max, Disney+ y otras plataformas segun catalogo, precio y tipo de usuario.",
     }, true);

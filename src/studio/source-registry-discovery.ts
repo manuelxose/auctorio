@@ -18,7 +18,7 @@ import { getSourceAdapter } from "./adapters/registry";
 import { newRunKey } from "./discovery-run";
 import { computeSourceUiHealth, listPackCatalog } from "./source-registry";
 import { sanitizeSourceForClient, updateSource } from "./sources";
-import { loadBlockedDomainSet } from "./source-quality";
+import { acceptSourceRecommendation, dismissSourceRecommendation, loadBlockedDomainSet } from "./source-quality";
 import { getWebIntelligenceProvider } from "./web-intelligence";
 import { recordWebUsage } from "./web-discovery";
 import { registerOnboardingStep } from "./onboarding/contracts";
@@ -361,18 +361,38 @@ async function requireSite(tenantId: string, siteId: string) {
   return site;
 }
 
+/**
+ * One recommendation list per site: the site's own rows plus the workspace-wide
+ * web-discovery rows (siteId null), mapped to the same shape and flagged `shared`.
+ * Those use "dismissed" where site rows use "rejected".
+ */
 export async function listSiteSourceRecommendations(tenantId: string, siteId: string, filters: { status?: string; relationship?: string } = {}) {
   await requireSite(tenantId, siteId);
-  return prisma.sourceRecommendation.findMany({
+  const statuses = filters.status === "rejected" ? ["rejected", "dismissed"] : filters.status ? [filters.status] : null;
+  const rows = await prisma.sourceRecommendation.findMany({
     where: {
       tenantId,
-      siteId,
-      ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.relationship ? { relationship: filters.relationship } : {}),
+      // Legacy rows have no relationship; a relationship filter keeps only the site's rows.
+      ...(filters.relationship ? { siteId, relationship: filters.relationship } : { OR: [{ siteId }, { siteId: null }] }),
+      ...(statuses ? { status: { in: statuses } } : {}),
     },
     orderBy: [{ status: "asc" }, { score: "desc" }, { name: "asc" }],
     take: 200,
   });
+  return rows.map((row) =>
+    row.siteId === null
+      ? {
+          ...row,
+          shared: true,
+          status: row.status === "dismissed" ? "rejected" : row.status,
+          name: row.name ?? row.domain,
+          url: row.url ?? `https://${row.domain}`,
+          assessmentReason: row.assessmentReason ?? row.reasonSummary,
+          relationship: row.relationship ?? "external",
+          discoveryMethod: row.discoveryMethod ?? "web_discovery",
+        }
+      : { ...row, shared: false },
+  );
 }
 
 const TRUST_SCORES: Record<string, number> = { high: 0.85, medium: 0.6, low: 0.35, unassessed: 0.5 };
@@ -393,7 +413,15 @@ async function uniqueSourceName(tenantId: string, base: string, siteKey: string)
 /** Accept: create (or reactivate) a ContentSource for the site with provenance. */
 export async function acceptSiteSourceRecommendation(tenantId: string, siteId: string, recommendationId: string, userId: string | null) {
   const site = await requireSite(tenantId, siteId);
-  const recommendation = await prisma.sourceRecommendation.findFirst({ where: { id: recommendationId, tenantId, siteId } });
+  const recommendation = await prisma.sourceRecommendation.findFirst({ where: { id: recommendationId, tenantId, OR: [{ siteId }, { siteId: null }] } });
+  // Workspace-wide web-discovery row: keep its own accept path (creates a shared source).
+  if (recommendation && recommendation.siteId === null) {
+    const accepted = await acceptSourceRecommendation(tenantId, recommendationId);
+    const shared = accepted ? await prisma.contentSource.findFirst({ where: { id: accepted.sourceId, tenantId } }) : null;
+    if (!shared) throw new Error("recommendation_not_found");
+    await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "source.recommendation.accepted", entityType: "content_source", entityId: shared.id, metadata: { recommendationId, siteId, shared: true } });
+    return sanitizeSourceForClient(shared);
+  }
   if (!recommendation || !recommendation.url) throw new Error("recommendation_not_found");
   let source = recommendation.sourceId ? await prisma.contentSource.findFirst({ where: { id: recommendation.sourceId, tenantId } }) : null;
   source ??= await prisma.contentSource.findFirst({ where: { tenantId, siteId, url: recommendation.url } });
@@ -441,7 +469,8 @@ export async function acceptSiteSourceRecommendation(tenantId: string, siteId: s
 
 export async function rejectSiteSourceRecommendation(tenantId: string, siteId: string, recommendationId: string, userId: string | null) {
   const updated = await prisma.sourceRecommendation.updateMany({ where: { id: recommendationId, tenantId, siteId }, data: { status: "rejected" } });
-  if (updated.count === 0) throw new Error("recommendation_not_found");
+  // Not a site row: it may be a workspace-wide web-discovery row, which is dismissed.
+  if (updated.count === 0 && !(await dismissSourceRecommendation(tenantId, recommendationId))) throw new Error("recommendation_not_found");
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "source.recommendation.rejected", entityType: "source_recommendation", entityId: recommendationId, metadata: { siteId } });
   return { ok: true };
 }
@@ -500,11 +529,14 @@ export function sourceLifecycleState(source: Pick<ContentSource, "enabled" | "ar
 
 export async function listSiteSources(tenantId: string, siteId: string, filters: { state?: string; search?: string } = {}) {
   await requireSite(tenantId, siteId);
+  // The site's own sources plus the shared ones (siteId null) that feed every site.
   const sources = await prisma.contentSource.findMany({
     where: {
       tenantId,
-      siteId,
-      ...(filters.search ? { OR: [{ name: { contains: filters.search, mode: "insensitive" } }, { url: { contains: filters.search, mode: "insensitive" } }] } : {}),
+      AND: [
+        { OR: [{ siteId }, { siteId: null }] },
+        ...(filters.search ? [{ OR: [{ name: { contains: filters.search, mode: "insensitive" as const } }, { url: { contains: filters.search, mode: "insensitive" as const } }] }] : []),
+      ],
     },
     include: { health: true, _count: { select: { items: true } } },
     orderBy: [{ priority: "desc" }, { name: "asc" }],
@@ -526,13 +558,14 @@ export async function listSiteSources(tenantId: string, siteId: string, filters:
         lastError: source.lastError,
       });
       const { _count, ...rest } = source;
-      return { ...sanitizeSourceForClient(rest), state, uiHealth: ui, itemsCount: _count.items };
+      return { ...sanitizeSourceForClient(rest), state, uiHealth: ui, itemsCount: _count.items, shared: source.siteId === null };
     })
     .filter((source) => !filters.state || source.state === filters.state);
 }
 
+/** A source the site uses: its own, or a shared one (siteId null). */
 async function requireSiteSource(tenantId: string, siteId: string, sourceId: string) {
-  const source = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId, siteId } });
+  const source = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId, OR: [{ siteId }, { siteId: null }] } });
   if (!source) throw new Error("source_not_found");
   return source;
 }

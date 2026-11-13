@@ -1,91 +1,57 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
-import { AiProviderSettingsComponent } from '../components/ai-provider-settings.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { AiUsageRow, DiscoverySettingsResponse, StudioRoleSummary, StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
 
-type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai' | 'discovery';
+type SettingsSection = 'sites' | 'team' | 'roles' | 'discovery';
 
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, AiProviderSettingsComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, RouterLink],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Workspace configuration</p>
-          <h1 class="au-page__title">Settings</h1>
-          <p class="au-page__subtitle">Profile, sites, team, roles and AI preferences.</p>
+          <p class="au-page__eyebrow">Workspace settings</p>
+          <h1 class="au-page__title">{{ titles[section] }}</h1>
         </div>
       </header>
 
-      <div class="au-settings">
-        <nav class="au-settings__nav" aria-label="Settings sections">
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'profile'" type="button" (click)="setSection('profile')">
-            <app-icon name="user"></app-icon>
-            Profile
-          </button>
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'sites'" type="button" (click)="setSection('sites')">
-            <app-icon name="globe"></app-icon>
-            Sites
-          </button>
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'team'" type="button" (click)="setSection('team')">
-            <app-icon name="user"></app-icon>
-            Users
-          </button>
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'roles'" type="button" (click)="setSection('roles')">
-            <app-icon name="lock"></app-icon>
-            Roles
-          </button>
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'ai'" type="button" (click)="setSection('ai')">
-            <app-icon name="sparkles"></app-icon>
-            AI
-          </button>
-          <button class="au-btn au-btn--ghost" [class.is-active]="section === 'discovery'" type="button" (click)="setSection('discovery')">
-            <app-icon name="sources"></app-icon>
-            Web discovery
-          </button>
-        </nav>
-
-        <section class="au-panel au-panel--padded" *ngIf="section === 'profile'">
-          <h2 class="au-panel__title au-mb-3">Profile</h2>
-          <dl class="au-kv">
-            <dt>Name</dt>
-            <dd>{{ user?.displayName || '—' }}</dd>
-            <dt>Email</dt>
-            <dd>{{ user?.email || '—' }}</dd>
-            <dt>Role</dt>
-            <dd>{{ role }}</dd>
-            <dt>Accessible sites</dt>
-            <dd>{{ siteNames }}</dd>
-          </dl>
-        </section>
-
         <section class="au-panel au-panel--padded" *ngIf="section === 'sites'">
-          <h2 class="au-panel__title">Sites</h2>
-          <p class="au-panel__subtitle au-mb-3">Destinations you can publish to.</p>
+          <div class="au-inline au-mb-3">
+            <div class="au-flex-1">
+              <h2 class="au-panel__title">Sites</h2>
+              <p class="au-panel__subtitle">Destinations you can publish to.</p>
+            </div>
+            <a class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">
+              <app-icon name="plus"></app-icon>Add new site
+            </a>
+          </div>
+
           <app-empty-state
             *ngIf="tenantSites.length === 0"
             icon="globe"
             title="No sites in the active workspace"
-            text="Sites appear here once they are connected to your account."
+            text="Use Add new site to connect the first one."
           ></app-empty-state>
           <div class="au-row" *ngFor="let site of tenantSites">
             <span class="au-row__title">{{ site.name }}</span>
             <span class="au-badge au-badge--outline">{{ site.type }}</span>
             <span class="au-row__meta">{{ site.baseUrl || '—' }}</span>
+            <span class="au-badge au-badge--brand" *ngIf="site.id === activeSiteId">Active</span>
+            <button class="au-btn" type="button" *ngIf="site.id !== activeSiteId" (click)="useSite(site.id)">Use</button>
           </div>
         </section>
 
         <section class="au-panel au-panel--padded" *ngIf="section === 'team'">
-          <h2 class="au-panel__title">Users</h2>
+          <h2 class="au-panel__title">People</h2>
           <p class="au-panel__subtitle au-mb-3">People who can access this workspace.</p>
           <app-empty-state *ngIf="users.length === 0" icon="user" title="No team members yet" text="Invite the first member by email."></app-empty-state>
           <div class="au-row" *ngFor="let member of users">
@@ -124,23 +90,6 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai' | 'discover
             <span class="au-row__title">{{ role.name }}</span>
             <span class="au-row__meta au-truncate" style="max-width: 420px">{{ permissionsLabel(role) }}</span>
             <span class="au-badge au-badge--neutral">{{ role.memberCount }} members</span>
-          </div>
-        </section>
-
-        <section class="au-panel au-panel--padded" *ngIf="section === 'ai'">
-          <h2 class="au-panel__title">AI</h2>
-          <p class="au-panel__subtitle au-mb-3">Choose the provider and model that write for this workspace, and see what each one has used</p>
-          <app-ai-provider-settings [canEdit]="role === 'admin'"></app-ai-provider-settings>
-          <h3 class="au-panel__title au-mt-2 au-mb-2">Usage by provider and model</h3>
-          <app-empty-state *ngIf="usageRows.length === 0" icon="sparkles" title="No AI usage recorded yet" text="Usage appears after the first generation."></app-empty-state>
-          <div class="au-usage" *ngIf="usageRows.length > 0">
-            <div class="au-usage__row" *ngFor="let row of usageRows">
-              <span class="au-usage__model">{{ row.provider }} / {{ row.model }}</span>
-              <span class="au-badge au-badge--neutral">{{ row.textCount }} texts</span>
-              <span class="au-badge au-badge--neutral">{{ row.imageCount }} images</span>
-              <span class="au-badge au-badge--neutral">{{ row.tokensInput + row.tokensOutput }} tokens</span>
-              <span class="au-badge au-badge--brand">{{ costLabel(row) }}</span>
-            </div>
           </div>
         </section>
 
@@ -235,10 +184,11 @@ type SettingsSection = 'profile' | 'sites' | 'team' | 'roles' | 'ai' | 'discover
               <button class="au-btn au-btn--secondary" type="button" (click)="runDiscovery()" [disabled]="runningDiscovery || !discovery?.provider?.configured" [attr.title]="discovery?.provider?.configured ? '' : 'Web search needs a provider key server-side. Configure firecrawl or tavily to enable discovery runs.'">
                 {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
               </button>
+              <!-- Findings are reviewed in one place, next to each site's own recommendations. -->
+              <a class="au-btn au-btn--ghost" routerLink="/studio/sources">Review findings in Sources → Recommendations</a>
             </div>
           </form>
         </section>
-      </div>
     </section>
   `,
 })
@@ -248,7 +198,8 @@ export class SettingsPageComponent implements OnInit {
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
 
-  section: SettingsSection = 'profile';
+  readonly titles: Record<SettingsSection, string> = { sites: 'Sites', team: 'People', roles: 'Roles', discovery: 'Web discovery' };
+  section: SettingsSection = 'sites';
   tenantSites: StudioSiteSummary[] = [];
   users: StudioUserSummary[] = [];
   roles: StudioRoleSummary[] = [];
@@ -277,27 +228,18 @@ export class SettingsPageComponent implements OnInit {
   savingDiscovery = false;
   runningDiscovery = false;
 
-  get user() {
-    return this.appContext.user();
-  }
-
-  get role() {
-    return this.appContext.role();
-  }
-
-  get siteNames(): string {
-    return this.appContext
-      .sites()
-      .map((site) => site.name)
-      .join(', ');
+  get activeSiteId(): string | null {
+    return this.appContext.session()?.activeSiteId ?? null;
   }
 
   ngOnInit(): void {
-    const sectionParam = String(this.route.snapshot.paramMap.get('section') || 'profile');
-    if (['profile', 'sites', 'team', 'roles', 'ai', 'discovery'].includes(sectionParam)) {
-      this.section = sectionParam as SettingsSection;
-    }
-    this.load();
+    this.route.paramMap.subscribe((params) => {
+      const sectionParam = String(params.get('section') || 'sites');
+      this.section = (['sites', 'team', 'roles', 'discovery'].includes(sectionParam) ? sectionParam : 'sites') as SettingsSection;
+      this.error = '';
+      this.notice = '';
+    });
+        this.load();
   }
 
   load(): void {
@@ -406,10 +348,10 @@ export class SettingsPageComponent implements OnInit {
     });
   }
 
-  setSection(section: SettingsSection): void {
-    this.section = section;
-    this.error = '';
-    this.notice = '';
+  /** Switches the active site; the shell reads the same app context, so its menu updates too. */
+  async useSite(siteId: string): Promise<void> {
+    await this.appContext.switchSite(siteId);
+    this.load();
   }
 
   rolesLabel(member: StudioUserSummary): string {

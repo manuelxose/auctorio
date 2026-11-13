@@ -11,7 +11,6 @@ import { PlanningApiService, apiMessage, isRunning } from '../services/planning-
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import { PlanGeneratorComponent } from '../components/planning/plan-generator.component';
-import { PlanCalendarViewComponent } from '../components/planning/plan-calendar-view.component';
 import { BacklogAction, PlanBacklogViewComponent } from '../components/planning/plan-backlog-view.component';
 import { PlanPipelineViewComponent } from '../components/planning/plan-pipeline-view.component';
 import { PlanItemDrawerComponent } from '../components/planning/plan-item-drawer.component';
@@ -19,15 +18,15 @@ import { addDays, localDate } from '../components/planning/planning-utils';
 import type { OperationItem, StudioSite } from '../models/studio.models';
 import type { PlanDetail, PlanGenerationAccepted, PlanItem } from '../models/planning.models';
 
-type View = 'calendar' | 'backlog' | 'pipeline';
+type View = 'backlog' | 'pipeline';
 
-/** Planning workspace: plan switcher, three views over the same items, plan actions and the item drawer. */
+/** Planning workspace: plan switcher, two views over the same items (dates live in Calendar), plan actions and the item drawer. */
 @Component({
   selector: 'app-editorial-plan-page',
   standalone: true,
   imports: [
     CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent,
-    PlanGeneratorComponent, PlanCalendarViewComponent, PlanBacklogViewComponent, PlanPipelineViewComponent, PlanItemDrawerComponent,
+    PlanGeneratorComponent, PlanBacklogViewComponent, PlanPipelineViewComponent, PlanItemDrawerComponent,
   ],
   styles: [
     `
@@ -61,7 +60,7 @@ type View = 'calendar' | 'backlog' | 'pipeline';
         <div>
           <p class="au-page__eyebrow">Editorial control</p>
           <h1 class="au-page__title">Editorial Plan</h1>
-          <p class="au-page__subtitle">Decide what to publish before generating the actual content.</p>
+          <p class="au-page__subtitle">Decide what to publish and review proposals. Dates and publishing live in Calendar.</p>
         </div>
         <div class="au-page__actions">
           <button class="au-btn au-btn--secondary" type="button" (click)="showGenerator = !showGenerator" [attr.aria-expanded]="showGenerator">
@@ -169,7 +168,6 @@ type View = 'calendar' | 'backlog' | 'pipeline';
           <ng-container *ngIf="!detailLoading">
             <app-empty-state *ngIf="items().length === 0" icon="plan" title="This plan has no proposals" text="Use Fill missing slots to generate proposals for the empty slots."></app-empty-state>
             <ng-container *ngIf="items().length > 0">
-              <app-plan-calendar-view *ngIf="view === 'calendar'" [items]="items()" [timezone]="plan.timezone" [startDate]="startDate()" (open)="openItem($event)" (periodChange)="onPeriod($event)"></app-plan-calendar-view>
               <app-plan-backlog-view *ngIf="view === 'backlog'" [items]="items()" [timezone]="plan.timezone" [busy]="bulkBusy || !!activeOp" (open)="openItem($event)" (action)="onBacklogAction($event)"></app-plan-backlog-view>
               <app-plan-pipeline-view *ngIf="view === 'pipeline'" [items]="items()" [timezone]="plan.timezone" (open)="openItem($event)"></app-plan-pipeline-view>
             </ng-container>
@@ -207,26 +205,26 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   showArchived = false;
   extending = false;
   extendTo = '';
-  view: View = 'calendar';
+  view: View = 'backlog';
   tabs: Array<{ id: View; label: string }> = [
-    { id: 'calendar', label: 'Calendar' },
     { id: 'backlog', label: 'Backlog' },
     { id: 'pipeline', label: 'Pipeline' },
   ];
   activeOp: OperationItem | null = null;
   opLabel = '';
   bulkBusy = false;
+  private pendingItemId: string | null = null;
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
     this.siteId = this.appContext.activeSite()?.id ?? this.sites[0]?.id ?? '';
     const query = this.route.snapshot.queryParamMap;
-    const querySite = query.get('siteId');
-    if (querySite && this.sites.some((site) => site.id === querySite)) this.siteId = querySite;
     this.initialPillar = query.get('pillar')?.trim() ?? '';
-    if (this.initialPillar) this.showGenerator = true;
+    // ?new=1 (Overview "Plan the next 30 days") and ?pillar= open the generator; ?plan=&item= (Calendar) open an item.
+    if (this.initialPillar || query.get('new')) this.showGenerator = true;
+    this.pendingItemId = query.get('item');
     this.context.update({ area: 'plan', siteId: this.siteId || null });
-    this.load();
+    this.load(query.get('plan') ?? undefined);
   }
 
   ngOnDestroy(): void {
@@ -246,12 +244,6 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   unfilledCount(): number {
     return this.plan?.generatedOutput?.unfilledSlots?.length ?? 0;
   }
-  startDate(): string {
-    const today = localDate(new Date(), this.plan?.timezone ?? 'Europe/Madrid');
-    const from = this.plan ? localDate(this.plan.dateFrom, this.plan.timezone) : today;
-    const to = this.plan ? localDate(this.plan.dateTo, this.plan.timezone) : today;
-    return today >= from && today <= to ? today : from;
-  }
   planTone(status: string): string {
     return status === 'ready' ? 'success' : status === 'failed' ? 'danger' : status === 'generating' || status === 'partial' ? 'warning' : 'neutral';
   }
@@ -268,7 +260,7 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   load(selectId?: string): void {
     this.loading = true;
     this.loadError = '';
-    this.api.listPlans().subscribe({
+    this.api.listPlans(this.appContext.activeSite()?.id).subscribe({
       next: (response) => {
         this.plans = response.items;
         this.loading = false;
@@ -302,6 +294,9 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
         this.detailLoading = false;
         this.plans = this.plans.map((entry) => (entry.id === detail.id ? { ...entry, ...detail } : entry));
         this.context.update({ planId: detail.id, siteId: detail.siteId ?? (this.siteId || null), planItemId: null });
+        const pending = this.pendingItemId ? detail.items?.find((entry) => entry.id === this.pendingItemId) : null;
+        this.pendingItemId = null;
+        if (pending) this.openItem(pending);
       },
       error: (err) => {
         this.detailLoading = false;
@@ -324,10 +319,6 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
       },
       error: () => undefined,
     });
-  }
-
-  onPeriod(period: { from: string; to: string }): void {
-    this.context.update({ periodFrom: period.from, periodTo: period.to });
   }
 
   openItem(item: PlanItem): void {

@@ -1,3 +1,4 @@
+import { withAiTenant } from "../ai/ai-settings";
 import { Prisma } from "@prisma/client";
 import { Worker } from "bullmq";
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
@@ -9,7 +10,7 @@ import { getImageProvider, ImageDownloadError, ImageGenerationResult } from "../
 import { resolveImagePrompt } from "../../studio/prompts";
 import { saveImageAsset } from "../storage/local-storage";
 import { buildImageDerivatives } from "../storage/image-processing";
-import { syncImageResultToStudio } from "../../studio/orchestration";
+import { syncImageResultToStudio, syncInlineImageToVersion } from "../../studio/orchestration";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { evaluateAiSpend, recordAiSpend } from "../../studio/cost-budgets";
@@ -72,12 +73,12 @@ export async function runImageWorker() {
   }
 
   const prisma = getPrismaClient();
-  const provider = getImageProvider();
-
   const worker = new Worker(
     QUEUE_NAMES.image,
-    async (job) => {
+    async (job) => withAiTenant((job.data as ImageJobData).tenantId, async () => {
       const data = job.data as ImageJobData;
+      // Resolved per job: each workspace may have chosen a different image model (Settings -> AI).
+      const provider = getImageProvider();
       await markJobProcessing(data.jobId);
       await prisma.contentImage.update({
         where: { id: data.contentImageId },
@@ -129,7 +130,10 @@ export async function runImageWorker() {
       });
 
       const size = typeof data.options?.size === "string" ? data.options.size : undefined;
-      let usedPrompt = prompt.userPrompt;
+      const section = data.options?.image_role === "inline" && typeof data.options.section === "string" ? data.options.section : null;
+      let usedPrompt = section
+        ? `${prompt.userPrompt.replace(/^.*hero image.*$/gim, "").trim()}\nCreate an in-article editorial image that illustrates the section "${section}". Its own composition, distinct from the hero. No text, logos or watermarks in the image.`
+        : prompt.userPrompt;
       let result: ImageGenerationResult;
       try {
         result = await provider.generate({
@@ -240,8 +244,12 @@ export async function runImageWorker() {
         },
       });
 
-      await syncImageResultToStudio(data.tenantId, data.contentImageId);
-    },
+      if (section) {
+        await syncInlineImageToVersion(data.tenantId, data.contentImageId);
+      } else {
+        await syncImageResultToStudio(data.tenantId, data.contentImageId);
+      }
+    }),
     {
       connection: getRedisConnectionOptions(),
       ...bullWorkerOptions("image", 1),

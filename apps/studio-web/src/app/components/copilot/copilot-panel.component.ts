@@ -224,7 +224,7 @@ export class CopilotPanelComponent implements AfterViewChecked {
     if (area === 'calendar') return [ask('Suggest ideas for a day', sel.periodFrom ? 'Suggest ideas for ' + sel.periodFrom : 'Suggest ideas for this day'), ask('Fill the missing slots'), ask('Find gaps in this period', 'Find weaknesses in this plan')];
     if (area === 'plan' || area === 'editorial-plan') return [ask('Explain the strategy'), ask('Find weaknesses in this plan'), ask('Suggest a publishing cadence'), ask('Fill the missing slots')];
     if (area === 'intelligence' || area === 'sources' || area === 'competitors') return [ask('Explain the strategy', 'Explain the strategy and the topics it covers'), ask('Which gaps could a new source close?', 'Find weaknesses in this plan')];
-    if (area === 'production') return [{ label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts.', competency: 'publication-status' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
+    if (area === 'production' || area === 'publish') return [{ label: 'Show the latest publication attempts', prompt: 'Show the latest publication attempts.', competency: 'publication-status' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
     return [{ label: 'What needs my attention on this site?', prompt: 'What needs my attention on this site?', competency: 'workspace-brief' }, ask('Why did the last job fail?', 'Explain why the last failed job failed')];
   });
 

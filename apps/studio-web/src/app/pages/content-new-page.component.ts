@@ -29,10 +29,8 @@ import type { StudioSite } from '../models/studio.models';
         <form (ngSubmit)="submit()">
           <label class="au-field">
             <span class="au-field__label">Destination</span>
-            <select class="au-select" name="site" [(ngModel)]="siteId" required>
-              <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-            </select>
-            <span class="au-field__hint">The site this piece will be published to.</span>
+            <input class="au-input" type="text" [value]="siteName" readonly aria-readonly="true" />
+            <span class="au-field__hint">The piece is published to the active site. Change it in the top bar.</span>
           </label>
 
           <label class="au-field">
@@ -107,6 +105,7 @@ export class ContentNewPageComponent implements OnInit {
 
   sites: StudioSite[] = [];
   siteId = '';
+  siteName = '';
   title = '';
   brief = '';
   goal = 'article';
@@ -118,7 +117,8 @@ export class ContentNewPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
-    this.siteId = this.appContext.activeSite()?.id ?? this.sites[0]?.id ?? '';
+    this.siteId = this.appContext.activeSite()?.id ?? '';
+    this.siteName = this.appContext.activeSite()?.name ?? '';
   }
 
   submit(): void {

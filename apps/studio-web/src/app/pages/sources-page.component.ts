@@ -1,13 +1,11 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
-import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { SiteSourceRegistryComponent } from '../components/sources/site-source-registry.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType, StudioEnrichmentProvider, StudioFeedCandidate, StudioFeedDiscoveryResult, StudioSite, StudioSource, StudioSourcePack } from '../models/studio.models';
@@ -15,75 +13,36 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
 @Component({
   selector: 'app-sources-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppPopoverComponent, AppEmptyStateComponent, SiteSourceRegistryComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, SiteSourceRegistryComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
           <p class="au-page__eyebrow">Content acquisition</p>
           <h1 class="au-page__title">Sources</h1>
-          <p class="au-page__subtitle">Feeds, AI-discovered sources and web monitoring that feed the editorial pipeline.</p>
+          <p class="au-page__subtitle">Where this site's stories and evidence come from: its own sources plus the ones shared by every site.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--primary" type="button" (click)="showForm = !showForm">
+          <button class="au-btn au-btn--primary" type="button" (click)="setView('add')">
             <app-icon name="plus"></app-icon>
-            {{ showForm ? 'Close form' : 'Add source' }}
+            Add source
           </button>
         </div>
       </header>
 
       <nav class="au-tabs au-mb-3" aria-label="Source sections">
-        <button class="au-tab" type="button" [class.is-active]="view === 'registry'" (click)="setView('registry')">Site registry</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'active'" (click)="setView('active')">Active sources</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'packs'" (click)="setView('packs')">Source packs</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'enrichment'" (click)="setView('enrichment')">Enrichment providers</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">
-          AI recommendations
-          <span class="au-badge au-badge--sm" *ngIf="recommendations.length > 0">{{ recommendations.length }}</span>
-        </button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'discovered'" (click)="setView('discovered')">Recently discovered</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'blocked'" (click)="setView('blocked')">Blocked sources</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'sources'" (click)="setView('sources')">1 · Sources</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">2 · Recommendations</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'add'" (click)="setView('add')">3 · Add</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'settings'" (click)="setView('settings')">Settings</button>
       </nav>
 
-      <app-site-source-registry *ngIf="view === 'registry'"></app-site-source-registry>
+      <app-site-source-registry *ngIf="view === 'sources'" section="sources"></app-site-source-registry>
+      <app-site-source-registry *ngIf="view === 'recommendations'" section="recommendations"></app-site-source-registry>
 
-      <!-- AI recommendations -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'recommendations'">
-        <h2 class="au-panel__title">AI recommendations</h2>
-        <p class="au-panel__subtitle au-mb-3">Domains the discovery engine found repeatedly with high relevance. Add them as permanent sources or dismiss them.</p>
-        <app-empty-state
-          *ngIf="recommendations.length === 0"
-          icon="sources"
-          title="No recommendations yet"
-          text="When AI web discovery finds recurring high-quality domains they appear here."
-        ></app-empty-state>
-        <div class="au-connection-grid" *ngIf="recommendations.length > 0">
-          <article class="au-connection-card" *ngFor="let recommendation of recommendations">
-            <div class="au-connection-card__head">
-              <div class="au-flex-1">
-                <h2>{{ recommendation.domain }}</h2>
-                <p>Discovered in {{ recommendation.searchesCount }} relevant searches · score {{ recommendation.score }}</p>
-              </div>
-              <span class="au-badge" [class.au-badge--success]="recommendation.score >= 85" [class.au-badge--warning]="recommendation.score >= 50 && recommendation.score < 85" [class.au-badge--neutral]="recommendation.score < 50">
-                {{ recommendation.score >= 85 ? 'High quality' : recommendation.score >= 50 ? 'Specialist' : 'Discovery only' }}
-              </span>
-            </div>
-            <p class="au-muted au-mb-2" *ngIf="recommendation.reasonSummary">{{ recommendation.reasonSummary }}</p>
-            <div class="au-inline">
-              <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="acceptRecommendation(recommendation)" [disabled]="busyRecommendation === recommendation.id">
-                <app-icon name="plus"></app-icon>
-                Add source
-              </button>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="dismissRecommendation(recommendation)" [disabled]="busyRecommendation === recommendation.id">
-                Dismiss
-              </button>
-            </div>
-          </article>
-        </div>
-      </section>
 
       <!-- Recently discovered -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'discovered'">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'settings'">
         <h2 class="au-panel__title">Recently discovered</h2>
         <p class="au-panel__subtitle au-mb-3">Domains found by AI web discovery. Block low-quality or off-topic domains from being scraped.</p>
         <app-empty-state
@@ -136,7 +95,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       </section>
 
       <!-- Blocked -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'blocked'">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'settings'">
         <h2 class="au-panel__title">Blocked sources</h2>
         <p class="au-panel__subtitle au-mb-3">These domains are excluded from AI discovery and scraping.</p>
         <app-empty-state
@@ -171,8 +130,8 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
         </div>
       </section>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="showForm && view === 'active'">
-        <h2 class="au-panel__title">{{ editingId ? 'Edit source' : 'New source' }}</h2>
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'add'">
+        <h2 class="au-panel__title">New source</h2>
         <p class="au-panel__subtitle au-mb-3">Sources provide input. They are separate from publishing connections.</p>
         <div class="au-field-grid">
           <label class="au-field">
@@ -198,10 +157,10 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
             </button>
           </div>
           <label class="au-field">
-            <span class="au-field__label">Site</span>
+            <span class="au-field__label">Used by</span>
             <select class="au-select" [(ngModel)]="form.siteId">
-              <option [ngValue]="null">All sites</option>
-              <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
+              <option [ngValue]="activeSiteId">This site only</option>
+              <option [ngValue]="null">Shared by all sites</option>
             </select>
           </label>
           <label class="au-field">
@@ -302,221 +261,9 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
         </div>
       </section>
 
-      <section class="au-panel" *ngIf="view === 'active'">
-        <app-empty-state
-          *ngIf="sources.length === 0"
-          icon="sources"
-          title="Connect a source to start discovering content"
-          text="Add an RSS feed, sitemap or page. Discovered stories land in the Inbox."
-        >
-          <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="showForm = true">Add source</button>
-        </app-empty-state>
-
-        <div class="au-panel au-panel--padded au-mb-2" *ngIf="selected.size > 0 && sources.length > 0">
-          <div class="au-inline">
-            <span class="au-muted au-mr-2">{{ selected.size }} selected</span>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('enable')"><app-icon name="play"></app-icon>Enable</button>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('disable')"><app-icon name="pause"></app-icon>Disable</button>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('refresh')" [disabled]="bulkRunning"><app-icon name="refresh"></app-icon>Refresh</button>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('verify')" [disabled]="bulkRunning"><app-icon name="circle-check"></app-icon>Verify</button>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="bulkAction('archive')">Archive</button>
-            <button class="au-btn au-btn--danger-ghost au-btn--sm" type="button" (click)="bulkAction('delete')">Delete</button>
-            <span class="au-muted au-ml-2">Category</span>
-            <input class="au-input au-input--sm" style="width: 140px" type="text" [(ngModel)]="bulkCategory" placeholder="movie-tv" />
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('assign_category')" [disabled]="!bulkCategory.trim()">Assign</button>
-            <span class="au-muted au-ml-2">Site</span>
-            <select class="au-select au-select--sm" style="width: 160px" [(ngModel)]="bulkSiteId">
-              <option [ngValue]="null">All sites</option>
-              <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-            </select>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="bulkAction('assign_site')">Assign</button>
-          </div>
-          <div class="au-muted" *ngIf="bulkFeedback">{{ bulkFeedback }}</div>
-        </div>
-
-        <div class="au-table-wrap" *ngIf="sources.length > 0">
-          <table class="au-table">
-            <thead>
-              <tr>
-                <th style="width: 34px">
-                  <input type="checkbox" [checked]="allSelected()" (change)="toggleSelectAll()" [attr.aria-label]="'Select all sources'" />
-                </th>
-                <th>Name</th>
-                <th>Type</th>
-                <th>Health</th>
-                <th>Last fetch</th>
-                <th>Last new</th>
-                <th>Stories</th>
-                <th>Verified</th>
-                <th style="width: 44px"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let source of sources">
-                <td>
-                  <input type="checkbox" [checked]="selected.has(source.id)" (change)="toggleSelect(source.id)" [attr.aria-label]="'Select ' + source.name" />
-                </td>
-                <td>
-                  <button class="au-link" type="button" (click)="openDetail(source)">
-                    <span class="au-table__title">{{ source.name }}</span>
-                  </button>
-                  <span class="au-table__sub">{{ source.site?.name ?? 'All sites' }} · priority {{ source.priority }} · {{ source.domain ?? '—' }}</span>
-                </td>
-                <td><span class="au-badge au-badge--outline">{{ source.type }}</span></td>
-                <td>
-                  <span class="au-badge" [class]="'au-badge ' + healthClass(source)" [attr.title]="healthTitle(source)">
-                    {{ healthLabel(source) }}
-                  </span>
-                </td>
-                <td class="au-nowrap au-muted">{{ dateLabel(source.lastFetchedAt) }}</td>
-                <td class="au-nowrap au-muted">{{ dateLabel(source.lastNewItemAt ?? null) }}</td>
-                <td>{{ source.discoveredCount }}</td>
-                <td>
-                  <span class="au-badge au-badge--success" *ngIf="source.verificationStatus === 'verified'">verified</span>
-                  <span class="au-badge au-badge--warning" *ngIf="source.verificationStatus === 'failed'">failed</span>
-                  <span class="au-badge au-badge--danger" *ngIf="source.verificationStatus === 'unsupported'">unsupported</span>
-                  <span class="au-badge au-badge--neutral" *ngIf="!source.verificationStatus || source.verificationStatus === 'unverified'">unverified</span>
-                </td>
-                <td>
-                  <button
-                    class="au-btn au-btn--ghost au-btn--icon au-btn--sm"
-                    type="button"
-                    #menuTrigger
-                    (click)="rowMenu.toggle(menuTrigger)"
-                    [attr.aria-label]="'Actions for ' + source.name"
-                    aria-haspopup="menu"
-                  >
-                    <app-icon name="dots"></app-icon>
-                  </button>
-                  <app-popover #rowMenu>
-                    <div class="au-menu">
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); openDetail(source)">
-                        <app-icon name="info"></app-icon>
-                        Details & runs
-                      </button>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); test(source)">
-                        <app-icon name="circle-check"></app-icon>
-                        Test connection
-                      </button>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); verify(source)">
-                        <app-icon name="shield-check"></app-icon>
-                        Verify endpoint
-                      </button>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); fetch(source)" [disabled]="fetching[source.id]">
-                        <app-icon name="refresh"></app-icon>
-                        Fetch now
-                      </button>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); toggle(source)">
-                        <app-icon name="pause"></app-icon>
-                        {{ source.enabled ? 'Disable' : 'Enable' }}
-                      </button>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); edit(source)">
-                        <app-icon name="edit"></app-icon>
-                        Edit
-                      </button>
-                      <div class="au-menu__sep"></div>
-                      <button class="au-menu__item" type="button" (click)="rowMenu.hide(); archive(source)">
-                        <app-icon name="archive"></app-icon>
-                        Archive
-                      </button>
-                      <button class="au-menu__item is-danger" type="button" (click)="rowMenu.hide(); remove(source)">
-                        <app-icon name="trash"></app-icon>
-                        Delete
-                      </button>
-                    </div>
-                  </app-popover>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <!-- Source detail & recent runs -->
-        <div class="au-panel au-panel--padded au-mb-3" *ngIf="detailSource">
-          <div class="au-inline au-mb-2">
-            <h2 class="au-panel__title au-flex-1">{{ detailSource.name }}</h2>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="closeDetail()">Close</button>
-          </div>
-          <div class="au-field-grid">
-            <div class="au-field">
-              <span class="au-field__label">Health</span>
-              <span class="au-badge" [class]="'au-badge ' + healthClass(detailSource)">{{ healthLabel(detailSource) }}</span>
-              <div class="au-muted" *ngFor="let diagnostic of healthDiagnostics(detailSource)">{{ diagnostic }}</div>
-            </div>
-            <div class="au-field">
-              <span class="au-field__label">Endpoint</span>
-              <div class="au-truncate au-muted" style="max-width: 480px">{{ detailSource.url || '—' }}</div>
-              <div class="au-muted">Adapter {{ detailSource.type }} · discovery {{ detailSource.discoveryMethod ?? 'manual' }}</div>
-            </div>
-            <div class="au-field">
-              <span class="au-field__label">Last fetch</span>
-              <div class="au-muted">{{ dateLabel(detailSource.lastFetchedAt) }}</div>
-              <div class="au-muted" *ngIf="detailSource.lastHttpStatus">HTTP {{ detailSource.lastHttpStatus }} · {{ detailSource.notModifiedCount }} not-modified</div>
-            </div>
-            <div class="au-field">
-              <span class="au-field__label">Last new item</span>
-              <div class="au-muted">{{ dateLabel(detailSource.lastNewItemAt ?? null) }}</div>
-            </div>
-            <div class="au-field au-field--wide" *ngIf="detailSource.lastError">
-              <span class="au-field__label">Last error</span>
-              <div class="au-muted">{{ detailSource.lastError }}</div>
-            </div>
-            <div class="au-field au-field--wide" *ngIf="detailSource.restrictionsNote">
-              <span class="au-field__label">Restrictions</span>
-              <div class="au-muted">{{ detailSource.restrictionsNote }}</div>
-            </div>
-            <div class="au-field" *ngIf="detailSource.health">
-              <span class="au-field__label">Fetch stats</span>
-              <div class="au-muted">
-                {{ detailSource.health.successfulFetches }} ok / {{ detailSource.health.failedFetches }} failed ·
-                {{ detailSource.health.itemsDiscovered }} items ·
-                {{ detailSource.health.rateLimitEvents }} rate-limit events ·
-                circuit {{ detailSource.health.circuitState }}
-              </div>
-            </div>
-          </div>
-          <div class="au-inline au-mb-3">
-            <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="fetch(detailSource)" [disabled]="fetching[detailSource.id]">
-              <app-icon name="refresh"></app-icon>
-              Refresh now
-            </button>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="verify(detailSource)">
-              <app-icon name="shield-check"></app-icon>
-              Verify endpoint
-            </button>
-            <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="test(detailSource)">
-              <app-icon name="circle-check"></app-icon>
-              Test connection
-            </button>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="markUnsupported(detailSource)">Mark unsupported</button>
-          </div>
-          <h3 class="au-panel__title">Recent runs</h3>
-          <app-empty-state *ngIf="runs.length === 0" icon="sources" title="No runs yet" text="Trigger a refresh to see discovery runs here."></app-empty-state>
-          <div class="au-table-wrap" *ngIf="runs.length > 0">
-            <table class="au-table">
-              <thead>
-                <tr><th>Started</th><th>Status</th><th>Duration</th><th>Found</th><th>Created</th><th>Duplicates</th><th>Error</th></tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let run of runs">
-                  <td class="au-nowrap au-muted">{{ dateLabel(run.startedAt) }}</td>
-                  <td>
-                    <span class="au-badge" [class.au-badge--success]="run.status === 'succeeded'" [class.au-badge--danger]="run.status === 'failed'" [class.au-badge--neutral]="run.status === 'skipped' || run.status === 'running'">{{ run.status }}</span>
-                  </td>
-                  <td class="au-muted">{{ run.durationMs !== null ? run.durationMs + ' ms' : '—' }}</td>
-                  <td>{{ run.itemsFound }}</td>
-                  <td>{{ run.itemsCreated }}</td>
-                  <td>{{ run.itemsDuplicated }}</td>
-                  <td class="au-muted au-truncate" style="max-width: 240px">{{ run.errorMessage || '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
 
       <!-- Source packs -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'packs'">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'add'">
         <h2 class="au-panel__title">Source packs</h2>
         <p class="au-panel__subtitle au-mb-3">Optional bootstrap configuration. Importing a pack creates ordinary sources — the database remains the runtime source of truth.</p>
         <app-empty-state *ngIf="packs.length === 0" icon="sources" title="No packs available" text="Source packs appear here when the backend registers them."></app-empty-state>
@@ -565,7 +312,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       </section>
 
       <!-- Enrichment providers -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'enrichment'">
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'settings'">
         <h2 class="au-panel__title">Enrichment providers</h2>
         <p class="au-panel__subtitle au-mb-3">Structured-data APIs (TMDB, OMDb, YouTube Data API…). Independent from editorial sources. Credentials are server-side env-var references — API keys never reach the browser.</p>
         <app-empty-state *ngIf="providers.length === 0" icon="sources" title="No enrichment providers" text="Import the movie-tv-en pack or add a provider manually."></app-empty-state>
@@ -643,7 +390,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
     </section>
   `,
 })
-export class SourcesPageComponent implements OnInit, OnDestroy {
+export class SourcesPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
@@ -657,7 +404,9 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   editingId: string | null = null;
   fetching: Record<string, boolean> = {};
   feedback = '';
-  view: 'registry' | 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked' = 'registry';
+  view: 'sources' | 'recommendations' | 'add' | 'settings' = 'sources';
+  /** New sources default to the active site; null shares them with every site. */
+  readonly activeSiteId = this.appContext.activeSite()?.id ?? null;
   recommendations: SourceRecommendation[] = [];
   domains: DiscoveredDomain[] = [];
   blockedDomains: BlockedDomain[] = [];
@@ -713,7 +462,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     type: 'rss' as SourceType,
     url: '',
     domain: '',
-    siteId: null as string | null,
+    siteId: this.activeSiteId as string | null,
     refreshIntervalMinutes: 30,
     priority: 0,
     trustScore: 0.5,
@@ -728,33 +477,22 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     respectRobots: true,
     discoveryMethod: '' as string,
   };
-  private refreshSubscription: Subscription | null = null;
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
-    this.load();
-    this.loadRecommendations();
-    this.loadDiscovered();
-    this.loadBlocked();
-    this.loadPacks();
-    this.loadProviders();
-    this.refreshSubscription = timer(45_000, 45_000).subscribe(() => this.load(true));
   }
 
-  setView(view: 'registry' | 'active' | 'packs' | 'enrichment' | 'recommendations' | 'discovered' | 'blocked'): void {
+  setView(view: 'sources' | 'recommendations' | 'add' | 'settings'): void {
     this.view = view;
-    if (view === 'recommendations') this.loadRecommendations();
-    if (view === 'discovered') this.loadDiscovered();
-    if (view === 'blocked') this.loadBlocked();
-    if (view === 'packs') this.loadPacks();
-    if (view === 'enrichment') this.loadProviders();
-  }
-
-  loadRecommendations(): void {
-    this.api.listSourceRecommendations(1, 50, 'open').subscribe({
-      next: (response) => { this.recommendations = response.items; },
-      error: () => { this.recommendations = []; },
-    });
+    if (view === 'add') {
+      this.resetForm();
+      this.loadPacks();
+    }
+    if (view === 'settings') {
+      this.loadDiscovered();
+      this.loadBlocked();
+      this.loadProviders();
+    }
   }
 
   loadDiscovered(): void {
@@ -768,34 +506,6 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
     this.api.listBlockedDomains().subscribe({
       next: (response) => { this.blockedDomains = response.items; },
       error: () => { this.blockedDomains = []; },
-    });
-  }
-
-  acceptRecommendation(recommendation: SourceRecommendation): void {
-    this.busyRecommendation = recommendation.id;
-    this.api.acceptSourceRecommendation(recommendation.id).subscribe({
-      next: () => {
-        this.busyRecommendation = '';
-        this.toast.success(`${recommendation.domain} added as a source.`);
-        this.loadRecommendations();
-        this.load();
-      },
-      error: (error) => {
-        this.busyRecommendation = '';
-        this.feedback = String(error?.error?.message ?? 'Could not add the source.');
-      },
-    });
-  }
-
-  dismissRecommendation(recommendation: SourceRecommendation): void {
-    this.busyRecommendation = recommendation.id;
-    this.api.dismissSourceRecommendation(recommendation.id).subscribe({
-      next: () => {
-        this.busyRecommendation = '';
-        this.toast.success('Recommendation dismissed.');
-        this.loadRecommendations();
-      },
-      error: () => { this.busyRecommendation = ''; },
     });
   }
 
@@ -836,29 +546,6 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       error: (error) => {
         this.runningDiscovery = false;
         this.feedback = String(error?.error?.message ?? 'Discovery could not be started.');
-      },
-    });
-  }
-
-  ngOnDestroy(): void {
-    this.refreshSubscription?.unsubscribe();
-  }
-
-  load(silent = false): void {
-    this.api.listSourcesWithHealth(1, 200, this.includeArchived).subscribe({
-      next: (response) => {
-        this.sources = response.items;
-        if (this.detailId) {
-          const refreshed = response.items.find((item) => item.id === this.detailId);
-          if (refreshed) {
-            this.detailSource = refreshed;
-          }
-        }
-      },
-      error: () => {
-        if (!silent) {
-          this.sources = [];
-        }
       },
     });
   }
@@ -935,39 +622,13 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       next: () => {
         this.saving = false;
         this.resetForm();
-        this.toast.success('Source saved.');
-        this.load();
+        this.toast.success('Source saved. It now appears in Sources.');
       },
       error: (error) => {
         this.saving = false;
         this.feedback = String(error?.error?.message ?? 'Failed to save source.');
       },
     });
-  }
-
-  edit(source: StudioSource): void {
-    this.editingId = source.id;
-    this.form = {
-      name: source.name,
-      type: source.type,
-      url: source.url ?? '',
-      domain: source.domain ?? '',
-      siteId: source.siteId,
-      refreshIntervalMinutes: source.refreshIntervalMinutes,
-      priority: source.priority,
-      trustScore: source.trustScore,
-      authorityScore: source.authorityScore ?? 0.5,
-      language: source.language,
-      country: source.country ?? '',
-      categoriesText: (source.categories ?? []).join(', '),
-      tagsText: (source.tags ?? []).join(', '),
-      configurationText: source.configuration ? JSON.stringify(source.configuration, null, 2) : '',
-      rateLimitsText: '',
-      extractionPolicyText: '',
-      respectRobots: true,
-      discoveryMethod: source.discoveryMethod ?? '',
-    };
-    this.showForm = true;
   }
 
   resetForm(): void {
@@ -981,7 +642,7 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
       type: 'rss',
       url: '',
       domain: '',
-      siteId: null,
+      siteId: this.activeSiteId,
       refreshIntervalMinutes: 30,
       priority: 0,
       trustScore: 0.5,
@@ -1065,158 +726,11 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
 
   // ── Bulk operations ──────────────────────────────────────────────────
 
-  toggleSelect(id: string): void {
-    if (this.selected.has(id)) {
-      this.selected.delete(id);
-    } else {
-      this.selected.add(id);
-    }
-  }
-
-  toggleSelectAll(): void {
-    if (this.allSelected()) {
-      this.selected.clear();
-    } else {
-      this.selected = new Set(this.sources.map((source) => source.id));
-    }
-  }
-
   allSelected(): boolean {
     return this.sources.length > 0 && this.sources.every((source) => this.selected.has(source.id));
   }
 
-  bulkAction(action: string): void {
-    const ids = Array.from(this.selected);
-    if (ids.length === 0) {
-      return;
-    }
-    const runBulk = () => {
-      this.bulkRunning = true;
-      this.bulkFeedback = '';
-      this.api.bulkSources({ ids, action, category: this.bulkCategory.trim() || undefined, siteId: this.bulkSiteId ?? undefined }).subscribe({
-        next: (result) => {
-          this.bulkRunning = false;
-          this.selected.clear();
-          this.bulkFeedback = `${result.succeeded} succeeded, ${result.failed} failed.`;
-          if (result.failed > 0) {
-            const firstError = result.results.find((item) => !item.ok)?.error;
-            this.toast.error(`Bulk ${action}: ${result.failed} failed${firstError ? ` — ${firstError}` : ''}.`);
-          } else {
-            this.toast.success(`Bulk ${action} complete.`);
-          }
-          this.load();
-        },
-        error: (error) => {
-          this.bulkRunning = false;
-          this.feedback = String(error?.error?.message ?? 'Bulk operation failed.');
-        },
-      });
-    };
-    if (action === 'delete') {
-      void this.confirm.confirm({
-        title: `Delete ${ids.length} source(s)?`,
-        message: 'Discovered stories stay in the inbox but these sources stop refreshing. This cannot be undone.',
-        confirmLabel: `Delete ${ids.length} sources`,
-        danger: true,
-      }).then((confirmed) => {
-        if (confirmed) {
-          runBulk();
-        }
-      });
-      return;
-    }
-    runBulk();
-  }
-
   // ── Source detail & runs ─────────────────────────────────────────────
-
-  openDetail(source: StudioSource): void {
-    this.detailSource = source;
-    this.detailId = source.id;
-    this.runs = [];
-    this.loadRuns(source.id);
-  }
-
-  closeDetail(): void {
-    this.detailSource = null;
-    this.detailId = null;
-    this.runs = [];
-  }
-
-  loadRuns(sourceId: string): void {
-    this.api.listSourceRuns(sourceId, 1, 10).subscribe({
-      next: (response) => {
-        this.runs = response.items;
-      },
-      error: () => {
-        this.runs = [];
-      },
-    });
-  }
-
-  verify(source: StudioSource): void {
-    this.feedback = `Verifying ${source.name}…`;
-    this.api.verifySource(source.id).subscribe({
-      next: (result) => {
-        if (result.ok) {
-          this.toast.success(`${source.name} verified (HTTP ${result.status ?? '?'}, ${result.itemCount ?? 0} items).`);
-        } else {
-          this.toast.error(`Verification failed: ${result.error}`);
-        }
-        this.load();
-        if (this.detailId === source.id) {
-          this.loadRuns(source.id);
-        }
-      },
-      error: (error) => {
-        this.feedback = String(error?.error?.message ?? 'Verification failed.');
-      },
-    });
-  }
-
-  markUnsupported(source: StudioSource): void {
-    void this.confirm.confirm({
-      title: `Mark "${source.name}" as unsupported?`,
-      message: 'The source will be disabled and labelled unsupported with the configured restrictions note.',
-      confirmLabel: 'Mark unsupported',
-      danger: true,
-    }).then((confirmed) => {
-      if (!confirmed) {
-        return;
-      }
-      this.api.markSourceUnsupported(source.id, 'unsupported').subscribe({
-        next: () => {
-          this.toast.success('Source marked as unsupported.');
-          this.load();
-        },
-        error: (error) => {
-          this.feedback = String(error?.error?.message ?? 'Update failed.');
-        },
-      });
-    });
-  }
-
-  archive(source: StudioSource): void {
-    void this.confirm.confirm({
-      title: `Archive "${source.name}"?`,
-      message: 'The source stops refreshing and is hidden from the default list (Archived view shows it).',
-      confirmLabel: 'Archive source',
-      danger: true,
-    }).then((confirmed) => {
-      if (!confirmed) {
-        return;
-      }
-      this.api.updateSource(source.id, { archived: true }).subscribe({
-        next: () => {
-          this.toast.success('Source archived.');
-          this.load();
-        },
-        error: (error) => {
-          this.feedback = String(error?.error?.message ?? 'Archive failed.');
-        },
-      });
-    });
-  }
 
   // ── Source packs ─────────────────────────────────────────────────────
 
@@ -1240,7 +754,6 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
         if (result.errors.length > 0) {
           this.feedback = result.errors.join('; ');
         }
-        this.load();
         this.loadPacks();
         this.loadProviders();
       },
@@ -1345,122 +858,6 @@ export class SourcesPageComponent implements OnInit, OnDestroy {
   }
 
   // ── Health presentation ──────────────────────────────────────────────
-
-  healthLabel(source: StudioSource): string {
-    const state = source.uiHealth?.state ?? (source.archivedAt ? 'archived' : source.enabled ? 'unknown' : 'disabled');
-    const labels: Record<string, string> = {
-      healthy: 'Healthy',
-      delayed: 'Delayed',
-      degraded: 'Degraded',
-      rate_limited: 'Rate limited',
-      broken: 'Broken',
-      disabled: 'Disabled',
-      archived: 'Archived',
-      unknown: 'Unknown',
-    };
-    return labels[state] ?? 'Unknown';
-  }
-
-  healthClass(source: StudioSource): string {
-    const state = source.uiHealth?.state ?? 'unknown';
-    switch (state) {
-      case 'healthy':
-        return 'au-badge--success';
-      case 'delayed':
-      case 'degraded':
-        return 'au-badge--warning';
-      case 'rate_limited':
-      case 'broken':
-        return 'au-badge--danger';
-      default:
-        return 'au-badge--neutral';
-    }
-  }
-
-  healthTitle(source: StudioSource): string {
-    return (source.uiHealth?.diagnostics ?? []).join('\n');
-  }
-
-  healthDiagnostics(source: StudioSource): string[] {
-    return source.uiHealth?.diagnostics ?? [];
-  }
-
-  test(source: StudioSource): void {
-    this.feedback = `Testing ${source.name}…`;
-    this.api.testSource(source.id).subscribe({
-      next: (result) => {
-        if (result.ok) {
-          this.toast.success(`${source.name}: test OK, ${result.itemCount ?? 0} items returned.`);
-        } else {
-          this.toast.error(`Test failed: ${result.message}`);
-        }
-      },
-      error: (error) => {
-        this.feedback = String(error?.error?.message ?? 'Test failed.');
-      },
-    });
-  }
-
-  fetch(source: StudioSource): void {
-    this.fetching[source.id] = true;
-    this.api.fetchSource(source.id).subscribe({
-      next: (result) => {
-        this.fetching[source.id] = false;
-        if (result.failed) {
-          this.toast.error(`Fetch failed: ${result.error}`);
-        } else if (result.notModified) {
-          this.toast.success(`${source.name}: unchanged (HTTP 304) — skipped download.`);
-        } else {
-          this.toast.success(`Fetch complete: ${result.created} new, ${result.duplicates} duplicates.`);
-        }
-        this.load(true);
-        if (this.detailId === source.id) {
-          this.loadRuns(source.id);
-        }
-      },
-      error: (error) => {
-        this.fetching[source.id] = false;
-        this.feedback = String(error?.error?.message ?? 'Fetch failed.');
-      },
-    });
-  }
-
-  toggle(source: StudioSource): void {
-    this.api.updateSource(source.id, { enabled: !source.enabled }).subscribe({
-      next: () => {
-        this.toast.success(source.enabled ? 'Source disabled.' : 'Source enabled.');
-        this.load();
-      },
-      error: (error) => {
-        this.feedback = String(error?.error?.message ?? 'Update failed.');
-      },
-    });
-  }
-
-  remove(source: StudioSource): void {
-    void this.confirmRemove(source);
-  }
-
-  private async confirmRemove(source: StudioSource): Promise<void> {
-    const confirmed = await this.confirm.confirm({
-      title: `Delete source "${source.name}"?`,
-      message: 'Discovered stories stay in the inbox but will no longer refresh.',
-      confirmLabel: 'Delete source',
-      danger: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-    this.api.deleteSource(source.id).subscribe({
-      next: () => {
-        this.toast.success('Source deleted.');
-        this.load();
-      },
-      error: (error) => {
-        this.feedback = String(error?.error?.message ?? 'Delete failed.');
-      },
-    });
-  }
 
   dateLabel(value: unknown): string {
     if (!value) {

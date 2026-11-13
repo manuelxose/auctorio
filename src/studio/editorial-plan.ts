@@ -1127,8 +1127,8 @@ async function recordGenerationAttempts(
   });
 }
 
-export async function listEditorialPlans(tenantId: string, page: number, pageSize: number) {
-  const where = { tenantId, status: { not: "archived" as const } };
+export async function listEditorialPlans(tenantId: string, page: number, pageSize: number, siteId?: string) {
+  const where = { tenantId, ...(siteId ? { siteId } : {}), status: { not: "archived" as const } };
   const [total, items] = await prisma.$transaction([
     prisma.editorialPlan.count({ where }),
     prisma.editorialPlan.findMany({

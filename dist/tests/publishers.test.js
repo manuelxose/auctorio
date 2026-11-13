@@ -97,6 +97,7 @@ function buildContext(siteType, overrides) {
         taxonomyMap: null,
         publishingCredentialsRef: null,
         siteValueConfig: null,
+        timezone: "Europe/Madrid",
         createdAt: now,
         updatedAt: now,
     };

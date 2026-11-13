@@ -1,5 +1,6 @@
 import { fetchJson } from "../../shared/utils/http";
 import { getEnv, getNumberEnv, isProductionEnv } from "../../shared/utils/env";
+import { activeImageSelection } from "./ai-settings";
 
 export type ImageGenerationInput = {
   prompt: string;
@@ -228,10 +229,11 @@ class OpenAICompatibleImageProvider implements ImageProvider {
       body: {
         model,
         prompt: input.prompt,
-        size: input.size ?? "1024x576",
+        size: this.providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
         image_size: input.size ?? "1024x576",
         n: 1,
-        response_format: "b64_json",
+        // gpt-image-* always returns base64 and rejects response_format
+        response_format: model.startsWith("gpt-image") ? undefined : "b64_json",
         seed: input.seed,
       },
       timeoutMs: getNumberEnv("IMAGE_TIMEOUT_MS", 90_000),
@@ -330,6 +332,10 @@ class MockImageProvider implements ImageProvider {
 }
 
 export function getImageProvider(): ImageProvider {
+  // A workspace admin's choice (Settings -> AI) wins over the environment default.
+  const selected = activeImageSelection();
+  if (selected) return new OpenAICompatibleImageProvider(selected.provider, selected.baseUrl, selected.apiKey, selected.model);
+
   const provider = getEnv("IMAGE_PROVIDER", "mock").toLowerCase();
   if (provider === "mock") {
     if (isProductionEnv()) {

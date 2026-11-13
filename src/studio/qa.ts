@@ -1,5 +1,6 @@
 import type { ContentVersion } from "@prisma/client";
 import type { QaCheck, QaReport } from "./types";
+import { INLINE_IMAGE_MIN } from "./inline-images";
 
 export type QaSeverity = "error" | "warning" | "info";
 export type QaGroup = "structural" | "seo" | "editorial" | "evidence" | "publishing";
@@ -203,7 +204,8 @@ export function runVersionQaV2(
   const externalLinks = countExternalLinks(body);
   add("evidence_links", "External evidence links", externalLinks >= 1 || !(intent === "news" || intent === "commercial-investigation"), intent === "news" || intent === "commercial-investigation" ? "warning" : "info", "El contenido de actualidad o comparación debe citar fuentes externas verificables.", "seo");
   const imageCount = countImages(body);
-  add("image_presence", "Inline images", imageCount >= 1 || !context.imageReady, "info", "Las imágenes inline mejoran el contenido; el hero image ya cubre la portada.", "seo");
+  // Checked once the hero exists: inline images are queued with it and land in the body as they finish.
+  add("image_presence", "Inline images", imageCount >= INLINE_IMAGE_MIN || !context.imageReady, "error", `El artículo debe llevar al menos ${INLINE_IMAGE_MIN} imágenes dentro del cuerpo (actual: ${imageCount}).`, "seo");
   add("image_alt", "Image alt text", hasImageAlt(body), "warning", "Todas las imágenes deben llevar texto alternativo descriptivo.", "seo");
   if (faqCandidates > 0 || intent === "informational" || intent === "commercial-investigation" || intent === "transactional") {
     add("faq_section", "FAQ section", hasFaqSection(body), "warning", "Esta intención se beneficia de una sección FAQ con preguntas frecuentes.", "seo");
