@@ -172,6 +172,7 @@ test("selectStratified covers every route family under a small budget and skips 
 test("legal routes are typed utility, not an editorial content type", () => {
   assert.equal(inferContentTypeFromUrl(`${BASE}/politica-de-privacidad`), "utility");
   assert.equal(routeFamily(`${BASE}/es/series/x`), "series");
+  assert.ok(isUtilityUrl(`${BASE}/avisolegal`) && isUtilityUrl(`${BASE}/accesibilidad`));
 });
 
 test("approved pillar alias scores like a known cluster and records why", () => {

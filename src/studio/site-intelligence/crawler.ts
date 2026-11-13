@@ -145,7 +145,7 @@ function readJsonLdTypes($: ReturnType<typeof load>): string[] {
   return Array.from(types);
 }
 
-const UTILITY_PATH = /(^|\/)(aviso-legal|legal|privacidad|politica-de-privacidad|politica-privacidad|privacy|privacy-policy|cookies|politica-de-cookies|cookie-policy|terminos|terminos-y-condiciones|terms|terms-of-service|condiciones|contacto|contact|sobre-nosotros|quienes-somos|about|about-us|mapa-del-sitio|sitemap|login|registro|cuenta|account|cart|carrito|checkout|buscar|search)(\/|$)/;
+const UTILITY_PATH = /(^|\/)(aviso-legal|avisolegal|legal|accesibilidad|accessibility|politica-editorial|privacidad|politica-de-privacidad|politica-privacidad|privacy|privacy-policy|cookies|politica-de-cookies|cookie-policy|terminos|terminos-y-condiciones|terms|terms-of-service|condiciones|contacto|contact|sobre-nosotros|quienes-somos|about|about-us|mapa-del-sitio|sitemap|login|registro|cuenta|account|cart|carrito|checkout|buscar|search)(\/|$)/;
 const LOCALE_SEGMENT = /^[a-z]{2}(-[a-z]{2})?$/;
 
 /** Legal/info/account routes: never an editorial topic and never worth crawl budget. */
