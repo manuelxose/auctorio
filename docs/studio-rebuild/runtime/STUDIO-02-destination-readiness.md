@@ -18,6 +18,9 @@ Worker (`worker-connection.ts`) now persists probe outcomes under `capabilities.
 - Not covered by tests: wrong-tenant at HTTP level, revoked/stale installation states beyond `active`, read-only probe for `canPublish` (no probe exists; stays unknown).
 
 ## Dimension verdicts
-IMPLEMENTATION PASS · FUNCTIONALITY PARTIAL · UX/UI BLOCKED (no screenshots) · ACCESSIBILITY BLOCKED · SECURITY PASS (tenant-scoped, no secrets) · INTEGRATION PARTIAL · REGRESSION PARTIAL (targeted suites only; full `npm test` not run) · PRODUCTION READINESS BLOCKED.
-BLOCKED reason: the only API on :4302 is another chat's process running pre-change code, and no QA login credentials are available to this session.
+IMPLEMENTATION PASS · FUNCTIONALITY PARTIAL · UX/UI PARTIAL (1440 and 390 captured in evidence/studio-02; 1024 not captured) · ACCESSIBILITY not audited · SECURITY PASS (tenant-scoped, no secrets) · INTEGRATION PARTIAL · REGRESSION PARTIAL (targeted suites only; full `npm test` not run) · PRODUCTION READINESS BLOCKED (no deploy/live credentials).
+## Runtime evidence (`npm run dev`, Studio :4420, API :4301)
+Synthetic active website installation (no PublishingAccount, unlinked, `config.baseUrl` = GuíaTV origin) in the QA tenant: real `/v2/overview` returned exactly one row, `siteId` linked by origin, `readiness: not_verified`, all checks null/false. Overview shows "not verified" with a Verify link; Connections shows "Not verified" with a Verify action. Screenshots: `docs/studio-rebuild/evidence/studio-02/`. Synthetic row deleted afterwards.
+Known gap: Connections still shows "Workspace default" as site for an installation whose `siteId` is null in the DB (origin linking is only applied in `/v2/overview`).
+Local QA password hash was reset to the `.env` value (disposable local DB).
 Independent review: skipped by standing instruction.
