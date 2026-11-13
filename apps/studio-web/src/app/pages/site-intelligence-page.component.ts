@@ -113,15 +113,6 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             <span class="au-stat__label">{{ busy ? 'Reading the site' : overview.lastRun ? 'Last read · ' + (overview.lastRun | date: 'HH:mm') : 'Last read' }}</span>
           </div>
         </div>
-        <details class="au-panel au-panel--padded au-mb-3" *ngIf="overview.evidence as ev">
-          <summary>
-            Evidence: {{ ev.discovered }} URLs in sitemaps · {{ ev.fetched }} fetched · {{ ev.extracted }} analysed · {{ ev.failed }} failed
-          </summary>
-          <p class="au-muted">Counts come from sitemap discovery and our own crawl. They say nothing about Google indexation; connect Search Console for that.</p>
-          <ul>
-            <li *ngFor="let s of ev.sections">/{{ s.family === '/' ? '' : s.family }} — {{ s.extracted }} analysed of {{ s.discovered }}</li>
-          </ul>
-        </details>
         <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview.profile?.warnings?.length">
           <app-icon name="warning"></app-icon>
           <span class="au-banner__text">{{ overview.profile?.warnings?.join(' · ') }}</span>
@@ -133,6 +124,21 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
       </nav>
 
       <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'coverage'">
+        <h2 class="au-panel__title">What was actually read</h2>
+        <ng-container *ngIf="overview?.evidence as ev; else noEvidence">
+          <p>{{ ev.discovered }} URLs found in sitemaps · {{ ev.fetched }} fetched · {{ ev.extracted }} analysed · {{ ev.failed }} failed · {{ ev.skipped }} skipped</p>
+          <p class="au-muted">Counts come from sitemap discovery and our own crawl. They say nothing about Google indexation; connect Search Console for that.</p>
+          <table class="au-table">
+            <thead><tr><th>Section</th><th>Analysed</th><th>Found</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let s of ev.sections"><td>/{{ s.family === '/' ? '' : s.family }}</td><td>{{ s.extracted }}</td><td>{{ s.discovered }}</td></tr>
+            </tbody>
+          </table>
+        </ng-container>
+        <ng-template #noEvidence><p class="au-muted">No crawl yet. Read the site from Crawl health to see coverage.</p></ng-template>
+      </section>
+
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && overview?.profile as p">
         <h2 class="au-panel__title">What Auctorio detected</h2>
         <div class="detected au-mt-2">
@@ -339,6 +345,7 @@ export class SiteIntelligencePageComponent implements OnInit {
   readonly tabs: Array<{ id: string; label: string }> = [
     { id: 'profile', label: 'Profile & audience' },
     { id: 'pillars', label: 'Pillars & clusters' },
+    { id: 'coverage', label: 'Coverage' },
     { id: 'inventory', label: 'Pages' },
     { id: 'health', label: 'Crawl health' },
   ];
