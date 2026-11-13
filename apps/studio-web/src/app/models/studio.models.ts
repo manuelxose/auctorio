@@ -1416,6 +1416,8 @@ export type StudioOverview = {
     enabled: boolean;
     status: string;
     connectionState: string | null;
+    readiness?: 'not_verified' | 'ready' | 'error';
+    reason?: string | null;
     lastVerifiedAt: string | null;
     siteId: string | null;
     siteName: string | null;

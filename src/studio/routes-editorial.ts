@@ -73,6 +73,7 @@ import {
 import { listAudit } from "./audit";
 import { writeAudit } from "./audit";
 import { computeConnectionState } from "./social-connections";
+import { dedupeLegacyWebsiteAccounts, installationToConnection } from "./destination-readiness";
 import { buildAssetPublicUrl } from "./orchestration";
 import {
   bulkApproveEditorialPlanItems,
@@ -2253,7 +2254,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       prisma.connectorInstallation.findMany({
         where: { tenantId, kind: "website", state: "active" },
         orderBy: { activatedAt: "desc" },
-        select: { id: true, displayName: true, verifiedAt: true, siteId: true, site: { select: { name: true } } },
+        select: { id: true, displayName: true, verifiedAt: true, lastError: true, siteId: true, site: { select: { name: true } } },
       }),
     ]);
 
@@ -2285,7 +2286,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         nextSlots: automation.nextSlots.slice(0, 5),
       },
       connections: [
-        ...connections.map((connection) => ({
+        ...dedupeLegacyWebsiteAccounts(connections, websiteInstallations).map((connection) => ({
           id: connection.id,
           platform: connection.platform,
           displayName: connection.username ? `@${connection.username}` : connection.displayName,
@@ -2296,17 +2297,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           siteId: connection.siteId,
           siteName: connection.site?.name ?? null,
         })),
-        ...websiteInstallations.map((installation) => ({
-          id: installation.id,
-          platform: "website",
-          displayName: installation.site?.name ?? installation.displayName ?? "Website",
-          enabled: true,
-          status: "active",
-          connectionState: "connected",
-          lastVerifiedAt: installation.verifiedAt,
-          siteId: installation.siteId,
-          siteName: installation.site?.name ?? null,
-        })),
+        ...websiteInstallations.map(installationToConnection),
       ],
       planCoverage: {
         today: todayPlanCount,

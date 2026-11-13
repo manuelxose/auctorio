@@ -378,7 +378,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
   readonly steps = computed<SetupStep[]>(() => {
     const o = this.overview();
     const connections = this.siteConnections();
-    const connected = (platform: string) => connections.some((c) => c.platform === platform && c.enabled && (c.status === 'active' || c.connectionState === 'connected'));
+    const connected = (platform: string) => connections.some((c) => c.platform === platform && c.enabled && this.connectionState(c) === 'ok');
     const p = this.policy();
     return setupSteps({
       websiteConnected: connected('website'),
@@ -515,14 +515,16 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  connectionState(c: { enabled: boolean; status: string; connectionState: string | null }): 'ok' | 'bad' | 'idle' {
+  connectionState(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): 'ok' | 'bad' | 'idle' {
     if (!c.enabled) return 'idle';
+    // Website installs are only ready once verified; a stored/active status alone is not proof.
+    if (c.platform === 'website') return c.connectionState === 'connected' ? 'ok' : c.connectionState === 'provider_error' ? 'bad' : 'idle';
     if (c.connectionState === 'connected' || c.status === 'active') return 'ok';
     if (c.status === 'error' || ['expired', 'provider_error', 'permissions_required'].includes(c.connectionState ?? '')) return 'bad';
     return 'idle';
   }
 
-  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null }): string {
+  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): string {
     const state = this.connectionState(c);
     return !c.enabled ? 'Disabled' : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
   }
@@ -534,6 +536,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/publications' });
     for (const c of this.siteConnections()) {
       if (this.connectionState(c) === 'bad') items.push({ title: `${c.displayName} needs attention`, detail: 'Its credentials stopped working', action: 'Fix', link: '/studio/connections' });
+      else if (c.platform === 'website' && c.enabled && c.connectionState === 'not_verified') items.push({ title: `${c.displayName} is not verified`, detail: 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });
     }
     if (o.sources.failing > 0) items.push({ title: `${o.sources.failing} failing source${o.sources.failing === 1 ? '' : 's'}`, detail: 'They stopped feeding the inbox', action: 'Review', link: '/studio/sources' });
     return items;
