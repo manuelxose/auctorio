@@ -53,7 +53,7 @@ Details: `STUDIO-02-destination-readiness.md`. Evidence: `docs/studio-rebuild/ev
 
 Cases covered: Site only, active installation only, legacy account only, both, disabled, cancelled, failed, stale (>30 d), wrong tenant. Not applicable: "no scopes" (social OAuth scopes are STUDIO-03/09 territory; the social path was not changed).
 
-Commands run: `npm run typecheck` PASS; `npm run build:studio` PASS; compiled backend suite 474/474 (before the stale/legacy additions; destination-readiness file now 9/9); Angular `ng test` 30/30; e2e `connection-installer.spec.ts` 5/5 (needs the connection worker: `npm run dev` does not start workers, run `scripts/start-worker-connection.ts`); axe wcag2a/aa 0 violations on Overview and Connections (1440); screenshots 1440/1024/390.
+Commands run: `npm run typecheck` PASS; `npm run build:studio` PASS; compiled backend suite 474/474 (before the stale/legacy additions; destination-readiness file now 9/9); Angular `ng test` 30/30; e2e `connection-installer.spec.ts` 5/5 (`npm run dev` now starts the API and all 9 workers, including the connection worker); axe wcag2a/aa 0 violations on Overview and Connections (1440); screenshots 1440/1024/390.
 
 Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PASS · ACCESSIBILITY PASS (automated + keyboard focus; no screen-reader pass) · SECURITY PASS · INTEGRATION PASS (no live destination used; `canPublish` stays unknown by design, no publish probe) · REGRESSION PASS · PRODUCTION READINESS BLOCKED (no deploy/live credentials by rule).
 Independent review: intentionally not done, per project owner instruction. No PR opened (not authorized). No migration needed (additive JSON under `capabilities.verification`; rollback = revert the commit).

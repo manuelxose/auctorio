@@ -21,6 +21,7 @@
     "start:worker:image": "ts-node scripts/start-worker-image.ts",
     "start:worker:scraping": "ts-node scripts/start-worker-scraping.ts",
     "start:worker:publishing": "ts-node scripts/start-worker-publishing.ts",
+    "start:worker:connection": "ts-node scripts/start-worker-connection.ts",
     "start:worker:discovery": "ts-node scripts/start-worker-discovery.ts",
     "start:worker:scheduler": "ts-node scripts/start-worker-scheduler.ts",
     "start:worker:automation": "ts-node scripts/start-worker-automation.ts",

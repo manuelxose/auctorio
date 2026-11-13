@@ -51,7 +51,8 @@ if ($LASTEXITCODE -ne 0) { Write-Warning 'prisma generate no pudo reemplazar el 
 $processes = @()
 $env:TS_NODE_TRANSPILE_ONLY = 'true'
 try {
-  $services = @('api')
+  # API plus every queue worker (connection verification, text, images, publishing, ...) so flows complete locally.
+  $services = @('api', 'worker:connection', 'worker:discovery', 'worker:text', 'worker:image', 'worker:scraping', 'worker:publishing', 'worker:scheduler', 'worker:automation', 'worker:social')
   foreach ($service in $services) {
     $script = 'scripts/start-' + $service.Replace(':', '-') + '.ts'
     $processes += Start-Process node -ArgumentList @('--env-file=.env', 'node_modules/ts-node/dist/bin.js', $script) -PassThru -NoNewWindow
