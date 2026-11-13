@@ -15,6 +15,18 @@ Run history: dirty DB 8 passed/12 failed; clean DB with no sites 0 passed (login
 
 Fixed by the clean setup (were failing before): login, site switching, connector installer, notifications, content workflow.
 
+## e2e with real AI (DeepSeek deepseek-chat, test key from .env; provider selected via PUT /v2/ai/provider; connection test ok, 1.1 s)
+Result: **16 passed, 7 failed, 3 skipped (3.7 min)**, nothing published (no destination credentials, `E2E_ALLOW_REAL_PUBLISH` unset).
+- Changed vs mock run: guiatv-seo 2.1 (7x1 plan, real structured output) now PASSES.
+- guiatv-seo 3 (article): generation ran but `qaState` = `failed` (expected `passed`) => real content-QA gate rejects the DeepSeek article; cause not investigated (needs the QA report). Step 4 fails as consequence.
+- 2.2/2.3 skipped (opt-in `E2E_PLAN_ALL_CADENCES`); autopilot irreparable skipped.
+- autopilot source->project: still no automatic project; not investigated. autopilot health: stale worker-name assertion (as before).
+- production-journey (2): expect 502/400 from a *failing* provider but get 200/202/404/422 => assertions depend on a provider-failure setup, not on a healthy provider.
+- notifications "saved plans table": 0 rows for the active site.
+
+## Keys / platform admin
+AI keys live in the gitignored .env (see memory reference-ai-test-keys); local QA user added to PLATFORM_ADMIN_EMAILS in .env to reach admin AI endpoints. Image provider left on mock. Production deployment of keys NOT done (no access, needs explicit go-ahead).
+
 ## Unit tests (`node --test --test-force-exit dist/tests/*.test.js`, separate DB `content_ai_test`)
 465/467 in each of two full runs, but the 2 failures were **different tests each run** (run 1: automation-recovery, site-strategy; run 2: site-onboarding ONB-01, phase5 duplicate enqueuePublication) and all pass in isolation => parallel-file flakiness on a shared DB, not deterministic. `npm test` itself hangs (open handle after `autopilot-planner.test.ts`); not fixed.
 
