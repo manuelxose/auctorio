@@ -541,7 +541,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
 
   connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): string {
     const state = this.connectionState(c);
-    return !c.enabled ? 'Disabled' : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
+    return !c.enabled ? 'Disabled' : c.connectionState === 'stale' ? 'Stale' : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
   }
 
   attentionItems(): Array<{ title: string; detail: string; action: string; link: string }> {
@@ -551,7 +551,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/publications' });
     for (const c of this.siteConnections()) {
       if (this.connectionState(c) === 'bad') items.push({ title: `${c.displayName} needs attention`, detail: 'Its credentials stopped working', action: 'Fix', link: '/studio/connections' });
-      else if (c.platform === 'website' && c.enabled && c.connectionState === 'not_verified') items.push({ title: `${c.displayName} is not verified`, detail: 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });
+      else if (c.platform === 'website' && c.enabled && (c.connectionState === 'not_verified' || c.connectionState === 'stale')) items.push({ title: `${c.displayName} is ${c.connectionState === 'stale' ? 'stale' : 'not verified'}`, detail: c.connectionState === 'stale' ? 'Last verification is over 30 days old' : 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });
     }
     if (o.sources.failing > 0) items.push({ title: `${o.sources.failing} failing source${o.sources.failing === 1 ? '' : 's'}`, detail: 'They stopped feeding the inbox', action: 'Review', link: '/studio/sources' });
     return items;

@@ -1416,7 +1416,7 @@ export type StudioOverview = {
     enabled: boolean;
     status: string;
     connectionState: string | null;
-    readiness?: 'not_verified' | 'ready' | 'error';
+    readiness?: 'not_verified' | 'ready' | 'stale' | 'error';
     reason?: string | null;
     checks?: { configured: boolean | null; authenticated: boolean | null; reachable: boolean | null; capabilitiesVerified: boolean; canCreateDraft: boolean | null; canPublish: boolean | null };
     lastSuccessfulPublicationAt?: string | null;

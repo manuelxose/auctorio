@@ -37,3 +37,25 @@ Independent review (prompt section 13): intentionally not done, per project owne
 - STUDIO-03: modes: all provisioned sites `manual`, autoApprove/autoPublish false; mode UI present on Overview/Automation.
 - STUDIO-04: not covered (crawl sampling); site_index operation succeeded for guiatv-editorial in e2e step 1 (43 s).
 - Defects to schedule (not fixed here): corrupt mock PNG, zero-site login, flaky unit tests / `npm test` hang, stale e2e specs, overview CSS budget.
+
+
+---
+
+# STUDIO-02 acceptance (2026-11-13) — destination identity and readiness
+Details: `STUDIO-02-destination-readiness.md`. Evidence: `docs/studio-rebuild/evidence/studio-02/`.
+
+| Acceptance criterion | Verdict | Evidence |
+|---|---|---|
+| Synthetic GuíaTV installation without PublishingAccount appears exactly once, Not verified | PASS | HTTP test + real `/v2/overview` + screenshots |
+| Missing/incorrect credentials never render Connected/Ready; write capability separate | PASS | `readiness` ready/not_verified/stale/error; `checks.*` tri-state; real e2e verification persisted `auth:passed`, `draft_roundtrip:passed`, `canPublish` stays unknown |
+| Existing website/social accounts still appear; tenants isolated | PASS | HTTP tests (legacy-only, dedupe, second tenant sees none) |
+| No real publication or credential exposure | PASS | no publish; ciphertext never serialized (asserted) |
+
+Cases covered: Site only, active installation only, legacy account only, both, disabled, cancelled, failed, stale (>30 d), wrong tenant. Not applicable: "no scopes" (social OAuth scopes are STUDIO-03/09 territory; the social path was not changed).
+
+Commands run: `npm run typecheck` PASS; `npm run build:studio` PASS; compiled backend suite 474/474 (before the stale/legacy additions; destination-readiness file now 9/9); Angular `ng test` 30/30; e2e `connection-installer.spec.ts` 5/5 (needs the connection worker: `npm run dev` does not start workers, run `scripts/start-worker-connection.ts`); axe wcag2a/aa 0 violations on Overview and Connections (1440); screenshots 1440/1024/390.
+
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PASS · ACCESSIBILITY PASS (automated + keyboard focus; no screen-reader pass) · SECURITY PASS · INTEGRATION PASS (no live destination used; `canPublish` stays unknown by design, no publish probe) · REGRESSION PASS · PRODUCTION READINESS BLOCKED (no deploy/live credentials by rule).
+Independent review: intentionally not done, per project owner instruction. No PR opened (not authorized). No migration needed (additive JSON under `capabilities.verification`; rollback = revert the commit).
+
+Hand-off: STUDIO-03/08/09 can read `connections[].readiness` / `checks` from `/v2/overview` and `loadWebsiteDestinations(tenantId)`.

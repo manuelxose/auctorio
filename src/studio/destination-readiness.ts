@@ -5,7 +5,10 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
  * Unknown never becomes success: an active installation is only "ready" once a
  * capability verification was recorded. Secrets are never selected for output.
  */
-export type DestinationReadiness = "not_verified" | "ready" | "error";
+export type DestinationReadiness = "not_verified" | "ready" | "stale" | "error";
+
+/** A verification older than this no longer proves the destination still accepts content. */
+export const VERIFICATION_STALE_MS = 30 * 24 * 3_600_000;
 
 export interface InstallationReadinessInput {
   id: string;
@@ -21,9 +24,10 @@ export interface InstallationReadinessInput {
 
 type Tri = boolean | null;
 
-export function installationReadiness(i: Pick<InstallationReadinessInput, "verifiedAt" | "lastError">): DestinationReadiness {
+export function installationReadiness(i: Pick<InstallationReadinessInput, "verifiedAt" | "lastError">, now = Date.now()): DestinationReadiness {
   if (i.lastError) return "error";
-  return i.verifiedAt ? "ready" : "not_verified";
+  if (!i.verifiedAt) return "not_verified";
+  return now - i.verifiedAt.getTime() > VERIFICATION_STALE_MS ? "stale" : "ready";
 }
 
 /** Outcome of a persisted probe: true=passed, false=failed, null=never ran / not supported. */
@@ -42,14 +46,16 @@ export function installationToConnection(i: InstallationReadinessInput) {
     displayName: i.site?.name ?? i.displayName ?? "Website",
     enabled: true,
     status: "active",
-    connectionState: readiness === "ready" ? "connected" : readiness === "error" ? "provider_error" : "not_verified",
+    connectionState: readiness === "ready" ? "connected" : readiness === "error" ? "provider_error" : readiness,
     readiness,
     reason:
       readiness === "ready"
         ? null
         : readiness === "error"
           ? "The last check failed. Re-verify or fix the credentials."
-          : "Installed but capabilities were never verified. Run verification before publishing.",
+          : readiness === "stale"
+            ? "The last verification is more than 30 days old. Re-verify before relying on it."
+            : "Installed but capabilities were never verified. Run verification before publishing.",
     checks: {
       configured: i.configured ?? null,
       authenticated: auth,

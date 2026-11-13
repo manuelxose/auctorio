@@ -133,3 +133,31 @@ test("HTTP: overview dedupes legacy account, hides disabled/revoked, isolates te
     await prisma.tenant.deleteMany({ where: { id: { in: ids } } });
   }
 });
+
+test("verification older than 30 days is stale, never connected", () => {
+  const old = new Date(Date.now() - 31 * 24 * 3_600_000);
+  const c = installationToConnection({ ...base, verifiedAt: old });
+  assert.equal(c.readiness, "stale");
+  assert.equal(c.connectionState, "stale");
+  assert.equal(c.checks.capabilitiesVerified, false);
+});
+
+test("HTTP: legacy account only and Site only (no installation)", async () => {
+  const prisma = getPrismaClient();
+  const seed = `dest-leg-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const t = await prisma.tenant.create({ data: { name: seed, apiKeyHash: sha256(seed), status: "active" } });
+  const site = await prisma.site.create({ data: { tenantId: t.id, key: seed, name: "Only", type: "guiatv", baseUrl: "https://only.example" } });
+  try {
+    const none = await server(t.id).inject({ method: "GET", url: "/v2/overview" });
+    assert.equal((none.json().connections as unknown[]).length, 0, "a Site alone is not a destination");
+    await prisma.publishingAccount.create({ data: { tenantId: t.id, siteId: site.id, platform: "website", displayName: "Legacy", status: "active", enabled: true } });
+    const legacy = await server(t.id).inject({ method: "GET", url: "/v2/overview" });
+    const rows = legacy.json().connections as Array<{ displayName: string }>;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].displayName, "Legacy");
+  } finally {
+    await prisma.publishingAccount.deleteMany({ where: { tenantId: t.id } });
+    await prisma.site.deleteMany({ where: { tenantId: t.id } });
+    await prisma.tenant.deleteMany({ where: { id: t.id } });
+  }
+});
