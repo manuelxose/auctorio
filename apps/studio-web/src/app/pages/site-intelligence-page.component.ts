@@ -113,6 +113,15 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             <span class="au-stat__label">{{ busy ? 'Reading the site' : overview.lastRun ? 'Last read · ' + (overview.lastRun | date: 'HH:mm') : 'Last read' }}</span>
           </div>
         </div>
+        <details class="au-panel au-panel--padded au-mb-3" *ngIf="overview.evidence as ev">
+          <summary>
+            Evidence: {{ ev.discovered }} URLs in sitemaps · {{ ev.fetched }} fetched · {{ ev.extracted }} analysed · {{ ev.failed }} failed
+          </summary>
+          <p class="au-muted">Counts come from sitemap discovery and our own crawl. They say nothing about Google indexation; connect Search Console for that.</p>
+          <ul>
+            <li *ngFor="let s of ev.sections">/{{ s.family === '/' ? '' : s.family }} — {{ s.extracted }} analysed of {{ s.discovered }}</li>
+          </ul>
+        </details>
         <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview.profile?.warnings?.length">
           <app-icon name="warning"></app-icon>
           <span class="au-banner__text">{{ overview.profile?.warnings?.join(' · ') }}</span>
@@ -269,7 +278,7 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         <!-- Indexed pages -->
         <section class="au-panel" *ngIf="tab === 'inventory'">
           <header class="au-panel__header">
-            <h2 class="au-panel__title">Indexed pages</h2>
+            <h2 class="au-panel__title">Discovered pages <span class="au-muted">(from sitemap; not Google-indexed)</span></h2>
             <span class="au-badge au-badge--neutral">{{ pagesTotal }}</span>
           </header>
           <div class="au-toolbar au-toolbar--panel">

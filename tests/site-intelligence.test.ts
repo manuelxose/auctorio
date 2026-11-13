@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizePageUrl, parseSitemapBody } from "../src/studio/site-intelligence/sitemap";
-import { extractPageFromHtml, inferContentTypeFromUrl } from "../src/studio/site-intelligence/crawler";
+import { extractPageFromHtml, inferContentTypeFromUrl, isUtilityUrl, routeFamily, selectStratified } from "../src/studio/site-intelligence/crawler";
+import { computeSiteRelevanceScore } from "../src/studio/site-relevance";
 
 const BASE = "https://guiaprogramaciontv.com";
 
@@ -148,4 +149,33 @@ test("extractPageFromHtml keeps canonical url", () => {
   const page = extractPageFromHtml(BASE, `${BASE}/guia/hoy`, pageHtml());
   assert.ok(page);
   assert.equal(page.canonicalUrl, `${BASE}/guia/hoy`);
+});
+
+// ────────────────────────────────────────────────────────────── representative sampling
+
+test("selectStratified covers every route family under a small budget and skips utility pages", () => {
+  const families = ["canales", "series", "programas", "programacion-tv", "guias", "deportes"];
+  const items = [
+    ...Array.from({ length: 500 }, (_, i) => ({ url: `${BASE}/peliculas/p-${i}` })),
+    ...families.flatMap((f) => Array.from({ length: 5 }, (_, i) => ({ url: `${BASE}/${f}/x-${i}` }))),
+    { url: `${BASE}/aviso-legal` },
+    { url: `${BASE}/es/privacidad` },
+  ];
+  const picked = selectStratified(items, 14);
+  assert.equal(picked.length, 14);
+  const covered = new Set(picked.map((p) => routeFamily(p.url)));
+  for (const f of [...families, "peliculas"]) assert.ok(covered.has(f), `missing ${f}`);
+  assert.ok(picked.every((p) => !isUtilityUrl(p.url)));
+  assert.deepEqual(selectStratified(items, 14), picked); // deterministic
+});
+
+test("legal routes are typed utility, not an editorial content type", () => {
+  assert.equal(inferContentTypeFromUrl(`${BASE}/politica-de-privacidad`), "utility");
+  assert.equal(routeFamily(`${BASE}/es/series/x`), "series");
+});
+
+test("approved pillar alias scores like a known cluster and records why", () => {
+  const profile = { mainTopics: ["programacion tv"], categories: [], commercialTopics: [], evergreenTopics: [], newsTopics: [], sportsTopics: [], topicClusters: [], contentTypes: [], detectedSiteType: "media", pillarAliases: [{ name: "Programación TV", clusterSlug: null }] } as unknown as Parameters<typeof computeSiteRelevanceScore>[1];
+  const verdict = computeSiteRelevanceScore({ topic: "x", topicCluster: "programacion-tv", contentType: "schedule", primaryIntent: "informational", targetQuery: "x", primaryKeyword: "x" } as never, profile, "Programación TV hoy");
+  assert.ok(verdict.reasons.some((r) => r.includes('approved strategy pillar "Programación TV"')), JSON.stringify(verdict));
 });

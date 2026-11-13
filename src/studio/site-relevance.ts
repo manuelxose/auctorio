@@ -208,7 +208,7 @@ export function isExcludedByStrategy(
 export type RelevanceProfile = Pick<
   SiteIntelligenceProfileSummary,
   "mainTopics" | "categories" | "commercialTopics" | "evergreenTopics" | "newsTopics" | "sportsTopics" | "topicClusters" | "contentTypes" | "detectedSiteType"
-> & { strategyExclusions?: string[] };
+> & { strategyExclusions?: string[]; pillarAliases?: Array<{ name: string; clusterSlug: string | null }> };
 
 /**
  * Deterministic site-relevance scoring. Scores 0-100; items below the
@@ -304,9 +304,15 @@ export function computeSiteRelevanceScore(
   const topicCluster = brief.topicCluster;
   if (topicCluster) {
     const cluster = profile.topicClusters.find((entry) => entry.slug === normalize(topicCluster).replace(/[^a-z0-9]+/g, "-") || entry.name === topicCluster);
+    const topicSlug = normalize(topicCluster).replace(/[^a-z0-9]+/g, "-");
+    // Approved pillars are a separate layer from detected clusters; this alias keeps the link auditable.
+    const pillar = cluster ? undefined : profile.pillarAliases?.find((entry) => normalize(entry.name).replace(/[^a-z0-9]+/g, "-") === topicSlug);
     if (cluster) {
       score += 15;
       reasons.push(`known topic cluster "${cluster.name}": +15`);
+    } else if (pillar) {
+      score += 15;
+      reasons.push(`approved strategy pillar "${pillar.name}"${pillar.clusterSlug ? ` (cluster ${pillar.clusterSlug})` : ""}: +15`);
     } else {
       reasons.push(`unknown topic cluster "${topicCluster}"`);
     }

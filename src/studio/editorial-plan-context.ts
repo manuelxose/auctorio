@@ -9,7 +9,7 @@ import { getApprovedStrategy, strategyExclusions, type StrategyConfig } from "./
 const prisma = getPrismaClient();
 
 /** Detected profile with the approved strategy layered on top (exclusions enforced by site-relevance). */
-export type PlanningProfile = SiteIntelligenceProfileSummary & { strategyExclusions?: string[] };
+export type PlanningProfile = SiteIntelligenceProfileSummary & { strategyExclusions?: string[]; pillarAliases?: Array<{ name: string; clusterSlug: string | null }> };
 
 /**
  * Approved strategy beats inferred defaults: approved pillars lead the topic space, excluded
@@ -42,6 +42,7 @@ export function applyApprovedStrategy(profile: SiteIntelligenceProfileSummary, c
     detectedLanguage: config.languages[0] ?? profile.detectedLanguage,
     editorialTone: config.writingStyle ?? profile.editorialTone,
     strategyExclusions: exclusions,
+    pillarAliases: included.map((pillar) => ({ name: pillar.name, clusterSlug: pillar.clusterSlug })),
   };
 }
 

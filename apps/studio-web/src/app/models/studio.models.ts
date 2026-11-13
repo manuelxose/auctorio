@@ -1251,6 +1251,7 @@ export type SiteIntelligenceOverview = {
   clusters: Array<{ id: string; name: string; slug: string; pagesCount: number; authorityScore: number; gapScore: number; keywords: unknown; sampleUrls: unknown }>;
   indexing: boolean;
   lastRun: string | null;
+  evidence?: { discovered: number; fetched: number; extracted: number; failed: number; skipped: number; sections: Array<{ family: string; discovered: number; extracted: number }> };
 };
 
 export type SiteIndexedPageRow = {

@@ -145,9 +145,61 @@ function readJsonLdTypes($: ReturnType<typeof load>): string[] {
   return Array.from(types);
 }
 
+const UTILITY_PATH = /(^|\/)(aviso-legal|legal|privacidad|politica-de-privacidad|politica-privacidad|privacy|privacy-policy|cookies|politica-de-cookies|cookie-policy|terminos|terminos-y-condiciones|terms|terms-of-service|condiciones|contacto|contact|sobre-nosotros|quienes-somos|about|about-us|mapa-del-sitio|sitemap|login|registro|cuenta|account|cart|carrito|checkout|buscar|search)(\/|$)/;
+const LOCALE_SEGMENT = /^[a-z]{2}(-[a-z]{2})?$/;
+
+/** Legal/info/account routes: never an editorial topic and never worth crawl budget. */
+export function isUtilityUrl(url: string): boolean {
+  try {
+    return UTILITY_PATH.test(new URL(url).pathname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+/** Route family = first path segment after an optional locale prefix ("" for the homepage). */
+export function routeFamily(url: string): string {
+  try {
+    const segments = new URL(url).pathname.toLowerCase().split("/").filter(Boolean);
+    if (segments.length > 1 && LOCALE_SEGMENT.test(segments[0])) segments.shift();
+    return segments[0] ?? "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Deterministic stratified sample: round-robin over route families (sorted by name) so one huge
+ * section cannot consume the whole budget. Order inside a family is preserved.
+ */
+export function selectStratified<T extends { url: string }>(items: T[], budget: number): T[] {
+  const groups = new Map<string, T[]>();
+  for (const item of items) {
+    if (isUtilityUrl(item.url)) continue;
+    const family = routeFamily(item.url);
+    const list = groups.get(family);
+    if (list) list.push(item);
+    else groups.set(family, [item]);
+  }
+  const queues = Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b)).map(([, list]) => list);
+  const picked: T[] = [];
+  for (let round = 0; picked.length < budget; round += 1) {
+    let any = false;
+    for (const queue of queues) {
+      if (round < queue.length && picked.length < budget) {
+        picked.push(queue[round]);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return picked;
+}
+
 /** Infer a coarse content type from URL patterns and metadata. */
 export function inferContentTypeFromUrl(url: string): string {
   const path = new URL(url).pathname.toLowerCase();
+  if (UTILITY_PATH.test(path)) return "utility";
   if (/(^|\/)(donde-ver|donde-ver-hoy|ver-online|como-ver)(\/|$)/.test(path)) return "where-to-watch";
   if (/(^|\/)(guia|programacion|parrilla|horario)(\/|$)/.test(path)) return "schedule";
   if (/(^|\/)(ranking|top|mejores|listas)(\/|$)/.test(path)) return "ranking";
@@ -347,12 +399,13 @@ export async function crawlPagesForSite(
     siteId: site.id,
     crawlState: changedOnly ? "stale" : { in: ["discovered", "failed", "stale"] },
   };
-  const pages = await prisma.siteIndexedPage.findMany({
+  const candidates = await prisma.siteIndexedPage.findMany({
     where,
     orderBy: [{ crawlState: "asc" }, { modifiedAt: "desc" }],
-    take: Math.min(budget, 500),
+    take: 20_000,
     select: { id: true, url: true },
   });
+  const pages = selectStratified(candidates, Math.min(budget, 500));
 
   const result: CrawlBatchResult = { extracted: 0, failed: 0, skipped: 0, errors: [] };
   for (const page of pages) {
