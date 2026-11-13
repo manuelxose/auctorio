@@ -1,5 +1,7 @@
 # Autorio Studio: implementation prompts (English)
 Evidence base: GitHub main 173ecf037 (2026-11-13) plus historical 2026-11-12 GuíaTV acceptance. This prompt suite is EVIDENCE-GROUNDED BUT RUNTIME-INCOMPLETE: browser/DB were not accessible when authored. Do not treat UX and account connection as verified. STUDIO-01 explicitly closes this gap before implementation.
+**Test site for every prompt: guiaprogramaciontv.com** (Site `guiatv-editorial`). Token = env var `GUIATV_AUCTORIO_ADMIN_KEY` already in the gitignored `.env` and verified; reuse it, never create a new one, never print it.
+
 
 | Order | Prompt | P | Dependencies | Outcome |
 |---|---|---|---|---|
