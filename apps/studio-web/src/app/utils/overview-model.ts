@@ -24,9 +24,9 @@ export function setupSteps(f: SetupFacts): SetupStep[] {
     {
       id: 'autopilot',
       required: true,
-      done: f.automationEnabled && f.autopilotMode !== null,
+      done: f.autopilotMode !== null, // Manual is a valid choice even though enabled=false
       label: 'Choose how much runs on its own',
-      detail: f.automationEnabled && f.autopilotMode ? modeSummary(f.autopilotMode) : 'Write only, write and wait for your approval, or publish on its own',
+      detail: f.autopilotMode ? modeSummary(f.autopilotMode) : 'Write only, write and wait for your approval, or publish on its own',
     },
     { id: 'instagram', required: false, done: f.instagramConnected, label: 'Connect Instagram', detail: 'Each article can become a post' },
     { id: 'x', required: false, done: f.xConnected, label: 'Connect X', detail: 'Share each article as a post' },

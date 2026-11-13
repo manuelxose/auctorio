@@ -15,6 +15,12 @@ describe('overview model', () => {
     expect(autopilotHeadline(steps, { enabled: true, paused: true, pausedReason: 'publish failures', mode: 'autopilot' }).text).toBe('Paused: publish failures');
   });
 
+  it('treats Manual (automation off) as a completed mode choice', () => {
+    const steps = setupSteps({ ...facts, websiteConnected: true, siteAnalyzed: true, planReady: true, autopilotMode: 'manual' });
+    expect(steps.find((s) => s.id === 'autopilot')?.done).toBeTrue();
+    expect(autopilotHeadline(steps, { enabled: false, paused: false, pausedReason: null, mode: 'manual' }).text).toBe('Automation is off. Articles are written when you ask');
+  });
+
   it('bands keyword difficulty stored as 0–1 or 0–100', () => {
     expect(difficultyLabel(0.12)).toBe('Easy');
     expect(difficultyLabel(45)).toBe('Medium');

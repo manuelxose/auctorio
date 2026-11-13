@@ -8,6 +8,7 @@ import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { MODE_FLAGS, type AutomationMode } from '../utils/automation-mode';
 import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, AutomationStatus, PublishingAccount, PublishingWindow, StudioSite } from '../models/studio.models';
 
 @Component({
@@ -112,7 +113,7 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
 
         <div class="au-banner au-banner--warning" *ngIf="policy.mode === 'assisted'">
           <app-icon name="warning"></app-icon>
-          <span class="au-banner__text">Assisted mode generates and schedules automatically but never approves or publishes without you.</span>
+          <span class="au-banner__text">Assisted mode writes and repairs drafts automatically but never schedules, approves or publishes without you.</span>
         </div>
 
         <button class="au-btn au-btn--ghost au-btn--sm au-mt-2" type="button" (click)="advancedOpen = !advancedOpen" [attr.aria-expanded]="advancedOpen">
@@ -381,31 +382,9 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
     });
   }
 
-  setMode(mode: 'manual' | 'assisted' | 'autopilot'): void {
+  setMode(mode: AutomationMode): void {
     if (!this.policy) return;
-    this.policy.mode = mode;
-    if (mode === 'manual') {
-      this.policy.enabled = false;
-      this.policy.autoGenerate = false;
-      this.policy.autoApprove = false;
-      this.policy.autoSchedule = false;
-      this.policy.autoPublish = false;
-      this.policy.autoRepair = false;
-    } else if (mode === 'assisted') {
-      this.policy.enabled = true;
-      this.policy.autoGenerate = true;
-      this.policy.autoApprove = false;
-      this.policy.autoSchedule = true;
-      this.policy.autoPublish = false;
-      this.policy.autoRepair = true;
-    } else {
-      this.policy.enabled = true;
-      this.policy.autoGenerate = true;
-      this.policy.autoApprove = true;
-      this.policy.autoSchedule = true;
-      this.policy.autoPublish = true;
-      this.policy.autoRepair = true;
-    }
+    Object.assign(this.policy, MODE_FLAGS[mode], { mode });
   }
 
   save(): void {
