@@ -45,11 +45,11 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
 
       <dl class="ov__kpis" aria-label="Key figures">
         @if (overview(); as o) {
-          <div><dt>Published today</dt><dd>{{ o.today.articlesPublished }}</dd><span>of {{ o.today.articlesPlanned }} planned</span></div>
-          <div><dt>Waiting for review</dt><dd>{{ o.pipeline.review }}</dd><span>{{ o.pipeline.drafts }} drafts in progress</span></div>
-          <div><dt>Scheduled</dt><dd>{{ o.pipeline.scheduled }}</dd><span>ready to go out</span></div>
-          <div [class.is-bad]="o.pipeline.failed > 0"><dt>Failed</dt><dd>{{ o.pipeline.failed }}</dd><span>{{ o.pipeline.failed ? 'need a retry' : 'nothing to fix' }}</span></div>
-          <div><dt>Next 7 days</dt><dd>{{ weekTopicCount() }}</dd><span>topics planned</span></div>
+          <div><dt>Published today</dt><dd>{{ o.today.articlesPublished }}</dd><dd class="ov__sub">of {{ o.today.articlesPlanned }} planned</dd></div>
+          <div><dt>Waiting for review</dt><dd>{{ o.pipeline.review }}</dd><dd class="ov__sub">{{ o.pipeline.drafts }} drafts in progress</dd></div>
+          <div><dt>Scheduled</dt><dd>{{ o.pipeline.scheduled }}</dd><dd class="ov__sub">ready to go out</dd></div>
+          <div [class.is-bad]="o.pipeline.failed > 0"><dt>Failed</dt><dd>{{ o.pipeline.failed }}</dd><dd class="ov__sub">{{ o.pipeline.failed ? 'need a retry' : 'nothing to fix' }}</dd></div>
+          <div><dt>Next 7 days</dt><dd>{{ weekTopicCount() }}</dd><dd class="ov__sub">topics planned</dd></div>
         } @else {
           @for (n of [1, 2, 3, 4, 5]; track n) { <div class="is-loading"><dt>&nbsp;</dt><dd>&nbsp;</dd></div> }
         }
@@ -257,8 +257,8 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
       .ov__kpis > div { display: flex; flex-direction: column; gap: 2px; padding: var(--au-s4); border: 1px solid var(--au-border); border-radius: 14px; background: var(--au-surface); box-shadow: var(--au-shadow-glass); }
       .ov__kpis dt { color: var(--au-muted); font-size: var(--au-fs-caption); }
       .ov__kpis dd { margin: 0; font: 600 26px/1.15 var(--au-font); font-variant-numeric: tabular-nums; }
-      .ov__kpis span { color: var(--au-faint); font-size: var(--au-fs-caption); }
-      .ov__kpis .is-bad dd { color: var(--au-danger); }
+      .ov__kpis dd.ov__sub { font: 400 var(--au-fs-caption) var(--au-font); color: var(--au-faint); }
+      .ov__kpis .is-bad dd:not(.ov__sub) { color: var(--au-danger); }
       .ov__kpis .is-loading { min-height: 88px; }
       .ov__card { padding: var(--au-s5); display: flex; flex-direction: column; gap: var(--au-s4); }
       .ov__card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--au-s3); }

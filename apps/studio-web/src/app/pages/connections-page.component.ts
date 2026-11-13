@@ -155,7 +155,7 @@ type ConnectionRow = {
                 <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.installation && resumable(row.installation)" (click)="resume(row.installation)">
                   {{ row.installation.state === 'ready' ? 'Activate' : row.installation.state === 'active' ? 'Verify' : 'Resume' }}
                 </button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website || row.social || (row.installation && !isActive(row.installation))" (click)="remove(row)" [disabled]="busyId === row.id">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website || row.social || (row.installation && !isActive(row.installation))" (click)="remove(row)" [disabled]="busyId === row.id" [attr.aria-label]="'Remove ' + row.displayName">
                   <app-icon name="trash"></app-icon>
                 </button>
               </td>

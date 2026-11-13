@@ -73,3 +73,63 @@ test("synthetic GuiaTV installation without PublishingAccount appears once, not 
     await prisma.tenant.deleteMany({ where: { id: { in: [a.tenant.id, b.tenant.id] } } });
   }
 });
+
+import Fastify from "fastify";
+import { registerStudioRoutes } from "../src/studio/routes";
+
+function server(tenantId: string) {
+  const s = Fastify();
+  s.decorateRequest("tenantId", "");
+  s.decorateRequest("studioPermissions", []);
+  s.addHook("preHandler", async (r) => {
+    r.tenantId = tenantId;
+    r.studioPermissions = ["workspace.manage", "publishing.manage", "integrations.manage", "analytics.read"];
+  });
+  registerStudioRoutes(s);
+  return s;
+}
+
+test("HTTP: overview dedupes legacy account, hides disabled/revoked, isolates tenants; list links site by origin", async () => {
+  process.env.SOCIAL_TOKEN_ENCRYPTION_KEY = process.env.SOCIAL_TOKEN_ENCRYPTION_KEY || "test-only-encryption-key";
+  const prisma = getPrismaClient();
+  const seed = `dest-http-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const mkTenant = (n: string) => prisma.tenant.create({ data: { name: `${seed}-${n}`, apiKeyHash: sha256(`${seed}-${n}`), status: "active" } });
+  const [ta, tb] = [await mkTenant("a"), await mkTenant("b")];
+  const site = await prisma.site.create({ data: { tenantId: ta.id, key: seed, name: "GuiaTV", type: "guiatv", baseUrl: "https://guiatv-http.example" } });
+  try {
+    await prisma.publishingAccount.create({
+      data: { tenantId: ta.id, siteId: site.id, platform: "website", displayName: "Legacy GuiaTV", status: "active", enabled: true },
+    });
+    const mk = (state: "active" | "disabled" | "cancelled" | "failed", extra: object = {}) =>
+      prisma.connectorInstallation.create({
+        data: { tenantId: ta.id, kind: "website", provider: "generic_webhook", state, siteId: site.id, config: { baseUrl: "https://guiatv-http.example" }, ...extra },
+      });
+    await mk("active");
+    await mk("disabled");
+    await mk("cancelled");
+    await mk("failed");
+    const a = server(ta.id);
+    const res = await a.inject({ method: "GET", url: "/v2/overview" });
+    assert.equal(res.statusCode, 200);
+    const web = (res.json().connections as Array<{ platform: string; readiness?: string; displayName: string }>).filter((c) => c.platform === "website");
+    assert.equal(web.length, 1, "legacy account + active install + non-active installs must collapse to one row");
+    assert.equal(web[0].readiness, "not_verified");
+
+    const b = await server(tb.id).inject({ method: "GET", url: "/v2/overview" });
+    assert.equal((b.json().connections as unknown[]).length, 0);
+
+    await prisma.connectorInstallation.deleteMany({ where: { tenantId: ta.id } });
+    await prisma.connectorInstallation.create({
+      data: { tenantId: ta.id, kind: "website", provider: "generic_webhook", state: "active", config: { baseUrl: "https://www.guiatv-http.example/" } },
+    });
+    const list = await a.inject({ method: "GET", url: "/v2/connector-installations" });
+    assert.equal(list.json().items[0].siteId, site.id);
+    assert.ok(!JSON.stringify(list.json()).includes("credentialsCiphertext"));
+  } finally {
+    const ids = [ta.id, tb.id];
+    await prisma.connectorInstallation.deleteMany({ where: { tenantId: { in: ids } } });
+    await prisma.publishingAccount.deleteMany({ where: { tenantId: { in: ids } } });
+    await prisma.site.deleteMany({ where: { tenantId: { in: ids } } });
+    await prisma.tenant.deleteMany({ where: { id: { in: ids } } });
+  }
+});
