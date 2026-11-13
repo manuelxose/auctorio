@@ -1,0 +1,25 @@
+# Autorio Studio: implementation prompts (English)
+Evidence base: GitHub main 173ecf037 (2026-11-13) plus historical 2026-11-12 GuíaTV acceptance. This prompt suite is EVIDENCE-GROUNDED BUT RUNTIME-INCOMPLETE: browser/DB were not accessible when authored. Do not treat UX and account connection as verified. STUDIO-01 explicitly closes this gap before implementation.
+
+| Order | Prompt | P | Dependencies | Outcome |
+|---|---|---|---|---|
+| 01 | [STUDIO-01: Close the runtime evidence gap and certify the current Studio baseline](STUDIO-01-runtime-evidence-and-baseline.md) | P0 | None | An evidence pack for the exact local Studio and DB state without publishing or mutating production. |
+| 02 | [STUDIO-02: Unify destination identity and accurately surface GuíaTV in Overview](STUDIO-02-connections-and-overview-readiness.md) | P0 | STUDIO-01 | A real website installation, whether legacy or new, appears once in Connections and Overview with a truthful verified status and actionable reason if not ready. |
+| 03 | [STUDIO-03: Make Manual, Assisted and Autopilot atomic, understandable and safe](STUDIO-03-publishing-mode-contract-and-discoverability.md) | P0 | STUDIO-01, STUDIO-02 | Exactly three historical publishing modes remain consistent across DB, policy endpoints, Overview and Automation, with explicit readiness gates. |
+| 04 | [STUDIO-04: Rebuild Site Intelligence around representative evidence and credible SEO](STUDIO-04-site-intelligence-and-crawl-evidence.md) | P1 | STUDIO-01 | A user can trust that site analysis covers representative sections, distinguishes discovered/crawled/extracted URLs and leads to actionable strategy. |
+| 05 | [STUDIO-05: Make source discovery and competitor analysis relevant to each site's market](STUDIO-05-sources-competitors-and-provenance.md) | P1 | STUDIO-04 | A Spanish TV guide receives useful Spanish-market TV/streaming sources, relevant competitors and traceable provenance instead of generic English movie feeds. |
+| 06 | [STUDIO-06: Complete daily editorial plans and preserve approved brief intent](STUDIO-06-editorial-plan-and-cadence.md) | P1 | STUDIO-04, STUDIO-05 | For a selected period and daily cadence, every requested slot is either filled with an approved relevant brief or transparently blocked with a precise reason and fix. |
+| 07 | [STUDIO-07: Make one production pipeline write credible localized content with assets](STUDIO-07-content-production-and-quality.md) | P1 | STUDIO-06 | A Spanish GuíaTV plan item becomes one editable, evidence-backed article with proper section outline, SEO metadata and a valid hero image request, never raw JSON or duplicated drafts. |
+| 08 | [STUDIO-08: Unify publication scheduling, calendar projection and delivery recovery](STUDIO-08-calendar-publications-and-reconciliation.md) | P1 | STUDIO-02, STUDIO-03, STUDIO-07 | A confirmed publication schedule has one canonical record, updates consistently across Content/Calendar/Publications, and can recover failures without duplicate remote articles. |
+| 09 | [STUDIO-09: Deliver the two-level Studio navigation and cohesive contextual AI assistant](STUDIO-09-dual-navigation-copilot-and-ui-system.md) | P1 | STUDIO-01, STUDIO-02 | A coherent global header and contextual left sidebar with a usable persistent Copilot that preserve feature discoverability and work on desktop/mobile. |
+| 10 | [STUDIO-10: Separate customer workflows from privileged operations without losing capabilities](STUDIO-10-admin-advanced-operations-separation.md) | P1 | STUDIO-03, STUDIO-05, STUDIO-09 | Common user screens are understandable, while advanced controls and system internals remain discoverable only to authorized roles. |
+| 11 | [STUDIO-11: Independently verify the entire SaaS journey with GuíaTV in safe mode](STUDIO-11-independent-integrated-acceptance.md) | P0 | STUDIO-02 through STUDIO-10 | Independent reviewer verifies a complete source -> intelligence -> plan -> content -> schedule -> mocked destination publication journey and reports separate production readiness. |
+
+## First prompt
+Copy **STUDIO-01-runtime-evidence-and-baseline.md** into the next Claude Code conversation. It is a real read-only runtime and UX audit; close the live GitHub-vs-local gap before editing user-facing or publishing behavior. Review docs/studio-rebuild/00-EXECUTIVE-AUDIT.md and 12-ACCEPTANCE-AND-REGRESSION-MATRIX.md.
+
+## Critical path and parallel work
+STUDIO-01 -> STUDIO-02 -> STUDIO-03 -> STUDIO-08 -> STUDIO-11; and STUDIO-01 -> STUDIO-04 -> STUDIO-05 -> STUDIO-06 -> STUDIO-07 -> STUDIO-08 -> STUDIO-11. STUDIO-09 may start after 01 and 02 contracts; STUDIO-10 after 03/05/09. Use separate worktrees, independent reviewer and controlled integration. Avoid concurrent writes to app-shell.component.ts, studio-nav.ts, models, prisma/schema.prisma or routes-editorial.ts without coordination.
+
+## Acceptance gate
+No production publication or deploy without explicit permission. Actual current connection status requires browser/DB inspection. The audit has no independent browser or test run in this originating session. No assertion of PASS from generated prompt text alone.
