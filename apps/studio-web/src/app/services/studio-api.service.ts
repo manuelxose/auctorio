@@ -960,8 +960,8 @@ export class StudioApiService {
 
   // ─── Editorial platform: overview & audit ─────────────────────────────
 
-  getOverview(): Observable<StudioOverview> {
-    return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`);
+  getOverview(siteId?: string): Observable<StudioOverview> {
+    return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`, { params: siteId ? { siteId } : {} });
   }
 
   getAiUsage(): Observable<{ rows: AiUsageRow[] }> {

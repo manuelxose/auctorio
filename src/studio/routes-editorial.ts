@@ -2160,6 +2160,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const tenantId = context.tenantId;
+    // Optional active-site scope: counts must not present tenant-wide numbers as the active site's.
+    const rawSite = (request.query as { siteId?: string }).siteId;
+    const siteScope =
+      rawSite && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSite) &&
+      (await prisma.site.findFirst({ where: { id: rawSite, tenantId }, select: { id: true } }))
+        ? { siteId: rawSite }
+        : {};
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
@@ -2184,28 +2191,28 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       websiteInstallations,
     ] = await Promise.all([
       prisma.publication.count({
-        where: { tenantId, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "website", status: "published", publishedAt: { gte: dayStart, lt: dayEnd } },
+        where: { tenantId, ...siteScope, channel: "website", status: "published", publishedAt: { gte: dayStart, lt: dayEnd } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "x", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "x", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "instagram", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "instagram", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.sourceItem.count({ where: { tenantId, processingStatus: "candidate" } }),
-      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["draft", "ai_generated"] } } }),
-      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["in_review", "qa_passed"] } } }),
-      prisma.publication.count({ where: { tenantId, status: { in: ["scheduled", "queued"] } } }),
-      prisma.publication.count({ where: { tenantId, status: "failed" } }),
+      prisma.contentProject.count({ where: { tenantId, ...siteScope, deletedAt: null, status: { in: ["draft", "ai_generated"] } } }),
+      prisma.contentProject.count({ where: { tenantId, ...siteScope, deletedAt: null, status: { in: ["in_review", "qa_passed"] } } }),
+      prisma.publication.count({ where: { tenantId, ...siteScope, status: { in: ["scheduled", "queued"] } } }),
+      prisma.publication.count({ where: { tenantId, ...siteScope, status: "failed" } }),
       prisma.contentSource.findMany({
-        where: { tenantId },
+        where: { tenantId, ...siteScope },
         select: { id: true, name: true, type: true, enabled: true, lastSuccessAt: true, consecutiveFailures: true },
       }),
       prisma.publication.findMany({
-        where: { tenantId, status: { not: "deleted" } },
+        where: { tenantId, ...siteScope, status: { not: "deleted" } },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         take: 8,
         include: {
@@ -2214,7 +2221,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           account: { select: { id: true, displayName: true } },
         },
       }),
-      getAutomationStatus(tenantId, null),
+      getAutomationStatus(tenantId, siteScope.siteId ?? null),
       prisma.publishingAccount.findMany({
         where: { tenantId },
         orderBy: [{ platform: "asc" }, { displayName: "asc" }],
@@ -2237,6 +2244,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       prisma.editorialPlanItem.findMany({
         where: {
           tenantId,
+          ...siteScope,
           scheduledFor: { gte: dayStart, lt: weekEnd },
           status: { notIn: ["canceled", "rejected"] },
         },
@@ -2245,6 +2253,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       prisma.editorialPlanItem.count({
         where: {
           tenantId,
+          ...siteScope,
           scheduledFor: { gte: dayStart, lt: dayEnd },
           status: { notIn: ["canceled", "rejected"] },
         },

@@ -23,6 +23,7 @@ export interface InstallationReadinessInput {
 }
 
 type Tri = boolean | null;
+export type DestinationStage = "unconfigured" | "stored" | "not_verified" | "authenticated" | "read_only" | "ready" | "stale" | "error";
 
 export function installationReadiness(i: Pick<InstallationReadinessInput, "verifiedAt" | "lastError">, now = Date.now()): DestinationReadiness {
   if (i.lastError) return "error";
@@ -40,6 +41,15 @@ function probeOutcome(capabilities: unknown, probe: string): Tri {
 export function installationToConnection(i: InstallationReadinessInput) {
   const readiness = installationReadiness(i);
   const auth = probeOutcome(i.capabilities, "auth");
+  const draft = probeOutcome(i.capabilities, "draft_roundtrip");
+  const stage: DestinationStage =
+    readiness === "error" ? "error"
+    : readiness === "stale" ? "stale"
+    : readiness === "ready" ? (draft === false ? "read_only" : "ready")
+    : i.configured === false ? "unconfigured"
+    : auth === true ? "authenticated"
+    : i.configured === true ? "stored"
+    : "not_verified";
   return {
     id: i.id,
     platform: "website" as const,
@@ -48,6 +58,7 @@ export function installationToConnection(i: InstallationReadinessInput) {
     status: "active",
     connectionState: readiness === "ready" ? "connected" : readiness === "error" ? "provider_error" : readiness,
     readiness,
+    stage,
     reason:
       readiness === "ready"
         ? null
@@ -61,7 +72,7 @@ export function installationToConnection(i: InstallationReadinessInput) {
       authenticated: auth,
       reachable: auth ?? (i.verifiedAt ? true : null),
       capabilitiesVerified: readiness === "ready",
-      canCreateDraft: probeOutcome(i.capabilities, "draft_roundtrip"),
+      canCreateDraft: draft,
       canPublish: probeOutcome(i.capabilities, "publish"),
     },
     lastVerifiedAt: i.verifiedAt,

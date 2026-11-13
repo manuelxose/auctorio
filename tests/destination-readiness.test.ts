@@ -161,3 +161,36 @@ test("HTTP: legacy account only and Site only (no installation)", async () => {
     await prisma.tenant.deleteMany({ where: { id: t.id } });
   }
 });
+
+test("stage separates unconfigured / stored / authenticated / read-only / ready", () => {
+  const auth = { verification: { probes: [{ probe: "auth", outcome: "passed" }] } };
+  const noDraft = { verification: { probes: [{ probe: "auth", outcome: "passed" }, { probe: "draft_roundtrip", outcome: "failed" }] } };
+  assert.equal(installationToConnection({ ...base, configured: false }).stage, "unconfigured");
+  assert.equal(installationToConnection({ ...base, configured: true }).stage, "stored");
+  assert.equal(installationToConnection({ ...base, configured: true, capabilities: auth }).stage, "authenticated");
+  assert.equal(installationToConnection({ ...base, configured: true, verifiedAt: new Date(), capabilities: noDraft }).stage, "read_only");
+  assert.equal(installationToConnection({ ...base, configured: true, verifiedAt: new Date(), capabilities: auth }).stage, "ready");
+  assert.equal(installationToConnection({ ...base, configured: true, lastError: "x" }).stage, "error");
+});
+
+test("HTTP: /v2/overview?siteId scopes counts to the active site, not the tenant", async () => {
+  const prisma = getPrismaClient();
+  const seed = `dest-scope-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const t = await prisma.tenant.create({ data: { name: seed, apiKeyHash: sha256(seed), status: "active" } });
+  const s1 = await prisma.site.create({ data: { tenantId: t.id, key: `${seed}-1`, name: "One", type: "guiatv" } });
+  const s2 = await prisma.site.create({ data: { tenantId: t.id, key: `${seed}-2`, name: "Two", type: "tecnoria" } });
+  try {
+    await prisma.contentSource.create({ data: { tenantId: t.id, siteId: s1.id, name: "a", type: "rss" } });
+    await prisma.contentSource.create({ data: { tenantId: t.id, siteId: s1.id, name: "b", type: "rss" } });
+    await prisma.contentSource.create({ data: { tenantId: t.id, siteId: s2.id, name: "c", type: "rss" } });
+    const get = async (q: string) => (await server(t.id).inject({ method: "GET", url: `/v2/overview${q}` })).json().sources.total;
+    assert.equal(await get(""), 3);
+    assert.equal(await get(`?siteId=${s1.id}`), 2);
+    assert.equal(await get(`?siteId=${s2.id}`), 1);
+    assert.equal(await get("?siteId=00000000-0000-4000-8000-000000000000"), 3, "unknown site id falls back, never leaks another tenant");
+  } finally {
+    await prisma.contentSource.deleteMany({ where: { tenantId: t.id } });
+    await prisma.site.deleteMany({ where: { tenantId: t.id } });
+    await prisma.tenant.deleteMany({ where: { id: t.id } });
+  }
+});

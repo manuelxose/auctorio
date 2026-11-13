@@ -27,3 +27,9 @@ Worker (`worker-connection.ts`) now persists probe outcomes under `capabilities.
 ## Dimension verdicts
 IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PASS (1440/1024/390) · ACCESSIBILITY PASS (axe wcag2a/aa on the two pages, 1440; no screen-reader pass) · SECURITY PASS · INTEGRATION PARTIAL (`canPublish`/last publication stay unknown until a publish probe exists; no live destination used) · REGRESSION PASS (474/474 backend; Angular specs and e2e suite not run) · PRODUCTION READINESS BLOCKED (no deploy or live credentials, by rule).
 Independent review: skipped by standing instruction.
+
+## Final completion pass
+- `stage` added to each destination (`unconfigured|stored|not_verified|authenticated|read_only|ready|stale|error`); Overview labels use it (screenshot `overview-stage-1440.png`: "Stored · Verify" for a synthetic install with a credentials reference and no verification). Stale = verification older than 30 days.
+- `/v2/overview?siteId=` scopes publication, content, source and plan counts and automation status to the active site (unknown or foreign site id falls back to the tenant, never leaks). Overview sends the active site id and reloads on site change. Known residual: `inboxCandidates` (SourceItem has no `siteId` column) stays workspace-wide.
+- Tests: `destination-readiness.test.ts` 11/11 (stage matrix, site scoping). Full backend suite 476/478: the 2 failures (`duplicate enqueuePublication calls are idempotent…`, `concurrent strategy saves both succeed…`) are the pre-existing flaky tests listed in STUDIO-01 (they also fail when run alone and hang the process), unrelated to destinations. Angular `ng test` 30/30; e2e `connection-installer` 5/5 earlier with `npm run dev` (API + 9 workers).
+- Feature ownership: destination readiness read model = `src/studio/destination-readiness.ts` (consumers: `/v2/overview`, Overview and Connections pages; next consumers STUDIO-03/08/09).

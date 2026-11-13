@@ -18,6 +18,8 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
  * Overview: what Auctorio did and will do for the active site, what is still needed to run
  * on autopilot, and what it learned about the site. Every figure comes from the API.
  */
+const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verified: 'Not verified', authenticated: 'Authenticated', read_only: 'Read-only', ready: 'Ready', stale: 'Stale', error: 'Error' } as const;
+
 @Component({
   selector: 'app-overview-page',
   standalone: true,
@@ -466,7 +468,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
 
   load(): void {
     const siteId = this.siteId() ?? undefined;
-    this.api.getOverview().subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
+    this.api.getOverview(siteId).subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
     this.api.getAutomationPolicy(siteId).subscribe({ next: (p) => this.policy.set(p), error: () => undefined });
     if (siteId) this.api.getSiteIntelligence(siteId).subscribe({ next: (i) => this.intelligence.set(i), error: () => undefined });
     this.api.listOperations({ page: 1, pageSize: 100, siteId }).subscribe({ next: (r) => this.operations.set(r.items), error: () => undefined });
@@ -539,9 +541,9 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     return days <= 0 ? 'today' : `${days}d ago`;
   }
 
-  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): string {
+  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string; stage?: keyof typeof STAGE_LABELS }): string {
     const state = this.connectionState(c);
-    return !c.enabled ? 'Disabled' : c.connectionState === 'stale' ? 'Stale' : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
+    return !c.enabled ? 'Disabled' : c.platform === 'website' && c.stage ? STAGE_LABELS[c.stage] : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
   }
 
   attentionItems(): Array<{ title: string; detail: string; action: string; link: string }> {
