@@ -1417,6 +1417,7 @@ export type StudioOverview = {
     status: string;
     connectionState: string | null;
     lastVerifiedAt: string | null;
+    siteId: string | null;
     siteName: string | null;
   }>;
   planCoverage: {

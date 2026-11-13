@@ -31,7 +31,19 @@ const STYLES = `
   .pill-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .pillars { display: grid; gap: 12px; }
   .cov { margin: 0; padding-left: 18px; }
+  .group { border: 0; padding: 0; margin: 0 0 var(--au-s5, 20px); min-width: 0; }
+  .group legend { padding: 0; font-weight: 600; }
+  .group__hint { margin: 2px 0 10px; }
+  .summary { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .detected { display: grid; gap: 16px 24px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 `;
+
+const FIELD_GROUPS: Array<{ title: string; hint: string; keys: StrategyField[] }> = [
+  { title: 'Identity & audience', hint: 'Who the site is for and where it is read.', keys: ['description', 'primaryAudience', 'languages', 'markets'] },
+  { title: 'Voice & boundaries', hint: 'How articles sound and what they never cover.', keys: ['writingStyle', 'preferredFormats', 'excludedTopics', 'editorialRestrictions'] },
+  { title: 'Search strategy', hint: 'What each article should rank for and how it links.', keys: ['priorityCategories', 'searchIntents', 'seoObjectives', 'internalLinkingRules'] },
+  { title: 'Sources & cadence', hint: 'Where facts come from and how often to publish.', keys: ['sourcePolicy', 'cadenceNotes'] },
+];
 
 const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }> = [
   { key: 'description', label: 'Site description', kind: 'text' },
@@ -59,47 +71,103 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Site Intelligence</p>
-          <h1 class="au-page__title">Site Intelligence</h1>
-          <p class="au-page__subtitle">What Auctorio actually knows about the connected website.</p>
+          <p class="au-page__eyebrow">{{ overview?.site?.name || 'Understand the site' }}<span *ngIf="host"> · {{ host }}</span></p>
+          <h1 class="au-page__title">Site intelligence</h1>
+          <p class="au-page__subtitle">What Auctorio learned from your pages, and the strategy every plan and article follows.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--secondary" type="button" [disabled]="indexing" (click)="crawlChanged()">
+          <button class="au-btn au-btn--ghost" type="button" [disabled]="busy" (click)="crawlChanged()" title="Only pages added or changed since the last read">
             <app-icon name="refresh"></app-icon>
             Crawl changes
           </button>
-          <button class="au-btn au-btn--primary" type="button" [disabled]="indexing" (click)="indexSite()">
+          <button class="au-btn au-btn--primary" type="button" [disabled]="busy" (click)="indexSite()">
             <app-icon name="scan"></app-icon>
-            {{ indexing ? 'Indexing…' : 'Index website' }}
+            {{ busy ? 'Reading the site…' : 'Read the whole site' }}
           </button>
         </div>
       </header>
 
-      <div class="au-banner au-banner--error" *ngIf="loadError">
+      <div class="au-banner au-banner--error" *ngIf="loadError" role="alert">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
       </div>
 
+      <!-- Summary: same on every tab -->
+      <ng-container *ngIf="overview">
+        <div class="au-stat-row summary au-mb-3" aria-label="Site summary">
+          <div class="au-stat">
+            <span class="au-stat__value">{{ overview.extractedPages }}<span class="au-muted"> / {{ overview.totalPages }}</span></span>
+            <span class="au-stat__label">Pages read / found</span>
+          </div>
+          <div class="au-stat">
+            <span class="au-stat__value">{{ overview.profile?.topicClusters?.length ?? 0 }}</span>
+            <span class="au-stat__label">Topic clusters</span>
+          </div>
+          <div class="au-stat" [class.is-alert]="healthySitemaps < overview.sitemaps.length">
+            <span class="au-stat__value">{{ healthySitemaps }}/{{ overview.sitemaps.length }}</span>
+            <span class="au-stat__label">Healthy sitemaps</span>
+          </div>
+          <div class="au-stat">
+            <span class="au-stat__value">{{ busy ? 'Now' : overview.lastRun ? (overview.lastRun | date: 'd MMM') : 'Never' }}</span>
+            <span class="au-stat__label">{{ busy ? 'Reading the site' : overview.lastRun ? 'Last read · ' + (overview.lastRun | date: 'HH:mm') : 'Last read' }}</span>
+          </div>
+        </div>
+        <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview.profile?.warnings?.length">
+          <app-icon name="warning"></app-icon>
+          <span class="au-banner__text">{{ overview.profile?.warnings?.join(' · ') }}</span>
+        </div>
+      </ng-container>
+
       <nav class="tabs" role="tablist" aria-label="Site intelligence sections">
         <button class="tab" type="button" role="tab" *ngFor="let t of tabs" [attr.aria-selected]="tab === t.id" (click)="tab = t.id">{{ t.label }}</button>
       </nav>
 
-      <!-- Profile & audience: editable approved strategy -->
+      <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && overview?.profile as p">
+        <h2 class="au-panel__title">What Auctorio detected</h2>
+        <div class="detected au-mt-2">
+          <div>
+            <p>{{ p.brandSummary || 'No summary yet. Read the whole site to build one.' }}</p>
+            <div class="au-chips au-mt-2" aria-label="Main topics">
+              <span class="au-chip au-chip--brand" *ngFor="let topic of p.mainTopics">{{ topic }}</span>
+            </div>
+            <div class="au-field-grid au-mt-3" *ngIf="topicGroups.length">
+              <div class="au-meta" *ngFor="let g of topicGroups">
+                <strong>{{ g.label }}</strong>
+                <p class="au-muted">{{ g.items.join(', ') }}</p>
+              </div>
+            </div>
+          </div>
+          <dl class="au-detail-grid">
+            <dt>Audience</dt><dd>{{ p.detectedAudience || '—' }}</dd>
+            <dt>Language</dt><dd>{{ p.detectedLanguage || '—' }}</dd>
+            <dt>Tone</dt><dd>{{ p.editorialTone || '—' }}</dd>
+            <dt>Site type</dt><dd>{{ p.detectedSiteType || '—' }}</dd>
+            <dt>Typical article</dt><dd>{{ p.commonArticleLength ? p.commonArticleLength + ' words' : '—' }}</dd>
+            <dt>Confidence</dt><dd>{{ p.confidence !== null ? (p.confidence * 100 | number: '1.0-0') + '%' : '—' }}</dd>
+          </dl>
+        </div>
+      </section>
+
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && draft">
-        <h2 class="au-panel__title">Profile &amp; audience</h2>
-        <p class="au-muted">Detected facts come from the crawl, suggestions are heuristic drafts, and Approved values are yours. Saving creates a new version; reindexing never overwrites approved fields.</p>
+        <h2 class="au-panel__title">Editorial strategy</h2>
+        <p class="au-muted">Detected values come from your pages, Suggested values are drafts, Approved values are yours. Saving creates a new version; reading the site again never overwrites approved values.</p>
         <div class="au-banner au-banner--info au-mt-2" *ngIf="layers && !layers.approved">
           <app-icon name="info"></app-icon>
           <span class="au-banner__text">Nothing is approved yet. Planning uses the suggested values below until you save.</span>
         </div>
-        <div class="form-grid au-mt-2">
-          <div class="field" *ngFor="let f of fields">
-            <label [attr.for]="'f-' + f.key">{{ f.label }} <span class="src" [ngClass]="'src--' + source(f.key)">{{ sourceLabel(f.key) }}</span></label>
-            <textarea *ngIf="f.kind === 'text'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="$any(draft)[f.key] ?? ''" (ngModelChange)="setText(f.key, $event)"></textarea>
-            <textarea *ngIf="f.kind === 'list'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="csv($any(draft)[f.key])" (ngModelChange)="setList(f.key, $event)" placeholder="Comma or line separated"></textarea>
+        <fieldset class="group au-mt-3" *ngFor="let g of fieldGroups">
+          <legend>{{ g.title }}</legend>
+          <p class="group__hint au-muted">{{ g.hint }}</p>
+          <div class="form-grid">
+            <div class="field" *ngFor="let f of g.fields">
+              <label [attr.for]="'f-' + f.key">{{ f.label }} <span class="src" [ngClass]="'src--' + source(f.key)">{{ sourceLabel(f.key) }}</span></label>
+              <textarea *ngIf="f.kind === 'text'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="$any(draft)[f.key] ?? ''" (ngModelChange)="setText(f.key, $event)"></textarea>
+              <textarea *ngIf="f.kind === 'list'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="csv($any(draft)[f.key])" (ngModelChange)="setList(f.key, $event)" placeholder="Comma or line separated"></textarea>
+            </div>
           </div>
-        </div>
+        </fieldset>
         <div class="savebar">
           <input class="au-input" type="text" [(ngModel)]="note" placeholder="Version note (optional)" aria-label="Version note" />
           <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save as new version' }}</button>
@@ -164,86 +232,7 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         <p class="au-error" *ngIf="strategyError">{{ strategyError }}</p>
       </section>
 
-      <app-onboarding-timeline *ngIf="tab === 'onboarding' && selectedSiteId" [siteId]="selectedSiteId" [allowStart]="true"></app-onboarding-timeline>
-
-
       <ng-container *ngIf="overview">
-        <!-- Overview -->
-        <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' || tab === 'health'">
-          <div class="au-stat-strip">
-            <div class="au-stat">
-              <span class="au-stat__value">{{ overview.totalPages }}</span>
-              <span class="au-stat__label">Pages indexed</span>
-            </div>
-            <div class="au-stat">
-              <span class="au-stat__value">{{ overview.extractedPages }}</span>
-              <span class="au-stat__label">Pages crawled</span>
-            </div>
-            <div class="au-stat">
-              <span class="au-stat__value">{{ healthySitemaps }}/{{ overview.sitemaps.length }}</span>
-              <span class="au-stat__label">Healthy sitemaps</span>
-            </div>
-            <div class="au-stat">
-              <span class="au-stat__value">{{ overview.profile?.topicClusters?.length ?? 0 }}</span>
-              <span class="au-stat__label">Topic clusters</span>
-            </div>
-            <div class="au-stat">
-              <span class="au-stat__value">{{ overview.profile?.detectedSiteType ?? '—' }}</span>
-              <span class="au-stat__label">Detected site type</span>
-            </div>
-            <div class="au-stat">
-              <span class="au-stat__value">{{ overview.profile ? (overview.profile.confidence !== null ? (overview.profile.confidence * 100 | number: '1.0-0') + '%' : '—') : '—' }}</span>
-              <span class="au-stat__label">Profile confidence</span>
-            </div>
-          </div>
-
-          <div class="au-banner au-banner--warning au-mt-2" *ngFor="let warning of overview.profile?.warnings ?? []">
-            <app-icon name="warning"></app-icon>
-            <span class="au-banner__text">{{ warning }}</span>
-          </div>
-
-          <div class="au-field-grid au-mt-3">
-            <div class="au-meta">
-              <strong>Brand summary</strong>
-              <p class="au-muted">{{ overview.profile?.brandSummary || 'No profile yet. Index the website to synthesize one.' }}</p>
-            </div>
-            <div class="au-meta">
-              <strong>Audience & language</strong>
-              <p class="au-muted">{{ overview.profile?.detectedAudience || '—' }} · {{ overview.profile?.detectedLanguage || '—' }} · average article {{ overview.profile?.commonArticleLength ?? '—' }} words</p>
-            </div>
-            <div class="au-meta">
-              <strong>Last crawl</strong>
-              <p class="au-muted">{{ overview.lastRun ? (overview.lastRun | date: 'medium') : 'Never' }}</p>
-            </div>
-          </div>
-        </section>
-
-        <!-- Topics -->
-        <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile'">
-          <h2 class="au-panel__title">Detected topics</h2>
-          <div class="au-chips au-mt-2">
-            <span class="au-chip au-chip--brand" *ngFor="let topic of overview.profile?.mainTopics ?? []">{{ topic }}</span>
-          </div>
-          <div class="au-field-grid au-mt-3">
-            <div class="au-meta">
-              <strong>Commercial topics</strong>
-              <p class="au-muted">{{ (overview.profile?.commercialTopics ?? []).join(', ') || '—' }}</p>
-            </div>
-            <div class="au-meta">
-              <strong>Evergreen topics</strong>
-              <p class="au-muted">{{ (overview.profile?.evergreenTopics ?? []).join(', ') || '—' }}</p>
-            </div>
-            <div class="au-meta">
-              <strong>News topics</strong>
-              <p class="au-muted">{{ (overview.profile?.newsTopics ?? []).join(', ') || '—' }}</p>
-            </div>
-            <div class="au-meta">
-              <strong>Sports topics</strong>
-              <p class="au-muted">{{ (overview.profile?.sportsTopics ?? []).join(', ') || '—' }}</p>
-            </div>
-          </div>
-        </section>
-
         <!-- Sitemaps -->
         <section class="au-panel au-mb-3" *ngIf="tab === 'health'">
           <header class="au-panel__header">
@@ -270,6 +259,12 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             </table>
           </div>
         </section>
+
+        <!-- Setup run: the one-off onboarding (read → profile → sources → competitors → strategy) -->
+        <details class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'health' && selectedSiteId">
+          <summary>Setup run</summary>
+          <app-onboarding-timeline class="au-mt-2" [siteId]="selectedSiteId" [allowStart]="true"></app-onboarding-timeline>
+        </details>
 
         <!-- Indexed pages -->
         <section class="au-panel" *ngIf="tab === 'inventory'">
@@ -321,7 +316,7 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         *ngIf="!loading && !overview && !loadError"
         icon="scan"
         title="No site intelligence yet"
-        text="Index the connected website to crawl its sitemap, understand its content and build a durable site profile."
+        text="Read the whole site to crawl its sitemaps, understand its content and build the site profile."
       ></app-empty-state>
     </section>
   `,
@@ -335,14 +330,13 @@ export class SiteIntelligencePageComponent implements OnInit {
   readonly tabs: Array<{ id: string; label: string }> = [
     { id: 'profile', label: 'Profile & audience' },
     { id: 'pillars', label: 'Pillars & clusters' },
-    { id: 'inventory', label: 'Inventory' },
+    { id: 'inventory', label: 'Pages' },
     { id: 'health', label: 'Crawl health' },
-    { id: 'onboarding', label: 'Onboarding' },
   ];
-  readonly fields = FIELDS;
-  // ?tab= deep-links a section, e.g. Overview "Read the site again" opens Crawl health.
+  readonly fieldGroups = FIELD_GROUPS.map((g) => ({ ...g, fields: FIELDS.filter((f) => g.keys.includes(f.key)) }));
+  // ?tab= deep-links a section, e.g. Overview "Read the site again" opens Crawl health; the old Onboarding tab lives there now.
   private readonly requestedTab = inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap.get('tab');
-  tab = this.tabs.find((t) => t.id === this.requestedTab)?.id ?? 'profile';
+  tab = this.requestedTab === 'onboarding' ? 'health' : (this.tabs.find((t) => t.id === this.requestedTab)?.id ?? 'profile');
   layers: StrategyLayers | null = null;
   draft: StrategyConfig | null = null;
   versions: StrategyVersion[] = [];
@@ -480,6 +474,31 @@ export class SiteIntelligencePageComponent implements OnInit {
   pageQuery = '';
   pageCrawlState = '';
 
+  /** A crawl started here, or one already running server-side (e.g. from onboarding). */
+  get busy(): boolean {
+    return this.indexing || Boolean(this.overview?.indexing);
+  }
+
+  get host(): string {
+    try {
+      return this.overview?.site.baseUrl ? new URL(this.overview.site.baseUrl).hostname : '';
+    } catch {
+      return '';
+    }
+  }
+
+  /** Only the topic groups the crawl actually filled; a TV guide has no "commercial" group to show. */
+  get topicGroups(): Array<{ label: string; items: string[] }> {
+    const p = this.overview?.profile;
+    if (!p) return [];
+    return [
+      { label: 'Evergreen', items: p.evergreenTopics },
+      { label: 'News', items: p.newsTopics },
+      { label: 'Commercial', items: p.commercialTopics },
+      { label: 'Sports', items: p.sportsTopics },
+    ].filter((g) => g.items?.length);
+  }
+
   get healthySitemaps(): number {
     return this.overview?.sitemaps.filter((sitemap) => sitemap.status === 'fetched').length ?? 0;
   }
@@ -501,6 +520,7 @@ export class SiteIntelligencePageComponent implements OnInit {
     this.api.getSiteIntelligence(this.selectedSiteId).subscribe({
       next: (overview) => {
         this.overview = overview;
+        this.indexing = false; // from here the server's overview.indexing tells whether the crawl still runs
         this.loading = false;
         this.loadPages();
       },

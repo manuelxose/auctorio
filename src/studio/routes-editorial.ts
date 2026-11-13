@@ -2180,6 +2180,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       connections,
       weekPlanItems,
       todayPlanCount,
+      websiteInstallations,
     ] = await Promise.all([
       prisma.publication.count({
         where: { tenantId, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
@@ -2228,6 +2229,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           connectionStatus: true,
           credentialsRef: true,
           lastVerifiedAt: true,
+          siteId: true,
           site: { select: { name: true } },
         },
       }),
@@ -2245,6 +2247,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           scheduledFor: { gte: dayStart, lt: dayEnd },
           status: { notIn: ["canceled", "rejected"] },
         },
+      }),
+      // Website destinations activated through the connection wizard (WordPress, webhook, Auctorio API pull)
+      // live in connector_installations, not publishing_accounts.
+      prisma.connectorInstallation.findMany({
+        where: { tenantId, kind: "website", state: "active" },
+        orderBy: { activatedAt: "desc" },
+        select: { id: true, displayName: true, verifiedAt: true, siteId: true, site: { select: { name: true } } },
       }),
     ]);
 
@@ -2275,16 +2284,30 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         warnings: automation.warnings,
         nextSlots: automation.nextSlots.slice(0, 5),
       },
-      connections: connections.map((connection) => ({
-        id: connection.id,
-        platform: connection.platform,
-        displayName: connection.username ? `@${connection.username}` : connection.displayName,
-        enabled: connection.enabled,
-        status: connection.status,
-        connectionState: computeConnectionState(connection as never),
-        lastVerifiedAt: connection.lastVerifiedAt,
-        siteName: connection.site?.name ?? null,
-      })),
+      connections: [
+        ...connections.map((connection) => ({
+          id: connection.id,
+          platform: connection.platform,
+          displayName: connection.username ? `@${connection.username}` : connection.displayName,
+          enabled: connection.enabled,
+          status: connection.status,
+          connectionState: computeConnectionState(connection as never),
+          lastVerifiedAt: connection.lastVerifiedAt,
+          siteId: connection.siteId,
+          siteName: connection.site?.name ?? null,
+        })),
+        ...websiteInstallations.map((installation) => ({
+          id: installation.id,
+          platform: "website",
+          displayName: installation.site?.name ?? installation.displayName ?? "Website",
+          enabled: true,
+          status: "active",
+          connectionState: "connected",
+          lastVerifiedAt: installation.verifiedAt,
+          siteId: installation.siteId,
+          siteName: installation.site?.name ?? null,
+        })),
+      ],
       planCoverage: {
         today: todayPlanCount,
         week: {
