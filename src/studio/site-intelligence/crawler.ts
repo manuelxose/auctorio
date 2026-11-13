@@ -317,10 +317,11 @@ export async function extractPage(site: Pick<Site, "baseUrl">, pageUrl: string):
   }
   await validateScrapeUrl(url);
 
-  const maxBytes = getNumberEnv("SITE_INTEL_MAX_PAGE_BYTES", 1_000_000);
+  // Schedule pages (e.g. /canales/*) are ~2.7 MB of server-rendered HTML; 5 MB keeps them in.
+  const maxBytes = getNumberEnv("SITE_INTEL_MAX_PAGE_BYTES", 5_000_000);
   const response = await fetchUrl(url, { accept: "text/html" });
   if (Buffer.byteLength(response.body, "utf8") > maxBytes) {
-    return null;
+    throw new Error("page_too_large"); // reported as failed/retriable, not mislabelled as low content
   }
 
   return extractPageFromHtml(baseUrl, pageUrl, response.body);
