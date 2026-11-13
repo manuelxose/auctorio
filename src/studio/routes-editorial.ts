@@ -73,7 +73,7 @@ import {
 import { listAudit } from "./audit";
 import { writeAudit } from "./audit";
 import { computeConnectionState } from "./social-connections";
-import { dedupeLegacyWebsiteAccounts, installationToConnection } from "./destination-readiness";
+import { dedupeLegacyWebsiteAccounts, loadWebsiteDestinations } from "./destination-readiness";
 import { buildAssetPublicUrl } from "./orchestration";
 import {
   bulkApproveEditorialPlanItems,
@@ -2249,13 +2249,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           status: { notIn: ["canceled", "rejected"] },
         },
       }),
-      // Website destinations activated through the connection wizard (WordPress, webhook, Auctorio API pull)
-      // live in connector_installations, not publishing_accounts.
-      prisma.connectorInstallation.findMany({
-        where: { tenantId, kind: "website", state: "active" },
-        orderBy: { activatedAt: "desc" },
-        select: { id: true, displayName: true, verifiedAt: true, lastError: true, siteId: true, site: { select: { name: true } } },
-      }),
+      // Website destinations (connector_installations) joined with site, probes and last publication.
+      loadWebsiteDestinations(tenantId),
     ]);
 
     return reply.send({
@@ -2297,7 +2292,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           siteId: connection.siteId,
           siteName: connection.site?.name ?? null,
         })),
-        ...websiteInstallations.map(installationToConnection),
+        ...websiteInstallations,
       ],
       planCoverage: {
         today: todayPlanCount,

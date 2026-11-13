@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Subscription, forkJoin, of, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
@@ -233,7 +233,7 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
             <div class="ov__card-head"><h2 id="ov-dest" class="ov__title">Publishing to</h2><a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a></div>
             <ul class="ov__dest">
               @for (c of siteConnections(); track c.id) {
-                <li><span class="ov__dest-dot" [attr.data-state]="connectionState(c)"></span>{{ c.displayName }}<span class="au-muted">{{ connectionLabel(c) }}</span></li>
+                <li [attr.title]="c.reason || null"><span class="ov__dest-dot" [attr.data-state]="connectionState(c)"></span>{{ c.displayName }}<span class="au-muted">{{ connectionLabel(c) }}{{ c.lastVerifiedAt ? ' · checked ' + checkedAge(c.lastVerifiedAt) : '' }}</span>@if (c.platform === 'website' && c.connectionState !== 'connected') { <a class="au-link" routerLink="/studio/connections">{{ c.connectionState === 'provider_error' ? 'Fix' : 'Verify' }}</a> }</li>
               } @empty {
                 <li class="au-muted">No destinations yet · <a class="au-link" routerLink="/studio/connections/wizard">connect one</a></li>
               }
@@ -440,6 +440,16 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     return [`${items.length} topic${items.length === 1 ? '' : 's'}`, count('Written') ? `${count('Written')} written` : '', count('Queued') ? `${count('Queued')} queued` : '', count('Needs approval') ? `${count('Needs approval')} need approval` : ''].filter(Boolean).join(' · ');
   });
 
+  /** Reload when the active site changes so destination rows never show the previous site's state. */
+  private lastSiteId: string | null | undefined;
+  private readonly reloadOnSiteChange = effect(() => {
+    const id = this.siteId();
+    untracked(() => {
+      if (this.lastSiteId !== undefined && this.lastSiteId !== id) this.load();
+      this.lastSiteId = id;
+    });
+  });
+
   ngOnInit(): void {
     this.load();
     // Every 5 s while a plan is being written (to show its progress), otherwise every 30 s.
@@ -522,6 +532,11 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     if (c.connectionState === 'connected' || c.status === 'active') return 'ok';
     if (c.status === 'error' || ['expired', 'provider_error', 'permissions_required'].includes(c.connectionState ?? '')) return 'bad';
     return 'idle';
+  }
+
+  checkedAge(iso: string): string {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+    return days <= 0 ? 'today' : `${days}d ago`;
   }
 
   connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): string {

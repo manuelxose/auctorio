@@ -1418,6 +1418,8 @@ export type StudioOverview = {
     connectionState: string | null;
     readiness?: 'not_verified' | 'ready' | 'error';
     reason?: string | null;
+    checks?: { configured: boolean | null; authenticated: boolean | null; reachable: boolean | null; capabilitiesVerified: boolean; canCreateDraft: boolean | null; canPublish: boolean | null };
+    lastSuccessfulPublicationAt?: string | null;
     lastVerifiedAt: string | null;
     siteId: string | null;
     siteName: string | null;

@@ -94,7 +94,11 @@ async function runVerification(data: Extract<ConnectionJobData, { kind: "verify"
     await touchOperationProgress(data.operationId, { phase: "verifying", progress: 80 });
     if (result.verified) {
       await transitionInstallation(data.tenantId, installation.id, "ready", {
-        patch: { verifiedAt: new Date() },
+        patch: {
+          verifiedAt: new Date(),
+          // Persist probe outcomes (no secrets) so readiness can separate auth / draft / publish.
+          capabilities: { ...((installation.capabilities as Record<string, unknown> | null) ?? {}), verification: { probes: result.probes, summary: result.summary } },
+        },
       });
       await publishEvent({
         tenantId: data.tenantId,

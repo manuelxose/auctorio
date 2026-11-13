@@ -3,6 +3,7 @@ import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { StudioApiService } from '../services/studio-api.service';
+import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
@@ -152,7 +153,7 @@ type ConnectionRow = {
                   Test
                 </button>
                 <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.installation && resumable(row.installation)" (click)="resume(row.installation)">
-                  {{ row.installation.state === 'ready' ? 'Activate' : 'Resume' }}
+                  {{ row.installation.state === 'ready' ? 'Activate' : row.installation.state === 'active' ? 'Verify' : 'Resume' }}
                 </button>
                 <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website || row.social || (row.installation && !isActive(row.installation))" (click)="remove(row)" [disabled]="busyId === row.id">
                   <app-icon name="trash"></app-icon>
@@ -167,6 +168,7 @@ type ConnectionRow = {
 })
 export class ConnectionsPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
+  private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
@@ -264,7 +266,10 @@ export class ConnectionsPageComponent implements OnInit {
 
   private rebuildRows(): void {
     const merged = new Map<string, ConnectionRow>();
+    // An installation is the canonical record: hide a legacy website account of the same site.
+    const covered = new Set(this.installations.filter((i) => i.kind === 'website' && i.state === 'active' && i.siteId).map((i) => i.siteId));
     for (const account of this.websiteAccounts) {
+      if (account.platform === 'website' && account.site?.id && covered.has(account.site.id)) continue;
       merged.set(`website:${account.id}`, {
         id: account.id,
         kind: account.platform === 'x' ? 'x' : account.platform === 'instagram' ? 'instagram' : 'website',
@@ -300,12 +305,13 @@ export class ConnectionsPageComponent implements OnInit {
         kind: installation.kind,
         provider: installation.provider,
         displayName: installation.displayName ?? installation.provider,
-        state: installation.state,
-        needsAttention: ['failed', 'expired', 'credentials_required'].includes(installation.state),
+        // Active alone is not proof: it must also carry a recorded verification and no last error.
+        state: this.installationState(installation),
+        needsAttention: ['failed', 'expired', 'credentials_required', 'not_verified', 'error'].includes(this.installationState(installation)),
         lastError: installation.lastError,
         verifiedAt: installation.verifiedAt,
         activatedAt: installation.activatedAt,
-        siteName: null,
+        siteName: this.appContext.sites().find((site) => site.id === installation.siteId)?.name ?? null,
         installation,
       });
     }
@@ -368,8 +374,15 @@ export class ConnectionsPageComponent implements OnInit {
     return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : 'Website';
   }
 
+  installationState(installation: ConnectorInstallation): string {
+    if (installation.state !== 'active') return installation.state;
+    return installation.lastError ? 'error' : installation.verifiedAt ? 'active' : 'not_verified';
+  }
+
   stateLabel(row: ConnectionRow): string {
     switch (row.state) {
+      case 'not_verified':
+        return 'Not verified';
       case 'connected':
         return 'Connected';
       case 'active':
@@ -409,6 +422,7 @@ export class ConnectionsPageComponent implements OnInit {
       case 'active':
         return 'au-badge--success';
       case 'ready':
+      case 'not_verified':
       case 'verifying':
       case 'discovering':
       case 'draft':
@@ -425,6 +439,7 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   resumable(installation: ConnectorInstallation): boolean {
+    if (installation.state === 'active') return this.installationState(installation) !== 'active';
     return ['draft', 'credentials_required', 'failed', 'ready', 'cancelled'].includes(installation.state);
   }
 
