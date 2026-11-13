@@ -24,6 +24,12 @@ Result: **16 passed, 7 failed, 3 skipped (3.7 min)**, nothing published (no dest
 - production-journey (2): expect 502/400 from a *failing* provider but get 200/202/404/422 => assertions depend on a provider-failure setup, not on a healthy provider.
 - notifications "saved plans table": 0 rows for the active site.
 
+## Root-cause follow-up on the article QA failure (CONFIRMED)
+- Earlier `qaState=failed` came from the only severity-error check `image_ready` (no hero image). Image generation under `IMAGE_PROVIDER=mock` failed with `vipspng: libpng read error` because `PLACEHOLDER_PNG_BASE64` in `src/infrastructure/ai/image.ts` is a corrupt PNG (reproduced with sharp). Other failed checks were warnings only (word_count 675 < 1200, internal_links 0, intent_defined).
+- Fixed: replaced the placeholder with a valid 16x9 PNG; added `tests/mock-image-provider.test.ts` (decode + resize), passes. End-to-end effect NOT yet confirmed: in the rerun the pipeline was rejected earlier by the content gates, so no image job ran.
+- Rerun of guiatv-seo spec: steps 1 and 2.1 pass; step 3 now times out after 4 min because `content_production` failed `quality_rejected`: "qa score 71 below threshold 75; critical unsupported factual claims present; configuration requires human approval". This is the real QA gate rejecting the DeepSeek draft (content quality/prompt/sources), not a plumbing bug; gates were not loosened. Step 4 depends on it.
+- A third site (`fa15d8a4…`) was created by the e2e run in the local DB.
+
 ## Keys / platform admin
 AI keys live in the gitignored .env (see memory reference-ai-test-keys); local QA user added to PLATFORM_ADMIN_EMAILS in .env to reach admin AI endpoints. Image provider left on mock. Production deployment of keys NOT done (no access, needs explicit go-ahead).
 
