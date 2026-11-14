@@ -151,6 +151,48 @@ function trustLevel(candidate: Candidate): "high" | "medium" | "low" | "unassess
   return candidate.packTrust >= 0.8 ? "high" : candidate.packTrust >= 0.6 ? "medium" : "low";
 }
 
+type Level = "high" | "medium" | "low";
+
+/**
+ * Explainable ranking of one recommendation. Pure. A known language that differs from the
+ * site's language lowers relevance a level and the score, so e.g. an English movie feed ranks
+ * below Spanish-market sources for a Spanish TV guide; first-party feeds always rank first.
+ */
+export function rankRecommendation(input: {
+  relationship: "first_party" | "external";
+  topicMatches: number;
+  trust: "high" | "medium" | "low" | "unassessed";
+  verified: boolean;
+  candidateLanguage: string | null;
+  siteLanguage: string;
+  candidateCountry: string | null;
+  siteCountry: string | null;
+}): { relevance: Level; score: number; factors: string[] } {
+  const firstParty = input.relationship === "first_party";
+  let relevance: Level = firstParty ? "high" : input.topicMatches >= 2 ? "high" : input.topicMatches === 1 ? "medium" : "low";
+  let score = (relevance === "high" ? 60 : relevance === "medium" ? 40 : 15) + (input.trust === "high" ? 30 : input.trust === "medium" ? 20 : 5) + (input.verified ? 10 : 0);
+  const factors = [firstParty ? "first-party feed of this site (+20)" : `${input.topicMatches} topic match(es)`, `trust ${input.trust}`, input.verified ? "verified fetch (+10)" : "not verified"];
+  if (firstParty) score += 20;
+  const language = input.candidateLanguage?.slice(0, 2).toLowerCase() ?? null;
+  if (!firstParty && language) {
+    if (language === input.siteLanguage) {
+      score += 10;
+      factors.push(`language ${language} matches the site (+10)`);
+    } else {
+      score -= 35;
+      relevance = relevance === "high" ? "medium" : "low";
+      factors.push(`language ${language} differs from site language ${input.siteLanguage} (-35)`);
+    }
+  } else if (!firstParty) {
+    factors.push("language unknown");
+  }
+  if (!firstParty && input.candidateCountry && input.siteCountry && input.candidateCountry.toUpperCase() === input.siteCountry) {
+    score += 5;
+    factors.push(`country ${input.siteCountry} matches the site (+5)`);
+  }
+  return { relevance, score, factors };
+}
+
 async function collectExternalCandidates(
   tenantId: string,
   site: { id: string; locale: string; baseUrl: string | null },
@@ -291,7 +333,17 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
     const sample = check.sample ?? [];
     const topics = Array.from(new Set([...candidate.seedTopics, ...classifyTopics(sample.map((item) => item.title).join(" \n "), vocabulary)]));
     const trust = trustLevel(candidate);
-    const relevance = candidate.relationship === "first_party" ? "high" : topics.length >= 2 ? "high" : topics.length === 1 ? "medium" : "low";
+    const ranking = rankRecommendation({
+      relationship: candidate.relationship,
+      topicMatches: topics.length,
+      trust,
+      verified: check.verified,
+      candidateLanguage: candidate.language,
+      siteLanguage: language,
+      candidateCountry: candidate.geography,
+      siteCountry: siteCountry(site.locale),
+    });
+    const relevance = ranking.relevance;
     const freshness = check.verified ? freshnessFromSample(sample, now) : "unknown";
     const limitations = [...candidate.limitations, REPUBLICATION_NOTICE];
     if (check.verified && check.itemCount === 0) limitations.push("The endpoint parsed but returned no items");
@@ -302,7 +354,7 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
         : `${candidate.discoveryMethod.startsWith("source_pack") ? "Curated source pack entry" : "Web search result"} matching site topics: ${topics.join(", ") || "none measured"}.`;
     const assessment = [
       `Trust ${trust}${candidate.packTrust !== null ? ` (pack trust ${candidate.packTrust})` : ""}.`,
-      `Relevance ${relevance}: ${topics.length} topic match(es) against the site vocabulary.`,
+      `Relevance ${relevance}: ${topics.length} topic match(es) against the site vocabulary. Ranking: ${ranking.factors.join("; ")}.`,
       check.verified ? `Verified: HTTP ${check.status ?? "?"}, ${check.itemCount ?? 0} item(s) parsed.` : `Not verified: ${check.note ?? "unknown error"}.`,
     ].join(" ");
     const data = {
@@ -324,8 +376,8 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
       expectedFreshness: freshness,
       limitations: limitations as Prisma.InputJsonValue,
       discoveryMethod: candidate.discoveryMethod,
-      evidence: { httpStatus: check.status, itemCount: check.itemCount, note: check.note, sample: sample.slice(0, 5) } as Prisma.InputJsonValue,
-      score: (relevance === "high" ? 60 : relevance === "medium" ? 40 : 15) + (trust === "high" ? 30 : trust === "medium" ? 20 : 5) + (check.verified ? 10 : 0),
+      evidence: { httpStatus: check.status, itemCount: check.itemCount, note: check.note, sample: sample.slice(0, 5), ranking: ranking.factors } as Prisma.InputJsonValue,
+      score: ranking.score,
     };
     const existing = await prisma.sourceRecommendation.findFirst({ where: { tenantId, siteId, canonicalUrl: candidate.canonicalUrl } });
     if (existing) {
@@ -678,7 +730,7 @@ export async function getSiteSourceDiagnostics(tenantId: string, siteId: string,
 
 // ────────────────────────────────────────────────────────────── Planning evidence
 
-export type PlanningSourceEvidence = { title: string; url: string; sourceName: string; publishedAt: string | null; topics: string[] };
+export type PlanningSourceEvidence = { title: string; url: string; sourceName: string; publishedAt: string | null; topics: string[]; sourceId: string; itemId: string };
 
 /**
  * Recent, relevant items from ACTIVE, verified sources of the site (paused and
@@ -702,7 +754,7 @@ export async function getSourceEvidenceForPlanning(tenantId: string, siteId: str
     },
     orderBy: [{ publishedAt: "desc" }, { discoveredAt: "desc" }],
     take: 400,
-    select: { title: true, canonicalUrl: true, sourceUrl: true, publishedAt: true, categories: true, description: true, sourceId: true },
+    select: { id: true, title: true, canonicalUrl: true, sourceUrl: true, publishedAt: true, categories: true, description: true, sourceId: true },
   });
   const byId = new Map(sources.map((source) => [source.id, source]));
   const out: PlanningSourceEvidence[] = [];
@@ -715,7 +767,7 @@ export async function getSourceEvidenceForPlanning(tenantId: string, siteId: str
     const keywordVocabulary = keywords.map((keyword) => ({ name: keyword, terms: [tokenize(keyword).join(" ")].filter(Boolean) }));
     const topics = Array.from(new Set([...classifyTopics(text, vocabulary), ...classifyTopics(text, keywordVocabulary)]));
     if ((vocabulary.length > 0 || keywordVocabulary.length > 0) && topics.length === 0) continue;
-    out.push({ title: item.title, url, sourceName: source.name, publishedAt: item.publishedAt?.toISOString() ?? null, topics });
+    out.push({ title: item.title, url, sourceName: source.name, publishedAt: item.publishedAt?.toISOString() ?? null, topics, sourceId: item.sourceId, itemId: item.id });
     if (out.length >= limit) break;
   }
   return out;
