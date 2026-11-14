@@ -111,3 +111,14 @@ test("rankRecommendation: Spanish TV guide ranks first-party and Spanish sources
   assert.equal(english.relevance, "medium");
   assert.ok(english.factors.some((factor) => /differs from site language/.test(factor)));
 });
+
+test("source pack catalog offers a Spanish TV/streaming pack with only Spanish-market https RSS entries", async () => {
+  const { listPackCatalog } = await import("../src/studio/source-registry");
+  const pack = listPackCatalog().find((entry) => entry.key === "tv-streaming-es");
+  assert.ok(pack && pack.entries.length >= 5);
+  for (const entry of pack.entries) {
+    assert.equal(entry.language, "es");
+    assert.equal(entry.country, "ES");
+    assert.ok(entry.endpoint.startsWith("https://") && entry.endpoint.includes(entry.domain));
+  }
+});

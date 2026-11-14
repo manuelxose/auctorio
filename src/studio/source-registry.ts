@@ -10,6 +10,7 @@ import { fetchSourceNow, sanitizeSourceForClient, testSourceFetch } from "./sour
 import { getSourceAdapter } from "./adapters/registry";
 import type { SourcePackDefinition, SourcePackEntry } from "./source-packs/types";
 import { MOVIE_TV_EN_PACK } from "./source-packs/movie-tv-en";
+import { TV_STREAMING_ES_PACK } from "./source-packs/tv-streaming-es";
 import { buildProvenance } from "./provenance";
 import { getSourceHealth } from "./source-health";
 import { newRunKey } from "./discovery-run";
@@ -18,7 +19,7 @@ const prisma = getPrismaClient();
 
 // ────────────────────────────────────────────────────────────── Pack catalog
 
-const PACK_DEFINITIONS: SourcePackDefinition[] = [MOVIE_TV_EN_PACK];
+const PACK_DEFINITIONS: SourcePackDefinition[] = [MOVIE_TV_EN_PACK, TV_STREAMING_ES_PACK];
 
 export function listPackCatalog(): SourcePackDefinition[] {
   return PACK_DEFINITIONS;
