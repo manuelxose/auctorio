@@ -333,3 +333,15 @@ test("an empty site profile keeps plan ideas but still blocks off-topic ones", (
   const blocked = computeSiteRelevanceScore(brief({ topic: "loans" }), emptyProfile, "Best payday loans this year");
   assert.equal(blocked.rejected, true);
 });
+
+test("postValidatePlanItems stamps registry sourceId/itemId on matching evidence, ignoring model-supplied ids", () => {
+  const url = "https://vertele.eldiario.es/series/la-isla";
+  const item = brief({
+    topic: "tv",
+    workingTitle: "Guía de TV hoy",
+    sourceEvidence: [{ sourceType: "source", url, title: "La isla", trustScore: null, sourceId: "forged", itemId: "forged" } as never],
+  });
+  const context = planningContext({ evidence: [{ sourceType: "source_item", url, title: "La isla", sourceId: "src-1", itemId: "item-1" }] });
+  const [kept] = postValidatePlanItems([item], planInput, context).kept;
+  assert.deepEqual({ ...kept.sourceEvidence[0] }, { ...kept.sourceEvidence[0], sourceId: "src-1", itemId: "item-1" });
+});

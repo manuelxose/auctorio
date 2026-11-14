@@ -210,6 +210,11 @@ export function postValidatePlanItems(
     ...context.indexedUrlInventory,
   ]);
 
+  const registryOrigin = new Map<string, { sourceId: string; itemId: string }>();
+  for (const entry of context.evidence) {
+    if (entry.url && entry.sourceId && entry.itemId) registryOrigin.set(entry.url, { sourceId: entry.sourceId, itemId: entry.itemId });
+  }
+
   for (const item of items) {
     const title = item.workingTitle.trim();
 
@@ -241,9 +246,12 @@ export function postValidatePlanItems(
     }
 
     // 5. Evidence URLs must come from the provided evidence set.
-    const validEvidence = (item.sourceEvidence ?? []).map((entry) =>
-      entry.url && !allowedEvidenceUrls.has(entry.url) ? { ...entry, url: undefined } : entry,
-    );
+    const validEvidence = (item.sourceEvidence ?? []).map((entry) => {
+      if (entry.url && !allowedEvidenceUrls.has(entry.url)) return { ...entry, url: undefined };
+      // Immutable provenance: ids come from the registry lookup, never from the model output.
+      const origin = entry.url ? registryOrigin.get(entry.url) : undefined;
+      return origin ? { ...entry, ...origin } : entry;
+    });
     const invented = (item.sourceEvidence ?? []).filter((entry) => entry.url && !allowedEvidenceUrls.has(entry.url)).length;
     if (invented > 0) {
       warnings.push(`stripped ${invented} unverified source url(s) from "${title}"`);
