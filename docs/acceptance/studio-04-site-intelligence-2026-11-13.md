@@ -41,12 +41,14 @@ Note: `site-strategy` "concurrent strategy saves" failed once when run in parall
 | IMPLEMENTATION | PARTIAL |
 | FUNCTIONALITY | PASS (acceptance criteria on local data) |
 | UX/UI | PARTIAL (Coverage tab verified; no SEO-signals/Opportunities tabs) |
-| ACCESSIBILITY | PARTIAL (no audit run) |
+| ACCESSIBILITY | PARTIAL (keyboard operation of tabs verified in E2E; no axe/contrast/screen-reader pass) |
 | SECURITY | PASS (SSRF/robots guards untouched; tenant filters unchanged) |
 | INTEGRATION | PARTIAL (Plan CTA is the existing per-pillar link) |
-| REGRESSION | PARTIAL (no full `npm test`, no E2E) |
+| REGRESSION | PARTIAL (new E2E passes; no full `npm test`) |
 | PRODUCTION READINESS | BLOCKED (local only; not deployed) |
 
+## E2E
+`e2e/specs/site-intelligence-coverage.spec.ts` (local, QA user, 2026-11-14): 1/1 passed. Checks keyboard activation of the Coverage tab, distinct discovered/fetched/analysed/failed counts, the "nothing about Google indexation" caveat, and that the inventory is titled "Discovered pages" (no "Indexed pages"). No Playwright trace was recorded.
+
 ## Not done
-SEO signals and Opportunities tabs; persistent crawl cursor (resume works via crawl state); unit test for `page_too_large`; Playwright E2E for the Coverage tab; independent review (skipped per project preference); Spanish-only/UX copy review.
-The `/v2/site-intelligence/:siteId` overview gains an additive `evidence` field; clients that ignore it are unaffected.
+SEO signals and Opportunities tabs; persistent crawl cursor (resume works via crawl state); unit test for `page_too_large`; E2E for strategy version/restore and the no-Search-Console state; axe/contrast/screen-reader audit; full `npm test` (runs migrations; needs an isolated DB); dedicated worktree (work is on the shared branch); independent review (skipped per project preference).
