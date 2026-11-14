@@ -35,7 +35,7 @@ Independent review (prompt section 13): intentionally not done, per project owne
 ## Hand-off
 - STUDIO-02: sites/connectors baseline; first-site/zero-site login gap; 2 provisioned sites (+ e2e leftovers).
 - STUDIO-03: modes: all provisioned sites `manual`, autoApprove/autoPublish false; mode UI present on Overview/Automation.
-- STUDIO-04: not covered (crawl sampling); site_index operation succeeded for guiatv-editorial in e2e step 1 (43 s).
+- STUDIO-04: covered by `docs/acceptance/studio-04-site-intelligence-2026-11-13.md` (stratified sampling, utility-page exclusion, Coverage tab). Hand-off for 05/06 in `studio-04-handoff.md`.
 - Defects to schedule (not fixed here): corrupt mock PNG, zero-site login, flaky unit tests / `npm test` hang, stale e2e specs, overview CSS budget.
 
 
@@ -59,3 +59,8 @@ Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PASS · A
 Independent review: intentionally not done, per project owner instruction. No PR opened (not authorized). No migration needed (additive JSON under `capabilities.verification`; rollback = revert the commit).
 
 Hand-off: STUDIO-03/08/09 can read `connections[].readiness` / `checks` from `/v2/overview` and `loadWebsiteDestinations(tenantId)`.
+
+## STUDIO-04 (2026-11-13) — Site Intelligence evidence
+Full record: `docs/acceptance/studio-04-site-intelligence-2026-11-13.md`. Screenshots: `screens/studio-04-coverage-{1440,1024,390}.jpg`.
+Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: SEO-signals/Opportunities tabs, Playwright E2E, full `npm test`, independent review (owner instruction), dedicated worktree.

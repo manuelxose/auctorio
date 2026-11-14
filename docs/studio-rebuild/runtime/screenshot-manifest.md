@@ -11,3 +11,4 @@ All 24 landed on their own route (no redirect), every API call 200, zero console
 - Verdict: **archived screenshots 01-16 are OUTDATED for Overview/shell** (navigation model changed); not re-compared pixel by pixel for the other 15 files.
 - At 390 the copilot is not loaded (no `copilot/*` calls), at 1024/1440 it is.
 - Visual/a11y review of the 24 images was not done beyond Overview 1440.
+- `screens/studio-04-coverage-1440.jpg`, `-1024.jpg`, `-390.jpg` (live, 2026-11-14): Site Intelligence > Coverage tab for GuiaProgramacionTV after the full recrawl (4245 found / 387 analysed). Captured in the in-app browser pane at emulated widths; images are the pane's scaled view, not native-resolution PNGs. Verdict: no horizontal overflow, table readable; at 390 the section table starts below the fold.
