@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { normalizePageUrl, parseSitemapBody } from "../src/studio/site-intelligence/sitemap";
 import { extractPageFromHtml, inferContentTypeFromUrl, isUtilityUrl, routeFamily, selectStratified } from "../src/studio/site-intelligence/crawler";
+import { computeOpportunities, computeSeoSignals } from "../src/studio/site-intelligence/signals";
 import { computeSiteRelevanceScore } from "../src/studio/site-relevance";
 
 const BASE = "https://guiaprogramaciontv.com";
@@ -181,4 +182,38 @@ test("approved pillar alias scores like a known cluster and records why", () => 
   const profile = { mainTopics: ["programacion tv"], categories: [], commercialTopics: [], evergreenTopics: [], newsTopics: [], sportsTopics: [], topicClusters: [], contentTypes: [], detectedSiteType: "media", pillarAliases: [{ name: "Programación TV", clusterSlug: null }] } as unknown as Parameters<typeof computeSiteRelevanceScore>[1];
   const verdict = computeSiteRelevanceScore({ topic: "x", topicCluster: "programacion-tv", contentType: "schedule", primaryIntent: "informational", targetQuery: "x", primaryKeyword: "x" } as never, profile, "Programación TV hoy");
   assert.ok(verdict.reasons.some((r) => r.includes('approved strategy pillar "Programación TV"')), JSON.stringify(verdict));
+});
+
+// ────────────────────────────────────────────────────────────── SEO signals and opportunities
+
+const page = (over: Partial<import("../src/studio/site-intelligence/signals").SignalPage> = {}) => ({
+  url: `${BASE}/a`, title: "Series hoy", h1: "Series hoy", metaDescription: "d", wordCount: 500, structuredData: ["Article"], canonicalUrl: `${BASE}/a/`, ...over,
+});
+
+test("computeSeoSignals counts issues only over analysed pages and samples urls", () => {
+  const signals = computeSeoSignals([page(), page({ url: `${BASE}/b`, metaDescription: null, wordCount: 50, structuredData: [], canonicalUrl: `${BASE}/other` })]);
+  const get = (id: string) => signals.find((s) => s.id === id)!;
+  assert.equal(get("missing_meta_description").count, 1);
+  assert.equal(get("thin_content").count, 1);
+  assert.equal(get("no_structured_data").count, 1);
+  assert.equal(get("canonical_differs").count, 1); // trailing slash alone is not a difference
+  assert.equal(get("missing_h1").count, 0);
+  assert.equal(get("thin_content").of, 2);
+  assert.deepEqual(get("thin_content").samples, [`${BASE}/b`]);
+});
+
+test("computeOpportunities flags uncovered subtopics with sample-based confidence and no invented metrics", () => {
+  const pages = [page({ title: "Series hoy en TV", h1: null })];
+  const low = computeOpportunities(pages, [{ name: "Series", subtopics: ["series", "Estrenos Netflix"] }], 4000);
+  assert.deepEqual(low.map((o) => o.subtopic), ["Estrenos Netflix"]);
+  assert.equal(low[0].confidence, "low");
+  assert.match(low[0].reason, /1 of 4000/);
+  assert.equal(computeOpportunities(pages, [{ name: "Series", subtopics: ["Estrenos Netflix"] }], 2)[0].confidence, "high");
+  assert.deepEqual(Object.keys(low[0]).sort(), ["confidence", "pagesRead", "pillar", "reason", "subtopic"]);
+});
+
+test("extractPageFromHtml keeps an H1 that lives inside <header>", () => {
+  const words = Array.from({ length: 60 }, (_, i) => `palabra${i}`).join(" ");
+  const html = `<html><head><title>T</title></head><body><main><header><h1>Programación de Neox hoy</h1></header><p>${words}</p></main></body></html>`;
+  assert.equal(extractPageFromHtml(BASE, `${BASE}/canales/neox`, html)?.h1, "Programación de Neox hoy");
 });

@@ -123,6 +123,47 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         <button class="tab" type="button" role="tab" *ngFor="let t of tabs" [attr.aria-selected]="tab === t.id" (click)="tab = t.id">{{ t.label }}</button>
       </nav>
 
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'seo'">
+        <h2 class="au-panel__title">On-page signals</h2>
+        <ng-container *ngIf="overview?.seoSignals?.length && overview?.evidence?.extracted; else noSeo">
+          <p class="au-muted">Measured on the {{ overview?.seoSignals?.[0]?.of }} editorial pages we analysed (legal and utility pages excluded), not the whole site. No rankings, traffic or Google indexation data: connect Search Console for that.</p>
+          <table class="au-table">
+            <thead><tr><th>Signal</th><th>Pages affected</th><th>Examples</th></tr></thead>
+            <tbody>
+              <tr *ngFor="let s of overview?.seoSignals">
+                <td>{{ s.label }}</td>
+                <td>{{ s.count }} of {{ s.of }}</td>
+                <td><a *ngFor="let u of s.samples" [href]="u" target="_blank" rel="noopener">{{ u }} </a><span class="au-muted" *ngIf="!s.samples.length">None found</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </ng-container>
+        <ng-template #noSeo><p class="au-muted">No pages analysed yet. Read the site from Crawl health to see on-page signals.</p></ng-template>
+      </section>
+
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'opportunities'">
+        <h2 class="au-panel__title">Content opportunities</h2>
+        <ng-container *ngIf="overview?.opportunities?.length; else noOpp">
+          <p class="au-muted">Inferred from approved pillar subtopics that no analysed page title or H1 mentions. A gap in our sample may not be a gap on the site; confidence follows how much of the site was read. No search volume or difficulty is estimated.</p>
+          <table class="au-table">
+            <thead><tr><th>Pillar</th><th>Subtopic</th><th>Why</th><th>Confidence</th><th></th></tr></thead>
+            <tbody>
+              <tr *ngFor="let o of overview?.opportunities">
+                <td>{{ o.pillar }}</td>
+                <td>{{ o.subtopic }}</td>
+                <td>{{ o.reason }}</td>
+                <td>{{ o.confidence }}</td>
+                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </ng-container>
+        <ng-template #noOpp>
+          <p class="au-muted" *ngIf="overview?.opportunitiesBasis === 'detected-keywords'">No pillars with subtopics are defined yet, so gaps cannot be detected. Add them in Pillars &amp; clusters.</p>
+          <p class="au-muted" *ngIf="overview?.opportunitiesBasis !== 'detected-keywords'">No uncovered subtopics found in the pages analysed so far.</p>
+        </ng-template>
+      </section>
+
       <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'coverage'">
         <h2 class="au-panel__title">What was actually read</h2>
@@ -346,6 +387,8 @@ export class SiteIntelligencePageComponent implements OnInit {
     { id: 'profile', label: 'Profile & audience' },
     { id: 'pillars', label: 'Pillars & clusters' },
     { id: 'coverage', label: 'Coverage' },
+    { id: 'seo', label: 'SEO signals' },
+    { id: 'opportunities', label: 'Opportunities' },
     { id: 'inventory', label: 'Pages' },
     { id: 'health', label: 'Crawl health' },
   ];

@@ -219,10 +219,11 @@ export function extractPageFromHtml(baseUrl: string, pageUrl: string, html: stri
   const $ = load(html);
   // JSON-LD must be read before boilerplate removal (script tags are removed).
   const jsonLdTypes = readJsonLdTypes($);
+  // The page H1 often sits inside <header> (stripped below), so read it first.
+  const h1 = firstText($("h1").first().text());
   $(BOILERPLATE_SELECTORS.join(",")).remove();
 
-  const title = firstText($("head title").text(), $("h1").first().text());
-  const h1 = firstText($("h1").first().text());
+  const title = firstText($("head title").text(), h1);
   const metaTitle = readMetaProperty($, "og:title") ?? title;
   const metaDescription = readMetaProperty($, "og:description") ?? readMeta($, "description");
 
@@ -350,7 +351,7 @@ export async function upsertDiscoveredPages(
     });
     const lastmod = entry.lastmod ? new Date(entry.lastmod) : null;
     if (existing) {
-      const patch: Record<string, unknown> = { crawlState: existing.crawlState === "extracted" ? existing.crawlState : "discovered" };
+      const patch: Record<string, unknown> = { crawlState: existing.crawlState === "extracted" || existing.crawlState === "stale" ? existing.crawlState : "discovered" };
       if (sitemapId && !existing.sitemapId) {
         patch.sitemapId = sitemapId;
       }

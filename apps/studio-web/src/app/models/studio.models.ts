@@ -1251,6 +1251,9 @@ export type SiteIntelligenceOverview = {
   clusters: Array<{ id: string; name: string; slug: string; pagesCount: number; authorityScore: number; gapScore: number; keywords: unknown; sampleUrls: unknown }>;
   indexing: boolean;
   lastRun: string | null;
+  seoSignals?: Array<{ id: string; label: string; count: number; of: number; samples: string[] }>;
+  opportunitiesBasis?: 'pillars' | 'detected-keywords';
+  opportunities?: Array<{ pillar: string; subtopic: string; reason: string; confidence: 'low' | 'medium' | 'high'; pagesRead: number }>;
   evidence?: { discovered: number; fetched: number; extracted: number; failed: number; skipped: number; sections: Array<{ family: string; discovered: number; extracted: number }> };
 };
 

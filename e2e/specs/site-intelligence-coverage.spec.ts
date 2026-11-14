@@ -36,5 +36,19 @@ test('Coverage tab states what was read, never claims Google indexation, and is 
   await tablist.getByRole('tab', { name: 'Pages' }).click();
   await expect(page.getByRole('heading', { name: /Discovered pages/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: /^Indexed pages$/ })).toHaveCount(0);
+
+  // SEO signals: facts about our sample, with the no-Search-Console caveat; never rankings or traffic.
+  await tablist.getByRole('tab', { name: 'SEO signals' }).click();
+  const seo = page.locator('section.au-panel', { hasText: 'On-page signals' });
+  await expect(seo).toContainText('connect Search Console');
+  await expect(seo.getByRole('row', { name: /No H1/ })).toBeVisible();
+  await expect(seo).not.toContainText(/ranking position|clicks|impressions/i);
+
+  // Opportunities: inferential, labelled with confidence or an explicit "no pillars" explanation.
+  await tablist.getByRole('tab', { name: 'Opportunities' }).click();
+  const opp = page.locator('section.au-panel', { hasText: 'Content opportunities' });
+  await expect(opp).toBeVisible();
+  await expect(opp).toContainText(/Confidence|No pillars with subtopics|No uncovered subtopics/);
+  await expect(opp).not.toContainText(/search volume:|difficulty:/i);
   await context.close();
 });

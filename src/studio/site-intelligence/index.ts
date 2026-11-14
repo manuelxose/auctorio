@@ -7,6 +7,8 @@ import { writeAudit } from "../audit";
 import { crawlPagesForSite, isUtilityUrl, routeFamily, upsertDiscoveredPages } from "./crawler";
 import { rebuildSiteProfile } from "./profile";
 import { discoverSitemapsForSite } from "./sitemap";
+import { computeOpportunities, computeSeoSignals, type SeoSignal, type SiteOpportunity } from "./signals";
+import { getStrategyLayers } from "./strategy";
 
 const prisma = getPrismaClient();
 
@@ -35,6 +37,10 @@ export type SiteIntelligenceOverview = {
   indexing: boolean;
   lastRun: string | null;
   /** Distinct evidence counts: discovered (sitemap) >= fetched >= extracted. Never Google-indexed. */
+  seoSignals: SeoSignal[];
+  opportunities: SiteOpportunity[];
+  /** "pillars" = approved/suggested strategy; "detected-keywords" = fallback that cannot reveal gaps. */
+  opportunitiesBasis: "pillars" | "detected-keywords";
   evidence: { discovered: number; fetched: number; extracted: number; failed: number; skipped: number; sections: Array<{ family: string; discovered: number; extracted: number }> };
 };
 
@@ -171,13 +177,19 @@ export async function getSiteIntelligenceOverview(tenantId: string, siteId: stri
   if (!site) {
     throw new Error("site_not_found");
   }
-  const [profile, sitemaps, pageGroups, clusters, urlRows] = await Promise.all([
+  const [profile, sitemaps, pageGroups, clusters, urlRows, layers] = await Promise.all([
     prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id } }),
     prisma.siteSitemap.findMany({ where: { tenantId, siteId: site.id }, orderBy: { lastFetchedAt: "desc" } }),
     prisma.siteIndexedPage.groupBy({ by: ["crawlState"], where: { tenantId, siteId: site.id }, _count: { _all: true } }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId: site.id }, orderBy: { pagesCount: "desc" } }),
-    prisma.siteIndexedPage.findMany({ where: { tenantId, siteId: site.id }, select: { url: true, crawlState: true }, take: 50_000 }),
+    prisma.siteIndexedPage.findMany({ where: { tenantId, siteId: site.id }, select: { url: true, crawlState: true, title: true, h1: true, metaDescription: true, wordCount: true, structuredData: true, canonicalUrl: true }, take: 50_000 }),
+    getStrategyLayers(tenantId, site.id),
   ]);
+  const analysed = urlRows.filter((row) => (row.crawlState === "extracted" || row.crawlState === "stale") && !isUtilityUrl(row.url));
+  const pillarSource = layers.effective.pillars.filter((pillar) => pillar.included);
+  const pillars = pillarSource.length
+    ? pillarSource.map((pillar) => ({ name: pillar.name, subtopics: pillar.subtopics }))
+    : clusters.map((cluster) => ({ name: cluster.name, subtopics: Array.isArray(cluster.keywords) ? cluster.keywords.filter((k): k is string => typeof k === "string") : [] }));
   const sectionMap = new Map<string, { discovered: number; extracted: number }>();
   for (const row of urlRows) {
     if (isUtilityUrl(row.url)) continue;
@@ -223,6 +235,9 @@ export async function getSiteIntelligenceOverview(tenantId: string, siteId: stri
     })),
     indexing: isSiteIndexing(siteId),
     lastRun: profile?.indexedAt?.toISOString() ?? null,
+    seoSignals: computeSeoSignals(analysed),
+    opportunitiesBasis: pillarSource.length ? "pillars" : "detected-keywords",
+    opportunities: computeOpportunities(analysed, pillars, urlRows.filter((row) => !isUtilityUrl(row.url)).length),
     evidence: {
       discovered: totalPages,
       fetched: extractedPages + (pageStates.failed ?? 0) + (pageStates.skipped ?? 0),
