@@ -22,7 +22,7 @@ Totals: 4245 found, 392 fetched, 387 analysed, 1 failed (404), 4 skipped. Movies
 Excluded as utility (never crawled, never clusters): legal/info/account routes (`avisolegal`, `accesibilidad`, `politica-editorial`, privacy, cookies, contact, login…).
 
 ## Known limitations to account for
-1. `inferContentTypeFromUrl` does not recognise `/guias` or `/programas` (exact-segment match on `guia`), so they land in the generic `article` cluster. `/programacion-tv` does not match `programacion` either (segment is `programacion-tv`); I have not verified the type of every path. STUDIO-06 should not read cluster size as demand.
+1. Content type comes from the URL only. `/programas/*` ("cuándo ver en TV" pages) is now typed `where-to-watch` (fixed 2026-11-14; existing rows keep `article` until recrawled/reprofiled). `/guias/*` are editorial guides and stay `article`. `/programacion-tv/*` is typed by suffix (series/movies) or `article`; I have not verified every path. Cluster size is not demand.
 2. Crawl sampling is per route family, round-robin; it is a sample, not a census. `profile confidence` reflects that.
 3. No Search Console data: nothing here implies Google indexation, volume or ranking.
 4. Pillar -> cluster link is an alias (`pillarAliases`, +15 in relevance); pillars without `clusterSlug` match by normalised name only.

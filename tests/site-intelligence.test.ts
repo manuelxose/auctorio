@@ -80,6 +80,8 @@ test("parseSitemapBody accepts sitemap urls in single-entry form", () => {
 // ────────────────────────────────────────────────────────────── Content type inference
 
 test("inferContentTypeFromUrl maps guiatv URL patterns", () => {
+  assert.equal(inferContentTypeFromUrl(`${BASE}/programas/todo-es-mentira`), "where-to-watch");
+  assert.equal(inferContentTypeFromUrl(`${BASE}/guias/precios-plataformas-streaming-espana`), "article");
   assert.equal(inferContentTypeFromUrl(`${BASE}/donde-ver/la-isla-de-las-tentaciones`), "where-to-watch");
   assert.equal(inferContentTypeFromUrl(`${BASE}/guia/la1-hoy`), "schedule");
   assert.equal(inferContentTypeFromUrl(`${BASE}/ranking/mejores-series-netflix`), "ranking");

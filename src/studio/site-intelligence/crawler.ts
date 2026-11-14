@@ -200,7 +200,7 @@ export function selectStratified<T extends { url: string }>(items: T[], budget: 
 export function inferContentTypeFromUrl(url: string): string {
   const path = new URL(url).pathname.toLowerCase();
   if (UTILITY_PATH.test(path)) return "utility";
-  if (/(^|\/)(donde-ver|donde-ver-hoy|ver-online|como-ver)(\/|$)/.test(path)) return "where-to-watch";
+  if (/(^|\/)(donde-ver|donde-ver-hoy|ver-online|como-ver|programas)(\/|$)/.test(path)) return "where-to-watch";
   if (/(^|\/)(guia|programacion|parrilla|horario)(\/|$)/.test(path)) return "schedule";
   if (/(^|\/)(ranking|top|mejores|listas)(\/|$)/.test(path)) return "ranking";
   if (/(^|\/)(comparativa|comparacion|vs)(\/|$)/.test(path)) return "comparison";
