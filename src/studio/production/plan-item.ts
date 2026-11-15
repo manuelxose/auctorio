@@ -154,6 +154,7 @@ export function planEvidenceToLedger(sourceEvidence: unknown): { facts: LedgerFa
       verificationStatus: "unverified",
       conflictingStatements: [],
       supportingGroups: 1,
+      ...(typeof entry.sourceId === "string" && typeof entry.itemId === "string" ? { origin: { sourceId: entry.sourceId, itemId: entry.itemId } } : {}),
     });
   }
   return { facts, groups: groups.size };

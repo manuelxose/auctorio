@@ -345,3 +345,13 @@ test("postValidatePlanItems stamps registry sourceId/itemId on matching evidence
   const [kept] = postValidatePlanItems([item], planInput, context).kept;
   assert.deepEqual({ ...kept.sourceEvidence[0] }, { ...kept.sourceEvidence[0], sourceId: "src-1", itemId: "item-1" });
 });
+
+test("planEvidenceToLedger carries the registry origin into ledger facts", async () => {
+  const { planEvidenceToLedger } = await import("../src/studio/production/plan-item");
+  const { facts } = planEvidenceToLedger([
+    { sourceType: "source_item", url: "https://espinof.com/a", title: "A", sourceId: "src-1", itemId: "item-1" },
+    { sourceType: "indexed-page", url: "https://guiaprogramaciontv.com/b", title: "B" },
+  ]);
+  assert.deepEqual(facts[0].origin, { sourceId: "src-1", itemId: "item-1" });
+  assert.equal(facts[1].origin, undefined);
+});

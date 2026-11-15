@@ -245,6 +245,8 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   let projectId = input.ownProjectId ?? jobProject?.id ?? (duplicate.decision === "update_existing" ? duplicate.targetProjectId : null);
   const existing = projectId ? await prisma.contentProject.findFirst({ where: { id: projectId, tenantId: ctx.tenantId } }) : null;
   if (!existing) projectId = null;
+  // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
+  const sourceOrigins = input.ledgerFacts.flatMap((fact) => (fact.origin ? [{ ...fact.origin, url: fact.sourceUrl }] : [])).slice(0, 40);
 
   if (!existing) {
     const firstItem = input.cluster
@@ -260,13 +262,14 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
         status: "draft",
         primaryLanguage: input.language,
         clusterId: input.cluster?.id ?? null,
-        sourceItemId: firstItem?.id ?? null,
+        sourceItemId: firstItem?.id ?? sourceOrigins[0]?.itemId ?? null,
         origin: ctx.kind === "cluster" ? "editorial_engine" : "manual",
         metadata: {
           generationId: ctx.generationId,
           productionJobId: ctx.jobId,
           articleType: duplicate.decision === "update_existing" ? "article_update" : "create_new",
           provenance: gate.provenance.slice(0, 40),
+          ...(sourceOrigins.length ? { sourceOrigins } : {}),
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
       },
@@ -283,6 +286,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           lastGenerationId: ctx.generationId,
           productionJobId: ctx.jobId,
           provenance: gate.provenance.slice(0, 40),
+          ...(sourceOrigins.length ? { sourceOrigins } : {}),
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),
         } as Prisma.InputJsonValue,
