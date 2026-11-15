@@ -299,14 +299,16 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
   const own = await discoverFeedsForUrl({ url: site.baseUrl });
   result.errors.push(...own.errors);
   for (const found of own.candidates) {
-    if (!FEED_TYPES.has(found.type) || (!found.verified && found.method !== "link_alternate")) continue;
+    // A verified full sitemap of the site itself is a valid first-party source (it lists every page, not only news).
+    const ownSitemap = found.type === "sitemap" && found.verified;
+    if ((!FEED_TYPES.has(found.type) && !ownSitemap) || (!found.verified && found.method !== "link_alternate")) continue;
     const canonicalUrl = normalizeCanonicalUrl(found.url);
     if (!canonicalUrl || candidates.has(canonicalUrl)) continue;
     candidates.set(canonicalUrl, {
       url: found.url,
       canonicalUrl,
       domain: siteHost,
-      name: found.title ? `${site.name} · ${found.title}` : `${site.name} · ${found.type === "news_sitemap" ? "news sitemap" : "feed"}`,
+      name: found.title ? `${site.name} · ${found.title}` : `${site.name} · ${found.type === "news_sitemap" ? "news sitemap" : ownSitemap ? "sitemap" : "feed"}`,
       type: found.type,
       category: "first_party",
       relationship: "first_party",
@@ -315,7 +317,7 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
       geography: siteCountry(site.locale),
       packTrust: null,
       seedTopics: [],
-      limitations: found.type === "news_sitemap" ? ["News sitemaps usually list only the last 48 hours of articles"] : [],
+      limitations: found.type === "news_sitemap" ? ["News sitemaps usually list only the last 48 hours of articles"] : ownSitemap ? ["A full sitemap lists every page of the site, not only new articles; it may be an index of child sitemaps"] : [],
     });
   }
   if (vocabulary.length === 0) {

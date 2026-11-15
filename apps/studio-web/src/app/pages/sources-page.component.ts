@@ -317,7 +317,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'settings'">
         <h2 class="au-panel__title">Enrichment providers</h2>
         <p class="au-panel__subtitle au-mb-3">Structured-data APIs (TMDB, OMDb, YouTube Data API…). Independent from editorial sources. Credentials are server-side env-var references — API keys never reach the browser.</p>
-        <app-empty-state *ngIf="providers.length === 0" icon="sources" title="No enrichment providers" text="Import the movie-tv-en pack or add a provider manually."></app-empty-state>
+        <app-empty-state *ngIf="providers.length === 0" icon="sources" title="No enrichment providers" text="Import a source pack or add a provider manually."></app-empty-state>
         <div class="au-table-wrap" *ngIf="providers.length > 0">
           <table class="au-table">
             <thead>

@@ -30,7 +30,15 @@ test('Sources: active/suggestions/evidence first, technical controls under Advan
   await expect(page.getByRole('heading', { name: 'Enrichment providers' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Blocked sources' })).toBeVisible();
 
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: 'test-results/sources-advanced-390.png', fullPage: true });
+  // Responsive: load fresh at each width (the copilot dock only auto-opens on desktop widths).
+  for (const [width, height] of [[1024, 768], [390, 844]]) {
+    await page.setViewportSize({ width, height });
+    await page.goto('/studio/sources', { waitUntil: 'networkidle' });
+    await expect(nav.getByRole('button', { name: 'Evidence' })).toBeVisible();
+    await nav.getByRole('button', { name: 'Advanced' }).click();
+    await expect(page.getByRole('heading', { name: 'Enrichment providers' })).toBeVisible();
+    if (width < 861) await expect(page.locator('#studio-copilot')).toHaveCount(0);
+    await page.screenshot({ path: `test-results/sources-advanced-${width}.png`, fullPage: true });
+  }
   await context.close();
 });
