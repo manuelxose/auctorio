@@ -72,9 +72,10 @@ export const AI_IMAGE_PROVIDERS: Array<Omit<AiProviderDefinition, "id"> & { id: 
     keyEnv: "OPENAI_API_KEY",
     baseUrlEnv: "OPENAI_BASE_URL",
     defaultBaseUrl: "https://api.openai.com",
-    models: ["gpt-image-1", "dall-e-3"],
-    defaultModel: "gpt-image-1",
-    description: "gpt-image-1 for quality, dall-e-3 as a cheaper fallback",
+    // gpt-image-1 / dall-e-3 are no longer served to current keys (400 "model does not exist", 2026-11-15).
+    models: ["gpt-image-2", "gpt-image-1.5", "gpt-image-1-mini"],
+    defaultModel: "gpt-image-2",
+    description: "gpt-image-2 for quality, gpt-image-1-mini as a cheaper fallback",
   },
   {
     id: "custom",

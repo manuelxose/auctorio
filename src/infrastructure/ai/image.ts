@@ -193,6 +193,23 @@ async function downloadBytesRobust(url: string): Promise<{ bytes: Buffer; conten
   throw lastError;
 }
 
+/** OpenAI rejects unknown fields (400 "Unknown parameter: 'image_size'"), so the compatible-provider extras are only sent elsewhere. */
+export function openAiImageBody(providerName: string, model: string, input: Pick<ImageGenerationInput, "prompt" | "size" | "seed">): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    model,
+    prompt: input.prompt,
+    size: providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
+    n: 1,
+  };
+  // gpt-image-* always returns base64 and rejects response_format
+  if (!model.startsWith("gpt-image")) body.response_format = "b64_json";
+  if (providerName !== "openai") {
+    body.image_size = input.size ?? "1024x576";
+    body.seed = input.seed;
+  }
+  return body;
+}
+
 class OpenAICompatibleImageProvider implements ImageProvider {
   private baseUrl: string;
   private apiKey: string;
@@ -226,16 +243,7 @@ class OpenAICompatibleImageProvider implements ImageProvider {
         "content-type": "application/json",
         authorization: `Bearer ${this.apiKey}`,
       },
-      body: {
-        model,
-        prompt: input.prompt,
-        size: this.providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
-        image_size: input.size ?? "1024x576",
-        n: 1,
-        // gpt-image-* always returns base64 and rejects response_format
-        response_format: model.startsWith("gpt-image") ? undefined : "b64_json",
-        seed: input.seed,
-      },
+      body: openAiImageBody(this.providerName, model, input),
       timeoutMs: getNumberEnv("IMAGE_TIMEOUT_MS", 90_000),
       retries: getNumberEnv("IMAGE_RETRIES", 1),
     });

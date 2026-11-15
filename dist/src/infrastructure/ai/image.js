@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ImageDownloadError = void 0;
+exports.openAiImageBody = openAiImageBody;
 exports.getImageProvider = getImageProvider;
 const http_1 = require("../../shared/utils/http");
 const env_1 = require("../../shared/utils/env");
@@ -132,6 +133,23 @@ async function downloadBytesRobust(url) {
     }
     throw lastError;
 }
+/** OpenAI rejects unknown fields (400 "Unknown parameter: 'image_size'"), so the compatible-provider extras are only sent elsewhere. */
+function openAiImageBody(providerName, model, input) {
+    const body = {
+        model,
+        prompt: input.prompt,
+        size: providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
+        n: 1,
+    };
+    // gpt-image-* always returns base64 and rejects response_format
+    if (!model.startsWith("gpt-image"))
+        body.response_format = "b64_json";
+    if (providerName !== "openai") {
+        body.image_size = input.size ?? "1024x576";
+        body.seed = input.seed;
+    }
+    return body;
+}
 class OpenAICompatibleImageProvider {
     baseUrl;
     apiKey;
@@ -154,16 +172,7 @@ class OpenAICompatibleImageProvider {
                 "content-type": "application/json",
                 authorization: `Bearer ${this.apiKey}`,
             },
-            body: {
-                model,
-                prompt: input.prompt,
-                size: this.providerName === "openai" ? "1536x1024" : input.size ?? "1024x576",
-                image_size: input.size ?? "1024x576",
-                n: 1,
-                // gpt-image-* always returns base64 and rejects response_format
-                response_format: model.startsWith("gpt-image") ? undefined : "b64_json",
-                seed: input.seed,
-            },
+            body: openAiImageBody(this.providerName, model, input),
             timeoutMs: (0, env_1.getNumberEnv)("IMAGE_TIMEOUT_MS", 90_000),
             retries: (0, env_1.getNumberEnv)("IMAGE_RETRIES", 1),
         });

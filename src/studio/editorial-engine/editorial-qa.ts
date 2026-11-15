@@ -9,7 +9,7 @@
 // ledger) are errors and hard-fail publication.
 
 import { detectVerbatimOverlap } from "./fact-safety";
-import { getStructureSpec } from "./structure";
+import { getStructureSpec, localizedHeading } from "./structure";
 import { stripHtml, wordCount } from "./seo-package";
 import { titleSimilarity } from "../editorial";
 import type {
@@ -41,6 +41,9 @@ export type QaInput = {
   enrichmentKnowledge: string[];
   /** Validated enrichment release dates (ISO) — allowed date knowledge. */
   enrichmentDates: string[];
+  /** Approved plan outline; when set it replaces the template headings (coverage is checked by version QA). */
+  plannedOutline?: string[];
+  language?: "es" | "en";
 };
 
 type DimensionAccumulator = {
@@ -388,13 +391,15 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
 
   // ── Completeness ────────────────────────────────────────────────────────
   const spec = getStructureSpec(brief.articleType);
-  const h2s = [...article.bodyHtml.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)].map((match) => stripHtml(match[1]).toLowerCase());
-  for (const section of spec.sections.filter((entry) => entry.required)) {
+  const h2s = [...article.bodyHtml.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)].map((match) => normalize(stripHtml(match[1])));
+  const outlined = (input.plannedOutline?.length ?? 0) > 0;
+  for (const section of spec.sections.filter((entry) => entry.required && !(outlined && entry.heading))) {
     let present: boolean;
     if (section.kind === "lead" || section.kind === "update_note") {
       present = bodyWords.length > 40;
     } else if (section.heading) {
-      present = h2s.some((h2) => h2.includes(normalize(section.heading ?? "")));
+      const variants = [section.heading, localizedHeading(section.heading, input.language ?? "en")].map(normalize);
+      present = h2s.some((h2) => variants.some((variant) => h2.includes(variant)));
     } else {
       present = bodyWords.length > 80;
     }

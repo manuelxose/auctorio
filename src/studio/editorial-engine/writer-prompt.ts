@@ -21,6 +21,8 @@ export type WriterPromptInput = {
   language: "es" | "en";
   /** Editorial plan guidance (outline, questions, CTA…) — planning data, treated as untrusted. */
   editorialGuidance?: string[];
+  /** Approved plan outline: rendered as the required H2 sections (structure template). */
+  plannedOutline?: string[];
 };
 
 export type WriterPrompt = {
@@ -116,7 +118,7 @@ export function buildWriterPrompt(input: WriterPromptInput): WriterPrompt {
   userLines.push(wrapUntrustedContent("site-value", renderSiteValueBlock(input.siteValueBlocks).join("\n")));
   userLines.push("");
   userLines.push("STRUCTURE TEMPLATE:");
-  userLines.push(renderStructureSpec(getStructureSpec(brief.articleType)));
+  userLines.push(renderStructureSpec(getStructureSpec(brief.articleType), language, input.plannedOutline));
   userLines.push("");
 
   if (input.editorialGuidance && input.editorialGuidance.length > 0) {
@@ -161,10 +163,6 @@ export function buildWriterPrompt(input: WriterPromptInput): WriterPrompt {
 
 // ────────────────────────────────────────────────────────────── Parsing
 
-function stripHtml(value: string): string {
-  return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim();
-}
-
 function clampText(value: unknown, max: number): string {
   return String(value ?? "").slice(0, max).trim();
 }
@@ -198,7 +196,8 @@ export function extractJsonObject(raw: string): Record<string, unknown> | null {
   }
 }
 
-export function parseWriterOutput(raw: string): ParsedArticle {
+/** Null when the output is not the JSON envelope (truncated/malformed): callers must fail, never store raw text as the body. */
+export function parseWriterOutput(raw: string): ParsedArticle | null {
   const shape = extractJsonObject(raw) as RawArticleShape | null;
   if (shape && typeof shape.bodyHtml === "string" && shape.bodyHtml.trim()) {
     const claims = Array.isArray(shape.claims)
@@ -223,15 +222,5 @@ export function parseWriterOutput(raw: string): ParsedArticle {
     };
   }
 
-  // Fallback: treat the raw output as the body so QA still runs on it.
-  const text = stripHtml(raw);
-  return {
-    title: text.split(/[.!?\n]/)[0]?.slice(0, 120) || "",
-    h1: "",
-    excerpt: text.slice(0, 300),
-    bodyHtml: `<p>${raw.slice(0, 200_000).replace(/\n/g, "</p><p>")}</p>`,
-    seoTitle: "",
-    seoDescription: "",
-    claims: [],
-  };
+  return null;
 }

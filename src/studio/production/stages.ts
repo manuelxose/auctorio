@@ -6,6 +6,7 @@
 
 import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
+import { structuredEvent } from "../../shared/utils/logger";
 import { sanitizeEditorialHtml } from "../html-sanitizer";
 import { getOrCreatePolicy } from "../automation";
 import { createPublication, enqueuePublication } from "../publication";
@@ -22,7 +23,7 @@ import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
 import { buildClusterBrief, enrichmentKnowledgeOf, prepareClusterInput } from "../editorial-engine/cluster-production";
 import type { SeoPackage } from "../editorial-engine/types";
-import { buildPlanBrief, prepareManualInput, preparePlanItemInput } from "./plan-item";
+import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput } from "./plan-item";
 import {
   ProductionStop,
   type BriefArtifact,
@@ -97,7 +98,7 @@ async function brief(ctx: StageContext): Promise<BriefArtifact> {
   return buildPlanBrief(ctx.input, factSafety, ctx.now);
 }
 
-/** The writer returns a JSON envelope (HTML body, claims, SEO); too tight a cap truncates it and parseWriterOutput silently falls back to raw text. */
+/** The writer returns a JSON envelope (HTML body, claims, SEO); too tight a cap truncates it and the write stage fails instead of storing it. */
 export function writerMaxTokens(targetWordMax: number): number {
   return Math.min(8000, Math.max(3000, Math.round(targetWordMax * 5)));
 }
@@ -114,6 +115,7 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     updateDelta: briefArtifact.updateDelta,
     language: ctx.input.language,
     editorialGuidance: briefArtifact.guidance,
+    plannedOutline: outlineHeadings(ctx.input.plan?.record ?? {}),
   });
   await updateGeneration(ctx, {
     status: "generating",
@@ -125,18 +127,26 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     factLicenses: factSafety.licenses as unknown as Prisma.InputJsonValue,
     writerPrompt: writerPrompt.userPrompt,
   });
-  const maxTokens = writerMaxTokens(briefArtifact.brief.targetLengthRange.max);
-  const result = await getArticleWriter().generate({
-    prompt: writerPrompt.userPrompt,
-    systemPrompt: writerPrompt.systemPrompt,
-    maxTokens,
-    language: ctx.input.language,
-  });
-  const parsed = parseWriterOutput(result.output);
-  // Editorial HTML is allowlist-sanitized before anything is stored.
-  parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
-  await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
-  return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
+  // One bounded retry at the token ceiling: a truncated envelope is the usual cause.
+  const attempts = [writerMaxTokens(briefArtifact.brief.targetLengthRange.max), 8000];
+  for (let attempt = 0; attempt < attempts.length; attempt++) {
+    const result = await getArticleWriter().generate({
+      prompt: writerPrompt.userPrompt,
+      systemPrompt: writerPrompt.systemPrompt,
+      maxTokens: attempts[attempt],
+      language: ctx.input.language,
+    });
+    await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
+    const parsed = parseWriterOutput(result.output);
+    if (parsed) {
+      // Editorial HTML is allowlist-sanitized before anything is stored.
+      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
+      return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
+    }
+    structuredEvent("production.writer_output_invalid", { jobId: ctx.jobId, attempt: attempt + 1, maxTokens: attempts[attempt], outputChars: result.output.length }, "warn");
+  }
+  // Nothing is materialized: the raw output stays on the generation record only, never in a ContentVersion.
+  throw new Error(`writer_output_invalid: the writer did not return a complete JSON article after ${attempts.length} attempts (likely truncated). Retry the job; if it persists, shorten the target length or switch the AI provider.`);
 }
 
 async function seo(ctx: StageContext): Promise<SeoPackage> {
@@ -166,6 +176,8 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
     entityNames: input.entities.map((entity) => entity.name),
     enrichmentKnowledge: enrichmentKnowledgeOf(input.enrichments),
     enrichmentDates: input.enrichments.map((enrichment) => enrichment.releaseDate).filter((date): date is string => Boolean(date)),
+    plannedOutline: outlineHeadings(input.plan?.record ?? {}),
+    language: input.language,
   });
   const record = input.plan?.record ?? {};
   const overlap = ctx.kind !== "cluster" && duplicate.similarity >= 0.6;
@@ -178,6 +190,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         contentType: record.contentType ?? null,
         primaryIntent: record.primaryIntent ?? record.searchIntent ?? briefArtifact.brief.searchIntent,
         primaryKeyword: briefArtifact.brief.primaryKeyword,
+        outline: record.outline ?? [],
       },
       siteType: input.site.type,
       recommendedWordCountMin: briefArtifact.brief.targetLengthRange.min,
