@@ -51,7 +51,9 @@ export const studioRoleGuard: CanActivateFn = async (
   }
   const router = inject(Router);
   const injector = inject(Injector);
-  const requiredRole = route.data['requiredRole'] as 'admin' | 'editor' | 'viewer' | undefined;
+  // `adminSections` lets one `settings/:section` route keep some tabs admin-only.
+  const adminSection = (route.data['adminSections'] as string[] | undefined)?.includes(route.params['section']);
+  const requiredRole = (route.data['requiredRole'] ?? (adminSection ? 'admin' : undefined)) as 'admin' | 'editor' | 'viewer' | undefined;
 
   const appContext = await studioContext(injector);
   try {

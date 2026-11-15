@@ -5,6 +5,8 @@ export type StudioNavItem = {
   path: string;
   icon: StudioIconName;
   platformAdminOnly?: boolean;
+  /** Workspace admins only: team, roles and system internals. The API enforces the same rule. */
+  adminOnly?: boolean;
   /** Small label shown above this item in the sidebar. */
   heading?: string;
   /** One line: what the user does on this step. Shown in the step bar and the "Next step" footer. */
@@ -104,19 +106,24 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     end: true,
     items: [
       { label: 'Sites', path: '/studio/settings/sites', icon: 'globe', heading: 'Workspace' },
-      { label: 'People', path: '/studio/settings/team', icon: 'user' },
-      { label: 'Roles', path: '/studio/settings/roles', icon: 'lock' },
+      { label: 'People', path: '/studio/settings/team', icon: 'user', adminOnly: true },
+      { label: 'Roles', path: '/studio/settings/roles', icon: 'lock', adminOnly: true },
       { label: 'Connections', path: '/studio/connections', icon: 'connections' },
       { label: 'Web discovery', path: '/studio/settings/discovery', icon: 'sources' },
       { label: 'Autopilot', path: '/studio/automation', icon: 'automation' },
       { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },
-      { label: 'System health', path: '/studio/operations', icon: 'operations', heading: 'System' },
+      { label: 'System health', path: '/studio/operations', icon: 'operations', heading: 'System', adminOnly: true },
       { label: 'Usage', path: '/studio/admin/overview', icon: 'overview', heading: 'All workspaces', platformAdminOnly: true },
       { label: 'Workspaces', path: '/studio/admin/workspaces', icon: 'globe', platformAdminOnly: true },
       { label: 'AI providers', path: '/studio/admin/ai', icon: 'sparkles', platformAdminOnly: true },
     ],
   },
 ];
+
+/** Whether a member with this workspace role (and platform flag) sees the item. */
+export function canSeeNavItem(item: StudioNavItem, role: string, isPlatformAdmin = false): boolean {
+  return (!item.adminOnly || role === 'admin') && (!item.platformAdminOnly || isPlatformAdmin);
+}
 
 /** Longest nav path that prefixes the URL, so /studio/content/new still lights up Content. */
 export function activeNavItem(url: string): { group: StudioNavGroup; item: StudioNavItem } | null {

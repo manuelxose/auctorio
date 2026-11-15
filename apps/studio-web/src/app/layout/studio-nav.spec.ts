@@ -1,4 +1,4 @@
-import { GUIDED_STEPS, STUDIO_NAV, currentStep, nextStep } from './studio-nav';
+import { GUIDED_STEPS, STUDIO_NAV, canSeeNavItem, currentStep, nextStep } from './studio-nav';
 
 describe('studio nav guided process', () => {
   it('lists every route exactly once', () => {
@@ -42,5 +42,16 @@ describe('studio nav guided process', () => {
     const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
     expect(settings.hidden).toBeFalsy();
     expect(settings.end).toBeTrue();
+  });
+
+  it('shows team, roles and system internals only to admins', () => {
+    const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
+    const visible = (role: string, platform = false) =>
+      settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);
+    for (const role of ['viewer', 'editor']) {
+      expect(visible(role)).toEqual(['Sites', 'Connections', 'Web discovery', 'Autopilot', 'Assistant tools']);
+    }
+    expect(visible('admin')).toEqual(['Sites', 'People', 'Roles', 'Connections', 'Web discovery', 'Autopilot', 'Assistant tools', 'System health']);
+    expect(visible('admin', true)).toContain('AI providers');
   });
 });

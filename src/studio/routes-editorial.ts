@@ -1442,7 +1442,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get("/v2/automation/health", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }
@@ -2380,7 +2380,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   // ──────────────────────────────────────────────────────────── Worker health
 
   fastify.get("/v2/health/workers", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }

@@ -22,10 +22,10 @@ The active area's tools, then the assistant (embedded by owner decision — the 
 | Plan | Editorial plan |
 | Produce | Content, Review queue, Media |
 | Publish | Calendar, Publications |
-| Settings | Sites, People, Roles, Connections, Web discovery, Autopilot, Assistant tools · System health · (platform admins) Usage, Workspaces, AI providers |
+| Settings | Sites, (admins) People, (admins) Roles, Connections, Web discovery, Autopilot (read-only for non-admins), Assistant tools · (admins) System health · (platform admins) Usage, Workspaces, AI providers |
 | Profile (account menu only) | Profile |
 
-Platform-admin entries are filtered client-side for display only; the server still enforces access.
+Platform-admin entries are filtered client-side for display only; the server still enforces access. Since STUDIO-10, `adminOnly` items (People, Roles, System health) are hidden from non-admin workspace roles in the sidebar and the command palette, their routes send non-admins to Overview (`studioRoleGuard` with `requiredRole` / `adminSections`), and the API answers 403 without `workspace.manage` for worker, queue, metrics, cost and preflight reads.
 
 ## Keyboard and focus
 

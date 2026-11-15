@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
@@ -14,7 +15,7 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
 @Component({
   selector: 'app-automation-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -23,7 +24,7 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
           <h1 class="au-page__title">Automation</h1>
           <p class="au-page__subtitle">Configure autonomous discovery, generation and multi-channel publishing.</p>
         </div>
-        <div class="au-page__actions">
+        <div class="au-page__actions" *ngIf="isAdmin">
           <button
             class="au-btn"
             [class.au-btn--danger]="policy?.state === 'active'"
@@ -50,6 +51,17 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
           Today: {{ status.today.articlesPlanned }}/{{ status.limits.articlesPerDay }} articles ·
           {{ status.today.xPlanned }} X · {{ status.today.instagramPlanned }} Instagram
         </span>
+      </div>
+
+      <div class="au-banner au-banner--info" *ngIf="!isAdmin">
+        <app-icon name="lock"></app-icon>
+        <span class="au-banner__text">Only workspace admins can change autopilot. You can see how it is set up for this site.</span>
+      </div>
+
+      <div class="au-banner au-banner--warning" *ngIf="isAdmin && health && (health.degraded || !health.redisConfigured)">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">Background processing is degraded, so scheduled work may run late.</span>
+        <a class="au-banner__action" routerLink="/studio/operations">Open System health</a>
       </div>
 
       <div class="au-banner au-banner--warning" *ngFor="let warning of status?.warnings ?? []">
@@ -201,11 +213,12 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
           <label class="au-field"><span class="au-field__label">Articles / hour</span><input class="au-input" type="number" min="1" [(ngModel)]="policy.articlesPerHour" /></label>
           <label class="au-field"><span class="au-field__label">Social posts / hour</span><input class="au-input" type="number" min="1" [(ngModel)]="policy.socialPostsPerHour" /></label>
         </div>
-
-        <div class="au-form__actions">
-          <button class="au-btn au-btn--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save automation policy' }}</button>
-        </div>
       </section>
+
+      <!-- Outside the advanced panel so a mode change can be saved without opening it. -->
+      <div class="au-form__actions au-mb-3" *ngIf="policy && isAdmin">
+        <button class="au-btn au-btn--primary" type="button" (click)="save()" [disabled]="saving">{{ saving ? 'Saving…' : 'Save automation policy' }}</button>
+      </div>
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="nextSlots.length > 0">
         <h2 class="au-panel__title">Next planned slots</h2>
@@ -215,42 +228,7 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
         </div>
       </section>
 
-      <section class="au-panel au-panel--padded au-mb-3">
-        <h2 class="au-panel__title">Workers & operational health</h2>
-        <p class="au-panel__subtitle au-mb-2">
-          <span class="au-badge" [class.au-badge--success]="health && health.redisConfigured && !health.degraded" [class.au-badge--danger]="health && (!health.redisConfigured || health.degraded)">
-            {{ health ? (health.degraded ? 'Degraded' : 'Healthy') : 'Loading…' }}
-          </span>
-          <span class="au-hint au-ml-1">Redis: {{ health ? (health.redisConfigured ? 'configured' : 'MISSING') : '…' }}</span>
-        </p>
-        <div class="au-table-wrap">
-          <table class="au-table">
-            <thead>
-              <tr>
-                <th>Worker</th>
-                <th>Status</th>
-                <th>Last heartbeat</th>
-                <th>Current task</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr *ngFor="let worker of health?.workers ?? []">
-                <td>{{ worker.name }}</td>
-                <td>
-                  <span class="au-badge" [class.au-badge--success]="worker.status === 'running' && !worker.stale" [class.au-badge--danger]="worker.status !== 'running' || worker.stale">
-                    {{ worker.status }}{{ worker.stale ? ' · stale' : '' }}
-                  </span>
-                </td>
-                <td class="au-muted">{{ formatRelative(worker.lastBeatAt) }}</td>
-                <td class="au-muted">{{ worker.currentTask ?? '—' }}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-        <p class="au-hint au-mt-2">Worker heartbeats update continuously. A stale heartbeat or missing Redis triggers a prominent operational failure and degrades the health badge.</p>
-      </section>
-
-      <section class="au-panel au-panel--padded">
+      <section class="au-panel au-panel--padded" *ngIf="isAdmin">
         <h2 class="au-panel__title">Recover stuck automatic content</h2>
         <p class="au-panel__subtitle au-mb-2">Automatically repair, approve and reschedule existing AUTOPILOT projects stuck in QA blocked, Ready for review or failed publication states. Manual projects are never touched.</p>
         <div class="au-form__actions">
@@ -315,6 +293,8 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
   priorityTopicsText = '';
   qaThresholdsText = '';
   advancedOpen = false;
+  /** Mirrors the API rule: changing automation needs workspace.manage (owner/admin). */
+  readonly isAdmin = this.appContext.role() === 'admin';
   health: AutomationHealth | null = null;
   recovering = false;
   recoveryReport: AutomationRecoveryReport | null = null;
@@ -361,7 +341,7 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
         this.accounts = response.items.filter((account) => account.platform !== 'website');
       },
     });
-    this.loadHealth();
+    if (this.isAdmin) this.loadHealth();
   }
 
   loadHealth(): void {
@@ -503,17 +483,6 @@ export class AutomationPageComponent implements OnInit, OnDestroy {
 
   dateLabel(value: string): string {
     return new Date(value).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  }
-
-  formatRelative(value: string | null | undefined): string {
-    if (!value) {
-      return '—';
-    }
-    const minutes = Math.round((Date.now() - new Date(value).getTime()) / 60_000);
-    if (minutes < 1) {
-      return 'just now';
-    }
-    return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} h`;
   }
 
   runRecovery(dryRun: boolean): void {

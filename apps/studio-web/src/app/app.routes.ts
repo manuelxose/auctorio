@@ -107,7 +107,8 @@ export const routes: Routes = [
       {
         path: 'operations',
         loadComponent: () => import('./pages/operations-page.component').then((m) => m.OperationsPageComponent),
-        data: { studioMeta: { section: 'Operations', title: 'System health' } },
+        canActivate: [studioRoleGuard],
+        data: { requiredRole: 'admin', studioMeta: { section: 'Operations', title: 'System health' } },
       },
       {
         path: 'notifications',
@@ -131,7 +132,7 @@ export const routes: Routes = [
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
         canActivate: [studioRoleGuard],
-        data: { studioMeta: { section: 'Settings', title: 'Settings' } },
+        data: { adminSections: ['team', 'roles'], studioMeta: { section: 'Settings', title: 'Settings' } },
       },
 
       // ── Compatibility redirects (old surface → new destination) ─────

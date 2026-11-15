@@ -13,7 +13,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, currentStep, nextStep, type GuidedStep, type StudioNavGroup } from './studio-nav';
+import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, canSeeNavItem, currentStep, nextStep, type GuidedStep, type StudioNavGroup } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
@@ -329,7 +329,7 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   session: StudioSession | null = null;
   isPlatformAdmin = false;
-  sidebarItems = () => this.activeArea().items.filter((item) => !item.platformAdminOnly || this.isPlatformAdmin);
+  sidebarItems = () => this.activeArea().items.filter((item) => canSeeNavItem(item, this.appContext.role(), this.isPlatformAdmin));
   get sites(): StudioSite[] {
     return this.appContext.sites();
   }
