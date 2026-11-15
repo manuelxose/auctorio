@@ -36,6 +36,7 @@ Independent review (prompt section 13): intentionally not done, per project owne
 - STUDIO-02: sites/connectors baseline; first-site/zero-site login gap; 2 provisioned sites (+ e2e leftovers).
 - STUDIO-03: modes: all provisioned sites `manual`, autoApprove/autoPublish false; mode UI present on Overview/Automation.
 - STUDIO-04: covered by `docs/acceptance/studio-04-site-intelligence-2026-11-13.md` (stratified sampling, utility-page exclusion, Coverage tab). Hand-off for 05/06 in `studio-04-handoff.md`.
+- STUDIO-05: covered by `docs/acceptance/studio-05-sources-competitors-provenance-2026-11-15.md` (language/country source ranking, `tv-streaming-es` pack, competitor false-positive filter, source→plan→draft provenance, Sources tabs + Evidence).
 - Defects to schedule (not fixed here): corrupt mock PNG, zero-site login, flaky unit tests / `npm test` hang, stale e2e specs, overview CSS budget.
 
 
@@ -64,3 +65,8 @@ Hand-off: STUDIO-03/08/09 can read `connections[].readiness` / `checks` from `/v
 Full record: `docs/acceptance/studio-04-site-intelligence-2026-11-13.md`. Screenshots: `screens/studio-04-coverage-{1440,1024,390}.jpg`.
 Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
 Not done: SEO-signals/Opportunities tabs, Playwright E2E, full `npm test`, independent review (owner instruction), dedicated worktree.
+
+## STUDIO-05 (2026-11-15) — Sources, competitors and provenance
+Full record: `docs/acceptance/studio-05-sources-competitors-provenance-2026-11-15.md`. Screenshots: `screens/studio-05-sources-*.png`.
+Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: full `npm test`, independent review (owner instruction), site-type classification, ids on manually added plan evidence.
