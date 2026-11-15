@@ -96,7 +96,7 @@ function installFetch(): () => void {
     const route = ROUTES[url];
     if (route) return new Response(route.body, { status: 200, headers: { "content-type": route.type } });
     if (host === SITE && /\/(electric|cycling)/.test(new URL(url).pathname)) {
-      return new Response(`<html><body><main><a href="https://${RIVAL}/review">rival</a> <a href="https://facebook.com/x">fb</a></main></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+      return new Response(`<html><body><main><a href="https://${RIVAL}/review">rival</a> <a href="https://facebook.com/x">fb</a> <a href="https://wa.me/34600000000">chat</a> <a href="https://web-agency-credit.example/">site by</a></main></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
     }
     void init;
     return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
@@ -276,6 +276,7 @@ test("CMP-01: competitor accept/edit/remove keeps evidence; Add to plan creates 
     assert.ok(evidence.some((entry) => entry.kind === "outbound_link"));
     assert.ok(evidence.some((entry) => entry.kind === "feed_fetched"));
     assert.equal(await prisma.competitor.count({ where: { siteId: site.id, domain: "facebook.com" } }), 0, "platforms are never competitors");
+    assert.equal(await prisma.competitor.count({ where: { siteId: site.id, domain: { in: ["wa.me", "web-agency-credit.example"] } } }), 0, "chat links and unverifiable footer credits are never shortlisted");
     const mention = await prisma.competitor.findUnique({ where: { siteId_domain: { siteId: site.id, domain: "rival-bikes.com" } } });
     assert.ok(mention, "content mention becomes a candidate");
     assert.equal(mention.verification, "speculative", "unreachable candidates stay speculative");

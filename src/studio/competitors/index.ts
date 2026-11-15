@@ -280,9 +280,10 @@ export async function discoverCompetitors(tenantId: string, siteId: string, opti
     }
     if (competitor.status === "rejected" || competitor.status === "removed") continue;
     competitor = await verifyCompetitor(competitor, vocabulary);
-    // A page linking to a host (footer credit, chat link) is not proof of competition: a link/mention-only
-    // candidate that shows no topic overlap and was created in this run (no operator decision yet) is dropped.
-    if (competitor.verification !== "verified" && !existing && candidate.entries.every((entry) => entry.kind === "outbound_link" || entry.kind === "mention")) {
+    // A page linking to a host (footer credit, chat link) is not proof of competition: a candidate whose only
+    // evidence is outbound links, with no topic overlap, created in this run (no operator decision yet) is dropped.
+    // Content mentions stay as speculative candidates.
+    if (competitor.verification !== "verified" && !existing && candidate.entries.every((entry) => entry.kind === "outbound_link")) {
       await prisma.competitor.delete({ where: { id: competitor.id } });
       result.created -= 1;
       result.candidates -= 1;
