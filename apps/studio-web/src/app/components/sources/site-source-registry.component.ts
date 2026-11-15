@@ -9,7 +9,7 @@ import { EditorialContextService } from '../../services/editorial-context.servic
 import { ToastService } from '../../services/toast.service';
 import { AppEmptyStateComponent } from '../ui/app-empty-state.component';
 import { AppIconComponent } from '../ui/app-icon.component';
-import { SiteSource, SiteSourceRecommendation, SourceConfigPatchBody, SourceDiagnostics, SourceItemRow, SourceTestResult, SourcesApiService } from '../../services/sources-api.service';
+import { SiteSource, SiteSourceRecommendation, SourceConfigPatchBody, SourceDiagnostics, SourceItemRow, SourceEvidenceRow, SourceTestResult, SourcesApiService } from '../../services/sources-api.service';
 
 const list = (value: string): string[] => value.split(',').map((entry) => entry.trim()).filter(Boolean);
 
@@ -37,7 +37,7 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
       permission to republish or copy its content.
     </p>
 
-    <div class="au-toolbar au-toolbar--panel au-mb-3">
+    <div class="au-toolbar au-toolbar--panel au-mb-3" *ngIf="section !== 'evidence'">
       <button *ngIf="section === 'recommendations'" class="au-btn au-btn--primary" type="button" [disabled]="busy()" (click)="discover()"><app-icon name="sparkles"></app-icon>{{ busy() ? 'Discovering...' : 'Discover sources' }}</button>
       <span class="au-toolbar__spacer"></span>
       <input class="au-input au-input--search" type="search" placeholder="Filter by name, URL or topic" aria-label="Filter sources" [ngModel]="search()" (ngModelChange)="search.set($event)" />
@@ -94,6 +94,20 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
           </div>
         </article>
       </div>
+    </section>
+
+    <!-- Evidence: recent items from active, verified sources that planning can cite. -->
+    <section class="au-panel au-panel--padded" aria-labelledby="reg-ev" *ngIf="section === 'evidence'">
+      <h2 class="au-panel__title" id="reg-ev">Recent evidence</h2>
+      <p class="au-page__subtitle">Items from active, verified sources that match this site's topics. Editorial planning may cite these; each plan item keeps the source it came from.</p>
+      <p *ngIf="evidence() === null" role="status">Loading evidence…</p>
+      <app-empty-state *ngIf="evidence()?.length === 0" icon="sources" title="No recent evidence" text="Accept and fetch a source whose items match your topics to see evidence here."></app-empty-state>
+      <ul class="au-list" *ngIf="evidence()?.length">
+        <li *ngFor="let item of evidence()">
+          <a [href]="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
+          <small> · {{ item.sourceName }}<ng-container *ngIf="item.publishedAt"> · {{ item.publishedAt | date: 'mediumDate' }}</ng-container><ng-container *ngIf="item.topics.length"> · {{ item.topics.join(', ') }}</ng-container></small>
+        </li>
+      </ul>
     </section>
 
     <!-- Managed sources -->
@@ -189,12 +203,13 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
   private readonly toast = inject(ToastService);
 
   /** Which subsection of the Sources page this instance renders. */
-  @Input() section: 'sources' | 'recommendations' = 'sources';
+  @Input() section: 'sources' | 'recommendations' | 'evidence' = 'sources';
   readonly selectedSources = signal<Set<string>>(new Set());
   readonly bulkCategory = signal('');
 
   readonly recommendations = signal<SiteSourceRecommendation[]>([]);
   readonly sources = signal<SiteSource[]>([]);
+  readonly evidence = signal<SourceEvidenceRow[] | null>(null);
   readonly search = signal('');
   readonly relationship = signal('');
   readonly state = signal('');
@@ -248,6 +263,11 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
 
   async reload(): Promise<void> {
     if (!this.siteId) return;
+    if (this.section === 'evidence') {
+      this.evidence.set(null);
+      this.evidence.set((await firstValueFrom(this.api.evidence(this.siteId, 30)).catch((error) => { this.toast.error(this.message(error)); return { items: [] }; })).items);
+      return;
+    }
     const [recs, srcs] = await Promise.all([firstValueFrom(this.api.recommendations(this.siteId)), firstValueFrom(this.api.sources(this.siteId))]).catch((error) => {
       this.toast.error(this.message(error));
       return [null, null] as const;

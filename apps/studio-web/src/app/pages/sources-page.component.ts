@@ -31,14 +31,16 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       </header>
 
       <nav class="au-tabs au-mb-3" aria-label="Source sections">
-        <button class="au-tab" type="button" [class.is-active]="view === 'sources'" (click)="setView('sources')">1 · Sources</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">2 · Recommendations</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'add'" (click)="setView('add')">3 · Add</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'settings'" (click)="setView('settings')">Settings</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'sources'" (click)="setView('sources')">Active sources</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">Suggestions</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'evidence'" (click)="setView('evidence')">Evidence</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'add'" (click)="setView('add')">Add</button>
+        <button class="au-tab" type="button" [class.is-active]="view === 'settings'" (click)="setView('settings')">Advanced</button>
       </nav>
 
       <app-site-source-registry *ngIf="view === 'sources'" section="sources"></app-site-source-registry>
       <app-site-source-registry *ngIf="view === 'recommendations'" section="recommendations"></app-site-source-registry>
+      <app-site-source-registry *ngIf="view === 'evidence'" section="evidence"></app-site-source-registry>
 
 
       <!-- Recently discovered -->
@@ -404,7 +406,7 @@ export class SourcesPageComponent implements OnInit {
   editingId: string | null = null;
   fetching: Record<string, boolean> = {};
   feedback = '';
-  view: 'sources' | 'recommendations' | 'add' | 'settings' = 'sources';
+  view: 'sources' | 'recommendations' | 'evidence' | 'add' | 'settings' = 'sources';
   /** New sources default to the active site; null shares them with every site. */
   readonly activeSiteId = this.appContext.activeSite()?.id ?? null;
   recommendations: SourceRecommendation[] = [];
@@ -482,7 +484,7 @@ export class SourcesPageComponent implements OnInit {
     this.sites = this.appContext.sites();
   }
 
-  setView(view: 'sources' | 'recommendations' | 'add' | 'settings'): void {
+  setView(view: 'sources' | 'recommendations' | 'evidence' | 'add' | 'settings'): void {
     this.view = view;
     if (view === 'add') {
       this.resetForm();
