@@ -34,4 +34,13 @@ describe('studio nav guided process', () => {
     expect(currentStep('/studio/settings/sites')).toBeNull();
     expect(nextStep('/studio/connections')).toBeNull();
   });
+
+  it('gives Home a purposeful sidebar and puts Settings in the area bar', () => {
+    const home = STUDIO_NAV.find((group) => group.id === 'home')!;
+    expect(home.items.map((item) => item.label)).toEqual(['Overview', 'Notifications', 'Background jobs']);
+    expect(nextStep('/studio/notifications')).toBeNull();
+    const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
+    expect(settings.hidden).toBeFalsy();
+    expect(settings.end).toBeTrue();
+  });
 });

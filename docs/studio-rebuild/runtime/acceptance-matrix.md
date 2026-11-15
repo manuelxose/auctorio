@@ -75,3 +75,11 @@ Not done: full `npm test`, independent review (owner instruction), site-type cla
 Full record: `docs/acceptance/studio-08-calendar-publications-2026-11-15.md`. Screenshots: `docs/studio-rebuild/evidence/studio-08/`.
 Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
 Not done: full `npm test`, axe audit, independent review (owner instruction), live publish-now.
+
+## STUDIO-09 (2026-11-15) — Two-level navigation and contextual assistant
+Evidence: `docs/studio-rebuild/evidence/studio-09/` (before/after 1440/1024/390), `docs/studio-rebuild/NAVIGATION.md`, e2e `e2e/specs/studio-shell-nav.spec.ts`.
+Root causes (CONFIRMED RUNTIME, local QA account): Home's sidebar held one link duplicating the Home tab; Settings, Connections, Autopilot and System health were reachable only from the account menu; on 390 px the active area sat off-screen in the scrolling area bar; Overview repeated the top-bar "New content"; the assistant wrapper and panel were two landmarks both named "Assistant".
+Changes: Home = Overview, Notifications, Background jobs; Settings is an area at the end of the bar (removed from account menu); active area scrolled into view on page activation; duplicate CTA and landmark removed. Assistant stays embedded in the sidebar (owner reverted the right dock in `ff50b77`).
+Commands: Angular `ng test` 34/34; `npm run typecheck` PASS; `npm run build:studio` PASS; e2e `studio-shell-nav` 2/2 on the production SSR build (on the dev server the phone check fails because Angular HMR re-renders the shell once after load — dev-only).
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL (no large-form progressive-disclosure pass) · ACCESSIBILITY PARTIAL (keyboard/focus e2e; axe not installed) · SECURITY PASS (no server change; admin entries still server-enforced) · INTEGRATION PASS · REGRESSION PARTIAL (full `npm test` not run; `notifications-links` "saved editorial plans" fails on `.au-plan-row`, pre-existing STUDIO-06 markup, unrelated) · PRODUCTION READINESS BLOCKED (no deploy by rule).
+Not done: page-monolith split, Copilot provider journeys, independent review (owner instruction).

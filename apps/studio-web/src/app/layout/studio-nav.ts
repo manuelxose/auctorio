@@ -18,6 +18,8 @@ export type StudioNavGroup = {
   items: StudioNavItem[];
   /** Reached from the account menu, not the horizontal nav. */
   hidden?: boolean;
+  /** Sits at the far end of the horizontal nav, apart from the guided flow. */
+  end?: boolean;
   /** Position in the guided editorial process; areas without one sit outside the flow. */
   step?: number;
 };
@@ -26,14 +28,19 @@ export type StudioNavGroup = {
  * Studio information architecture, in the order the work happens for the
  * active site: understand it, feed it, plan, produce, publish. Each route
  * appears exactly once and every capability has a single home; other pages
- * link to it. Settings and Profile live in the account menu, outside the flow.
+ * link to it. Home gathers what needs attention; Settings closes the bar,
+ * outside the flow; Profile lives in the account menu.
  */
 export const STUDIO_NAV: StudioNavGroup[] = [
   {
     id: 'home',
     label: 'Home',
     icon: 'overview',
-    items: [{ label: 'Overview', path: '/studio/overview', icon: 'overview', hint: 'See what needs you today and what the next step is.' }],
+    items: [
+      { label: 'Overview', path: '/studio/overview', icon: 'overview', hint: 'See what needs you today and what the next step is.' },
+      { label: 'Notifications', path: '/studio/notifications', icon: 'bell', hint: 'Read what happened and jump to the item.' },
+      { label: 'Background jobs', path: '/studio/activity', icon: 'activity', hint: 'Follow running, queued and failed work.' },
+    ],
   },
   {
     id: 'intelligence',
@@ -88,16 +95,13 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     label: 'Profile',
     icon: 'user',
     hidden: true,
-    items: [
-      { label: 'Profile', path: '/studio/profile', icon: 'user' },
-      { label: 'Notifications', path: '/studio/notifications', icon: 'bell' },
-    ],
+    items: [{ label: 'Profile', path: '/studio/profile', icon: 'user' }],
   },
   {
     id: 'settings',
     label: 'Settings',
     icon: 'settings',
-    hidden: true,
+    end: true,
     items: [
       { label: 'Sites', path: '/studio/settings/sites', icon: 'globe', heading: 'Workspace' },
       { label: 'People', path: '/studio/settings/team', icon: 'user' },
@@ -107,7 +111,6 @@ export const STUDIO_NAV: StudioNavGroup[] = [
       { label: 'Autopilot', path: '/studio/automation', icon: 'automation' },
       { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },
       { label: 'System health', path: '/studio/operations', icon: 'operations', heading: 'System' },
-      { label: 'Background jobs', path: '/studio/activity', icon: 'activity' },
       { label: 'Usage', path: '/studio/admin/overview', icon: 'overview', heading: 'All workspaces', platformAdminOnly: true },
       { label: 'Workspaces', path: '/studio/admin/workspaces', icon: 'globe', platformAdminOnly: true },
       { label: 'AI providers', path: '/studio/admin/ai', icon: 'sparkles', platformAdminOnly: true },
@@ -142,10 +145,10 @@ export function currentStep(url: string): GuidedStep | null {
   return GUIDED_STEPS.find((step) => step.item === match?.item) ?? null;
 }
 
-/** Step after the URL's one; from Home the process starts at step 1.1; null on the last step or outside the flow. */
+/** Step after the URL's one; from Overview the process starts at step 1.1; null on the last step or outside the flow. */
 export function nextStep(url: string): GuidedStep | null {
   const match = activeNavItem(url);
-  if (match?.group.id === 'home') return GUIDED_STEPS[0] ?? null;
+  if (match?.item.path === '/studio/overview') return GUIDED_STEPS[0] ?? null;
   const index = GUIDED_STEPS.findIndex((step) => step.item === match?.item);
   return index >= 0 ? GUIDED_STEPS[index + 1] ?? null : null;
 }

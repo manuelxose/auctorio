@@ -4728,7 +4728,8 @@ html[data-theme="dark"] .au-app {
   background: var(--au-surface-solid);
   border-bottom: 1px solid var(--au-border);
 }
-.au-areas__list { display: flex; gap: var(--au-s1); margin: 0; padding: 0; list-style: none; }
+.au-areas__list { display: flex; flex: 1; gap: var(--au-s1); margin: 0; padding: 0; list-style: none; }
+.au-areas__end { margin-left: auto; }
 .au-areas__item {
   position: relative;
   display: inline-flex;

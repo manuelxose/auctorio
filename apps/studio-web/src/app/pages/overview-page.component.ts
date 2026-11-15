@@ -34,7 +34,6 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
             <span class="ov__dot" aria-hidden="true"></span>{{ headline().text }}
           </p>
         </div>
-        <a class="au-btn au-btn--primary" routerLink="/studio/content/new"><app-icon name="plus"></app-icon>New content</a>
       </header>
 
       @for (alert of attentionItems(); track alert.title) {

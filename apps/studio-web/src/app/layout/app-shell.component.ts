@@ -177,7 +177,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
                 <div class="au-menu__label au-truncate">{{ session.user.displayName }} · {{ session.role }}</div>
                 <div class="au-menu__label au-menu__label--plain au-truncate">{{ session.user.email }}</div>
                 <a class="au-menu__item" routerLink="/studio/profile" (click)="userMenu.hide()"><app-icon name="user"></app-icon>Profile</a>
-                <a class="au-menu__item" routerLink="/studio/settings" (click)="userMenu.hide()"><app-icon name="settings"></app-icon>Settings</a>
                 <button class="au-menu__item" type="button" (click)="cycleTheme()">
                   <app-icon [name]="themeIcon"></app-icon>
                   Appearance
@@ -194,7 +193,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       <!-- Primary navigation: areas -->
       <nav class="au-areas" aria-label="Areas">
         <ul class="au-areas__list">
-          <li *ngFor="let area of areas">
+          <li *ngFor="let area of areas" [class.au-areas__end]="area.end">
             <a
               class="au-areas__item"
               [routerLink]="area.items[0].path"
@@ -231,9 +230,10 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
         </nav>
 
         @if (copilot.open()) {
-          <section id="studio-copilot" class="au-sb__assistant" aria-label="Assistant">
+          <!-- The panel is the labelled region; a second landmark here would announce "Assistant" twice. -->
+          <div id="studio-copilot" class="au-sb__assistant">
             <app-copilot-panel #panel (closed)="toggleCopilot(false)"></app-copilot-panel>
-          </section>
+          </div>
         } @else {
           <button #copilotLauncher class="au-sb__item au-sb__copilot" type="button" (click)="toggleCopilot(true)" aria-controls="studio-copilot" aria-expanded="false">
             <app-icon name="message"></app-icon>
@@ -258,7 +258,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           }
           <!-- Re-created per site so pages reload their data instead of showing the previous site's. -->
           @for (siteKey of [activeSiteId]; track siteKey) {
-            <router-outlet></router-outlet>
+            <router-outlet (activate)="revealActiveArea()"></router-outlet>
           }
           @if (next(); as following) {
             <nav class="au-nextstep" aria-label="Next step">
@@ -439,6 +439,12 @@ export class AppShellComponent implements OnInit, OnDestroy {
     }
     this.collapsed.set(!this.collapsed());
     localStorage.setItem(COLLAPSE_KEY, this.collapsed() ? '1' : '0');
+  }
+
+  /** Phones scroll the area bar sideways; keep the current area in view. */
+  // Runs on page activation: the shell view can be rebuilt after boot, which drops an earlier scroll.
+  revealActiveArea(): void {
+    if (isPlatformBrowser(this.platformId)) setTimeout(() => document.querySelector('.au-areas__item.is-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
   }
 
   closeDrawer(): void {
