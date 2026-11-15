@@ -41,7 +41,7 @@ const ALLOWED_TRANSITIONS: Record<PublicationState, PublicationState[]> = {
   queued: ["publishing", "canceled", "failed", "deleted"],
   publishing: ["published", "failed", "unpublished"],
   published: ["unpublished", "ready", "deleted"],
-  failed: ["queued", "canceled", "deleted", "draft"],
+  failed: ["queued", "scheduled", "canceled", "deleted", "draft"],
   canceled: ["scheduled", "deleted"],
   deleted: [],
   unpublished: ["deleted", "ready"],
@@ -202,6 +202,31 @@ export async function createPublication(input: CreatePublicationInput): Promise<
     return existing;
   }
 
+  // One canonical delivery record per content + destination: a manual request to
+  // schedule the same content again moves the open record instead of creating a
+  // second one. Automation keeps its own path (the planner skips existing channels).
+  const open = !input.manualOverride ? null : await prisma.publication.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      projectId: input.projectId,
+      channel: input.channel,
+      accountId: input.accountId ?? null,
+      siteId: input.siteId ?? null,
+      status: { in: ["draft", "ready", "scheduled", "queued", "publishing", "failed", "canceled"] },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  if (open) {
+    if (open.status === "queued" || open.status === "publishing") {
+      throw new Error("publication_in_flight");
+    }
+    if (!scheduledFor) {
+      return open;
+    }
+    const moved = await updatePublicationSchedule(input.tenantId, open.id, { scheduledFor });
+    return moved ?? open;
+  }
+
   const publication = await prisma.publication.create({
     data: {
       tenantId: input.tenantId,
@@ -345,6 +370,8 @@ export async function updatePublicationSchedule(
     scheduledFor?: Date | string;
     accountId?: string | null;
     cancel?: boolean;
+    /** Audit action override, e.g. an explicit human release from publish-now. */
+    auditAction?: string;
   },
   auditWriter: (input: AuditEntryInput, client: Prisma.TransactionClient) => Promise<void> = writeAudit,
 ): Promise<Publication | null> {
@@ -388,7 +415,7 @@ export async function updatePublicationSchedule(
 
     await auditWriter({
       tenantId,
-      action: input.cancel ? "publication.canceled" : "publication.rescheduled",
+      action: input.auditAction ?? (input.cancel ? "publication.canceled" : "publication.rescheduled"),
       entityType: "publication",
       entityId: publication.id,
       actorType: "user",
@@ -628,6 +655,63 @@ export async function claimDuePublications(batchSize = 20): Promise<string[]> {
 
     return ids;
   });
+}
+
+/**
+ * Bounded recovery for rows that entered a queue but never got a worker result
+ * (lost job, crashed worker). The remote outcome is unknown, so the row fails
+ * visibly without an automatic retry: an operator checks the destination and
+ * retries from Publications, where the recorded external id prevents a second article.
+ */
+export async function recoverStalledPublications(now: Date = new Date()): Promise<number> {
+  const minutes = Math.max(5, getNumberEnv("PUBLICATION_STALL_MINUTES", 60));
+  const stalled = await prisma.publication.findMany({
+    where: { status: { in: ["queued", "publishing"] }, updatedAt: { lt: new Date(now.getTime() - minutes * 60_000) } },
+    select: { id: true, tenantId: true, status: true, publicationJobId: true },
+    take: 50,
+  });
+  let recovered = 0;
+  for (const row of stalled) {
+    const { count } = await prisma.publication.updateMany({
+      where: { id: row.id, status: row.status },
+      data: {
+        status: "failed",
+        failureClass: "transient",
+        failureReason: "stalled",
+        nextRetryAt: null,
+        lastError: `stalled: no worker result after ${minutes} min while ${row.status}. Check the destination, then retry.`,
+      },
+    });
+    if (!count) continue;
+    recovered += 1;
+    // Free the website job so a manual retry requeues it instead of linking to a dead job.
+    if (row.publicationJobId) {
+      await prisma.publicationJob.updateMany({
+        where: { id: row.publicationJobId, status: { in: ["queued", "processing"] } },
+        data: { status: "failed", error: "stalled" },
+      });
+    }
+    await writeAudit({
+      tenantId: row.tenantId,
+      action: "publication.stalled",
+      entityType: "publication",
+      entityId: row.id,
+      actorType: "system",
+      metadata: { from: row.status, minutes },
+    });
+    await notifyOperators([row.tenantId], {
+      category: "operations",
+      severity: "warning",
+      title: "Publication stalled",
+      message: `Publication ${row.id} got no worker result after ${minutes} min. Check the destination before retrying.`,
+      entityType: "publication",
+      entityId: row.id,
+      actionUrl: `/studio/publications?id=${row.id}`,
+      dedupeKey: `ops.publication.${row.id}.stalled`,
+      dedupeWindowMs: 6 * 3_600_000,
+    });
+  }
+  return recovered;
 }
 
 export async function enqueuePublication(publicationId: string): Promise<void> {

@@ -289,3 +289,32 @@ function noopVerification() {
         "clear-published",
     ]);
 });
+(0, node_test_1.default)("processPublishingJob keeps a remote draft id from a failed attempt and reuses it on retry", async () => {
+    const jobUpdates = [];
+    const publishedWith = [];
+    const dependencies = (job, publish) => ({
+        getPublicationJobById: async () => job,
+        updatePublicationJob: async (_id, data) => {
+            jobUpdates.push(data);
+            return {};
+        },
+        updateProjectStatus: async () => ({}),
+        getLatestPublishedExternalId: async () => null,
+        buildAssetPublicUrl: async () => null,
+        getPublisher: () => buildPublisher({ publish }),
+        markProjectPublished: async () => ({}),
+        clearProjectPublicationState: async () => ({}),
+        verifyWebsitePublication: noopVerification(),
+    });
+    await strict_1.default.rejects((0, worker_publishing_1.processPublishingJob)("publication-1", dependencies(buildPublication(), async (_context, externalId) => {
+        publishedWith.push(externalId);
+        throw Object.assign(new Error("http_error status=503"), { externalId: "remote-draft-9" });
+    })), /status=503/);
+    strict_1.default.ok(jobUpdates.some((data) => data.externalId === "remote-draft-9" && data.status === "failed"));
+    // The retried job row carries the persisted id: publish finishes that record.
+    await (0, worker_publishing_1.processPublishingJob)("publication-1", dependencies(buildPublication({ externalId: "remote-draft-9" }), async (_context, externalId) => {
+        publishedWith.push(externalId);
+        return { externalId: externalId ?? null, externalUrl: "https://remote.example/items/9", effectiveTargetStatus: "publish", responsePayload: {} };
+    }));
+    strict_1.default.deepEqual(publishedWith, [null, "remote-draft-9"]);
+});

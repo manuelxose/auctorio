@@ -718,7 +718,7 @@ export class StudioApiService {
     return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/unpublish`, {});
   }
 
-  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[] }> {
+  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[]; timeZone?: string | null }> {
     let params = new HttpParams().set('from', from).set('to', to);
     if (channel) {
       params = params.set('channel', channel);
@@ -726,7 +726,7 @@ export class StudioApiService {
     if (siteId) {
       params = params.set('siteId', siteId);
     }
-    return this.http.get<{ items: CalendarEvent[] }>(`${this.apiBase}/backend/v2/calendar`, { params });
+    return this.http.get<{ items: CalendarEvent[]; timeZone?: string | null }>(`${this.apiBase}/backend/v2/calendar`, { params });
   }
 
   // ─── Editorial platform: social ───────────────────────────────────────

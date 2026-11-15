@@ -4688,6 +4688,10 @@ html[data-theme="dark"] .au-app {
   cursor: pointer;
 }
 .au-calendar-chip.is-proposal { border-style: dashed; }
+/* Proposals (plan items) are outlined; scheduled publications stay solid. */
+.au-calendar-card.is-proposal { border-style: dashed; background: transparent; box-shadow: none; }
+.au-calendar-legend { white-space: nowrap; padding: 0 var(--au-space-1, 4px); border: 1px solid var(--au-border-strong); border-radius: 4px; }
+.au-calendar-legend--proposal { border-style: dashed; }
 .au-calendar-chip:hover { border-color: var(--au-border-strong); }
 .au-calendar-chip:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 1px; }
 .au-calendar-chip__text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

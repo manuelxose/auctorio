@@ -12,8 +12,11 @@ import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
 import {
   claimDuePublications,
+  createPublication as createPublicationRecord,
   enqueuePublication,
+  recoverStalledPublications,
 } from "../src/studio/publication";
+import { getPublicationReleaseReadiness } from "../src/studio/release-readiness";
 import { notify } from "../src/studio/notifications";
 import { getRedisConnectionOptions } from "../src/infrastructure/queue/redis";
 import { closeProducerQueues } from "../src/infrastructure/queue/producer";
@@ -283,5 +286,64 @@ test("worker heartbeats record liveness and detect stale workers", async () => {
     assert.equal(stopped?.status, "stopped");
   } finally {
     await prisma.workerHeartbeat.deleteMany({ where: { name } });
+  }
+});
+
+test("manual scheduling of the same content and destination keeps one canonical publication", async () => {
+  const fixture = await createSchedulerFixture();
+  try {
+    const input = { tenantId: fixture.tenantId, projectId: fixture.projectId, versionId: fixture.versionId, channel: "instagram" as const, accountId: fixture.accountId, siteId: fixture.siteId, manualOverride: true };
+    const first = await createPublicationRecord({ ...input, scheduledFor: new Date(Date.now() + 60 * 60_000) });
+    const later = new Date(Date.now() + 3 * 60 * 60_000);
+    const second = await createPublicationRecord({ ...input, scheduledFor: later });
+    assert.equal(second.id, first.id, "the open record is moved, not duplicated");
+    assert.equal(second.scheduledFor?.toISOString(), later.toISOString());
+    assert.equal(await prisma.publication.count({ where: { tenantId: fixture.tenantId } }), 1);
+
+    // A failed record is rescheduled in place too.
+    await prisma.publication.update({ where: { id: first.id }, data: { status: "failed", lastError: "boom" } });
+    const third = await createPublicationRecord({ ...input, scheduledFor: new Date(Date.now() + 5 * 60 * 60_000) });
+    assert.equal(third.id, first.id);
+    assert.equal(third.status, "scheduled");
+    assert.equal(third.lastError, null);
+
+    // While a worker holds it, a new schedule is refused instead of racing the delivery.
+    await prisma.publication.update({ where: { id: first.id }, data: { status: "publishing" } });
+    await assert.rejects(() => createPublicationRecord({ ...input, scheduledFor: new Date(Date.now() + 7 * 60 * 60_000) }), /publication_in_flight/);
+  } finally {
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("stalled queued/publishing rows fail visibly without an automatic retry", async () => {
+  const fixture = await createSchedulerFixture();
+  try {
+    const old = new Date(Date.now() - 3 * 60 * 60_000);
+    const stalled = await createPublication(fixture, { status: "publishing" });
+    const fresh = await createPublication(fixture, { status: "queued" });
+    await prisma.$executeRaw`UPDATE publications SET updated_at = ${old} WHERE id = ${stalled.id}::uuid`;
+
+    assert.ok((await recoverStalledPublications()) >= 1);
+    const row = await prisma.publication.findUniqueOrThrow({ where: { id: stalled.id } });
+    assert.equal(row.status, "failed");
+    assert.equal(row.failureReason, "stalled");
+    assert.equal(row.nextRetryAt, null, "remote outcome unknown: no automatic retry");
+    assert.equal((await prisma.publication.findUniqueOrThrow({ where: { id: fresh.id } })).status, "queued");
+  } finally {
+    await cleanupFixture(fixture.tenantId);
+  }
+});
+
+test("publish-now readiness evaluates the explicit human release, not the autopilot gate", async () => {
+  const fixture = await createSchedulerFixture();
+  try {
+    const publication = await createPublication(fixture, { manualOverride: false });
+    const automatic = await getPublicationReleaseReadiness(publication.id);
+    assert.ok(automatic.blockers.includes("automation_policy_missing"));
+    const manual = await getPublicationReleaseReadiness(publication.id, { manual: true });
+    assert.ok(!manual.blockers.includes("automation_policy_missing"));
+    assert.deepEqual(manual.blockers, [], "connected account with credentials is releasable by a human");
+  } finally {
+    await cleanupFixture(fixture.tenantId);
   }
 });

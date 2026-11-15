@@ -967,6 +967,8 @@ export type StudioPublication = {
   failureClass: string | null;
   failureReason: string | null;
   manualOverride: boolean;
+  /** metadata.verification is written after a website publish: verified, or failed with a reason. */
+  metadata?: { verification?: { state: 'verified' | 'failed'; detail: string; checkedAt: string } } | null;
   createdAt: string;
   updatedAt: string;
   assetUrl?: string | null;

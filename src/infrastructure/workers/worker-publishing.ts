@@ -124,12 +124,23 @@ export async function processPublishingJob(
 
   await dependencies.updateProjectStatus(publication.tenantId, publication.projectId, "publish_queued");
 
-  const externalId = await dependencies.getLatestPublishedExternalId(
+  // A failed attempt that already created the remote record left its id on this
+  // job; reusing it makes the retry finish that record instead of creating another.
+  const externalId = (await dependencies.getLatestPublishedExternalId(
     publication.tenantId,
     publication.siteId,
     publication.projectId,
-  );
-  const result = await runPublisherAction(publication, externalId, dependencies);
+  )) ?? publication.externalId ?? null;
+  let result: PublishResult;
+  try {
+    result = await runPublisherAction(publication, externalId, dependencies);
+  } catch (error) {
+    const remoteId = (error as { externalId?: unknown }).externalId;
+    if (typeof remoteId === "string" && remoteId && !externalId) {
+      await dependencies.updatePublicationJob(publication.id, { status: "failed", externalId: remoteId });
+    }
+    throw error;
+  }
   const status = resolvePublicationStatus(publication, result);
 
   await dependencies.updatePublicationJob(publication.id, {

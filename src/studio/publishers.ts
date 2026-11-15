@@ -470,7 +470,8 @@ class GuiaTvPublisher implements PublisherAdapter {
         headers: this.getHeaders(context.site),
         body: payload,
         timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
+        // Creating a draft is not idempotent: a retried timeout could leave two remote drafts.
+        retries: 0,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -539,7 +540,10 @@ class GuiaTvPublisher implements PublisherAdapter {
         timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
         retries: 1,
       },
-    );
+    ).catch((error: unknown) => {
+      // The remote draft exists: carry its id so the retry approves it instead of creating another.
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
+    });
     return {
       externalId: draft.externalId,
       externalUrl: response.data?.post?.link || null,

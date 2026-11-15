@@ -396,7 +396,8 @@ class GuiaTvPublisher {
                 headers: this.getHeaders(context.site),
                 body: payload,
                 timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
-                retries: 1,
+                // Creating a draft is not idempotent: a retried timeout could leave two remote drafts.
+                retries: 0,
             });
         }
         catch (error) {
@@ -451,6 +452,9 @@ class GuiaTvPublisher {
             body: { notes: "Automatically approved after Auctorio maximum quality gates." },
             timeoutMs: (0, env_1.getNumberEnv)("PUBLISH_TIMEOUT_MS", 30_000),
             retries: 1,
+        }).catch((error) => {
+            // The remote draft exists: carry its id so the retry approves it instead of creating another.
+            throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
         });
         return {
             externalId: draft.externalId,

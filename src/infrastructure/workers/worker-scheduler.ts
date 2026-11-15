@@ -1,5 +1,5 @@
 import { getNumberEnv } from "../../shared/utils/env";
-import { claimDuePublications, enqueuePublication } from "../../studio/publication";
+import { claimDuePublications, enqueuePublication, recoverStalledPublications } from "../../studio/publication";
 import { runIntervalWorker } from "./worker-runtime";
 import { getPrismaClient } from "../db/prisma";
 import { structuredEvent } from "../../shared/utils/logger";
@@ -58,6 +58,12 @@ export async function runSchedulerTick(): Promise<SchedulerTickResult> {
       });
       return result;
     }
+  }
+
+  // Only after the congestion guard: a long but healthy queue is not a stall.
+  const stalled = await recoverStalledPublications();
+  if (stalled > 0) {
+    structuredEvent("scheduler.publications_stalled", { count: stalled }, "warn");
   }
 
   const claimed = await claimDuePublications(getNumberEnv("SCHEDULER_BATCH_SIZE", 20));

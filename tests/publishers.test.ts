@@ -881,3 +881,72 @@ test("PUBLISH_ALLOW_PRIVATE_TARGETS escape hatch re-enables loopback targets", a
     await server.close();
   }
 });
+
+test("guiatv approve failure keeps the created draft id so a retry approves instead of creating a second draft", async () => {
+  process.env["APP_ENV"] = "production";
+  process.env["NODE_ENV"] = "production";
+  process.env["PUBLISH_DRY_RUN"] = "false";
+  process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
+  process.env["AUCTORIO_EDITORIAL_REVIEW_KEY"] = "review-secret";
+  process.env["AUCTORIO_EDITORIAL_REVIEWER"] = "auctorio-quality-gate";
+  process.env["GUIATV_EDITORIAL_AUTHOR_NAME"] = "Equipo editorial GuíaTV";
+  process.env["GUIATV_EDITORIAL_AUTHOR_ID"] = "guiatv-editorial";
+
+  let approveCalls = 0;
+  const server = await createMockServer((req, res) => {
+    res.setHeader("content-type", "application/json");
+    if (req.url === "/v2/blog" && req.method === "POST") {
+      res.statusCode = 201;
+      res.end(JSON.stringify({ data: { post: { id: "post-7", link: "https://guiatv.example/editorial/proyecto-test" } } }));
+      return;
+    }
+    if (req.url === "/v2/blog/post-7/approve" && req.method === "POST") {
+      approveCalls += 1;
+      // First approve fails (both in-call tries), the retry succeeds.
+      res.statusCode = approveCalls <= 2 ? 503 : 200;
+      res.end(JSON.stringify(approveCalls <= 2 ? { error: "unavailable" } : { data: { post: { id: "post-7", link: "https://guiatv.example/editorial/proyecto-test" } } }));
+      return;
+    }
+    res.statusCode = 404;
+    res.end();
+  });
+
+  try {
+    const context = buildContext("guiatv", {
+      site: { ...buildContext("guiatv").site, baseUrl: server.url, publishingCredentialsRef: "GUIATV_TEST_KEY" },
+      assetUrl: "https://assets.example.test/guiatv-cover.webp",
+    });
+    const publisher = getPublisher(context.site);
+
+    const failure = await publisher.publish(context).then(() => null, (error: unknown) => error as { externalId?: string });
+    assert.ok(failure, "approve failure must reject");
+    assert.equal(failure.externalId, "post-7");
+
+    const retried = await publisher.publish(context, failure.externalId);
+    assert.equal(retried.externalId, "post-7");
+    assert.equal(server.requests.filter((request) => request.path === "/v2/blog").length, 1, "exactly one remote draft");
+  } finally {
+    await server.close();
+  }
+});
+
+test("guiatv does not retry the non-idempotent draft creation", async () => {
+  process.env["APP_ENV"] = "production";
+  process.env["NODE_ENV"] = "production";
+  process.env["PUBLISH_DRY_RUN"] = "false";
+  process.env["GUIATV_TEST_KEY"] = "guiatv-secret";
+
+  const server = await createMockServer((_req, res) => {
+    res.statusCode = 502;
+    res.end();
+  });
+  try {
+    const context = buildContext("guiatv", {
+      site: { ...buildContext("guiatv").site, baseUrl: server.url, publishingCredentialsRef: "GUIATV_TEST_KEY" },
+    });
+    await assert.rejects(() => getPublisher(context.site).publishDraft(context));
+    assert.equal(server.requests.length, 1);
+  } finally {
+    await server.close();
+  }
+});

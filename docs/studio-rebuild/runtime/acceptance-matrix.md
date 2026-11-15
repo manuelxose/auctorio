@@ -70,3 +70,8 @@ Not done: SEO-signals/Opportunities tabs, Playwright E2E, full `npm test`, indep
 Full record: `docs/acceptance/studio-05-sources-competitors-provenance-2026-11-15.md`. Screenshots: `screens/studio-05-sources-*.png`.
 Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
 Not done: full `npm test`, independent review (owner instruction), site-type classification, ids on manually added plan evidence.
+
+## STUDIO-08 (2026-11-15) — Calendar, publications and delivery recovery
+Full record: `docs/acceptance/studio-08-calendar-publications-2026-11-15.md`. Screenshots: `docs/studio-rebuild/evidence/studio-08/`.
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: full `npm test`, axe audit, independent review (owner instruction), live publish-now.

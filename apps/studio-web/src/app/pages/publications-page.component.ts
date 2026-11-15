@@ -136,13 +136,19 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
                       {{ item.externalUrl }}
                       <app-icon name="external"></app-icon>
                     </a>
+                    <span class="au-table__sub" *ngIf="item.status === 'published'">
+                      <span class="au-badge" [class]="item.metadata?.verification?.state === 'verified' ? 'au-badge--success' : 'au-badge--warning'">{{ verificationLabel(item) }}</span>
+                    </span>
                     <span class="au-table__sub" *ngIf="item.lastError">
                       <span class="au-badge au-badge--danger">{{ item.lastError }}</span>
                     </span>
                   </td>
                   <td><span class="au-channel" [class]="'au-channel--' + item.channel">{{ item.channel }}</span></td>
                   <td class="au-nowrap">{{ destination(item) }}</td>
-                  <td><span class="au-badge" [class]="statusClass(item.status)">{{ item.status }}</span></td>
+                  <td>
+                    <span class="au-badge" [class]="statusClass(item.status)">{{ item.status }}</span>
+                    <span class="au-table__sub au-muted" *ngIf="item.failureReason">{{ failureReasonLabel(item.failureReason) }}</span>
+                  </td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.scheduledFor) }}</td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.publishedAt) }}</td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.updatedAt) }}</td>
@@ -224,6 +230,9 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
             <dt>Status</dt><dd><span class="au-badge" [class]="statusClass(selected.status)">{{ selected.status }}</span></dd>
             <dt>Attempts</dt><dd>{{ selected.attempts?.length || 0 }}</dd>
             <dt>Failure</dt><dd class="au-muted">{{ selected.lastError || 'No failure recorded' }}</dd>
+            <dt>Reason</dt><dd class="au-muted">{{ selected.failureReason ? failureReasonLabel(selected.failureReason) : '—' }}</dd>
+            <dt>Remote record</dt><dd class="au-muted">{{ selected.externalId || 'None yet' }}</dd>
+            <dt>Verification</dt><dd class="au-muted">{{ verificationLabel(selected) }}</dd>
           </dl>
           <!-- Dates have a single home: the calendar. -->
           <p class="au-mt-3 au-inline">
@@ -364,6 +373,30 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
     }
   }
 
+  verificationLabel(item: StudioPublication): string {
+    const verification = item.metadata?.verification;
+    if (item.status !== 'published') return '—';
+    if (!verification) return 'Remote URL not verified';
+    return verification.state === 'verified' ? 'Remote URL verified' : `Unverified: ${verification.detail}`;
+  }
+
+  failureReasonLabel(reason: string): string {
+    return ({
+      awaiting_retry: 'Retrying automatically',
+      retries_exhausted: 'Retries exhausted',
+      permanent_failure: 'Needs a fix before retry',
+      release_blocked: 'Blocked before release',
+      enqueue_failed: 'Could not be queued',
+      stalled: 'Stalled: check the destination, then retry',
+    } as Record<string, string>)[reason] ?? reason.replace(/_/g, ' ');
+  }
+
+  private blockerMessage(err: unknown): string | null {
+    const message = (err as { error?: { error?: { message?: string } } })?.error?.error?.message ?? '';
+    if (!message.startsWith('release_blocked:')) return null;
+    return `Not released. Fix first: ${message.slice('release_blocked:'.length).split(',').map((code) => code.replace(/_/g, ' ')).join(', ')}.`;
+  }
+
   dateLabel(value: string | null): string {
     return value ? new Date(value).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
   }
@@ -384,7 +417,8 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
         this.toast.success('Publishing started.');
         this.load(true);
       },
-      error: () => this.toast.error('The publication could not be started.'),
+      // 409 release_blocked:<codes> names what must be fixed before a human release.
+      error: (err) => this.toast.error(this.blockerMessage(err) ?? 'The publication could not be started.'),
     });
   }
 

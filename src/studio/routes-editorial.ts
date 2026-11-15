@@ -42,6 +42,7 @@ import {
   updatePublicationSchedule,
 } from "./publication";
 import { listCalendarEvents } from "./calendar";
+import { getPublicationReleaseReadiness } from "./release-readiness";
 import { computePlanSlotsDetailed, PLAN_SLOT_LEAD_MINUTES, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 import {
   createPlanPreset,
@@ -598,6 +599,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
 
   // ──────────────────────────────────────────────────────────── Publications
 
+  // A schedule in the past would fire immediately; publish-now is the explicit way to do that.
+  const isPastSchedule = (date: Date | null | undefined) => Boolean(date && date.getTime() < Date.now() - 60_000);
+
   fastify.get("/v2/publications", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
@@ -710,6 +714,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!versionId) {
       return badRequest(reply, "project has no versions");
     }
+    if (isPastSchedule(parseIsoDate(body.scheduledFor))) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
 
     try {
       const publication = await createPublication({
@@ -726,7 +733,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       });
       return reply.code(201).send(publication);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_in_flight" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
     }
   });
 
@@ -740,6 +751,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "invalid publication id");
     }
     const body = parseBody<{ scheduledFor?: string; accountId?: string | null }>(request);
+    if (isPastSchedule(parseIsoDate(body.scheduledFor))) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
         scheduledFor: parseIsoDate(body.scheduledFor) ?? undefined,
@@ -792,6 +806,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!scheduledFor) {
       return badRequest(reply, "scheduledFor (ISO date) is required");
     }
+    if (isPastSchedule(scheduledFor)) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
       if (!publication) {
@@ -821,6 +838,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!scheduledFor) {
       return badRequest(reply, "scheduledFor (ISO date) is required");
     }
+    if (isPastSchedule(scheduledFor)) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
       if (!publication) {
@@ -845,9 +865,19 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!isUuid(publicationId)) {
       return badRequest(reply, "invalid publication id");
     }
+    const owned = await prisma.publication.findFirst({ where: { id: publicationId, tenantId: context.tenantId }, select: { id: true } });
+    if (!owned) {
+      return notFound(reply, "publication not found");
+    }
+    // A human release still needs a destination it can reach: surface blockers now, not at the next scheduler tick.
+    const readiness = await getPublicationReleaseReadiness(publicationId, { manual: true });
+    if (!readiness.ready) {
+      return conflict(reply, `release_blocked:${readiness.blockers.join(",")}`);
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
         scheduledFor: new Date(Date.now() + 1000),
+        auditAction: "publication.release_requested",
       });
       if (!publication) {
         return notFound(reply, "publication not found");
@@ -949,7 +979,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       channel: query.channel as (typeof PUBLICATION_CHANNELS)[number] | undefined,
       siteId: query.siteId,
     });
-    return reply.send({ items: events });
+    // Wall-clock times are shown and entered in the site's timezone; scheduledFor stays UTC.
+    const site = query.siteId && isUuid(query.siteId)
+      ? await prisma.site.findFirst({ where: { id: query.siteId, tenantId: context.tenantId }, select: { timezone: true } })
+      : null;
+    return reply.send({ items: events, timeZone: site?.timezone ?? null });
   });
 
   // ──────────────────────────────────────────────────────────── Social

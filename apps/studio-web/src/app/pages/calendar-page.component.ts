@@ -11,6 +11,7 @@ import { EditorialContextService } from '../services/editorial-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { CalendarEvent, PublicationChannel, StudioProjectSummary, PublishingAccount } from '../models/studio.models';
+import { localDate, localTime, zonedToUtc } from '../components/planning/planning-utils';
 
 type CalendarView = 'list' | 'day' | 'week' | 'month';
 
@@ -25,6 +26,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
           <p class="au-page__subtitle">When each piece goes out on {{ siteName }}. Schedule content, then drag a card or use Move to change its date. Briefs are decided in the plan; publishing, retries and cancellations live in Publications.</p>
+          <p class="au-hint au-mb-0">Times in {{ timeZone }}. <span class="au-calendar-legend au-calendar-legend--proposal">Dashed: proposal, not scheduled to publish</span> · <span class="au-calendar-legend">Solid: scheduled publication</span></p>
         </div>
         <div class="au-page__actions">
           <button class="au-btn au-btn--primary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
@@ -93,7 +95,8 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           </label>
           <label class="au-field au-mb-0">
             <span class="au-field__label">3 · When</span>
-            <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required />
+            <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="draft.scheduledFor" required aria-describedby="schedule-tz" />
+            <span class="au-hint" id="schedule-tz">{{ timeZone }}</span>
           </label>
           <div class="au-form__actions au-mt-0 au-mb-0">
             <button class="au-btn au-btn--primary" type="submit" [disabled]="creating">
@@ -117,6 +120,8 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <h3 class="au-calendar-group__date">{{ group.label }}</h3>
           <div
             class="au-calendar-card"
+            [class.is-proposal]="entry.item.kind === 'plan_item'"
+            role="group" [attr.aria-label]="ariaLabel(entry.item)"
             [draggable]="canDrag(entry.item)"
             (dragstart)="onDragStart($event, entry.item)"
             (dragend)="onDragEnd($event)"
@@ -135,6 +140,8 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           (dragover)="$event.preventDefault()" (drop)="onDropOnDay($event, day.date)">
           <h3 class="au-calendar-group__date">{{ day.label }}</h3>
           <div class="au-calendar-card" *ngFor="let event of day.events"
+            [class.is-proposal]="event.kind === 'plan_item'"
+            role="group" [attr.aria-label]="ariaLabel(event)"
             [draggable]="canDrag(event)"
             (dragstart)="onDragStart($event, event)"
             (dragend)="onDragEnd($event)"
@@ -156,7 +163,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <button type="button" class="au-calendar-chip" *ngFor="let event of day.events.slice(0, 3)"
             [class.is-proposal]="event.kind === 'plan_item'"
             [draggable]="canDrag(event)" (dragstart)="onDragStart($event, event)" (dragend)="onDragEnd($event)"
-            (click)="focusDay(day.date)" [title]="event.title" [attr.aria-label]="event.title + ', ' + statusLabel(event)">
+            (click)="focusDay(day.date)" [title]="event.title" [attr.aria-label]="ariaLabel(event)">
             <i class="au-channel-dot" [class]="'au-channel-dot au-channel-dot--' + event.channel"></i>
             <span class="au-calendar-chip__text">{{ event.title }}</span>
           </button>
@@ -169,18 +176,20 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
 
     <ng-template #cardTpl let-event>
       <div class="au-calendar-card__body">
-        <span class="au-calendar-time">{{ timeLabel(event.scheduledFor) }}</span>
+        <span class="au-calendar-time" [title]="utcLabel(event.scheduledFor)">{{ timeLabel(event.scheduledFor) }}</span>
         <span class="au-channel" [class]="'au-channel--' + event.channel">{{ event.channel }}</span>
         <img class="au-calendar-thumb" *ngIf="event.thumbnail" [src]="event.thumbnail" alt="" loading="lazy" />
         <div class="au-calendar-card__text">
           <strong>{{ event.title }}</strong>
           <span class="au-calendar-card__meta">{{ event.destination }} · {{ event.projectTitle }}</span>
           <span class="au-inline au-mt-1">
+            <span class="au-badge au-badge--neutral">{{ event.kind === 'plan_item' ? 'Proposal' : 'Publication' }}</span>
             <span class="au-badge" [class]="statusClass(event.status)">{{ statusLabel(event) }}</span>
             <span class="au-badge au-badge--neutral" *ngIf="event.contentType">{{ event.contentType }}</span>
             <span class="au-badge au-badge--brand" *ngIf="event.automated">automatic</span>
           </span>
           <span class="au-calendar-card__error" *ngIf="event.lastError">{{ event.lastError }}</span>
+          <a class="au-table__sub au-link" *ngIf="event.externalUrl" [href]="event.externalUrl" target="_blank" rel="noopener">{{ event.externalUrl }}</a>
         </div>
         <div class="au-calendar-card__actions" (click)="$event.stopPropagation()">
           <button *ngIf="event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
@@ -203,7 +212,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
       </div>
       <form class="au-inline au-mt-2" *ngIf="movingId === event.id" (ngSubmit)="confirmMove(event)" (keydown.escape)="cancelMove()" (click)="$event.stopPropagation()">
         <label class="au-field au-mb-0">
-          <span class="au-field__label">Move to</span>
+          <span class="au-field__label">Move to ({{ timeZone }})</span>
           <input class="au-input" type="datetime-local" name="moveTo" [(ngModel)]="moveTo" required />
         </label>
         <button class="au-btn au-btn--primary au-btn--sm" type="submit" [disabled]="!moveTo">Move</button>
@@ -231,6 +240,8 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   ];
   viewMode: CalendarView = 'week';
   events: CalendarEvent[] = [];
+  /** The site's IANA timezone (from the API); wall-clock inputs and labels use it, the API stores UTC. */
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   channelFilter = '';
   anchor = new Date();
   dragHint = false;
@@ -331,6 +342,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           this.events = response.items;
+          if (response.timeZone) this.timeZone = response.timeZone;
         },
         error: () => {
           if (!silent) {
@@ -359,14 +371,13 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   get groupedEvents(): Array<{ label: string; entries: Array<{ item: CalendarEvent }> }> {
     const byDate = new Map<string, CalendarEvent[]>();
     for (const event of this.events) {
-      const date = event.scheduledFor ? new Date(event.scheduledFor) : null;
-      const key = date ? date.toDateString() : 'unscheduled';
+      const key = event.scheduledFor ? localDate(event.scheduledFor, this.timeZone) : 'unscheduled';
       byDate.set(key, [...(byDate.get(key) ?? []), event]);
     }
     return Array.from(byDate.entries())
-      .sort(([a], [b]) => (a === 'unscheduled' ? 1 : b === 'unscheduled' ? -1 : new Date(a).getTime() - new Date(b).getTime()))
+      .sort(([a], [b]) => (a === 'unscheduled' ? 1 : b === 'unscheduled' ? -1 : a.localeCompare(b)))
       .map(([key, entries]) => ({
-        label: key === 'unscheduled' ? 'Unscheduled' : new Date(key).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }),
+        label: key === 'unscheduled' ? 'Unscheduled' : new Date(`${key}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' }),
         entries: entries
           .sort((a, b) => (a.scheduledFor ?? '').localeCompare(b.scheduledFor ?? ''))
           .map((item) => ({ item })),
@@ -381,7 +392,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       return {
         date,
         label: date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }),
-        events: this.events.filter((event) => event.scheduledFor && new Date(event.scheduledFor).toDateString() === date.toDateString()),
+        events: this.eventsOn(date),
       };
     });
   }
@@ -394,9 +405,29 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       return {
         date,
         dayNum: index + 1,
-        events: this.events.filter((event) => event.scheduledFor && new Date(event.scheduledFor).toDateString() === date.toDateString()),
+        events: this.eventsOn(date),
       };
     });
+  }
+
+  /** Calendar cells are browser-local dates; an event belongs to the cell of its site-local day. */
+  private dayKey(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  }
+
+  private eventsOn(date: Date): CalendarEvent[] {
+    const key = this.dayKey(date);
+    return this.events.filter((event) => event.scheduledFor && localDate(event.scheduledFor, this.timeZone) === key);
+  }
+
+  ariaLabel(event: CalendarEvent): string {
+    const kind = event.kind === 'plan_item' ? 'Proposal, not scheduled to publish' : 'Scheduled publication';
+    const when = event.scheduledFor ? `${localDate(event.scheduledFor, this.timeZone)} ${localTime(event.scheduledFor, this.timeZone)} ${this.timeZone}` : 'unscheduled';
+    return `${kind}: ${event.title}, ${this.statusLabel(event)}, ${when}`;
+  }
+
+  utcLabel(value: string | null): string {
+    return value ? `Stored as ${new Date(value).toISOString().slice(0, 16).replace('T', ' ')} UTC` : '';
   }
 
   canDrag(event: CalendarEvent): boolean {
@@ -419,7 +450,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   timeLabel(value: string | null): string {
-    return value ? new Date(value).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : '—';
+    return value ? localTime(value, this.timeZone) : '—';
   }
 
   statusClass(status: string): string {
@@ -485,10 +516,8 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     if (!source) {
       return;
     }
-    const original = source.scheduledFor ? new Date(source.scheduledFor) : new Date();
-    const target = new Date(day.getTime());
-    target.setHours(original.getHours(), original.getMinutes(), 0, 0);
-    this.reschedule(source, target);
+    const time = localTime(source.scheduledFor ?? new Date(), this.timeZone);
+    this.reschedule(source, zonedToUtc(this.dayKey(day), time, this.timeZone));
   }
 
   private reschedule(eventItem: CalendarEvent, target: Date): void {
@@ -511,13 +540,14 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       next: () => {
         this.reschedulingIds.delete(eventItem.id);
         this.toast.success(eventItem.kind === 'plan_item' ? 'Proposal moved.' : 'Publication rescheduled.');
-        this.moveResult = `${eventItem.title} moved to ${target.toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}.`;
+        this.moveResult = `${eventItem.title} moved to ${localDate(target, this.timeZone)} ${localTime(target, this.timeZone)} (${this.timeZone}).`;
         this.load(true);
       },
-      error: () => {
+      error: (err: unknown) => {
         if (eventItem.scheduledFor === optimisticSchedule) eventItem.scheduledFor = previous;
         this.reschedulingIds.delete(eventItem.id);
         this.error = eventItem.kind === 'plan_item' ? 'The proposal could not be moved.' : 'The publication could not be rescheduled.';
+        if (/scheduled_in_past/.test(JSON.stringify((err as { error?: unknown })?.error ?? ''))) this.error += ' Pick a future time, or use Publish now in Publications.';
         this.moveResult = this.error;
         this.load(true);
       },
@@ -527,9 +557,8 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   // Keyboard alternative to drag: pick an exact date and time, result announced via aria-live.
   startMove(item: CalendarEvent): void {
     this.movingId = this.movingId === item.id ? '' : item.id;
-    const at = item.scheduledFor ? new Date(item.scheduledFor) : new Date();
-    const pad = (n: number): string => String(n).padStart(2, '0');
-    this.moveTo = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}T${pad(at.getHours())}:${pad(at.getMinutes())}`;
+    const at = item.scheduledFor ?? new Date();
+    this.moveTo = `${localDate(at, this.timeZone)}T${localTime(at, this.timeZone)}`;
     this.context.update({ planItemId: item.kind === 'plan_item' && this.movingId ? item.id : null, planId: item.kind === 'plan_item' && this.movingId ? item.planId : null });
   }
   cancelMove(): void {
@@ -537,11 +566,19 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     this.context.update({ planItemId: null, planId: null });
   }
   confirmMove(item: CalendarEvent): void {
-    const target = new Date(this.moveTo);
-    if (Number.isNaN(target.getTime())) return;
+    const target = this.fromWallClock(this.moveTo);
+    if (!target) return;
     this.movingId = '';
     this.moveResult = '';
     this.reschedule(item, target);
+  }
+
+  /** `YYYY-MM-DDTHH:mm` from a datetime-local input, read in the site's timezone (DST-safe). */
+  private fromWallClock(value: string): Date | null {
+    const [date, time] = value.split('T');
+    if (!date || !time) return null;
+    const target = zonedToUtc(date, time.slice(0, 5), this.timeZone);
+    return Number.isNaN(target.getTime()) ? null : target;
   }
 
   createFromCalendar(): void {
@@ -557,7 +594,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
       channel: this.draft.channel,
       siteId: this.draft.channel === 'website' ? (this.siteId || undefined) : undefined,
       accountId: this.draft.channel !== 'website' ? (this.draft.accountId || undefined) : undefined,
-      scheduledFor: new Date(this.draft.scheduledFor).toISOString(),
+      scheduledFor: this.fromWallClock(this.draft.scheduledFor)?.toISOString(),
     }).subscribe({
       next: () => {
         this.creating = false;

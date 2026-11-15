@@ -18,7 +18,11 @@ export type ReleaseReadiness = {
  * schedule is intentionally not enough to publish: a row must pass this
  * check again immediately before it enters a queue.
  */
-export async function getPublicationReleaseReadiness(publicationId: string): Promise<ReleaseReadiness> {
+export async function getPublicationReleaseReadiness(
+  publicationId: string,
+  // manual: evaluate as the explicit human release (publish-now) the caller is about to record.
+  options: { manual?: boolean } = {},
+): Promise<ReleaseReadiness> {
   const publication = await prisma.publication.findUnique({
     where: { id: publicationId },
     include: { account: true, site: true, version: true },
@@ -28,6 +32,7 @@ export async function getPublicationReleaseReadiness(publicationId: string): Pro
   }
 
   const blockers: string[] = [];
+  const manualOverride = options.manual ?? publication.manualOverride;
   const policy = await prisma.automationPolicy.findFirst({
     where: { tenantId: publication.tenantId, siteId: publication.siteId },
   });
@@ -37,14 +42,14 @@ export async function getPublicationReleaseReadiness(publicationId: string): Pro
 
   // A human-triggered release is allowed in manual/assisted mode, but every
   // automatic release must originate from a healthy autopilot policy.
-  if (!publication.manualOverride) {
+  if (!manualOverride) {
     if (!policy) blockers.push("automation_policy_missing");
     else if (!policy.enabled || policy.state !== "active") blockers.push("automation_paused");
     else if (mode !== "autopilot" || !policy.autoPublish) blockers.push("autopilot_not_enabled");
     else if (policy.circuitOpen) blockers.push("publication_circuit_open");
   }
 
-  if (!publication.manualOverride && !["approved", "published"].includes(publication.version.status)) {
+  if (!manualOverride && !["approved", "published"].includes(publication.version.status)) {
     blockers.push("version_not_approved");
   }
 
@@ -66,14 +71,14 @@ export async function getPublicationReleaseReadiness(publicationId: string): Pro
   }
 
   // Dry-run is useful for manual development, never as an automatic release.
-  if (!publication.manualOverride && getBooleanEnv("PUBLISH_DRY_RUN", !isProductionEnv())) {
+  if (!manualOverride && getBooleanEnv("PUBLISH_DRY_RUN", !isProductionEnv())) {
     blockers.push("publish_dry_run_enabled");
   }
 
   // Do not permit a production autopilot to feed a queue with no live
   // consumer. The scheduler itself is intentionally excluded: this check is
   // executed by it before enqueueing.
-  if (!publication.manualOverride && isProductionEnv()) {
+  if (!manualOverride && isProductionEnv()) {
     const required = publication.channel === "website" ? ["publishing"] : ["social"];
     const heartbeats = await listWorkerHeartbeats();
     for (const worker of required) {
