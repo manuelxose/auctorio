@@ -166,3 +166,10 @@ test("PLAN-04b: local date helpers", () => {
   assert.equal(localDateInZone(new Date("2026-11-22T23:00:00.000Z"), "Europe/Madrid"), "2026-11-23");
   assert.equal(nextLocalDate("2026-12-31"), "2027-01-01");
 });
+
+test("PLAN-05: unfilled slot reason names the main rejection categories and the fix", () => {
+  const slot = { localDate: "2026-11-20", localTime: "09:00", scheduledFor: new Date("2026-11-20T08:00:00Z") } as never;
+  const { unfilled } = assignBriefsToSlots([], [slot], [{ reason: "low site relevance: 10" }, { reason: "low site relevance: 12" }, { reason: "duplicate title across generation batches" }]);
+  assert.match(unfilled[0].reason, /low site relevance \(x2\)/);
+  assert.match(unfilled[0].reason, /Fill missing slots/);
+});

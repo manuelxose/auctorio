@@ -126,7 +126,7 @@ type SortKey = 'date-asc' | 'date-desc' | 'priority' | 'title';
       <ul class="pb__list">
         <li class="pb__row pb__row--head">
           <input class="pb__check" type="checkbox" [checked]="allSelected(group.items)" (change)="toggleAll(group.items, $event)" [attr.aria-label]="'Select all ' + group.items.length + (group.label ? ' in ' + group.label : '')" />
-          <span aria-hidden="true">When</span><span aria-hidden="true">Brief</span><span aria-hidden="true">Status</span><span aria-hidden="true">Channel</span>
+          <span aria-hidden="true">Proposed date</span><span aria-hidden="true">Brief</span><span aria-hidden="true">Status</span><span aria-hidden="true">Channel</span>
         </li>
         <li class="pb__row" *ngFor="let item of group.items; trackBy: trackId" [class.is-selected]="selected.has(item.id)">
           <input class="pb__check" type="checkbox" [checked]="selected.has(item.id)" (change)="toggle(item.id)" [attr.aria-label]="'Select ' + title(item)" />
