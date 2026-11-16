@@ -33,6 +33,10 @@ const STYLES = `
   .pillar__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
   .pill-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .pillars { display: grid; gap: 12px; }
+  .howto { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--au-fs-body-sm); color: var(--au-muted); }
+  .howto strong { color: var(--au-text); font-weight: 600; }
+  .sub-label { font-size: var(--au-fs-caption); color: var(--au-muted); margin-bottom: -6px; }
+  .src--none { color: var(--au-muted); }
   .cov { margin: 0; padding-left: 18px; }
   .group { border: 0; padding: 0; margin: 0 0 var(--au-s5, 20px); min-width: 0; }
   .group legend { padding: 0; font-weight: 600; }
@@ -173,10 +177,10 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && draft">
         <h2 class="au-panel__title">Editorial strategy</h2>
-        <p class="au-muted">Detected values come from your pages, Suggested values are drafts, Approved values are yours. Saving creates a new version; reading the site again never overwrites approved values.</p>
+        <p class="au-muted">The rules every plan and article follows. Fields marked <span class="src src--suggested">From your site</span> were filled from what Auctorio read; edit anything and save to approve it. Reading the site again never overwrites approved values.</p>
         <div class="au-banner au-banner--info au-mt-2" *ngIf="layers && !layers.approved">
           <app-icon name="info"></app-icon>
-          <span class="au-banner__text">Nothing is approved yet. Planning uses the suggested values below until you save.</span>
+          <span class="au-banner__text">Nothing approved yet. Plans already use these values; review them and save to make them yours.</span>
         </div>
         <fieldset class="group au-mt-3" *ngFor="let g of fieldGroups">
           <legend>{{ g.title }}</legend>
@@ -193,9 +197,8 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
           <input class="au-input" type="text" [(ngModel)]="note" placeholder="Version note (optional)" aria-label="Version note" />
           <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save as new version' }}</button>
           <button class="au-btn au-btn--ghost" type="button" [disabled]="saving" (click)="resetDraft()">Discard edits</button>
-          <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="regenerate()">Refresh suggestions</button>
+          <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="regenerate()" title="Fill again from the latest read of the site; approved values stay">Refill from site</button>
           <span class="au-muted" *ngIf="layers?.approved">Approved v{{ layers?.approved?.version }}</span>
-          <span class="au-muted" *ngIf="layers?.suggested">Suggestions: {{ layers?.suggested?.source }}</span>
         </div>
         <p class="au-error" *ngIf="strategyError">{{ strategyError }}</p>
 
@@ -211,22 +214,29 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         </details>
       </section>
 
-      <!-- Pillars & clusters -->
+      <!-- Pillars: the main topics plans are built from -->
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'pillars' && draft">
-        <h2 class="au-panel__title">Pillars &amp; clusters</h2>
-        <p class="au-muted">Excluded pillars and topics are rejected from editorial plans after generation.</p>
-        <div class="pillars au-mt-2">
+        <h2 class="au-panel__title">Content pillars</h2>
+        <p class="au-muted">Pillars are the big topics your site writes about. Auctorio found them by grouping your pages by subject. When it generates a plan, it splits the articles between the pillars you include, by their share, and never proposes topics from excluded ones.</p>
+        <ul class="howto au-mt-2">
+          <li><strong>Include or exclude</strong> a pillar to decide whether plans cover it.</li>
+          <li><strong>Share of the plan</strong> sets how many articles each one gets.</li>
+          <li><strong>Subtopics</strong> are what articles inside the pillar can be about; missing ones show up below as gaps.</li>
+        </ul>
+        <div class="pillars au-mt-3">
           <article class="pillar" *ngFor="let p of draft.pillars; let i = index" [class.pillar--off]="!p.included">
             <div class="pillar__head">
               <input class="au-input" type="text" [(ngModel)]="p.name" [attr.aria-label]="'Pillar name ' + (i + 1)" />
               <span class="src" [ngClass]="'src--' + (layers?.pillarProvenance?.[i] ?? 'approved')">{{ pillarLabel(i) }}</span>
             </div>
-            <textarea class="au-input" rows="2" [(ngModel)]="p.description" placeholder="Description" aria-label="Pillar description"></textarea>
-            <textarea class="au-input" rows="2" [ngModel]="csv(p.subtopics)" (ngModelChange)="p.subtopics = split($event)" placeholder="Subtopics, comma separated" aria-label="Pillar subtopics"></textarea>
+            <textarea class="au-input" rows="2" [(ngModel)]="p.description" placeholder="What this pillar covers" aria-label="Pillar description"></textarea>
+            <label class="sub-label" [attr.for]="'sub-' + i">Subtopics</label>
+            <textarea class="au-input" rows="2" [id]="'sub-' + i" [ngModel]="csv(p.subtopics)" (ngModelChange)="p.subtopics = split($event)" placeholder="Comma separated, e.g. series de estreno, horarios"></textarea>
             <div class="pill-row">
-              <label>Weight <input class="au-input" type="number" min="0" max="10" step="1" [(ngModel)]="p.weight" style="width: 80px" /></label>
-              <label><input type="checkbox" [(ngModel)]="p.included" /> Include in planning</label>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="investigate(p)" [disabled]="!p.clusterSlug" [title]="p.clusterSlug ? '' : 'Not linked to a detected cluster'">Site pages &amp; gaps</button>
+              <label><input type="checkbox" [(ngModel)]="p.included" /> Include in plans</label>
+              <label>Weight <input class="au-input" type="number" min="0" max="10" step="0.1" [(ngModel)]="p.weight" style="width: 80px" [disabled]="!p.included" /></label>
+              <span class="au-muted" *ngIf="p.included">≈ {{ share(p) }}% of the plan</span>
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="investigate(p)" [disabled]="!p.clusterSlug" [title]="p.clusterSlug ? 'See which of your pages cover it and which subtopics are missing' : 'Not linked to a group of your pages'">Show my pages</button>
               <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: p.name }">Generate proposals</a>
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="removePillar(i)">Remove</button>
             </div>
@@ -241,10 +251,13 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             </div>
           </article>
         </div>
-        <p class="au-muted au-mt-2" *ngIf="draft.pillars.length === 0">No pillars yet. Index the website or add one.</p>
+        <p class="au-muted au-mt-2" *ngIf="draft.pillars.length === 0">No pillars yet. Read the whole site so Auctorio can find them, or add one.</p>
         <div class="pill-row au-mt-2">
           <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="addPillar()">Add pillar</button>
-          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngFor="let c of unlinkedClusters" (click)="addPillar(c.name, c.slug, c.keywords)">+ {{ c.name }} ({{ c.pagesCount }})</button>
+          <ng-container *ngIf="unlinkedClusters.length">
+            <span class="au-muted">Other topics found on your site:</span>
+            <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngFor="let c of unlinkedClusters" (click)="addPillar(c.name, c.slug, c.keywords)" [title]="c.pagesCount + ' pages'">+ {{ c.name }}</button>
+          </ng-container>
         </div>
         <div class="savebar">
           <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save as new version' }}</button>
@@ -405,15 +418,20 @@ export class SiteIntelligencePageComponent implements OnInit {
   }
   source(key: StrategyField): string {
     const p = this.layers?.provenance[key];
-    return !p || p === 'none' ? 'detected' : p;
+    return !p || p === 'none' ? 'none' : p;
   }
   sourceLabel(key: StrategyField): string {
     const s = this.source(key);
-    return s === 'approved' ? 'Approved' : s === 'suggested' ? 'Suggested' : 'Detected';
+    return s === 'approved' ? 'Approved' : s === 'suggested' ? 'From your site' : 'Empty';
   }
   pillarLabel(i: number): string {
     const p: Provenance | undefined = this.layers?.pillarProvenance?.[i];
-    return p === 'approved' ? 'Approved' : p === 'suggested' ? 'Suggested' : 'New (unsaved)';
+    return p === 'approved' ? 'Approved' : p === 'suggested' ? 'From your site' : 'New (unsaved)';
+  }
+  /** Plans split articles by weight among included pillars (editorial-plan-context). */
+  share(p: StrategyPillar): number {
+    const total = (this.draft?.pillars ?? []).filter((x) => x.included).reduce((sum, x) => sum + (x.weight || 0), 0);
+    return total ? Math.round(((p.weight || 0) / total) * 100) : 0;
   }
   get unlinkedClusters() {
     const linked = new Set((this.draft?.pillars ?? []).map((p) => p.clusterSlug));

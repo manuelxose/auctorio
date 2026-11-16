@@ -74,7 +74,19 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     icon: 'sources',
     step: 2,
     items: [
-      { label: 'Sources', path: '/studio/sources', icon: 'sources', hint: 'Choose where stories and evidence come from.' },
+      {
+        label: 'Sources',
+        path: '/studio/sources',
+        icon: 'sources',
+        hint: 'Choose where stories and evidence come from.',
+        sections: [
+          { id: 'sources', label: 'Active sources' },
+          { id: 'recommendations', label: 'Suggested for you' },
+          { id: 'add', label: 'Add a source' },
+          { id: 'evidence', label: 'Evidence' },
+          { id: 'settings', label: 'Advanced' },
+        ],
+      },
       { label: 'Inbox', path: '/studio/inbox', icon: 'inbox', hint: 'Triage the stories your sources found.' },
     ],
   },

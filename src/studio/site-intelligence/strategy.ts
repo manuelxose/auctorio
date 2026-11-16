@@ -390,13 +390,20 @@ export async function getApprovedStrategy(tenantId: string, siteId: string): Pro
   return { config: sanitizeStrategyConfig(row.approved), version: row.approvedVersion };
 }
 
-export async function getStrategyLayers(tenantId: string, siteId: string): Promise<StrategyLayers> {
+export async function getStrategyLayers(tenantId: string, siteId: string, refreshed = false): Promise<StrategyLayers> {
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId }, select: { id: true } });
   if (!site) throw new Error("site_not_found");
   const [row, profileRow] = await Promise.all([
     prisma.siteEditorialStrategy.findFirst({ where: { tenantId, siteId } }),
     prisma.siteIntelligenceProfile.findFirst({ where: { tenantId, siteId } }),
   ]);
+  // Re-reading the site builds a new profile but no suggestion; derive it here (deterministic, no AI) so
+  // the form always starts from what was detected. Approved values are never touched.
+  const staleSuggestion = !row?.suggested || !row.suggestedAt || (profileRow?.indexedAt && row.suggestedAt < profileRow.indexedAt);
+  if (profileRow && staleSuggestion && !refreshed) {
+    const result = await regenerateStrategySuggestion(tenantId, siteId);
+    if (result.generated) return getStrategyLayers(tenantId, siteId, true);
+  }
   const suggestedJson = row?.suggested as { config?: unknown; evidence?: Record<string, string> } | null | undefined;
   const suggested = suggestedJson?.config
     ? {

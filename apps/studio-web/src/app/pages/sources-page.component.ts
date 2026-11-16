@@ -8,12 +8,17 @@ import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { SiteSourceRegistryComponent } from '../components/sources/site-source-registry.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { sectionFor } from '../layout/studio-nav';
+
+type SourcesView = 'sources' | 'recommendations' | 'evidence' | 'add' | 'settings';
 import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType, StudioEnrichmentProvider, StudioFeedCandidate, StudioFeedDiscoveryResult, StudioSite, StudioSource, StudioSourcePack } from '../models/studio.models';
 
 @Component({
   selector: 'app-sources-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, SiteSourceRegistryComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, SiteSourceRegistryComponent],
+  styles: [`.add-url { display: flex; gap: var(--au-s2); flex-wrap: wrap; } .add-url .au-input { flex: 1 1 320px; }`],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -23,20 +28,12 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
           <p class="au-page__subtitle">Where this site's stories and evidence come from: its own sources plus the ones shared by every site.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--primary" type="button" (click)="setView('add')">
+          <a class="au-btn au-btn--primary" routerLink="." [queryParams]="{ tab: 'add' }" *ngIf="view !== 'add'">
             <app-icon name="plus"></app-icon>
             Add source
-          </button>
+          </a>
         </div>
       </header>
-
-      <nav class="au-tabs au-mb-3" aria-label="Source sections">
-        <button class="au-tab" type="button" [class.is-active]="view === 'sources'" (click)="setView('sources')">Active sources</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'recommendations'" (click)="setView('recommendations')">Suggestions</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'evidence'" (click)="setView('evidence')">Evidence</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'add'" (click)="setView('add')">Add</button>
-        <button class="au-tab" type="button" [class.is-active]="view === 'settings'" (click)="setView('settings')">Advanced</button>
-      </nav>
 
       <app-site-source-registry *ngIf="view === 'sources'" section="sources"></app-site-source-registry>
       <app-site-source-registry *ngIf="view === 'recommendations'" section="recommendations"></app-site-source-registry>
@@ -133,36 +130,38 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
       </section>
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="view === 'add'">
-        <h2 class="au-panel__title">New source</h2>
-        <p class="au-panel__subtitle au-mb-3">Sources provide input. They are separate from publishing connections.</p>
-        <div class="au-field-grid">
+        <h2 class="au-panel__title">{{ editingId ? 'Edit source' : 'Add a source' }}</h2>
+        <p class="au-panel__subtitle au-mb-3">Paste any website, feed or sitemap address. Auctorio finds the feed, you test it, and new stories start arriving in the Inbox.</p>
+        <div class="au-field au-mb-3">
+          <span class="au-field__label">1. Website or feed address</span>
+          <div class="add-url">
+            <input class="au-input" type="url" [(ngModel)]="form.url" placeholder="https://www.example.com" [disabled]="form.type === 'manual'" aria-label="Website or feed address" />
+            <button class="au-btn au-btn--secondary" type="button" (click)="discoverFeeds()" [disabled]="!form.url || discoveringFeeds">
+              <app-icon name="sparkles"></app-icon>
+              {{ discoveringFeeds ? 'Looking…' : 'Find the feed' }}
+            </button>
+          </div>
+        </div>
+        <div class="au-field-grid au-mb-3">
           <label class="au-field">
-            <span class="au-field__label">Name</span>
-            <input class="au-input" type="text" [(ngModel)]="form.name" placeholder="e.g. El Mundo Deportes RSS" />
+            <span class="au-field__label">2. Name</span>
+            <input class="au-input" type="text" [(ngModel)]="form.name" placeholder="e.g. El Mundo Deportes" />
           </label>
+          <label class="au-field">
+            <span class="au-field__label">3. Used by</span>
+            <select class="au-select" [(ngModel)]="form.siteId">
+              <option [ngValue]="activeSiteId">This site only</option>
+              <option [ngValue]="null">Shared by all sites</option>
+            </select>
+          </label>
+        </div>
+        <details class="au-details au-mb-3">
+          <summary class="au-details__summary">More options (type, refresh, trust, categories…)</summary>
+        <div class="au-field-grid">
           <label class="au-field">
             <span class="au-field__label">Type</span>
             <select class="au-select" [(ngModel)]="form.type">
               <option *ngFor="let type of sourceTypes" [ngValue]="type">{{ type }}</option>
-            </select>
-          </label>
-          <label class="au-field">
-            <span class="au-field__label">URL / endpoint</span>
-            <input class="au-input" type="url" [(ngModel)]="form.url" placeholder="https://…" [disabled]="form.type === 'manual'" />
-            <span class="au-field__hint">Feed, sitemap or page URL. Use auto-discover to find the publisher's feed first.</span>
-          </label>
-          <div class="au-field">
-            <span class="au-field__label">Feed discovery</span>
-            <button class="au-btn au-btn--secondary" type="button" (click)="discoverFeeds()" [disabled]="!form.url || discoveringFeeds">
-              <app-icon name="sparkles"></app-icon>
-              {{ discoveringFeeds ? 'Discovering…' : 'Auto-discover feed' }}
-            </button>
-          </div>
-          <label class="au-field">
-            <span class="au-field__label">Used by</span>
-            <select class="au-select" [(ngModel)]="form.siteId">
-              <option [ngValue]="activeSiteId">This site only</option>
-              <option [ngValue]="null">Shared by all sites</option>
             </select>
           </label>
           <label class="au-field">
@@ -191,9 +190,7 @@ import type { BlockedDomain, DiscoveredDomain, SourceRecommendation, SourceType,
             <span class="au-field__hint">Selectors for htmllist, filters for imdb. Leave empty to use per-site defaults.</span>
           </label>
         </div>
-        <details class="au-details au-mb-3">
-          <summary class="au-details__summary">Advanced</summary>
-          <div class="au-field-grid">
+          <div class="au-field-grid au-mt-3">
             <label class="au-field">
               <span class="au-field__label">Authority (0..1)</span>
               <input class="au-input" type="number" min="0" max="1" step="0.05" [(ngModel)]="form.authorityScore" />
@@ -397,6 +394,7 @@ export class SourcesPageComponent implements OnInit {
   private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
+  private readonly route = inject(ActivatedRoute);
 
   sourceTypes: SourceType[] = ['rss', 'atom', 'html', 'sitemap', 'api', 'htmllist', 'imdb', 'manual'];
   sources: StudioSource[] = [];
@@ -406,7 +404,7 @@ export class SourcesPageComponent implements OnInit {
   editingId: string | null = null;
   fetching: Record<string, boolean> = {};
   feedback = '';
-  view: 'sources' | 'recommendations' | 'evidence' | 'add' | 'settings' = 'sources';
+  view: SourcesView = 'sources';
   /** New sources default to the active site; null shares them with every site. */
   readonly activeSiteId = this.appContext.activeSite()?.id ?? null;
   recommendations: SourceRecommendation[] = [];
@@ -482,9 +480,11 @@ export class SourcesPageComponent implements OnInit {
 
   ngOnInit(): void {
     this.sites = this.appContext.sites();
+    // Sections are picked in the sidebar (?tab=).
+    this.route.queryParamMap.subscribe((params) => this.setView(sectionFor('/studio/sources', params.get('tab')) as SourcesView));
   }
 
-  setView(view: 'sources' | 'recommendations' | 'evidence' | 'add' | 'settings'): void {
+  setView(view: SourcesView): void {
     this.view = view;
     if (view === 'add') {
       this.resetForm();

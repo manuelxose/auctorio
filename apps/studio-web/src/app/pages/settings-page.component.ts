@@ -185,7 +185,7 @@ type SettingsSection = 'sites' | 'team' | 'roles' | 'discovery';
                 {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
               </button>
               <!-- Findings are reviewed in one place, next to each site's own recommendations. -->
-              <a class="au-btn au-btn--ghost" routerLink="/studio/sources">Review findings in Sources → Recommendations</a>
+              <a class="au-btn au-btn--ghost" routerLink="/studio/sources" [queryParams]="{ tab: 'recommendations' }">Review findings in Sources → Suggested for you</a>
             </div>
           </form>
         </section>

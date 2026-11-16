@@ -1,4 +1,5 @@
 import { CommonModule } from '@angular/common';
+import { RouterLink } from '@angular/router';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subscription, timer } from 'rxjs';
@@ -24,7 +25,7 @@ type InboxTab = 'inbox' | 'clusters';
 @Component({
   selector: 'app-inbox-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -109,7 +110,7 @@ type InboxTab = 'inbox' | 'clusters';
               title="No stories to triage"
               text="Stories appear here once a source fetches them. Add a source or adjust the filters."
             >
-              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/sources">Add source</a>
+              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/sources" [queryParams]="{ tab: 'add' }">Add source</a>
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="clearFilters()">Reset filters</button>
             </app-empty-state>
           } @else {
