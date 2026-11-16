@@ -129,6 +129,11 @@ function buildTextPrompt(input) {
     if (briefFreshness) {
         briefInstructions.push(`Freshness requirement: ${briefFreshness}. ${briefFreshness === "high" ? "Use only current facts from the provided sources; do not invent schedules, prices or availability." : "Keep evergreen statements general unless a source supports specifics."}`);
     }
+    if (input.type === "seo" && goal !== "news_article") {
+        briefInstructions.push("Article structure: open with a short answer-first introduction, then a 'Key takeaways' bulleted list (3-5 points). " +
+            "At least 4 H2 sections, each opening with a paragraph, so images can sit between them (images are added later; do not write img tags or image placeholders). " +
+            "Include one comparison or summary table when the topic allows it. Close with an FAQ section and a short conclusion with a next step.");
+    }
     briefInstructions.push("Formatting requirements: semantic HTML only (h2/h3, strong for genuinely important concepts, ul/ol, tables when useful). " +
         "Short paragraphs. No keyword stuffing. No invented statistics, quotes or prices. No generic AI filler phrases.");
     const systemPrompt = goal === "news_article"

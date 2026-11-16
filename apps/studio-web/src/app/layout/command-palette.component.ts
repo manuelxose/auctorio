@@ -1,7 +1,8 @@
 import { Component, ElementRef, ViewChild, computed, inject, output, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { AppIconComponent, type StudioIconName } from '../components/ui/app-icon.component';
-import { STUDIO_NAV } from './studio-nav';
+import { AppContextService } from '../services/app-context.service';
+import { STUDIO_NAV, canSeeNavItem } from './studio-nav';
 
 export type PaletteCommand = { id: string; label: string; group: string; icon: StudioIconName; run: () => void };
 
@@ -60,8 +61,10 @@ export class CommandPaletteComponent {
 
   @ViewChild('field', { static: true }) private field!: ElementRef<HTMLInputElement>;
 
+  private readonly appContext = inject(AppContextService);
+  // Platform pages are reached from the sidebar; the palette does not know the platform flag.
   private readonly navCommands: PaletteCommand[] = STUDIO_NAV.flatMap((group) =>
-    group.items.map((item) => ({ id: item.path.replace(/\W+/g, '-'), label: item.label, group: group.label, icon: item.icon, run: () => void this.router.navigateByUrl(item.path) })),
+    group.items.filter((item) => canSeeNavItem(item, this.appContext.role())).map((item) => ({ id: item.path.replace(/\W+/g, '-'), label: item.label, group: group.label, icon: item.icon, run: () => void this.router.navigateByUrl(item.path) })),
   );
 
   readonly results = computed(() => {

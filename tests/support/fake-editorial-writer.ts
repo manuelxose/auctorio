@@ -97,7 +97,7 @@ export function buildFakeArticleFromPrompt(prompt: string, injectUnsupportedYear
 
   // Structure-driven sections: one H2 per required heading, claims distributed.
   let index = 2;
-  for (const heading of requiredHeadings.slice(0, 3)) {
+  for (const heading of requiredHeadings.slice(0, 8)) {
     const sectionClaims = claims.slice(index, index + 3);
     index += 3;
     const body =

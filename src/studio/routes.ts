@@ -67,7 +67,9 @@ import {
   buildAssetPublicUrl,
   queuePublication,
   requestImageGenerationForVersion,
+  requestInlineImagesForVersion,
   retryImageGeneration,
+  isProjectGenerationInFlight,
   startProjectGeneration,
 } from "./orchestration";
 import { archiveProject } from "./projects";
@@ -147,6 +149,7 @@ import { registerPhase5OpsRoutes } from "./routes-phase5-ops";
 import { registerNotificationRoutes } from "./routes-notifications";
 import { registerCopilotRoutes } from "./routes-copilot";
 import { registerAiSettingsRoutes } from "./routes-ai";
+import { registerAdminRoutes } from "./routes-admin";
 import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
 import { registerSiteIntelligenceRoutes } from "./routes-site-intelligence";
@@ -423,6 +426,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerNotificationRoutes(fastify);
   registerCopilotRoutes(fastify);
   registerAiSettingsRoutes(fastify);
+  registerAdminRoutes(fastify);
   registerEventRoutes(fastify);
 
   fastify.get("/health/live", async () => ({ status: "ok" }));
@@ -1219,13 +1223,26 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (!project) {
       return notFound(reply, "project not found");
     }
+    if (await isProjectGenerationInFlight(context.tenantId, project.id)) {
+      return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
+    }
 
     const body = parseBody<{ feedback?: string; promptPresetVersionId?: string }>(request);
+    const presetVersionId = body.promptPresetVersionId?.trim() || null;
+    // An unknown or foreign preset would otherwise start a real (paid) run that silently ignores it.
+    if (presetVersionId) {
+      const preset = isUuid(presetVersionId)
+        ? await prisma.studioPromptVersion.findFirst({ where: { id: presetVersionId, preset: { tenantId: context.tenantId } }, select: { id: true } })
+        : null;
+      if (!preset) {
+        return notFound(reply, "prompt preset version not found");
+      }
+    }
     const result = await startProjectGeneration(
       project.id,
       context.tenantId,
       body.feedback ?? null,
-      body.promptPresetVersionId?.trim() || null,
+      presetVersionId,
     );
     return reply.code(202).send({
       project_id: project.id,
@@ -1255,6 +1272,9 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     const project = await getProjectById(context.tenantId, projectId);
     if (!project) {
       return notFound(reply, "project not found");
+    }
+    if (await isProjectGenerationInFlight(context.tenantId, project.id)) {
+      return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
     }
 
     const result = await startProjectGeneration(
@@ -1620,7 +1640,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return;
     }
 
-    const body = parseBody<{ projectId?: string; versionId?: string; promptPresetVersionId?: string }>(request);
+    const body = parseBody<{ projectId?: string; versionId?: string; promptPresetVersionId?: string; kind?: string }>(request);
     const projectId = body.projectId?.trim();
     if (!projectId) {
       return badRequest(reply, "projectId is required");
@@ -1636,6 +1656,11 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
 
     if (!version) {
       return notFound(reply, "version not found");
+    }
+
+    if (body.kind === "inline") {
+      const contentImageIds = await requestInlineImagesForVersion(context.tenantId, version.id);
+      return reply.code(202).send({ version_id: version.id, content_image_ids: contentImageIds, status: "queued" });
     }
 
     const contentImageId = await requestImageGenerationForVersion(

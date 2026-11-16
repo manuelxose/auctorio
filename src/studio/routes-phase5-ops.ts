@@ -32,7 +32,7 @@ const BUDGET_PERIODS = ["daily", "monthly"] as const;
 
 export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
   fastify.get("/v2/operations/metrics", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }
@@ -40,7 +40,7 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get("/v2/operations/health", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }
@@ -161,7 +161,7 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
 
   /** Read-only release preflight used before enabling a tenant autopilot. */
   fastify.get("/v2/operations/release-preflight", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) return;
     const report = await getTenantReleaseReadiness(context.tenantId);
     return reply.code(report.ready ? 200 : 409).send(report);
@@ -170,7 +170,7 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
   // ──────────────────────────────────────────────────────────── Cost controls
 
   fastify.get("/v2/cost-controls", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }

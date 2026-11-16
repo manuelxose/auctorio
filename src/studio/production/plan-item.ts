@@ -41,7 +41,7 @@ export function readGenerationSettings(item: Pick<EditorialPlanItem, "metadata">
   return asRecord(asRecord(item.metadata).generation);
 }
 
-function outlineHeadings(item: Pick<EditorialPlanItem, "outline">): string[] {
+export function outlineHeadings(item: { outline?: unknown }): string[] {
   return Array.isArray(item.outline)
     ? item.outline.map((entry) => (typeof entry === "object" && entry !== null ? String((entry as Record<string, unknown>).heading ?? "") : String(entry))).filter(Boolean)
     : [];
@@ -154,6 +154,7 @@ export function planEvidenceToLedger(sourceEvidence: unknown): { facts: LedgerFa
       verificationStatus: "unverified",
       conflictingStatements: [],
       supportingGroups: 1,
+      ...(typeof entry.sourceId === "string" && typeof entry.itemId === "string" ? { origin: { sourceId: entry.sourceId, itemId: entry.itemId } } : {}),
     });
   }
   return { facts, groups: groups.size };
@@ -190,14 +191,13 @@ async function indexedTitles(tenantId: string, siteId: string): Promise<string[]
 }
 
 export function planGuidance(item: EditorialPlanItem): string[] {
+  // The approved outline is not guidance: the structure template renders it as required H2s.
   const lines: string[] = [];
-  const outline = outlineHeadings(item);
   if (item.angle) lines.push(`Angle: ${item.angle}`);
   if (item.editorialObjective || item.objective) lines.push(`Objective: ${item.editorialObjective || item.objective}`);
   if (item.audience) lines.push(`Audience: ${item.audience}`);
   if (item.funnelStage) lines.push(`Funnel stage: ${item.funnelStage}`);
   if (item.competitorAngle) lines.push(`Differentiate from competitors: ${item.competitorAngle}`);
-  if (outline.length) lines.push(`Planned outline (use as H2 sections where the structure allows):\n${outline.map((heading, index) => `${index + 1}. ${heading}`).join("\n")}`);
   const questions = stringList(item.questionsToAnswer);
   if (questions.length) lines.push(`Questions the article must answer:\n${questions.map((question) => `- ${question}`).join("\n")}`);
   const faq = stringList(item.faqCandidates);

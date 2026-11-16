@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runImageWorker = runImageWorker;
+const ai_settings_1 = require("../ai/ai-settings");
 const client_1 = require("@prisma/client");
 const bullmq_1 = require("bullmq");
 const env_1 = require("../../shared/utils/env");
@@ -58,9 +59,10 @@ async function runImageWorker() {
         return;
     }
     const prisma = (0, prisma_1.getPrismaClient)();
-    const provider = (0, image_1.getImageProvider)();
-    const worker = new bullmq_1.Worker(queues_1.QUEUE_NAMES.image, async (job) => {
+    const worker = new bullmq_1.Worker(queues_1.QUEUE_NAMES.image, async (job) => (0, ai_settings_1.withAiTenant)(job.data.tenantId, async () => {
         const data = job.data;
+        // Resolved per job: each workspace may have chosen a different image model (Settings -> AI).
+        const provider = (0, image_1.getImageProvider)();
         await (0, jobs_1.markJobProcessing)(data.jobId);
         await prisma.contentImage.update({
             where: { id: data.contentImageId },
@@ -105,7 +107,10 @@ async function runImageWorker() {
             options: data.options ?? {},
         });
         const size = typeof data.options?.size === "string" ? data.options.size : undefined;
-        let usedPrompt = prompt.userPrompt;
+        const section = data.options?.image_role === "inline" && typeof data.options.section === "string" ? data.options.section : null;
+        let usedPrompt = section
+            ? `${prompt.userPrompt.replace(/^.*hero image.*$/gim, "").trim()}\nCreate an in-article editorial image that illustrates the section "${section}". Its own composition, distinct from the hero. No text, logos or watermarks in the image.`
+            : prompt.userPrompt;
         let result;
         try {
             result = await provider.generate({
@@ -206,8 +211,13 @@ async function runImageWorker() {
                 usageJson: client_1.Prisma.JsonNull,
             },
         });
-        await (0, orchestration_1.syncImageResultToStudio)(data.tenantId, data.contentImageId);
-    }, {
+        if (section) {
+            await (0, orchestration_1.syncInlineImageToVersion)(data.tenantId, data.contentImageId);
+        }
+        else {
+            await (0, orchestration_1.syncImageResultToStudio)(data.tenantId, data.contentImageId);
+        }
+    }), {
         connection: (0, redis_1.getRedisConnectionOptions)(),
         ...(0, worker_runtime_1.bullWorkerOptions)("image", 1),
     });
@@ -237,7 +247,12 @@ async function runImageWorker() {
             if (!retryable && data.tenantId) {
                 // QA must not be blocked by a permanently failed hero image.
                 try {
-                    await (0, orchestration_1.syncImageResultToStudio)(data.tenantId, data.contentImageId);
+                    if (data.options?.image_role === "inline") {
+                        await (0, orchestration_1.syncInlineImageToVersion)(data.tenantId, data.contentImageId);
+                    }
+                    else {
+                        await (0, orchestration_1.syncImageResultToStudio)(data.tenantId, data.contentImageId);
+                    }
                 }
                 catch (qaError) {
                     console.warn("[worker:image] qa-after-failure skipped", qaError instanceof Error ? qaError.message : String(qaError));

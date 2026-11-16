@@ -36,7 +36,6 @@ import type {
   SocialSetupInfo,
   SourceRecommendation,
   EditorialPlan,
-  EditorialPlanGenerationAccepted,
   InternalLinkSuggestion,
   SiteIndexedPageRow,
   SiteIntelligenceOverview,
@@ -247,10 +246,11 @@ export class StudioApiService {
     });
   }
 
-  generateAsset(projectId: string, versionId?: string): Observable<unknown> {
+  generateAsset(projectId: string, versionId?: string, kind?: 'inline'): Observable<unknown> {
     return this.http.post(`${this.apiBase}/backend/v2/assets/generate`, {
       projectId,
       ...(versionId ? { versionId } : {}),
+      ...(kind ? { kind } : {}),
     });
   }
 
@@ -718,7 +718,7 @@ export class StudioApiService {
     return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/unpublish`, {});
   }
 
-  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[] }> {
+  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[]; timeZone?: string | null }> {
     let params = new HttpParams().set('from', from).set('to', to);
     if (channel) {
       params = params.set('channel', channel);
@@ -726,7 +726,7 @@ export class StudioApiService {
     if (siteId) {
       params = params.set('siteId', siteId);
     }
-    return this.http.get<{ items: CalendarEvent[] }>(`${this.apiBase}/backend/v2/calendar`, { params });
+    return this.http.get<{ items: CalendarEvent[]; timeZone?: string | null }>(`${this.apiBase}/backend/v2/calendar`, { params });
   }
 
   // ─── Editorial platform: social ───────────────────────────────────────
@@ -864,54 +864,14 @@ export class StudioApiService {
     return this.http.get<{ items: BlockedDomain[] }>(`${this.apiBase}/backend/v2/discovery/blocked-domains`);
   }
 
-  listEditorialPlans(page = 1, pageSize = 20): Observable<PaginatedResponse<EditorialPlan>> {
+  listEditorialPlans(page = 1, pageSize = 20, siteId?: string): Observable<PaginatedResponse<EditorialPlan>> {
     return this.http.get<PaginatedResponse<EditorialPlan>>(`${this.apiBase}/backend/v2/editorial-plans`, {
-      params: new HttpParams().set('page', page).set('pageSize', pageSize),
+      params: siteId ? new HttpParams().set('page', page).set('pageSize', pageSize).set('siteId', siteId) : new HttpParams().set('page', page).set('pageSize', pageSize),
     });
   }
 
   getEditorialPlan(planId: string): Observable<EditorialPlan> {
     return this.http.get<EditorialPlan>(`${this.apiBase}/backend/v2/editorial-plans/${planId}`);
-  }
-
-  generateEditorialPlan(payload: {
-    siteId?: string;
-    dateFrom: string;
-    dateTo: string;
-    objective?: string;
-    channels: Array<'website' | 'x' | 'instagram'>;
-    publicationCount?: number;
-    articlesPerDay?: number;
-    weekdays?: number[];
-    excludedDates?: string[];
-    publishTimes?: string[];
-    frequency?: string;
-    timezone?: string;
-    language?: string;
-    audience?: string;
-    topics?: string[];
-    excludedTopics?: string[];
-    strategyMode?: string;
-    primaryIntent?: string;
-    contentFormats?: string[];
-    market?: string;
-    campaignName?: string;
-    existingCluster?: string;
-    newCluster?: boolean;
-    freeAiDiscovery?: boolean;
-    seasonalEvents?: string[];
-    brandsOrEntities?: string[];
-    keywordSeeds?: string[];
-  }): Observable<EditorialPlanGenerationAccepted> {
-    return this.http.post<EditorialPlanGenerationAccepted>(`${this.apiBase}/backend/v2/editorial-plans/generate`, payload);
-  }
-
-  updateEditorialPlanItem(itemId: string, payload: Record<string, unknown>): Observable<EditorialPlan['items'] extends Array<infer Item> ? Item : never> {
-    return this.http.patch<EditorialPlan['items'] extends Array<infer Item> ? Item : never>(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}`, payload);
-  }
-
-  approveEditorialPlanItem(itemId: string): Observable<unknown> {
-    return this.http.post(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}/approve`, {});
   }
 
   bulkApproveEditorialPlanItems(itemIds: string[]): Observable<{ updatedCount: number }> {
@@ -962,10 +922,6 @@ export class StudioApiService {
     return this.http.get<{ items: InternalLinkSuggestion[] }>(`${this.apiBase}/backend/v2/site-intelligence/${siteId}/internal-links`, { params });
   }
 
-  generateContentFromEditorialPlanItem(itemId: string): Observable<unknown> {
-    return this.http.post(`${this.apiBase}/backend/v2/editorial-plan-items/${itemId}/generate-content`, {});
-  }
-
   getAutomationPolicy(siteId?: string): Observable<AutomationPolicy> {
     let params = new HttpParams();
     if (siteId) {
@@ -1004,8 +960,8 @@ export class StudioApiService {
 
   // ─── Editorial platform: overview & audit ─────────────────────────────
 
-  getOverview(): Observable<StudioOverview> {
-    return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`);
+  getOverview(siteId?: string): Observable<StudioOverview> {
+    return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`, { params: siteId ? { siteId } : {} });
   }
 
   getAiUsage(): Observable<{ rows: AiUsageRow[] }> {

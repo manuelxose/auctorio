@@ -1,0 +1,99 @@
+# STUDIO-01 acceptance matrix and hand-off (2026-11-13)
+
+Branch `feat/editorial-operating-system`. Audited code HEAD `1961e362706bef8ed5ad6264824cec1bdbcab0db` (+ docs-only commits afterwards). Prompt baseline: `origin/main` `173ecf0`. Node v24.18.0, npm 12.0.1. Start: `.claude/launch.json` (API 4302, Studio 4420) + 9 workers via `scripts/start-worker-*.ts`; local DB rebuilt from zero (see db-state-matrix.md).
+
+## Problems from prompt section 4, classified
+| Problem | Class | Result |
+|---|---|---|
+| Unknown runtime commit / dirty tree | CONFIRMED RUNTIME | HEAD above; tree clean (only untracked dev logs, later committed); local is 3 commits / 81 files ahead of main |
+| No current screenshots / network traces / DB metadata | CONFIRMED RUNTIME (resolved) | 24 screenshots, request map, sanitized state matrix |
+| Skill availability / delegation | NOT VERIFIED | `ui-ux-pro-max`/`unslop` listed as installed, not read (no UI work in this milestone); no sub-agents used |
+| Prompt port 4312 vs dev.ps1 4301 vs launch.json 4302 | CONFIRMED CODE | three different API ports in use |
+| Archived screenshots (16) vs live UI | CONFIRMED RUNTIME | outdated for the shell/Overview; other 15 not compared |
+| Zero-site tenant cannot log in | CONFIRMED CODE+RUNTIME | `completeGlobalAccountLogin` -> `user_not_authorized` when no sites |
+| Mock image placeholder PNG corrupt (libpng) | CONFIRMED RUNTIME | defect, not fixed (out of scope) |
+| `overview-page.component.ts` CSS budget 7.51 kB > 4 kB | CONFIRMED CODE | build warning |
+| `npm test` hangs / 2 flaky unit tests per run | CONFIRMED RUNTIME | not fixed |
+| e2e specs stale/assume production data | CONFIRMED RUNTIME | see confirmed-vs-unknown.md |
+| Autopilot health spec expects a worker named "automation" | CURRENT RUNTIME HYPOTHESIS | live name is `control` |
+| Real-provider article rejected by QA (score 71<75, unsupported claims) | CONFIRMED RUNTIME | gate working; content quality is another milestone |
+
+## Dimension verdicts (PASS / PARTIAL / BLOCKED / FAIL)
+| Dimension | Verdict | Evidence / why |
+|---|---|---|
+| IMPLEMENTATION | PASS | no code changed by this milestone; typecheck + build pass |
+| FUNCTIONALITY | PARTIAL | 8 routes load, all API 200; e2e 16/26 on clean DB; CTAs not exercised |
+| UX/UI | PARTIAL | 24 screenshots, no overflow, 0 console errors; visual review only Overview |
+| ACCESSIBILITY | BLOCKED | no keyboard/ARIA/contrast pass done |
+| SECURITY | PARTIAL | publish/credential/automation endpoints have permission guards; bulk-approve and social-connection guards unchecked; no secrets in evidence |
+| INTEGRATION | PARTIAL | BFF endpoints mapped; 0 publishing accounts / social connections locally |
+| REGRESSION | PARTIAL | unit 465/467 (flaky), e2e failures not triaged to regressions |
+| PRODUCTION READINESS | BLOCKED | no destination credentials, no prod validation, keys not deployed |
+
+Independent review (prompt section 13): intentionally not done, per project owner instruction.
+
+## Hand-off
+- STUDIO-02: sites/connectors baseline; first-site/zero-site login gap; 2 provisioned sites (+ e2e leftovers).
+- STUDIO-03: modes: all provisioned sites `manual`, autoApprove/autoPublish false; mode UI present on Overview/Automation.
+- STUDIO-04: covered by `docs/acceptance/studio-04-site-intelligence-2026-11-13.md` (stratified sampling, utility-page exclusion, Coverage tab). Hand-off for 05/06 in `studio-04-handoff.md`.
+- STUDIO-05: covered by `docs/acceptance/studio-05-sources-competitors-provenance-2026-11-15.md` (language/country source ranking, `tv-streaming-es` pack, competitor false-positive filter, source→plan→draft provenance, Sources tabs + Evidence).
+- Defects to schedule (not fixed here): corrupt mock PNG, zero-site login, flaky unit tests / `npm test` hang, stale e2e specs, overview CSS budget.
+
+
+---
+
+# STUDIO-02 acceptance (2026-11-13) — destination identity and readiness
+Details: `STUDIO-02-destination-readiness.md`. Evidence: `docs/studio-rebuild/evidence/studio-02/`.
+
+| Acceptance criterion | Verdict | Evidence |
+|---|---|---|
+| Synthetic GuíaTV installation without PublishingAccount appears exactly once, Not verified | PASS | HTTP test + real `/v2/overview` + screenshots |
+| Missing/incorrect credentials never render Connected/Ready; write capability separate | PASS | `readiness` ready/not_verified/stale/error; `checks.*` tri-state; real e2e verification persisted `auth:passed`, `draft_roundtrip:passed`, `canPublish` stays unknown |
+| Existing website/social accounts still appear; tenants isolated | PASS | HTTP tests (legacy-only, dedupe, second tenant sees none) |
+| No real publication or credential exposure | PASS | no publish; ciphertext never serialized (asserted) |
+
+Cases covered: Site only, active installation only, legacy account only, both, disabled, cancelled, failed, stale (>30 d), wrong tenant. Not applicable: "no scopes" (social OAuth scopes are STUDIO-03/09 territory; the social path was not changed).
+
+Commands run: `npm run typecheck` PASS; `npm run build:studio` PASS; compiled backend suite 474/474 (before the stale/legacy additions; destination-readiness file now 9/9); Angular `ng test` 30/30; e2e `connection-installer.spec.ts` 5/5 (`npm run dev` now starts the API and all 9 workers, including the connection worker); axe wcag2a/aa 0 violations on Overview and Connections (1440); screenshots 1440/1024/390.
+
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PASS · ACCESSIBILITY PASS (automated + keyboard focus; no screen-reader pass) · SECURITY PASS · INTEGRATION PASS (no live destination used; `canPublish` stays unknown by design, no publish probe) · REGRESSION PASS · PRODUCTION READINESS BLOCKED (no deploy/live credentials by rule).
+Independent review: intentionally not done, per project owner instruction. No PR opened (not authorized). No migration needed (additive JSON under `capabilities.verification`; rollback = revert the commit).
+
+Hand-off: STUDIO-03/08/09 can read `connections[].readiness` / `checks` from `/v2/overview` and `loadWebsiteDestinations(tenantId)`.
+
+## STUDIO-04 (2026-11-13) — Site Intelligence evidence
+Full record: `docs/acceptance/studio-04-site-intelligence-2026-11-13.md`. Screenshots: `screens/studio-04-coverage-{1440,1024,390}.jpg`.
+Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: SEO-signals/Opportunities tabs, Playwright E2E, full `npm test`, independent review (owner instruction), dedicated worktree.
+
+## STUDIO-05 (2026-11-15) — Sources, competitors and provenance
+Full record: `docs/acceptance/studio-05-sources-competitors-provenance-2026-11-15.md`. Screenshots: `screens/studio-05-sources-*.png`.
+Dimension verdicts: IMPLEMENTATION PARTIAL · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL (not audited) · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: full `npm test`, independent review (owner instruction), site-type classification, ids on manually added plan evidence.
+
+## STUDIO-08 (2026-11-15) — Calendar, publications and delivery recovery
+Full record: `docs/acceptance/studio-08-calendar-publications-2026-11-15.md`. Screenshots: `docs/studio-rebuild/evidence/studio-08/`.
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL · ACCESSIBILITY PARTIAL · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: full `npm test`, axe audit, independent review (owner instruction), live publish-now.
+
+## STUDIO-09 (2026-11-15) — Two-level navigation and contextual assistant
+Evidence: `docs/studio-rebuild/evidence/studio-09/` (before/after 1440/1024/390), `docs/studio-rebuild/NAVIGATION.md`, e2e `e2e/specs/studio-shell-nav.spec.ts`.
+Root causes (CONFIRMED RUNTIME, local QA account): Home's sidebar held one link duplicating the Home tab; Settings, Connections, Autopilot and System health were reachable only from the account menu; on 390 px the active area sat off-screen in the scrolling area bar; Overview repeated the top-bar "New content"; the assistant wrapper and panel were two landmarks both named "Assistant".
+Changes: Home = Overview, Notifications, Background jobs; Settings is an area at the end of the bar (removed from account menu); active area scrolled into view on page activation; duplicate CTA and landmark removed. Assistant stays embedded in the sidebar (owner reverted the right dock in `ff50b77`).
+Commands: Angular `ng test` 34/34; `npm run typecheck` PASS; `npm run build:studio` PASS; e2e `studio-shell-nav` 2/2 on the production SSR build (on the dev server the phone check fails because Angular HMR re-renders the shell once after load — dev-only).
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL (no large-form progressive-disclosure pass) · ACCESSIBILITY PARTIAL (keyboard/focus e2e; axe not installed) · SECURITY PASS (no server change; admin entries still server-enforced) · INTEGRATION PASS · REGRESSION PARTIAL (full `npm test` not run; `notifications-links` "saved editorial plans" fails on `.au-plan-row`, pre-existing STUDIO-06 markup, unrelated) · PRODUCTION READINESS BLOCKED (no deploy by rule).
+Not done: page-monolith split, Copilot provider journeys, independent review (owner instruction).
+
+## STUDIO-10 (2026-11-16) — Customer workflows vs privileged operations
+Evidence: `docs/studio-rebuild/evidence/studio-10/` (admin automation 1440; editor settings/automation 1440/1024), API matrix `tests/studio-rbac-matrix.test.ts`, e2e `e2e/specs/studio-role-separation.spec.ts`, `docs/studio-rebuild/NAVIGATION.md`.
+Root causes (CONFIRMED CODE): `/v2/operations/health|metrics|release-preflight`, `/v2/cost-controls` (GET), `/v2/automation/health` and `/v2/health/workers` only required a session, so any viewer could read worker heartbeats, queue counts, circuit state and AI spend; Autopilot showed the worker table to everyone and offered Save/Pause/Recover to members the API refuses (`workspace.manage`); the save button only appeared after opening "Advanced controls"; People, Roles and System health were listed (sidebar and palette) and routable for every role. Mutating endpoints were already permission-checked (verified by route scan).
+Changes: those six reads now require `workspace.manage` (owner/admin); nav items gain `adminOnly` filtered by `canSeeNavItem` in sidebar and palette; `/studio/operations` and `settings/team|roles` are admin-guarded; Autopilot is read-only for non-admins with a plain notice, its worker table moved to System health (admins see a "degraded" banner linking there), Save sits outside the advanced panel.
+Commands: `npm run typecheck` PASS; `npm run build` + `node --test` rbac-matrix 6/6, studio-routes + connector-routes + tenant-isolation 23/23; `ng test` studio-nav.spec 6/6; `npm run build:studio` PASS; e2e `studio-role-separation` 4/4 on the SSR build (editor = real QA login with `/session/me` role rewritten in the browser; API side covered by signed-header matrix).
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PASS · UX/UI PARTIAL (no full progressive-disclosure pass of Settings/Sources; non-admin Autopilot inputs stay editable but cannot be saved) · ACCESSIBILITY PARTIAL (axe not installed) · SECURITY PASS · INTEGRATION PASS · REGRESSION PARTIAL (full `npm test` not run) · PRODUCTION READINESS BLOCKED (no deploy by rule).
+Not done: Operation/PublicationJob/notification status taxonomy unification; session does not expose permissions, so custom roles holding `workspace.manage` without the admin key see the UI as non-admins (API still allows them); independent review (owner instruction).
+
+## STUDIO-11 (2026-11-16) — Integrated GuíaTV journey in safe mode
+Full record: `docs/acceptance/studio-11-integrated-acceptance-2026-11-16.md`. Screenshots: `docs/studio-rebuild/evidence/studio-11/` (1440/1024/390).
+Fixed: sitemap-index sources stored child sitemaps as items (autopilot drafted "sitemap blog.xml" articles); false `qa_failed` while inline images were still rendering (plus the `draft` regression it caused, caught at runtime); `qa-visual-login` on a fresh tenant; flaky onboarding timeout test; stale e2e specs. Golden path (crawl → plan 7×1/7×2 → article + 3 images + QA 89 → draft `draft_synced` on the dry-run destination) PASS; 7×3 partial (18/21, honest).
+Dimension verdicts: IMPLEMENTATION PASS · FUNCTIONALITY PARTIAL · UX/UI PARTIAL · ACCESSIBILITY PARTIAL · SECURITY PASS · INTEGRATION PARTIAL · REGRESSION PARTIAL · PRODUCTION READINESS BLOCKED.
+Not done: real GuíaTV draft (needs owner approval), axe, live specs `production-journey`/`autopilot-golden-path` full journeys, independent review (owner instruction).

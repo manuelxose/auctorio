@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { Site } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { getNumberEnv } from "../../shared/utils/env";
+import { isUtilityUrl } from "./crawler";
 
 const prisma = getPrismaClient();
 
@@ -385,6 +386,7 @@ export async function rebuildSiteProfile(site: Pick<Site, "id" | "tenantId" | "t
   const clusterMap = new Map<string, { pages: string[]; keywords: string[]; type: string }>();
   for (const page of pages) {
     const type = page.contentType ?? "article";
+    if (type === "utility" || isUtilityUrl(page.url)) continue; // legal/info pages are not editorial topics
     const key = type;
     const entry = clusterMap.get(key) ?? { pages: [], keywords: [], type };
     entry.pages.push(page.url);

@@ -46,7 +46,7 @@ async function cleanup(tenantId: string) {
 }
 
 function fakeImageQueue() {
-  setProductionStageOverrides({ requestImage: async () => undefined });
+  setProductionStageOverrides({ requestImage: async () => undefined, requestInlineImages: async () => undefined });
 }
 
 test("ENG-01: plan item and manual requests run the same shared QA/gates stage functions", async () => {
@@ -56,6 +56,7 @@ test("ENG-01: plan item and manual requests run the same shared QA/gates stage f
   const seen: string[] = [];
   setProductionStageOverrides({
     requestImage: async () => undefined,
+    requestInlineImages: async () => undefined,
     qa: async (ctx) => (seen.push(`qa:${ctx.kind}`), defaults.qa(ctx)),
     gates: async (ctx) => (seen.push(`gates:${ctx.kind}`), defaults.gates(ctx)),
   });
@@ -169,6 +170,64 @@ test("a stale queued job is retryable and a concurrent review has one winner", a
     assert.deepEqual(results.map((r) => r.status).sort(), ["fulfilled", "rejected"]);
     const loser = results.find((r): r is PromiseRejectedResult => r.status === "rejected")!;
     assert.equal((loser.reason as { httpStatus?: number }).httpStatus, 409);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("PROD-07a: truncated writer JSON fails the job with a typed code, stores no version, and retry reuses the project", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  let truncate = true;
+  const tokens: Array<number | undefined> = [];
+  setArticleWriterFactory(() => ({
+    generate: async (input) => {
+      tokens.push(input.maxTokens);
+      const good = await new FakeWriter().generate(input);
+      return truncate ? { ...good, output: good.output.slice(0, Math.floor(good.output.length / 2)) } : good;
+    },
+  }));
+  try {
+    const first = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    assert.equal(first.job.status, "failed");
+    assert.equal(first.job.stage, "write");
+    assert.equal(first.job.errorCode, "writer_output_invalid");
+    assert.equal(tokens.length, 2, "one bounded retry");
+    assert.equal(tokens[1], 8000);
+    assert.equal(await prisma.contentVersion.count({ where: { tenantId: f.tenantId } }), 0, "no raw JSON version persisted");
+
+    truncate = false;
+    const retried = await retryProductionJob(f.tenantId, first.job.id, { wait: true });
+    assert.ok(["needs_review", "ready"].includes(retried.status), `${retried.status} ${retried.error}`);
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: f.tenantId } }), 1);
+    const versions = await prisma.contentVersion.findMany({ where: { tenantId: f.tenantId } });
+    assert.equal(versions.length, 1);
+    assert.doesNotMatch(versions[0].bodyHtml ?? "", /"bodyHtml"|^\s*\{/);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("PROD-07b: a Spanish plan item gets Spanish template headings and its approved outline as required H2s", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  const prompts: string[] = [];
+  setArticleWriterFactory(() => ({
+    generate: async (input) => (prompts.push(input.prompt), new FakeWriter().generate(input)),
+  }));
+  try {
+    const run = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    assert.ok(["needs_review", "ready"].includes(run.job.status), `${run.job.status} ${run.job.error}`);
+    const prompt = prompts[0];
+    assert.match(prompt, /\(heading: Que ver primero\) \[required\]/);
+    assert.match(prompt, /\(heading: Para quien es\) \[required\]/);
+    assert.doesNotMatch(prompt, /What you need to know|Key facts|\(heading: Context\)/);
+    assert.match(prompt, /written in Spanish/);
+    const version = await prisma.contentVersion.findFirstOrThrow({ where: { tenantId: f.tenantId } });
+    assert.match(version.bodyHtml ?? "", /<h2>Que ver primero<\/h2>/);
+    const findings = (version.qaReport as { findings: Array<{ key: string; passed: boolean; severity: string }> }).findings;
+    const coverage = findings.find((finding) => finding.key === "outline_coverage");
+    assert.deepEqual([coverage?.passed, coverage?.severity], [true, "error"]);
   } finally {
     await cleanup(f.tenantId);
   }

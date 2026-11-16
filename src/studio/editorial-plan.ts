@@ -78,14 +78,21 @@ type PlanAppendMode = {
 export type UnfilledSlot = { localDate: string; localTime: string; scheduledFor: string; reason: string };
 
 /** Assigns validated briefs to slots in order; the LLM's own scheduledFor is discarded. */
-export function assignBriefsToSlots(items: EditorialPlanBriefV2[], slots: PlanSlot[]): { items: EditorialPlanBriefV2[]; unfilled: UnfilledSlot[] } {
+export function assignBriefsToSlots(items: EditorialPlanBriefV2[], slots: PlanSlot[], dropped: Array<{ reason: string }> = []): { items: EditorialPlanBriefV2[]; unfilled: UnfilledSlot[] } {
+  const counts = new Map<string, number>();
+  for (const entry of dropped) {
+    const key = entry.reason.replace(/\s*[:(].*$/, "").trim().slice(0, 80);
+    if (key) counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const top = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([reason, n]) => `${reason} (x${n})`).join("; ");
+  const reason = `no valid proposal survived validation after bounded top-up retries${top ? `. Main rejections: ${top}` : ""}. Fix: relax exclusions or add sources, then use "Fill missing slots".`;
   return {
     items: items.slice(0, slots.length).map((item, index) => ({ ...item, scheduledFor: slots[index].scheduledFor.toISOString() })),
     unfilled: slots.slice(items.length).map((slot) => ({
       localDate: slot.localDate,
       localTime: slot.localTime,
       scheduledFor: slot.scheduledFor.toISOString(),
-      reason: "no valid proposal survived validation after bounded top-up retries",
+      reason,
     })),
   };
 }
@@ -210,6 +217,11 @@ export function postValidatePlanItems(
     ...context.indexedUrlInventory,
   ]);
 
+  const registryOrigin = new Map<string, { sourceId: string; itemId: string }>();
+  for (const entry of context.evidence) {
+    if (entry.url && entry.sourceId && entry.itemId) registryOrigin.set(entry.url, { sourceId: entry.sourceId, itemId: entry.itemId });
+  }
+
   for (const item of items) {
     const title = item.workingTitle.trim();
 
@@ -241,9 +253,12 @@ export function postValidatePlanItems(
     }
 
     // 5. Evidence URLs must come from the provided evidence set.
-    const validEvidence = (item.sourceEvidence ?? []).map((entry) =>
-      entry.url && !allowedEvidenceUrls.has(entry.url) ? { ...entry, url: undefined } : entry,
-    );
+    const validEvidence = (item.sourceEvidence ?? []).map((entry) => {
+      if (entry.url && !allowedEvidenceUrls.has(entry.url)) return { ...entry, url: undefined };
+      // Immutable provenance: ids come from the registry lookup, never from the model output.
+      const origin = entry.url ? registryOrigin.get(entry.url) : undefined;
+      return origin ? { ...entry, ...origin } : entry;
+    });
     const invented = (item.sourceEvidence ?? []).filter((entry) => entry.url && !allowedEvidenceUrls.has(entry.url)).length;
     if (invented > 0) {
       warnings.push(`stripped ${invented} unverified source url(s) from "${title}"`);
@@ -660,7 +675,7 @@ ${SOURCE_DATA_RULES}`;
 
     await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, attempts, "succeeded");
 
-    const assignment = input.slots?.length ? assignBriefsToSlots(validated.kept, input.slots) : { items: validated.kept, unfilled: [] as UnfilledSlot[] };
+    const assignment = input.slots?.length ? assignBriefsToSlots(validated.kept, input.slots, validated.dropped) : { items: validated.kept, unfilled: [] as UnfilledSlot[] };
     const items = assignment.items;
     const append = input.append;
     const unfilledSlots = [...(append?.keepUnfilled ?? []), ...assignment.unfilled];
@@ -1127,8 +1142,8 @@ async function recordGenerationAttempts(
   });
 }
 
-export async function listEditorialPlans(tenantId: string, page: number, pageSize: number) {
-  const where = { tenantId, status: { not: "archived" as const } };
+export async function listEditorialPlans(tenantId: string, page: number, pageSize: number, siteId?: string) {
+  const where = { tenantId, ...(siteId ? { siteId } : {}), status: { not: "archived" as const } };
   const [total, items] = await prisma.$transaction([
     prisma.editorialPlan.count({ where }),
     prisma.editorialPlan.findMany({

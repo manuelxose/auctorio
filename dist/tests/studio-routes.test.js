@@ -533,3 +533,25 @@ node_test_1.default.after(async () => {
         await cleanupFixture(fixture.tenantId);
     }
 });
+(0, node_test_1.default)("POST /v2/projects/:id/generate refuses unknown presets and parallel runs without starting a job", async () => {
+    const fixture = await createFixture();
+    const server = buildStudioTestServer(fixture.tenantId);
+    try {
+        const unknownPreset = await server.inject({
+            method: "POST",
+            url: `/v2/projects/${fixture.projectId}/generate`,
+            payload: { promptPresetVersionId: "00000000-0000-4000-8000-000000000000" },
+        });
+        strict_1.default.equal(unknownPreset.statusCode, 404);
+        const topic = await prisma.topic.create({ data: { tenantId: fixture.tenantId, title: "t" } });
+        const text = await prisma.contentText.create({ data: { tenantId: fixture.tenantId, topicId: topic.id, type: "seo", language: "es", status: "processing" } });
+        await prisma.contentVersion.update({ where: { id: fixture.versionId }, data: { contentTextId: text.id } });
+        const parallel = await server.inject({ method: "POST", url: `/v2/projects/${fixture.projectId}/generate`, payload: {} });
+        strict_1.default.equal(parallel.statusCode, 409);
+        strict_1.default.equal(await prisma.contentVersion.count({ where: { projectId: fixture.projectId } }), 1, "no second version");
+    }
+    finally {
+        await server.close();
+        await cleanupFixture(fixture.tenantId);
+    }
+});

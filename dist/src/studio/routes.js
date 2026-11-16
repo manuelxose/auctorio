@@ -62,15 +62,20 @@ const views_1 = require("./views");
 const routes_editorial_1 = require("./routes-editorial");
 const routes_connections_1 = require("./routes-connections");
 const routes_connectors_1 = require("./routes-connectors");
+const waitlist_1 = require("./waitlist");
 const routes_operations_1 = require("./routes-operations");
 const routes_phase5_ops_1 = require("./routes-phase5-ops");
 const routes_notifications_1 = require("./routes-notifications");
+const routes_copilot_1 = require("./routes-copilot");
+const routes_ai_1 = require("./routes-ai");
+const routes_admin_1 = require("./routes-admin");
 const routes_events_1 = require("./routes-events");
 const routes_discovery_1 = require("./routes-discovery");
 const routes_site_intelligence_1 = require("./routes-site-intelligence");
 const routes_source_registry_1 = require("./routes-source-registry");
 const routes_intelligence_1 = require("./routes-intelligence");
 const routes_editorial_engine_1 = require("./routes-editorial-engine");
+const routes_production_1 = require("./routes-production");
 const SITE_TYPES = ["guiatv", "tecnoria", "talkaris", "webhook"];
 const PROJECT_GOALS = [
     "article",
@@ -152,7 +157,9 @@ function parsePublicationTargetStatus(value) {
 async function handleReadyCheck() {
     const prisma = (0, prisma_1.getPrismaClient)();
     await prisma.$queryRaw `SELECT 1`;
-    const redis = new ioredis_1.default((0, redis_1.getRedisConnectionOptions)());
+    // The shared options disable the offline queue so a CLI call cannot wait minutes for Redis; a readiness probe
+    // is the opposite case, so it queues the PING until the socket is up (connectTimeout still bounds the wait).
+    const redis = new ioredis_1.default({ ...(0, redis_1.getRedisConnectionOptions)(), enableOfflineQueue: true });
     try {
         await redis.ping();
     }
@@ -298,10 +305,15 @@ function registerStudioRoutes(fastify) {
     (0, routes_source_registry_1.registerSourceRegistryRoutes)(fastify);
     (0, routes_intelligence_1.registerIntelligenceRoutes)(fastify);
     (0, routes_editorial_engine_1.registerEditorialEngineRoutes)(fastify);
+    (0, routes_production_1.registerProductionRoutes)(fastify);
     (0, routes_connectors_1.registerConnectorRoutes)(fastify);
+    (0, waitlist_1.registerWaitlistRoutes)(fastify);
     (0, routes_operations_1.registerOperationRoutes)(fastify);
     (0, routes_phase5_ops_1.registerPhase5OpsRoutes)(fastify);
     (0, routes_notifications_1.registerNotificationRoutes)(fastify);
+    (0, routes_copilot_1.registerCopilotRoutes)(fastify);
+    (0, routes_ai_1.registerAiSettingsRoutes)(fastify);
+    (0, routes_admin_1.registerAdminRoutes)(fastify);
     (0, routes_events_1.registerEventRoutes)(fastify);
     fastify.get("/health/live", async () => ({ status: "ok" }));
     fastify.get("/health/ready", async (_request, reply) => {
@@ -965,8 +977,21 @@ function registerStudioRoutes(fastify) {
         if (!project) {
             return (0, http_utils_1.notFound)(reply, "project not found");
         }
+        if (await (0, orchestration_1.isProjectGenerationInFlight)(context.tenantId, project.id)) {
+            return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
+        }
         const body = (0, http_utils_1.parseBody)(request);
-        const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback ?? null, body.promptPresetVersionId?.trim() || null);
+        const presetVersionId = body.promptPresetVersionId?.trim() || null;
+        // An unknown or foreign preset would otherwise start a real (paid) run that silently ignores it.
+        if (presetVersionId) {
+            const preset = (0, http_utils_1.isUuid)(presetVersionId)
+                ? await prisma.studioPromptVersion.findFirst({ where: { id: presetVersionId, preset: { tenantId: context.tenantId } }, select: { id: true } })
+                : null;
+            if (!preset) {
+                return (0, http_utils_1.notFound)(reply, "prompt preset version not found");
+            }
+        }
+        const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback ?? null, presetVersionId);
         return reply.code(202).send({
             project_id: project.id,
             version_id: result.versionId,
@@ -991,6 +1016,9 @@ function registerStudioRoutes(fastify) {
         const project = await (0, repository_1.getProjectById)(context.tenantId, projectId);
         if (!project) {
             return (0, http_utils_1.notFound)(reply, "project not found");
+        }
+        if (await (0, orchestration_1.isProjectGenerationInFlight)(context.tenantId, project.id)) {
+            return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
         }
         const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback.trim(), null);
         return reply.code(202).send({
@@ -1292,6 +1320,10 @@ function registerStudioRoutes(fastify) {
             : await (0, repository_1.getLatestVersion)(projectId, context.tenantId);
         if (!version) {
             return (0, http_utils_1.notFound)(reply, "version not found");
+        }
+        if (body.kind === "inline") {
+            const contentImageIds = await (0, orchestration_1.requestInlineImagesForVersion)(context.tenantId, version.id);
+            return reply.code(202).send({ version_id: version.id, content_image_ids: contentImageIds, status: "queued" });
         }
         const contentImageId = await (0, orchestration_1.requestImageGenerationForVersion)(context.tenantId, version.id, body.promptPresetVersionId?.trim() || null);
         return reply.code(202).send({

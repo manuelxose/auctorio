@@ -24,11 +24,15 @@ export type SiteSourceRecommendation = {
   score: number;
   status: string;
   sourceId: string | null;
+  /** Workspace-wide web-discovery row (siteId null); accepting it creates a shared source. */
+  shared?: boolean;
 };
 
 export type SiteSource = {
   id: string;
   name: string;
+  /** Feeds every site (siteId null) rather than only the active one. */
+  shared?: boolean;
   url: string;
   type: string;
   state: 'active' | 'paused' | 'archived';
@@ -60,6 +64,14 @@ export type SourceTestResult = { ok: boolean; latencyMs: number; itemCount: numb
 export type SourceItemRow = { id: string; title: string; canonicalUrl: string | null; sourceUrl: string; publishedAt: string | null; processingStatus: string };
 export type SourceDiagnostics = { health: { healthStatus: string; consecutiveFailures?: number } | null; runs: Array<{ id: string; status: string; startedAt: string; errorMessage?: string | null }>; notice: string };
 
+export interface SourceEvidenceRow {
+  title: string;
+  url: string;
+  sourceName: string;
+  publishedAt: string | null;
+  topics: string[];
+}
+
 @Injectable({ providedIn: 'root' })
 export class SourcesApiService {
   private readonly http = inject(HttpClient);
@@ -73,6 +85,9 @@ export class SourcesApiService {
     let params = new HttpParams();
     if (status) params = params.set('status', status);
     return this.http.get<{ items: SiteSourceRecommendation[] }>(`${this.site(siteId)}/source-recommendations`, { params });
+  }
+  evidence(siteId: string, limit = 20): Observable<{ items: SourceEvidenceRow[] }> {
+    return this.http.get<{ items: SourceEvidenceRow[] }>(`${this.site(siteId)}/source-evidence`, { params: new HttpParams().set('limit', limit) });
   }
   discover(siteId: string): Observable<{ operationId: string }> {
     return this.http.post<{ operationId: string }>(`${this.site(siteId)}/source-recommendations/discover`, {});

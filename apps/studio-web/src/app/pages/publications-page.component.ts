@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
@@ -22,7 +22,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
         <div>
           <p class="au-page__eyebrow">Publishing operations</p>
           <h1 class="au-page__title">Publications</h1>
-          <p class="au-page__subtitle">Operational view of every article and social publication.</p>
+          <p class="au-page__subtitle">Every publication of this site: publish now, retry, cancel, unpublish or delete. Dates are changed in Calendar.</p>
         </div>
         <div class="au-page__actions">
           <a class="au-btn au-btn--secondary" routerLink="/studio/calendar">
@@ -31,6 +31,12 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
           </a>
         </div>
       </header>
+
+      <div class="au-banner au-banner--info" *ngIf="projectId">
+        <app-icon name="filter"></app-icon>
+        <span class="au-banner__text">Showing the publications of one article.</span>
+        <a class="au-banner__action" routerLink="/studio/publications">Show all</a>
+      </div>
 
       <div class="au-toolbar">
         <div class="au-search">
@@ -52,10 +58,6 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
         <select class="au-select au-filter-select" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()" aria-label="Filter by state">
           <option value="">All states</option>
           <option *ngFor="let state of states" [ngValue]="state">{{ state }}</option>
-        </select>
-        <select class="au-select au-filter-select" [(ngModel)]="filters.siteId" (ngModelChange)="applyFilters()" aria-label="Filter by site">
-          <option value="">All sites</option>
-          <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
         </select>
         <label class="au-checkbox">
           <input type="checkbox" [(ngModel)]="filters.failed" (ngModelChange)="applyFilters()" />
@@ -134,13 +136,19 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
                       {{ item.externalUrl }}
                       <app-icon name="external"></app-icon>
                     </a>
+                    <span class="au-table__sub" *ngIf="item.status === 'published'">
+                      <span class="au-badge" [class]="item.metadata?.verification?.state === 'verified' ? 'au-badge--success' : 'au-badge--warning'">{{ verificationLabel(item) }}</span>
+                    </span>
                     <span class="au-table__sub" *ngIf="item.lastError">
                       <span class="au-badge au-badge--danger">{{ item.lastError }}</span>
                     </span>
                   </td>
                   <td><span class="au-channel" [class]="'au-channel--' + item.channel">{{ item.channel }}</span></td>
                   <td class="au-nowrap">{{ destination(item) }}</td>
-                  <td><span class="au-badge" [class]="statusClass(item.status)">{{ item.status }}</span></td>
+                  <td>
+                    <span class="au-badge" [class]="statusClass(item.status)">{{ item.status }}</span>
+                    <span class="au-table__sub au-muted" *ngIf="item.failureReason">{{ failureReasonLabel(item.failureReason) }}</span>
+                  </td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.scheduledFor) }}</td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.publishedAt) }}</td>
                   <td class="au-nowrap au-muted">{{ dateLabel(item.updatedAt) }}</td>
@@ -222,14 +230,18 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
             <dt>Status</dt><dd><span class="au-badge" [class]="statusClass(selected.status)">{{ selected.status }}</span></dd>
             <dt>Attempts</dt><dd>{{ selected.attempts?.length || 0 }}</dd>
             <dt>Failure</dt><dd class="au-muted">{{ selected.lastError || 'No failure recorded' }}</dd>
+            <dt>Reason</dt><dd class="au-muted">{{ selected.failureReason ? failureReasonLabel(selected.failureReason) : '—' }}</dd>
+            <dt>Remote record</dt><dd class="au-muted">{{ selected.externalId || 'None yet' }}</dd>
+            <dt>Verification</dt><dd class="au-muted">{{ verificationLabel(selected) }}</dd>
           </dl>
-          <form class="au-mt-3" *ngIf="canEdit(selected)" (ngSubmit)="saveSchedule()">
-            <label class="au-field">
-              <span class="au-field__label">Scheduled time</span>
-              <input class="au-input" type="datetime-local" name="scheduledFor" [(ngModel)]="scheduleDraft" required />
-            </label>
-            <button class="au-btn au-btn--primary au-btn--sm" type="submit" [disabled]="saving">{{ saving ? 'Saving…' : 'Save schedule' }}</button>
-          </form>
+          <!-- Dates have a single home: the calendar. -->
+          <p class="au-mt-3 au-inline">
+            <span>Scheduled for <strong>{{ selected.scheduledFor ? dateLabel(selected.scheduledFor) : 'not scheduled' }}</strong></span>
+            <a *ngIf="canEdit(selected)" class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/calendar">
+              <app-icon name="calendar"></app-icon>
+              Change in Calendar
+            </a>
+          </p>
           <ng-container *ngIf="selected.attempts?.length">
             <h3 class="au-panel__title au-mt-3 au-mb-2">Attempt history</h3>
             <div class="au-row" *ngFor="let attempt of selected.attempts">
@@ -251,19 +263,19 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
 
   states: PublicationState[] = ['draft', 'ready', 'scheduled', 'queued', 'publishing', 'published', 'failed', 'canceled', 'deleted', 'unpublished'];
   items: StudioPublication[] = [];
-  sites: StudioSite[] = [];
   page = 1;
   pageSize = 20;
   total = 0;
   selected: StudioPublication | null = null;
-  scheduleDraft = '';
-  saving = false;
   loading = false;
   error = '';
+  /** ?projectId= (from an article) filters to its publications; ?id= (from Calendar) opens one. */
+  private readonly query = inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap;
+  readonly projectId = this.query?.get('projectId') ?? '';
   filters = {
     channel: '' as '' | PublicationChannel,
     status: '' as '' | PublicationState,
-    siteId: '',
+    siteId: this.appContext.activeSite()?.id ?? '',
     search: '',
     failed: false,
     sort: 'scheduled' as 'scheduled' | 'created' | 'updated',
@@ -276,8 +288,9 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
     this.load();
+    const id = this.query?.get('id');
+    if (id) this.inspect({ id } as StudioPublication);
     this.refreshSubscription = timer(30_000, 30_000).subscribe(() => {
       if (!document.hidden) {
         this.load(true);
@@ -308,6 +321,7 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
         channel: this.filters.channel || undefined,
         status: this.filters.status || undefined,
         siteId: this.filters.siteId || undefined,
+        projectId: this.projectId || undefined,
         search: this.filters.search || undefined,
         failed: this.filters.failed || undefined,
         sort: this.filters.sort,
@@ -337,16 +351,10 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   inspect(item: StudioPublication): void {
-    this.api.getPublication(item.id).subscribe({ next: (publication) => { this.selected = publication; this.scheduleDraft = publication.scheduledFor ? new Date(publication.scheduledFor).toISOString().slice(0, 16) : ''; }, error: () => { this.error = 'Publication details could not be loaded.'; } });
+    this.api.getPublication(item.id).subscribe({ next: (publication) => { this.selected = publication; }, error: () => { this.error = 'Publication details could not be loaded.'; } });
   }
 
   canEdit(item: StudioPublication): boolean { return ['draft', 'ready', 'scheduled', 'failed', 'canceled'].includes(item.status); }
-
-  saveSchedule(): void {
-    if (!this.selected || !this.scheduleDraft) return;
-    this.saving = true;
-    this.api.reschedulePublication(this.selected.id, new Date(this.scheduleDraft).toISOString()).subscribe({ next: (publication) => { this.selected = { ...this.selected!, ...publication }; this.saving = false; this.load(true); }, error: () => { this.saving = false; this.error = 'Publication schedule could not be updated.'; } });
-  }
 
   statusClass(status: string): string {
     switch (status) {
@@ -363,6 +371,30 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
       default:
         return 'au-badge--neutral';
     }
+  }
+
+  verificationLabel(item: StudioPublication): string {
+    const verification = item.metadata?.verification;
+    if (item.status !== 'published') return '—';
+    if (!verification) return 'Remote URL not verified';
+    return verification.state === 'verified' ? 'Remote URL verified' : `Unverified: ${verification.detail}`;
+  }
+
+  failureReasonLabel(reason: string): string {
+    return ({
+      awaiting_retry: 'Retrying automatically',
+      retries_exhausted: 'Retries exhausted',
+      permanent_failure: 'Needs a fix before retry',
+      release_blocked: 'Blocked before release',
+      enqueue_failed: 'Could not be queued',
+      stalled: 'Stalled: check the destination, then retry',
+    } as Record<string, string>)[reason] ?? reason.replace(/_/g, ' ');
+  }
+
+  private blockerMessage(err: unknown): string | null {
+    const message = (err as { error?: { error?: { message?: string } } })?.error?.error?.message ?? '';
+    if (!message.startsWith('release_blocked:')) return null;
+    return `Not released. Fix first: ${message.slice('release_blocked:'.length).split(',').map((code) => code.replace(/_/g, ' ')).join(', ')}.`;
   }
 
   dateLabel(value: string | null): string {
@@ -385,7 +417,8 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
         this.toast.success('Publishing started.');
         this.load(true);
       },
-      error: () => this.toast.error('The publication could not be started.'),
+      // 409 release_blocked:<codes> names what must be fixed before a human release.
+      error: (err) => this.toast.error(this.blockerMessage(err) ?? 'The publication could not be started.'),
     });
   }
 

@@ -5,10 +5,11 @@ import { AppIconComponent } from './ui/app-icon.component';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 
 type ProviderView = { id: string; label: string; description: string; keyEnv: string; configured: boolean; models: string[]; defaultModel: string | null; freeModel: boolean };
-type ProvidersResponse = { selection: { provider: string; model: string } | null; environmentDefault: { provider: string; model: string | null }; providers: ProviderView[] };
+type ProviderGroup = { selection: { provider: string; model: string } | null; environmentDefault: { provider: string; model: string | null }; providers: ProviderView[] };
+type ProvidersResponse = ProviderGroup & { tasks: { task: string; label: string; uses: string[] }[]; image: ProviderGroup };
 type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: number; sample?: string; error?: string };
 
-/** Settings → AI: which provider and model write for this workspace. Keys live in the server env only. */
+/** Settings → AI: which provider and model write (task="text") or draw (task="image") for this workspace. Keys live in the server env only. */
 @Component({
   selector: 'app-ai-provider-settings',
   standalone: true,
@@ -17,20 +18,20 @@ type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: n
     <section class="aip" aria-labelledby="aip-title">
       <div class="aip__head">
         <div>
-          <h3 id="aip-title" class="aip__title">Model used for writing</h3>
-          <p class="aip__sub">Applies to plans, articles, quality repair, social posts and the copilot for this workspace</p>
+          <h3 id="aip-title" class="aip__title">{{ task() === 'image' ? 'Model used for images' : 'Model used for writing' }}</h3>
+          <p class="aip__sub">Used for: {{ uses() }}</p>
         </div>
         @if (current(); as c) {
           <span class="aip__current"><span class="aip__dot"></span>{{ labelOf(c.provider) }} · {{ c.model }}</span>
-        } @else if (data()) {
-          <span class="aip__current is-default">Server default: {{ data()!.environmentDefault.provider }}{{ data()!.environmentDefault.model ? ' · ' + data()!.environmentDefault.model : '' }}</span>
+        } @else if (view()) {
+          <span class="aip__current is-default">Server default: {{ view()!.environmentDefault.provider }}{{ view()!.environmentDefault.model ? ' · ' + view()!.environmentDefault.model : '' }}</span>
         }
       </div>
 
       @if (error()) { <p class="au-error" role="alert">{{ error() }}</p> }
 
       <div class="aip__grid" role="radiogroup" aria-label="Provider">
-        @for (p of data()?.providers ?? []; track p.id) {
+        @for (p of view()?.providers ?? []; track p.id) {
           <button
             type="button"
             role="radio"
@@ -66,9 +67,11 @@ type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: n
             <button class="au-btn au-btn--primary" type="button" (click)="save()" [disabled]="!canEdit() || saving() || !model.trim() || unchanged()">
               {{ saving() ? 'Saving…' : 'Use this model' }}
             </button>
-            <button class="au-btn" type="button" (click)="test()" [disabled]="!canEdit() || testing() || !current()">
-              <app-icon name="activity"></app-icon>{{ testing() ? 'Testing…' : 'Test connection' }}
-            </button>
+            @if (task() === 'text') {
+              <button class="au-btn" type="button" (click)="test()" [disabled]="!canEdit() || testing() || !current()">
+                <app-icon name="activity"></app-icon>{{ testing() ? 'Testing…' : 'Test connection' }}
+              </button>
+            }
           </div>
         </div>
       }
@@ -111,11 +114,14 @@ export class AiProviderSettingsComponent implements OnInit {
   private readonly http = inject(HttpClient);
   private readonly base = `${inject(STUDIO_ORIGIN)}/studio/api/backend/v2/ai`;
   readonly canEdit = input(false);
+  readonly task = input<'text' | 'image'>('text');
 
   readonly data = signal<ProvidersResponse | null>(null);
-  readonly current = computed(() => this.data()?.selection ?? null);
+  readonly view = computed(() => (this.task() === 'image' ? this.data()?.image : this.data()) ?? null);
+  readonly uses = computed(() => this.data()?.tasks.find((t) => t.task === this.task())?.uses.join(', ') ?? '');
+  readonly current = computed(() => this.view()?.selection ?? null);
   readonly provider = signal<string | null>(null);
-  readonly selected = computed(() => this.data()?.providers.find((p) => p.id === this.provider()) ?? null);
+  readonly selected = computed(() => this.view()?.providers.find((p) => p.id === this.provider()) ?? null);
   readonly saving = signal(false);
   readonly testing = signal(false);
   readonly error = signal<string | null>(null);
@@ -126,8 +132,9 @@ export class AiProviderSettingsComponent implements OnInit {
     this.http.get<ProvidersResponse>(`${this.base}/providers`).subscribe({
       next: (response) => {
         this.data.set(response);
-        const chosen = response.selection;
-        const fallback = response.providers.find((p) => p.configured);
+        const group = this.view()!;
+        const chosen = group.selection;
+        const fallback = group.providers.find((p) => p.configured);
         this.provider.set(chosen?.provider ?? fallback?.id ?? null);
         this.model = chosen?.model ?? fallback?.defaultModel ?? fallback?.models[0] ?? '';
       },
@@ -136,7 +143,7 @@ export class AiProviderSettingsComponent implements OnInit {
   }
 
   labelOf(id: string): string {
-    return this.data()?.providers.find((p) => p.id === id)?.label ?? id;
+    return this.view()?.providers.find((p) => p.id === id)?.label ?? id;
   }
 
   unchanged(): boolean {
@@ -153,11 +160,11 @@ export class AiProviderSettingsComponent implements OnInit {
   save(): void {
     this.saving.set(true);
     this.error.set(null);
-    this.http.put<{ selection: { provider: string; model: string } }>(`${this.base}/provider`, { provider: this.provider(), model: this.model.trim() }).subscribe({
+    this.http.put<{ selection: { provider: string; model: string } }>(`${this.base}/${this.task() === 'image' ? 'image-provider' : 'provider'}`, { provider: this.provider(), model: this.model.trim() }).subscribe({
       next: (r) => {
         this.saving.set(false);
-        this.data.update((d) => (d ? { ...d, selection: r.selection } : d));
-        this.test();
+        this.data.update((d) => (d ? (this.task() === 'image' ? { ...d, image: { ...d.image, selection: r.selection } } : { ...d, selection: r.selection }) : d));
+        if (this.task() === 'text') this.test();
       },
       error: (e: HttpErrorResponse) => {
         this.saving.set(false);

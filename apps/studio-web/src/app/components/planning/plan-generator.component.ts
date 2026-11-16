@@ -55,10 +55,9 @@ const list = (value: string) => value.split(',').map((entry) => entry.trim()).fi
       <div class="pg__row">
         <label class="au-field">
           <span class="au-field__label">Site</span>
-          <select class="au-select" name="siteId" [(ngModel)]="siteId" (ngModelChange)="onSite()" required>
-            <option value="" disabled>Select a site</option>
-            <option *ngFor="let site of sites" [value]="site.id">{{ site.name }}</option>
-          </select>
+          <!-- One site at a time: the plan is for the top bar active site. -->
+          <input class="au-input" type="text" [value]="siteName()" readonly aria-readonly="true" />
+          <span class="au-field__hint">Change it in the top bar.</span>
         </label>
         <label class="au-field">
           <span class="au-field__label">From</span>
@@ -174,6 +173,9 @@ export class PlanGeneratorComponent implements OnInit {
   private readonly api = inject(PlanningApiService);
   @Input() sites: StudioSite[] = [];
   @Input() initialSiteId = '';
+  siteName(): string {
+    return this.sites.find((site) => site.id === this.siteId)?.name ?? '';
+  }
   @Input() initialPillar = '';
   @Input() busy = false;
   @Output() generate = new EventEmitter<Record<string, unknown>>();

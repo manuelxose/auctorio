@@ -212,20 +212,5 @@ export function renderBriefForWriter(brief: EditorialBrief): string {
     ...brief.freshnessConstraints.map((constraint) => `- ${constraint}`),
     `Content warnings:`,
     ...(brief.contentWarnings.length ? brief.contentWarnings.map((warning) => `- ${warning}`) : ["- (none)"]),
-    `Structure template:`,
-    ...renderStructureLines(brief),
   ].join("\n");
-}
-
-function renderStructureLines(brief: EditorialBrief): string[] {
-  const spec = getStructureSpec(brief.articleType);
-  const lines = [spec.description, "Sections:"];
-  for (const section of spec.sections) {
-    const heading = section.heading ? ` — H2 «${section.heading}»` : "";
-    const required = section.required ? " (required)" : " (optional)";
-    lines.push(`- ${section.kind}${heading}${required}: ${section.instruction}`);
-  }
-  lines.push(`Conclusion: ${spec.allowsConclusion ? "allowed when it adds value" : "do NOT add a conclusion"}.`);
-  lines.push(`FAQ section: ${spec.allowsFaq ? "only if genuinely useful" : "do NOT force a FAQ"}.`);
-  return lines;
 }

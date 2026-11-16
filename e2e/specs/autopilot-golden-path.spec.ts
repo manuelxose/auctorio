@@ -17,7 +17,8 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 
 const EMAIL = process.env.E2E_EMAIL || "";
 const PASSWORD = process.env.E2E_PASSWORD || "";
-const FEED_URL = process.env.E2E_RSS_FEED_URL || "https://hnrss.org/newest";
+// On-topic for the GuíaTV test site (Spanish TV news); an off-topic feed only proves the relevance filter.
+const FEED_URL = process.env.E2E_RSS_FEED_URL || "https://www.vertele.com/rss/";
 const ALLOW_REAL_PUBLISH = process.env.E2E_ALLOW_REAL_PUBLISH === "1";
 
 type Site = { id: string; key: string; name: string };
@@ -124,6 +125,7 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
             articlesPerDay: previousPolicy.articlesPerDay,
             maxArticlesPerDay: previousPolicy.maxArticlesPerDay,
             maximumQueueSize: previousPolicy.maximumQueueSize,
+            minimumStoryScore: previousPolicy.minimumStoryScore,
             publishingWindows: previousPolicy.publishingWindows,
           },
         })
@@ -136,7 +138,19 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
   });
 
   test("autopilot: source item → automatic project → strict QA → repair/auto-approval → publication without any manual step", async () => {
+    // Text + hero + 3 inline images render in sequence, then approval and scheduling each wait for a control tick.
+    test.setTimeout(1_200_000);
     const suffix = randomSuffix();
+    const startedAt = Date.now();
+
+    // The daily cap counts website publications already planned today (manual ones too):
+    // allow exactly one more so the pipeline has room to create one project.
+    const listed = await api.get(`/studio/api/backend/v2/publications?siteId=${siteId}&channel=website&pageSize=100`);
+    expect(listed.status()).toBe(200);
+    const planned = ((await listed.json()) as { items: Array<{ status: string; scheduledFor: string | null; publishedAt?: string | null }> }).items
+      .filter((pub) => ["draft", "ready", "scheduled", "queued", "publishing", "published", "failed"].includes(pub.status))
+      .filter((pub) => [pub.scheduledFor, pub.publishedAt].some((at) => at && Math.abs(Date.parse(at) - Date.now()) < 24 * 3_600_000)).length;
+    const dailyCap = Math.min(planned + 1, 20);
 
     // 1. Select AUTOPILOT for the site. The API must produce an internally
     // consistent policy (mode + derived flags atomically).
@@ -147,10 +161,9 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
         autoRepair: true,
         maxRepairAttempts: 4,
         socialRequired: false,
-        articlesPerDay: 2,
-        maxArticlesPerDay: 2,
+        articlesPerDay: dailyCap,
+        maxArticlesPerDay: dailyCap,
         maximumQueueSize: 5,
-        minimumStoryScore: 0.01,
         publishingWindows: [{ channel: "website", days: [0, 1, 2, 3, 4, 5, 6], from: "00:00", to: "23:59" }],
       },
     });
@@ -184,14 +197,18 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
 
     // 3. Wait for the automation tick to create an origin=auto project.
     let project: ProjectSummary | null = null;
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    // 150 s: must outlast one control-worker tick (AUTOMATION_INTERVAL_MS, default 120 s).
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       await sleep(5_000);
       const listed = await api.get(
         `/studio/api/backend/v2/projects?origin=auto&siteId=${siteId}&page=1&pageSize=5`,
       );
       expect(listed.status()).toBe(200);
-      const body = (await listed.json()) as { items?: ProjectSummary[] };
-      const candidates = (body.items ?? []).filter((item) => item.automationMode === "autopilot");
+      const body = (await listed.json()) as { items?: Array<ProjectSummary & { createdAt?: string }> };
+      // Only projects this run produced: older autopilot projects would prove nothing.
+      const candidates = (body.items ?? []).filter(
+        (item) => item.automationMode === "autopilot" && Date.parse(item.createdAt ?? "") >= startedAt,
+      );
       if (candidates.length > 0) {
         project = candidates[0]!;
         break;
@@ -204,7 +221,7 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
     // AUTOPILOT project must never sit in "in_review" / Ready for review.
     let sawAutonomousGate = false;
     let sawAutoApproval = false;
-    for (let attempt = 0; attempt < 24; attempt += 1) {
+    for (let attempt = 0; attempt < 144; attempt += 1) {
       await sleep(5_000);
       const current = await getProject(projectId);
       if (current.automationMode === "autopilot" && current.status === "in_review") {
@@ -245,7 +262,7 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
 
     // 5. Scheduling: the approved project must get website publications.
     let publications: ProjectSummary["publications"] = finalProject.publications;
-    for (let attempt = 0; !ALLOW_REAL_PUBLISH && attempt < 10 && publications.length === 0; attempt += 1) {
+    for (let attempt = 0; !ALLOW_REAL_PUBLISH && attempt < 30 && publications.length === 0; attempt += 1) {
       await sleep(5_000);
       publications = (await getProject(projectId)).publications;
     }
@@ -312,7 +329,8 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
     };
     expect(typeof body.redisConfigured).toBe("boolean");
     expect(Array.isArray(body.workers)).toBe(true);
-    expect(body.workers!.some((worker) => worker.name === "automation-worker" || worker.name.includes("automation"))).toBe(true);
+    // The automation tick runs in the single control-plane worker (src/infrastructure/workers/worker-automation.ts).
+    expect(body.workers!.some((worker) => worker.name === "control")).toBe(true);
     expect(Array.isArray(body.policies)).toBe(true);
   });
 

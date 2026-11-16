@@ -52,7 +52,7 @@ npm ci --prefix apps/studio-web
 npm run dev
 ```
 
-Abre http://localhost:4420/studio. El comando crea `.env` si falta, inicia PostgreSQL y Redis, aplica las migraciones y arranca la API y Studio. Pulsa Ctrl+C para detener la aplicación; los contenedores y los datos permanecen disponibles. Para detener los contenedores: `docker compose -f compose.local.yml stop`. La configuración inicial usa proveedores simulados y no crea usuarios: configura el acceso y las credenciales reales en `.env` cuando los necesites. Las tareas en segundo plano necesitan los workers indicados abajo, iniciados por separado con `node --env-file=.env node_modules/ts-node/dist/bin.js scripts/start-worker-<nombre>.ts`.
+Abre http://localhost:4420/studio. El comando crea `.env` si falta, inicia PostgreSQL y Redis, aplica las migraciones y arranca la API y Studio. Pulsa Ctrl+C para detener la aplicación; al salir se libera el puerto 4420 (y un `npm run dev` posterior cierra cualquier Studio que hubiera quedado huérfano). Los contenedores y los datos permanecen disponibles. Para detener los contenedores: `docker compose -f compose.local.yml stop`. La configuración inicial usa proveedores simulados y no crea usuarios: configura el acceso y las credenciales reales en `.env` cuando los necesites. Las tareas en segundo plano necesitan los workers indicados abajo, iniciados por separado con `node --env-file=.env node_modules/ts-node/dist/bin.js scripts/start-worker-<nombre>.ts`.
 
 Comandos individuales:
 

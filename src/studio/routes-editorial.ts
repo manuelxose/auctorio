@@ -42,6 +42,7 @@ import {
   updatePublicationSchedule,
 } from "./publication";
 import { listCalendarEvents } from "./calendar";
+import { getPublicationReleaseReadiness } from "./release-readiness";
 import { computePlanSlotsDetailed, PLAN_SLOT_LEAD_MINUTES, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 import {
   createPlanPreset,
@@ -73,6 +74,7 @@ import {
 import { listAudit } from "./audit";
 import { writeAudit } from "./audit";
 import { computeConnectionState } from "./social-connections";
+import { dedupeLegacyWebsiteAccounts, loadWebsiteDestinations } from "./destination-readiness";
 import { buildAssetPublicUrl } from "./orchestration";
 import {
   bulkApproveEditorialPlanItems,
@@ -597,6 +599,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
 
   // ──────────────────────────────────────────────────────────── Publications
 
+  // A schedule in the past would fire immediately; publish-now is the explicit way to do that.
+  const isPastSchedule = (date: Date | null | undefined) => Boolean(date && date.getTime() < Date.now() - 60_000);
+
   fastify.get("/v2/publications", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
@@ -709,6 +714,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!versionId) {
       return badRequest(reply, "project has no versions");
     }
+    if (isPastSchedule(parseIsoDate(body.scheduledFor))) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
 
     try {
       const publication = await createPublication({
@@ -725,7 +733,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       });
       return reply.code(201).send(publication);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "publication_in_flight" || message.startsWith("invalid_publication_transition")) {
+        return conflict(reply, message);
+      }
+      return badRequest(reply, message);
     }
   });
 
@@ -739,6 +751,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "invalid publication id");
     }
     const body = parseBody<{ scheduledFor?: string; accountId?: string | null }>(request);
+    if (isPastSchedule(parseIsoDate(body.scheduledFor))) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
         scheduledFor: parseIsoDate(body.scheduledFor) ?? undefined,
@@ -791,6 +806,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!scheduledFor) {
       return badRequest(reply, "scheduledFor (ISO date) is required");
     }
+    if (isPastSchedule(scheduledFor)) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
       if (!publication) {
@@ -820,6 +838,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!scheduledFor) {
       return badRequest(reply, "scheduledFor (ISO date) is required");
     }
+    if (isPastSchedule(scheduledFor)) {
+      return badRequest(reply, "scheduled_in_past: pick a future time or use Publish now");
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, { scheduledFor });
       if (!publication) {
@@ -844,9 +865,19 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!isUuid(publicationId)) {
       return badRequest(reply, "invalid publication id");
     }
+    const owned = await prisma.publication.findFirst({ where: { id: publicationId, tenantId: context.tenantId }, select: { id: true } });
+    if (!owned) {
+      return notFound(reply, "publication not found");
+    }
+    // A human release still needs a destination it can reach: surface blockers now, not at the next scheduler tick.
+    const readiness = await getPublicationReleaseReadiness(publicationId, { manual: true });
+    if (!readiness.ready) {
+      return conflict(reply, `release_blocked:${readiness.blockers.join(",")}`);
+    }
     try {
       const publication = await updatePublicationSchedule(context.tenantId, publicationId, {
         scheduledFor: new Date(Date.now() + 1000),
+        auditAction: "publication.release_requested",
       });
       if (!publication) {
         return notFound(reply, "publication not found");
@@ -948,7 +979,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       channel: query.channel as (typeof PUBLICATION_CHANNELS)[number] | undefined,
       siteId: query.siteId,
     });
-    return reply.send({ items: events });
+    // Wall-clock times are shown and entered in the site's timezone; scheduledFor stays UTC.
+    const site = query.siteId && isUuid(query.siteId)
+      ? await prisma.site.findFirst({ where: { id: query.siteId, tenantId: context.tenantId }, select: { timezone: true } })
+      : null;
+    return reply.send({ items: events, timeZone: site?.timezone ?? null });
   });
 
   // ──────────────────────────────────────────────────────────── Social
@@ -1407,7 +1442,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   });
 
   fastify.get("/v2/automation/health", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }
@@ -1455,11 +1490,12 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   fastify.get("/v2/editorial-plans", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) return;
-    const query = request.query as { page?: string; pageSize?: string };
+    const query = request.query as { page?: string; pageSize?: string; siteId?: string };
     return reply.send(await listEditorialPlans(
       context.tenantId,
       parsePage(query.page, 1),
       parsePageSize(query.pageSize, 20),
+      query.siteId && isUuid(query.siteId) ? query.siteId : undefined,
     ));
   });
 
@@ -2158,6 +2194,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const tenantId = context.tenantId;
+    // Optional active-site scope: counts must not present tenant-wide numbers as the active site's.
+    const rawSite = (request.query as { siteId?: string }).siteId;
+    const siteScope =
+      rawSite && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSite) &&
+      (await prisma.site.findFirst({ where: { id: rawSite, tenantId }, select: { id: true } }))
+        ? { siteId: rawSite }
+        : {};
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
@@ -2179,30 +2222,31 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       connections,
       weekPlanItems,
       todayPlanCount,
+      websiteInstallations,
     ] = await Promise.all([
       prisma.publication.count({
-        where: { tenantId, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "website", status: "published", publishedAt: { gte: dayStart, lt: dayEnd } },
+        where: { tenantId, ...siteScope, channel: "website", status: "published", publishedAt: { gte: dayStart, lt: dayEnd } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "x", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "x", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.publication.count({
-        where: { tenantId, channel: "instagram", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
+        where: { tenantId, ...siteScope, channel: "instagram", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
       }),
       prisma.sourceItem.count({ where: { tenantId, processingStatus: "candidate" } }),
-      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["draft", "ai_generated"] } } }),
-      prisma.contentProject.count({ where: { tenantId, deletedAt: null, status: { in: ["in_review", "qa_passed"] } } }),
-      prisma.publication.count({ where: { tenantId, status: { in: ["scheduled", "queued"] } } }),
-      prisma.publication.count({ where: { tenantId, status: "failed" } }),
+      prisma.contentProject.count({ where: { tenantId, ...siteScope, deletedAt: null, status: { in: ["draft", "ai_generated"] } } }),
+      prisma.contentProject.count({ where: { tenantId, ...siteScope, deletedAt: null, status: { in: ["in_review", "qa_passed"] } } }),
+      prisma.publication.count({ where: { tenantId, ...siteScope, status: { in: ["scheduled", "queued"] } } }),
+      prisma.publication.count({ where: { tenantId, ...siteScope, status: "failed" } }),
       prisma.contentSource.findMany({
-        where: { tenantId },
+        where: { tenantId, ...siteScope },
         select: { id: true, name: true, type: true, enabled: true, lastSuccessAt: true, consecutiveFailures: true },
       }),
       prisma.publication.findMany({
-        where: { tenantId, status: { not: "deleted" } },
+        where: { tenantId, ...siteScope, status: { not: "deleted" } },
         orderBy: [{ publishedAt: "desc" }, { createdAt: "desc" }],
         take: 8,
         include: {
@@ -2211,7 +2255,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           account: { select: { id: true, displayName: true } },
         },
       }),
-      getAutomationStatus(tenantId, null),
+      getAutomationStatus(tenantId, siteScope.siteId ?? null),
       prisma.publishingAccount.findMany({
         where: { tenantId },
         orderBy: [{ platform: "asc" }, { displayName: "asc" }],
@@ -2227,12 +2271,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           connectionStatus: true,
           credentialsRef: true,
           lastVerifiedAt: true,
+          siteId: true,
           site: { select: { name: true } },
         },
       }),
       prisma.editorialPlanItem.findMany({
         where: {
           tenantId,
+          ...siteScope,
           scheduledFor: { gte: dayStart, lt: weekEnd },
           status: { notIn: ["canceled", "rejected"] },
         },
@@ -2241,10 +2287,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       prisma.editorialPlanItem.count({
         where: {
           tenantId,
+          ...siteScope,
           scheduledFor: { gte: dayStart, lt: dayEnd },
           status: { notIn: ["canceled", "rejected"] },
         },
       }),
+      // Website destinations (connector_installations) joined with site, probes and last publication.
+      loadWebsiteDestinations(tenantId),
     ]);
 
     return reply.send({
@@ -2274,16 +2323,20 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         warnings: automation.warnings,
         nextSlots: automation.nextSlots.slice(0, 5),
       },
-      connections: connections.map((connection) => ({
-        id: connection.id,
-        platform: connection.platform,
-        displayName: connection.username ? `@${connection.username}` : connection.displayName,
-        enabled: connection.enabled,
-        status: connection.status,
-        connectionState: computeConnectionState(connection as never),
-        lastVerifiedAt: connection.lastVerifiedAt,
-        siteName: connection.site?.name ?? null,
-      })),
+      connections: [
+        ...dedupeLegacyWebsiteAccounts(connections, websiteInstallations).map((connection) => ({
+          id: connection.id,
+          platform: connection.platform,
+          displayName: connection.username ? `@${connection.username}` : connection.displayName,
+          enabled: connection.enabled,
+          status: connection.status,
+          connectionState: computeConnectionState(connection as never),
+          lastVerifiedAt: connection.lastVerifiedAt,
+          siteId: connection.siteId,
+          siteName: connection.site?.name ?? null,
+        })),
+        ...websiteInstallations,
+      ],
       planCoverage: {
         today: todayPlanCount,
         week: {
@@ -2327,7 +2380,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
   // ──────────────────────────────────────────────────────────── Worker health
 
   fastify.get("/v2/health/workers", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
+    const context = await requireStudioPermission(request, reply, "workspace.manage");
     if (!context) {
       return;
     }

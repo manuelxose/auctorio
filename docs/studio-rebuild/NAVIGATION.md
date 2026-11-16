@@ -1,40 +1,41 @@
-# Studio navigation
+# Studio navigation (current, STUDIO-09, 2026-11-15)
 
-## Why the two navigations looked missing (baseline)
+One registry, `apps/studio-web/src/app/layout/studio-nav.ts` (`STUDIO_NAV`), drives the area bar, the contextual sidebar, the step bar / "Next step" footer and the command palette. Each route appears exactly once (unit test `studio-nav.spec.ts`).
 
-Both bars existed in `app-shell.component.ts`, but the design defeated them:
+## Top bar (global)
 
-- The top bar held the **sections as horizontal tabs** (Workspace / Publish / Operate), so it was a second menu, not global chrome.
-- The left "rail" rendered every group but CSS hid all except the active one on desktop (`.au-sidebar .au-nav:not(.is-current) { display: none }`). It showed 3–6 links that duplicated the active tab.
-- Routes outside the three groups (Settings, Notifications) kept showing the previous group's links.
-- No collapse, no persistence, no copilot entry, no search, no job status. Below 861 px the tabs disappeared entirely behind a drawer.
+Sidebar toggle · brand (→ Overview) · site switcher (`AppContextService.switchSite`) · search / command palette (Ctrl/⌘K) · background jobs (live count) · notifications preview · New content (the only "New content" in the shell; Overview no longer repeats it) · account menu (Profile, Appearance, Log out).
 
-Evidence: `evidence/01-baseline-1440.jpg`. The fix replaced the model rather than adding another component: one nav definition (`studio-nav.ts`) drives the sidebar and the palette; the top bar now holds only global context and actions.
+## Area bar (primary)
 
-## Navigation A: top bar
+`Home` · `1 Understand the site` · `2 Sources` · `3 Plan` · `4 Produce` · `5 Publish` · … · `Settings` (pushed to the far end, outside the numbered flow). The active area has `aria-current=page`; on phones the bar scrolls sideways and the active area is scrolled into view on every page activation.
 
-Sidebar toggle · brand · **site switcher** (`AppContextService.switchSite`) · breadcrumb (group › route `studioMeta.title`) · search / command palette (Ctrl/⌘K) · background jobs (live count from `/operations` counts: running+queued+retrying; red dot when only failures) · notifications (existing) · New content split button · account menu (profile, appearance, log out).
+## Contextual sidebar (secondary)
 
-## Navigation B: sidebar
+The active area's tools, then the assistant (embedded by owner decision — the right-hand dock was reverted in `ff50b77`; do not reintroduce it without asking).
 
-Copilot launcher first (Ctrl/⌘J), then six groups, each entry an implemented route:
-
-| Group | Entries |
+| Area | Sidebar entries |
 |---|---|
-| Workspace | Overview, Inbox, Activity |
-| Editorial | Content, Editorial plan, Calendar, Editorial engine, Sources, Media |
-| Intelligence | Competencies (new), Site intelligence |
-| Automation | Autopilot (`/automation`), System health (`/operations`) |
-| Distribution | Publications, Publishing, Connections |
-| System | Notifications, Settings |
+| Home | Overview, Notifications, Background jobs |
+| Understand the site | Site intelligence, Competitors |
+| Sources | Sources, Inbox |
+| Plan | Editorial plan |
+| Produce | Content, Review queue, Media |
+| Publish | Calendar, Publications |
+| Settings | Sites, (admins) People, (admins) Roles, Connections, Web discovery, Autopilot (read-only for non-admins), Assistant tools · (admins) System health · (platform admins) Usage, Workspaces, AI providers |
+| Profile (account menu only) | Profile |
 
-Behaviour: expanded 248 px / collapsed 64 px icon rail with tooltips (hover and keyboard focus); groups fold, and the folded set persists (`localStorage`); collapse state persists, and without a stored preference the rail starts collapsed below 1200 px; Arrow/Home/End move focus between entries; active entry gets the vermilion pencil mark and `aria-current=page`; longest-prefix matching keeps `/studio/content/:id` under Content.
+Platform-admin entries are filtered client-side for display only; the server still enforces access. Since STUDIO-10, `adminOnly` items (People, Roles, System health) are hidden from non-admin workspace roles in the sidebar and the command palette, their routes send non-admins to Overview (`studioRoleGuard` with `requiredRole` / `adminSections`), and the API answers 403 without `workspace.manage` for worker, queue, metrics, cost and preflight reads.
+
+## Keyboard and focus
+
+Ctrl/⌘K palette (Esc closes, focus returns to the trigger) · Ctrl/⌘J toggles the assistant (closing returns focus to the "Assistant" launcher) · Arrow/Home/End move between sidebar entries · phone drawer: focus moves in, Esc/backdrop closes, focus returns to the menu button.
 
 ## Breakpoints
 
-| Width | Sidebar | Copilot |
+| Width | Sidebar | Assistant |
 |---|---|---|
-| ≥ 1200 | persistent, collapsible | docked column 400 px (560 px "wider") |
-| 861–1199 | collapsed rail by default | overlay drawer 440 px with backdrop |
-| ≤ 860 | drawer (focus moves in; Esc/backdrop closes; focus returns to the menu button) | full screen |
-| ≤ 480 | brand hidden, site name truncated | full screen |
+| ≥ 861 | 332 px column, toggle hides it entirely (preference persisted) | lower part of the sidebar; area tools stay on top (max 46 % height, scrolls) |
+| ≤ 860 | drawer | inside the drawer |
+
+Evidence: `evidence/studio-09/` (before vs after at 1440/1024/390), e2e `e2e/specs/studio-shell-nav.spec.ts`.

@@ -133,7 +133,15 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       ...(query.kind ? { kind: query.kind as "website" | "x" | "instagram" } : {}),
       ...(query.state ? { state: query.state as (typeof STATES)[number] } : {}),
     });
-    return reply.send({ items });
+    // Read-only link by normalized origin so unlinked installs show their site; nothing is persisted.
+    const linked = await Promise.all(
+      items.map(async (item) => {
+        const baseUrl = (item.config as { baseUrl?: unknown } | null)?.baseUrl;
+        if (item.siteId || item.kind !== "website" || typeof baseUrl !== "string") return item;
+        return { ...item, siteId: await findSiteIdByOrigin(context.tenantId, baseUrl) };
+      }),
+    );
+    return reply.send({ items: linked });
   });
 
   fastify.post("/v2/connector-installations", async (request, reply) => {

@@ -246,6 +246,7 @@ const PASSING_PROVIDER: RepairProvider = {
       html: [
         "<h2>Destacados de la semana</h2>",
         paragraphs,
+        '<figure><img src="https://example.test/a.webp" alt="Parrilla de la semana" /></figure>'.repeat(3),
         "<h2>Preguntas frecuentes</h2>",
         "<p>¿Cuándo se estrenan los nuevos programas? Consulta los horarios oficiales actualizados.</p>",
         '<p>Más guías: <a href="/guias/streaming">Guías de streaming</a> y <a href="/noticias/tv">Noticias TV</a>.</p>',

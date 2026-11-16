@@ -18,7 +18,7 @@ import { getSourceAdapter } from "./adapters/registry";
 import { newRunKey } from "./discovery-run";
 import { computeSourceUiHealth, listPackCatalog } from "./source-registry";
 import { sanitizeSourceForClient, updateSource } from "./sources";
-import { loadBlockedDomainSet } from "./source-quality";
+import { acceptSourceRecommendation, dismissSourceRecommendation, loadBlockedDomainSet } from "./source-quality";
 import { getWebIntelligenceProvider } from "./web-intelligence";
 import { recordWebUsage } from "./web-discovery";
 import { registerOnboardingStep } from "./onboarding/contracts";
@@ -151,6 +151,48 @@ function trustLevel(candidate: Candidate): "high" | "medium" | "low" | "unassess
   return candidate.packTrust >= 0.8 ? "high" : candidate.packTrust >= 0.6 ? "medium" : "low";
 }
 
+type Level = "high" | "medium" | "low";
+
+/**
+ * Explainable ranking of one recommendation. Pure. A known language that differs from the
+ * site's language lowers relevance a level and the score, so e.g. an English movie feed ranks
+ * below Spanish-market sources for a Spanish TV guide; first-party feeds always rank first.
+ */
+export function rankRecommendation(input: {
+  relationship: "first_party" | "external";
+  topicMatches: number;
+  trust: "high" | "medium" | "low" | "unassessed";
+  verified: boolean;
+  candidateLanguage: string | null;
+  siteLanguage: string;
+  candidateCountry: string | null;
+  siteCountry: string | null;
+}): { relevance: Level; score: number; factors: string[] } {
+  const firstParty = input.relationship === "first_party";
+  let relevance: Level = firstParty ? "high" : input.topicMatches >= 2 ? "high" : input.topicMatches === 1 ? "medium" : "low";
+  let score = (relevance === "high" ? 60 : relevance === "medium" ? 40 : 15) + (input.trust === "high" ? 30 : input.trust === "medium" ? 20 : 5) + (input.verified ? 10 : 0);
+  const factors = [firstParty ? "first-party feed of this site (+20)" : `${input.topicMatches} topic match(es)`, `trust ${input.trust}`, input.verified ? "verified fetch (+10)" : "not verified"];
+  if (firstParty) score += 20;
+  const language = input.candidateLanguage?.slice(0, 2).toLowerCase() ?? null;
+  if (!firstParty && language) {
+    if (language === input.siteLanguage) {
+      score += 10;
+      factors.push(`language ${language} matches the site (+10)`);
+    } else {
+      score -= 35;
+      relevance = relevance === "high" ? "medium" : "low";
+      factors.push(`language ${language} differs from site language ${input.siteLanguage} (-35)`);
+    }
+  } else if (!firstParty) {
+    factors.push("language unknown");
+  }
+  if (!firstParty && input.candidateCountry && input.siteCountry && input.candidateCountry.toUpperCase() === input.siteCountry) {
+    score += 5;
+    factors.push(`country ${input.siteCountry} matches the site (+5)`);
+  }
+  return { relevance, score, factors };
+}
+
 async function collectExternalCandidates(
   tenantId: string,
   site: { id: string; locale: string; baseUrl: string | null },
@@ -257,14 +299,16 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
   const own = await discoverFeedsForUrl({ url: site.baseUrl });
   result.errors.push(...own.errors);
   for (const found of own.candidates) {
-    if (!FEED_TYPES.has(found.type) || (!found.verified && found.method !== "link_alternate")) continue;
+    // A verified full sitemap of the site itself is a valid first-party source (it lists every page, not only news).
+    const ownSitemap = found.type === "sitemap" && found.verified;
+    if ((!FEED_TYPES.has(found.type) && !ownSitemap) || (!found.verified && found.method !== "link_alternate")) continue;
     const canonicalUrl = normalizeCanonicalUrl(found.url);
     if (!canonicalUrl || candidates.has(canonicalUrl)) continue;
     candidates.set(canonicalUrl, {
       url: found.url,
       canonicalUrl,
       domain: siteHost,
-      name: found.title ? `${site.name} · ${found.title}` : `${site.name} · ${found.type === "news_sitemap" ? "news sitemap" : "feed"}`,
+      name: found.title ? `${site.name} · ${found.title}` : `${site.name} · ${found.type === "news_sitemap" ? "news sitemap" : ownSitemap ? "sitemap" : "feed"}`,
       type: found.type,
       category: "first_party",
       relationship: "first_party",
@@ -273,7 +317,7 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
       geography: siteCountry(site.locale),
       packTrust: null,
       seedTopics: [],
-      limitations: found.type === "news_sitemap" ? ["News sitemaps usually list only the last 48 hours of articles"] : [],
+      limitations: found.type === "news_sitemap" ? ["News sitemaps usually list only the last 48 hours of articles"] : ownSitemap ? ["A full sitemap lists every page of the site, not only new articles; it may be an index of child sitemaps"] : [],
     });
   }
   if (vocabulary.length === 0) {
@@ -291,7 +335,17 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
     const sample = check.sample ?? [];
     const topics = Array.from(new Set([...candidate.seedTopics, ...classifyTopics(sample.map((item) => item.title).join(" \n "), vocabulary)]));
     const trust = trustLevel(candidate);
-    const relevance = candidate.relationship === "first_party" ? "high" : topics.length >= 2 ? "high" : topics.length === 1 ? "medium" : "low";
+    const ranking = rankRecommendation({
+      relationship: candidate.relationship,
+      topicMatches: topics.length,
+      trust,
+      verified: check.verified,
+      candidateLanguage: candidate.language,
+      siteLanguage: language,
+      candidateCountry: candidate.geography,
+      siteCountry: siteCountry(site.locale),
+    });
+    const relevance = ranking.relevance;
     const freshness = check.verified ? freshnessFromSample(sample, now) : "unknown";
     const limitations = [...candidate.limitations, REPUBLICATION_NOTICE];
     if (check.verified && check.itemCount === 0) limitations.push("The endpoint parsed but returned no items");
@@ -302,7 +356,7 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
         : `${candidate.discoveryMethod.startsWith("source_pack") ? "Curated source pack entry" : "Web search result"} matching site topics: ${topics.join(", ") || "none measured"}.`;
     const assessment = [
       `Trust ${trust}${candidate.packTrust !== null ? ` (pack trust ${candidate.packTrust})` : ""}.`,
-      `Relevance ${relevance}: ${topics.length} topic match(es) against the site vocabulary.`,
+      `Relevance ${relevance}: ${topics.length} topic match(es) against the site vocabulary. Ranking: ${ranking.factors.join("; ")}.`,
       check.verified ? `Verified: HTTP ${check.status ?? "?"}, ${check.itemCount ?? 0} item(s) parsed.` : `Not verified: ${check.note ?? "unknown error"}.`,
     ].join(" ");
     const data = {
@@ -324,8 +378,8 @@ export async function discoverSourceRecommendations(tenantId: string, siteId: st
       expectedFreshness: freshness,
       limitations: limitations as Prisma.InputJsonValue,
       discoveryMethod: candidate.discoveryMethod,
-      evidence: { httpStatus: check.status, itemCount: check.itemCount, note: check.note, sample: sample.slice(0, 5) } as Prisma.InputJsonValue,
-      score: (relevance === "high" ? 60 : relevance === "medium" ? 40 : 15) + (trust === "high" ? 30 : trust === "medium" ? 20 : 5) + (check.verified ? 10 : 0),
+      evidence: { httpStatus: check.status, itemCount: check.itemCount, note: check.note, sample: sample.slice(0, 5), ranking: ranking.factors } as Prisma.InputJsonValue,
+      score: ranking.score,
     };
     const existing = await prisma.sourceRecommendation.findFirst({ where: { tenantId, siteId, canonicalUrl: candidate.canonicalUrl } });
     if (existing) {
@@ -361,18 +415,38 @@ async function requireSite(tenantId: string, siteId: string) {
   return site;
 }
 
+/**
+ * One recommendation list per site: the site's own rows plus the workspace-wide
+ * web-discovery rows (siteId null), mapped to the same shape and flagged `shared`.
+ * Those use "dismissed" where site rows use "rejected".
+ */
 export async function listSiteSourceRecommendations(tenantId: string, siteId: string, filters: { status?: string; relationship?: string } = {}) {
   await requireSite(tenantId, siteId);
-  return prisma.sourceRecommendation.findMany({
+  const statuses = filters.status === "rejected" ? ["rejected", "dismissed"] : filters.status ? [filters.status] : null;
+  const rows = await prisma.sourceRecommendation.findMany({
     where: {
       tenantId,
-      siteId,
-      ...(filters.status ? { status: filters.status } : {}),
-      ...(filters.relationship ? { relationship: filters.relationship } : {}),
+      // Legacy rows have no relationship; a relationship filter keeps only the site's rows.
+      ...(filters.relationship ? { siteId, relationship: filters.relationship } : { OR: [{ siteId }, { siteId: null }] }),
+      ...(statuses ? { status: { in: statuses } } : {}),
     },
     orderBy: [{ status: "asc" }, { score: "desc" }, { name: "asc" }],
     take: 200,
   });
+  return rows.map((row) =>
+    row.siteId === null
+      ? {
+          ...row,
+          shared: true,
+          status: row.status === "dismissed" ? "rejected" : row.status,
+          name: row.name ?? row.domain,
+          url: row.url ?? `https://${row.domain}`,
+          assessmentReason: row.assessmentReason ?? row.reasonSummary,
+          relationship: row.relationship ?? "external",
+          discoveryMethod: row.discoveryMethod ?? "web_discovery",
+        }
+      : { ...row, shared: false },
+  );
 }
 
 const TRUST_SCORES: Record<string, number> = { high: 0.85, medium: 0.6, low: 0.35, unassessed: 0.5 };
@@ -393,7 +467,15 @@ async function uniqueSourceName(tenantId: string, base: string, siteKey: string)
 /** Accept: create (or reactivate) a ContentSource for the site with provenance. */
 export async function acceptSiteSourceRecommendation(tenantId: string, siteId: string, recommendationId: string, userId: string | null) {
   const site = await requireSite(tenantId, siteId);
-  const recommendation = await prisma.sourceRecommendation.findFirst({ where: { id: recommendationId, tenantId, siteId } });
+  const recommendation = await prisma.sourceRecommendation.findFirst({ where: { id: recommendationId, tenantId, OR: [{ siteId }, { siteId: null }] } });
+  // Workspace-wide web-discovery row: keep its own accept path (creates a shared source).
+  if (recommendation && recommendation.siteId === null) {
+    const accepted = await acceptSourceRecommendation(tenantId, recommendationId);
+    const shared = accepted ? await prisma.contentSource.findFirst({ where: { id: accepted.sourceId, tenantId } }) : null;
+    if (!shared) throw new Error("recommendation_not_found");
+    await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "source.recommendation.accepted", entityType: "content_source", entityId: shared.id, metadata: { recommendationId, siteId, shared: true } });
+    return sanitizeSourceForClient(shared);
+  }
   if (!recommendation || !recommendation.url) throw new Error("recommendation_not_found");
   let source = recommendation.sourceId ? await prisma.contentSource.findFirst({ where: { id: recommendation.sourceId, tenantId } }) : null;
   source ??= await prisma.contentSource.findFirst({ where: { tenantId, siteId, url: recommendation.url } });
@@ -441,7 +523,8 @@ export async function acceptSiteSourceRecommendation(tenantId: string, siteId: s
 
 export async function rejectSiteSourceRecommendation(tenantId: string, siteId: string, recommendationId: string, userId: string | null) {
   const updated = await prisma.sourceRecommendation.updateMany({ where: { id: recommendationId, tenantId, siteId }, data: { status: "rejected" } });
-  if (updated.count === 0) throw new Error("recommendation_not_found");
+  // Not a site row: it may be a workspace-wide web-discovery row, which is dismissed.
+  if (updated.count === 0 && !(await dismissSourceRecommendation(tenantId, recommendationId))) throw new Error("recommendation_not_found");
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "source.recommendation.rejected", entityType: "source_recommendation", entityId: recommendationId, metadata: { siteId } });
   return { ok: true };
 }
@@ -500,11 +583,14 @@ export function sourceLifecycleState(source: Pick<ContentSource, "enabled" | "ar
 
 export async function listSiteSources(tenantId: string, siteId: string, filters: { state?: string; search?: string } = {}) {
   await requireSite(tenantId, siteId);
+  // The site's own sources plus the shared ones (siteId null) that feed every site.
   const sources = await prisma.contentSource.findMany({
     where: {
       tenantId,
-      siteId,
-      ...(filters.search ? { OR: [{ name: { contains: filters.search, mode: "insensitive" } }, { url: { contains: filters.search, mode: "insensitive" } }] } : {}),
+      AND: [
+        { OR: [{ siteId }, { siteId: null }] },
+        ...(filters.search ? [{ OR: [{ name: { contains: filters.search, mode: "insensitive" as const } }, { url: { contains: filters.search, mode: "insensitive" as const } }] }] : []),
+      ],
     },
     include: { health: true, _count: { select: { items: true } } },
     orderBy: [{ priority: "desc" }, { name: "asc" }],
@@ -526,13 +612,14 @@ export async function listSiteSources(tenantId: string, siteId: string, filters:
         lastError: source.lastError,
       });
       const { _count, ...rest } = source;
-      return { ...sanitizeSourceForClient(rest), state, uiHealth: ui, itemsCount: _count.items };
+      return { ...sanitizeSourceForClient(rest), state, uiHealth: ui, itemsCount: _count.items, shared: source.siteId === null };
     })
     .filter((source) => !filters.state || source.state === filters.state);
 }
 
+/** A source the site uses: its own, or a shared one (siteId null). */
 async function requireSiteSource(tenantId: string, siteId: string, sourceId: string) {
-  const source = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId, siteId } });
+  const source = await prisma.contentSource.findFirst({ where: { id: sourceId, tenantId, OR: [{ siteId }, { siteId: null }] } });
   if (!source) throw new Error("source_not_found");
   return source;
 }
@@ -645,7 +732,7 @@ export async function getSiteSourceDiagnostics(tenantId: string, siteId: string,
 
 // ────────────────────────────────────────────────────────────── Planning evidence
 
-export type PlanningSourceEvidence = { title: string; url: string; sourceName: string; publishedAt: string | null; topics: string[] };
+export type PlanningSourceEvidence = { title: string; url: string; sourceName: string; publishedAt: string | null; topics: string[]; sourceId: string; itemId: string };
 
 /**
  * Recent, relevant items from ACTIVE, verified sources of the site (paused and
@@ -669,7 +756,7 @@ export async function getSourceEvidenceForPlanning(tenantId: string, siteId: str
     },
     orderBy: [{ publishedAt: "desc" }, { discoveredAt: "desc" }],
     take: 400,
-    select: { title: true, canonicalUrl: true, sourceUrl: true, publishedAt: true, categories: true, description: true, sourceId: true },
+    select: { id: true, title: true, canonicalUrl: true, sourceUrl: true, publishedAt: true, categories: true, description: true, sourceId: true },
   });
   const byId = new Map(sources.map((source) => [source.id, source]));
   const out: PlanningSourceEvidence[] = [];
@@ -682,7 +769,7 @@ export async function getSourceEvidenceForPlanning(tenantId: string, siteId: str
     const keywordVocabulary = keywords.map((keyword) => ({ name: keyword, terms: [tokenize(keyword).join(" ")].filter(Boolean) }));
     const topics = Array.from(new Set([...classifyTopics(text, vocabulary), ...classifyTopics(text, keywordVocabulary)]));
     if ((vocabulary.length > 0 || keywordVocabulary.length > 0) && topics.length === 0) continue;
-    out.push({ title: item.title, url, sourceName: source.name, publishedAt: item.publishedAt?.toISOString() ?? null, topics });
+    out.push({ title: item.title, url, sourceName: source.name, publishedAt: item.publishedAt?.toISOString() ?? null, topics, sourceId: item.sourceId, itemId: item.id });
     if (out.length >= limit) break;
   }
   return out;

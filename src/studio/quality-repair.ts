@@ -16,8 +16,9 @@ import { getTextProvider } from "../infrastructure/ai/text";
 import { runVersionQaV2, type QaReportV2 } from "./qa";
 import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import { sanitizeEditorialHtml } from "./html-sanitizer";
+import { insertInlineFigure } from "./inline-images";
 import { suggestInternalLinks } from "./internal-linking";
-import { retryImageGeneration } from "./orchestration";
+import { requestInlineImagesForVersion, retryImageGeneration } from "./orchestration";
 import { notifyOperators } from "./notifications";
 import { structuredEvent } from "../shared/utils/logger";
 import type { AutomationMode } from "./automation-mode";
@@ -43,6 +44,7 @@ export type RepairStrategyKind =
   | "image_alt_text"
   | "faq_generate"
   | "image_retry"
+  | "inline_images"
   | "publish_contract_repair";
 
 export type RepairStrategy = {
@@ -90,12 +92,22 @@ const STRATEGY_MAP: Record<string, RepairStrategy> = {
   excerpt_present: { key: "excerpt_generate", label: "Generar el extracto", contentLevel: false },
   readable_paragraphs: { key: "paragraph_restructure", label: "Reestructurar párrafos largos", contentLevel: false },
   image_ready: { key: "image_retry", label: "Reintentar el pipeline de imagen", contentLevel: false },
+  image_presence: { key: "inline_images", label: "Generar las imágenes del cuerpo que faltan", contentLevel: false },
   publish_contract: { key: "publish_contract_repair", label: "Completar campos obligatorios de publicación", contentLevel: false },
   no_placeholders: { key: "generic_cleanup", label: "Sustituir marcadores de posición", contentLevel: true },
 };
 
 /** Findings that cannot be repaired by a targeted strategy and need regeneration. */
 const UNREPAIRABLE_KEYS = new Set(["body_exists", "cannibalization", "version_missing"]);
+
+/** A rewrite must not drop the generated in-body images: put back any figure it lost. */
+function keepInlineFigures(previous: string, next: string): string {
+  let html = next;
+  for (const match of previous.matchAll(/<figure[^>]*data-auctorio-slot=["'](\d+)["'][^>]*>[\s\S]*?<\/figure>/gi)) {
+    html = insertInlineFigure(html, match[0], Number(match[1]));
+  }
+  return html;
+}
 
 export function buildRepairPlan(qaReport: QaReportV2): QualityRepairPlan {
   const failedFindings = (qaReport?.findings ?? [])
@@ -531,6 +543,15 @@ export async function applyRepairPlan(input: RepairApplicationInput): Promise<Re
     }
   }
 
+  if (strategies.has("inline_images")) {
+    try {
+      await requestInlineImagesForVersion(input.tenantId, input.version.id);
+      applied.push("inline_images");
+    } catch {
+      failed.push("inline_images");
+    }
+  }
+
   // 4. One targeted LLM pass for all content-level strategies.
   if (contentStrategyCount(input.plan) > 0) {
     try {
@@ -545,7 +566,7 @@ export async function applyRepairPlan(input: RepairApplicationInput): Promise<Re
       });
 
       if (result.html && result.html !== bodyHtml) {
-        bodyHtml = sanitizeEditorialHtml(result.html);
+        bodyHtml = keepInlineFigures(bodyHtml, sanitizeEditorialHtml(result.html));
         changedFields.add("bodyHtml");
       }
       if (result.title && result.title !== title) {

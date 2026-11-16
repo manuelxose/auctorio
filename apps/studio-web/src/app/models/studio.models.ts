@@ -967,6 +967,8 @@ export type StudioPublication = {
   failureClass: string | null;
   failureReason: string | null;
   manualOverride: boolean;
+  /** metadata.verification is written after a website publish: verified, or failed with a reason. */
+  metadata?: { verification?: { state: 'verified' | 'failed'; detail: string; checkedAt: string } } | null;
   createdAt: string;
   updatedAt: string;
   assetUrl?: string | null;
@@ -1251,6 +1253,10 @@ export type SiteIntelligenceOverview = {
   clusters: Array<{ id: string; name: string; slug: string; pagesCount: number; authorityScore: number; gapScore: number; keywords: unknown; sampleUrls: unknown }>;
   indexing: boolean;
   lastRun: string | null;
+  seoSignals?: Array<{ id: string; label: string; count: number; of: number; samples: string[] }>;
+  opportunitiesBasis?: 'pillars' | 'detected-keywords';
+  opportunities?: Array<{ pillar: string; subtopic: string; reason: string; confidence: 'low' | 'medium' | 'high'; pagesRead: number }>;
+  evidence?: { discovered: number; fetched: number; extracted: number; failed: number; skipped: number; sections: Array<{ family: string; discovered: number; extracted: number }> };
 };
 
 export type SiteIndexedPageRow = {
@@ -1416,7 +1422,13 @@ export type StudioOverview = {
     enabled: boolean;
     status: string;
     connectionState: string | null;
+    readiness?: 'not_verified' | 'ready' | 'stale' | 'error';
+    stage?: 'unconfigured' | 'stored' | 'not_verified' | 'authenticated' | 'read_only' | 'ready' | 'stale' | 'error';
+    reason?: string | null;
+    checks?: { configured: boolean | null; authenticated: boolean | null; reachable: boolean | null; capabilitiesVerified: boolean; canCreateDraft: boolean | null; canPublish: boolean | null };
+    lastSuccessfulPublicationAt?: string | null;
     lastVerifiedAt: string | null;
+    siteId: string | null;
     siteName: string | null;
   }>;
   planCoverage: {

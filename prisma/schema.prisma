@@ -325,6 +325,7 @@ model Tenant {
   updatedAt  DateTime     @updatedAt @map("updated_at")
 
   aiProviderSetting              AiProviderSetting?
+  aiImageSetting                 AiImageSetting?
   copilotThreads                 CopilotThread[]
   copilotMessages                CopilotMessage[]
   topics                         Topic[]
@@ -3041,4 +3042,30 @@ model AiProviderSetting {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("ai_provider_settings")
+}
+
+model AiImageSetting {
+  id              String   @id @default(uuid()) @db.Uuid
+  tenantId        String   @unique @map("tenant_id") @db.Uuid
+  provider        String
+  model           String
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("ai_image_settings")
+}
+
+/// Provider API keys / endpoints entered by a platform admin; value is AES-GCM ciphertext. Overrides the server env.
+model AiProviderKey {
+  id              String   @id @default(uuid()) @db.Uuid
+  envName         String   @unique @map("env_name")
+  ciphertext      String
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("ai_provider_keys")
 }

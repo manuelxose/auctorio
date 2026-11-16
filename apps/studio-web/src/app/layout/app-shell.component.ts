@@ -2,6 +2,7 @@ import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, ElementRef, HostListener, OnDestroy, OnInit, PLATFORM_ID, ViewChild, inject, signal } from '@angular/core';
 import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Subscription, filter, startWith } from 'rxjs';
+import { AdminApiService } from '../services/admin-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
 import { ThemeService } from '../services/theme.service';
@@ -12,7 +13,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { STUDIO_NAV, activeNavItem, type StudioNavGroup } from './studio-nav';
+import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, canSeeNavItem, currentStep, nextStep, type GuidedStep, type StudioNavGroup } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
@@ -87,6 +88,10 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               <span class="au-menu__meta">{{ site.role }}</span>
             </button>
             <div class="au-menu__sep"></div>
+            <a class="au-menu__item" role="menuitem" routerLink="/studio/connections/wizard" (click)="siteMenu.hide()">
+              <app-icon name="plus"></app-icon>
+              Add new site
+            </a>
             <a class="au-menu__item" role="menuitem" routerLink="/studio/settings/sites" (click)="siteMenu.hide()">
               <app-icon name="settings"></app-icon>
               Manage sites
@@ -171,8 +176,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               <div class="au-menu">
                 <div class="au-menu__label au-truncate">{{ session.user.displayName }} · {{ session.role }}</div>
                 <div class="au-menu__label au-menu__label--plain au-truncate">{{ session.user.email }}</div>
-                <a class="au-menu__item" routerLink="/studio/settings/profile" (click)="userMenu.hide()"><app-icon name="user"></app-icon>Profile</a>
-                <a class="au-menu__item" routerLink="/studio/settings/sites" (click)="userMenu.hide()"><app-icon name="settings"></app-icon>Settings</a>
+                <a class="au-menu__item" routerLink="/studio/profile" (click)="userMenu.hide()"><app-icon name="user"></app-icon>Profile</a>
                 <button class="au-menu__item" type="button" (click)="cycleTheme()">
                   <app-icon [name]="themeIcon"></app-icon>
                   Appearance
@@ -189,14 +193,18 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       <!-- Primary navigation: areas -->
       <nav class="au-areas" aria-label="Areas">
         <ul class="au-areas__list">
-          <li *ngFor="let area of nav">
+          <li *ngFor="let area of areas" [class.au-areas__end]="area.end">
             <a
               class="au-areas__item"
               [routerLink]="area.items[0].path"
               [class.is-active]="area.id === activeArea().id"
               [attr.aria-current]="area.id === activeArea().id ? 'page' : null"
             >
-              <app-icon [name]="area.icon"></app-icon>
+              @if (area.step) {
+                <span class="au-step-num" aria-hidden="true">{{ area.step }}</span>
+              } @else {
+                <app-icon [name]="area.icon"></app-icon>
+              }
               <span>{{ area.label }}</span>
             </a>
           </li>
@@ -208,19 +216,24 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
         <nav class="au-sb__nav" [attr.aria-label]="activeArea().label + ' tools'">
           <p class="au-sb__heading">{{ activeArea().label }}</p>
           <ul class="au-sb__list">
-            <li *ngFor="let item of activeArea().items">
-              <a class="au-sb__item" [routerLink]="item.path" routerLinkActive="is-active" ariaCurrentWhenActive="page">
+            <li *ngFor="let item of sidebarItems(); let first = first">
+              <p class="au-sb__heading au-sb__heading--sub" *ngIf="item.heading && !first">{{ item.heading }}</p>
+              <a class="au-sb__item" [routerLink]="item.path" routerLinkActive="is-active" ariaCurrentWhenActive="page" [attr.title]="item.hint || null">
                 <app-icon [name]="item.icon"></app-icon>
-                <span class="au-sb__label">{{ item.label }}</span>
+                <span class="au-sb__label">
+                  @if (stepNumberOf(item.path); as number) { <span class="au-sb__step">{{ number }}</span> }
+                  {{ item.label }}
+                </span>
               </a>
             </li>
           </ul>
         </nav>
 
         @if (copilot.open()) {
-          <section id="studio-copilot" class="au-sb__assistant" aria-label="Assistant">
+          <!-- The panel is the labelled region; a second landmark here would announce "Assistant" twice. -->
+          <div id="studio-copilot" class="au-sb__assistant">
             <app-copilot-panel #panel (closed)="toggleCopilot(false)"></app-copilot-panel>
-          </section>
+          </div>
         } @else {
           <button #copilotLauncher class="au-sb__item au-sb__copilot" type="button" (click)="toggleCopilot(true)" aria-controls="studio-copilot" aria-expanded="false">
             <app-icon name="message"></app-icon>
@@ -236,7 +249,26 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
 
       <main id="studio-main" class="au-main" tabindex="-1">
         <div class="au-content">
-          <router-outlet></router-outlet>
+          @if (step(); as current) {
+            <p class="au-stepbar">
+              <span class="au-stepbar__num">Step {{ current.number }} of {{ stepAreas }}</span>
+              <span class="au-stepbar__area">{{ current.group.label }}</span>
+              <span class="au-stepbar__hint">{{ current.item.hint }}</span>
+            </p>
+          }
+          <!-- Re-created per site so pages reload their data instead of showing the previous site's. -->
+          @for (siteKey of [activeSiteId]; track siteKey) {
+            <router-outlet (activate)="revealActiveArea()"></router-outlet>
+          }
+          @if (next(); as following) {
+            <nav class="au-nextstep" aria-label="Next step">
+              <a class="au-nextstep__link" [routerLink]="following.item.path">
+                <span class="au-nextstep__label">Next step {{ following.number }} · {{ following.item.label }}</span>
+                <span class="au-nextstep__hint">{{ following.item.hint }}</span>
+                <app-icon name="chevron-right"></app-icon>
+              </a>
+            </nav>
+          }
         </div>
       </main>
 
@@ -256,13 +288,21 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly seo = inject(SeoService);
   private readonly appContext = inject(AppContextService);
+  private readonly adminApi = inject(AdminApiService);
   private readonly themeService = inject(ThemeService);
   private readonly api = inject(StudioApiService);
   private readonly sse = inject(SseService);
   private readonly platformId = inject(PLATFORM_ID);
   readonly copilot = inject(CopilotService);
 
-  readonly nav = STUDIO_NAV;
+  readonly areas = STUDIO_NAV.filter((area) => !area.hidden);
+  readonly stepAreas = this.areas.filter((area) => area.step).length;
+  /** Guided-process position of the current route; null outside the flow (settings, home). */
+  readonly step = signal<GuidedStep | null>(null);
+  readonly next = signal<GuidedStep | null>(null);
+  stepNumberOf(path: string): string | null {
+    return GUIDED_STEPS.find((step) => step.item.path === path)?.number ?? null;
+  }
 
   @ViewChild('navToggle') private navToggle?: ElementRef<HTMLButtonElement>;
   @ViewChild('copilotLauncher') private copilotLauncher?: ElementRef<HTMLButtonElement>;
@@ -288,8 +328,14 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private paletteReturnFocus: HTMLElement | null = null;
 
   session: StudioSession | null = null;
-  sites: StudioSite[] = [];
-  activeSiteId: string | null = null;
+  isPlatformAdmin = false;
+  sidebarItems = () => this.activeArea().items.filter((item) => canSeeNavItem(item, this.appContext.role(), this.isPlatformAdmin));
+  get sites(): StudioSite[] {
+    return this.appContext.sites();
+  }
+  get activeSiteId(): string | null {
+    return this.appContext.session()?.activeSiteId ?? this.sites[0]?.id ?? null;
+  }
   loading = true;
   unreadCount = 0;
   notificationPreview: StudioNotification[] = [];
@@ -347,8 +393,11 @@ export class AppShellComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         this.drawerOpen.set(false);
         this.location.set(this.resolveLocation());
-        const match = activeNavItem(this.router.url.split(/[?#]/)[0]);
+        const url = this.router.url.split(/[?#]/)[0];
+        const match = activeNavItem(url);
         if (match) this.activeArea.set(match.group);
+        this.step.set(currentStep(url));
+        this.next.set(nextStep(url));
       });
 
     void this.bootstrap();
@@ -390,6 +439,12 @@ export class AppShellComponent implements OnInit, OnDestroy {
     }
     this.collapsed.set(!this.collapsed());
     localStorage.setItem(COLLAPSE_KEY, this.collapsed() ? '1' : '0');
+  }
+
+  /** Phones scroll the area bar sideways; keep the current area in view. */
+  // Runs on page activation: the shell view can be rebuilt after boot, which drops an earlier scroll.
+  revealActiveArea(): void {
+    if (isPlatformBrowser(this.platformId)) setTimeout(() => document.querySelector('.au-areas__item.is-active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }));
   }
 
   closeDrawer(): void {
@@ -563,9 +618,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
     try {
       const session = await this.appContext.ensureSession();
       this.session = session;
-      this.sites = session?.sites ?? [];
-      this.activeSiteId = session?.activeSiteId ?? this.sites[0]?.id ?? null;
       this.loading = false;
+      this.adminApi.me().subscribe({ next: (r) => (this.isPlatformAdmin = r.isPlatformAdmin), error: () => undefined });
       this.watchLiveUpdates();
       this.seo.update({
         title: 'Auctorio',
@@ -594,8 +648,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
     if (siteId === this.activeSiteId) return;
     const session = await this.appContext.switchSite(siteId);
     this.session = session;
-    this.sites = session?.sites ?? [];
-    this.activeSiteId = session?.activeSiteId ?? null;
   }
 
   cycleTheme(): void {

@@ -8,12 +8,12 @@ const redis_1 = require("../queue/redis");
 const repository_1 = require("../../studio/repository");
 const publishers_1 = require("../../studio/publishers");
 const orchestration_1 = require("../../studio/orchestration");
-const env_1 = require("../../shared/utils/env");
 const prisma_1 = require("../db/prisma");
 const operation_hooks_1 = require("./operation-hooks");
 const worker_runtime_1 = require("./worker-runtime");
 const metrics_1 = require("../../studio/metrics");
 const publication_1 = require("../../studio/publication");
+const redis_2 = require("../queue/redis");
 const prisma = (0, prisma_1.getPrismaClient)();
 const defaultDependencies = {
     getPublicationJobById: repository_1.getPublicationJobById,
@@ -73,8 +73,20 @@ async function processPublishingJob(publicationJobId, dependencies = defaultDepe
         status: "processing",
     });
     await dependencies.updateProjectStatus(publication.tenantId, publication.projectId, "publish_queued");
-    const externalId = await dependencies.getLatestPublishedExternalId(publication.tenantId, publication.siteId, publication.projectId);
-    const result = await runPublisherAction(publication, externalId, dependencies);
+    // A failed attempt that already created the remote record left its id on this
+    // job; reusing it makes the retry finish that record instead of creating another.
+    const externalId = (await dependencies.getLatestPublishedExternalId(publication.tenantId, publication.siteId, publication.projectId)) ?? publication.externalId ?? null;
+    let result;
+    try {
+        result = await runPublisherAction(publication, externalId, dependencies);
+    }
+    catch (error) {
+        const remoteId = error.externalId;
+        if (typeof remoteId === "string" && remoteId && !externalId) {
+            await dependencies.updatePublicationJob(publication.id, { status: "failed", externalId: remoteId });
+        }
+        throw error;
+    }
     const status = resolvePublicationStatus(publication, result);
     await dependencies.updatePublicationJob(publication.id, {
         status,
@@ -147,11 +159,7 @@ async function syncDurablePublication(publicationJobId, jobStatus, result, exter
     }
 }
 async function runPublishingWorker() {
-    const redisUrl = (0, env_1.getEnv)("REDIS_URL", "");
-    if (!redisUrl) {
-        console.warn("[worker:publishing] REDIS_URL is missing; worker not started");
-        return;
-    }
+    (0, redis_2.assertRedisConfigured)();
     const worker = new bullmq_1.Worker(queues_1.QUEUE_NAMES.publishing, async (job) => {
         const data = job.data;
         await processPublishingJob(data.publicationJobId);

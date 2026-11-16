@@ -6,12 +6,13 @@
 
 import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
+import { structuredEvent } from "../../shared/utils/logger";
 import { sanitizeEditorialHtml } from "../html-sanitizer";
 import { getOrCreatePolicy } from "../automation";
 import { createPublication, enqueuePublication } from "../publication";
 import { writeAudit } from "../audit";
 import { runVersionQaV2 } from "../qa";
-import { requestImageGenerationForVersion } from "../orchestration";
+import { requestImageGenerationForVersion, requestInlineImagesForVersion } from "../orchestration";
 import { buildFactSafetyReport, hasCopyrightWarningCues, type FactSafetyReport } from "../editorial-engine/fact-safety";
 import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editorial-engine/duplicate-check";
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
@@ -22,7 +23,7 @@ import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
 import { buildClusterBrief, enrichmentKnowledgeOf, prepareClusterInput } from "../editorial-engine/cluster-production";
 import type { SeoPackage } from "../editorial-engine/types";
-import { buildPlanBrief, prepareManualInput, preparePlanItemInput } from "./plan-item";
+import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput } from "./plan-item";
 import {
   ProductionStop,
   type BriefArtifact,
@@ -97,7 +98,7 @@ async function brief(ctx: StageContext): Promise<BriefArtifact> {
   return buildPlanBrief(ctx.input, factSafety, ctx.now);
 }
 
-/** The writer returns a JSON envelope (HTML body, claims, SEO); too tight a cap truncates it and parseWriterOutput silently falls back to raw text. */
+/** The writer returns a JSON envelope (HTML body, claims, SEO); too tight a cap truncates it and the write stage fails instead of storing it. */
 export function writerMaxTokens(targetWordMax: number): number {
   return Math.min(8000, Math.max(3000, Math.round(targetWordMax * 5)));
 }
@@ -114,6 +115,7 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     updateDelta: briefArtifact.updateDelta,
     language: ctx.input.language,
     editorialGuidance: briefArtifact.guidance,
+    plannedOutline: outlineHeadings(ctx.input.plan?.record ?? {}),
   });
   await updateGeneration(ctx, {
     status: "generating",
@@ -125,18 +127,26 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     factLicenses: factSafety.licenses as unknown as Prisma.InputJsonValue,
     writerPrompt: writerPrompt.userPrompt,
   });
-  const maxTokens = writerMaxTokens(briefArtifact.brief.targetLengthRange.max);
-  const result = await getArticleWriter().generate({
-    prompt: writerPrompt.userPrompt,
-    systemPrompt: writerPrompt.systemPrompt,
-    maxTokens,
-    language: ctx.input.language,
-  });
-  const parsed = parseWriterOutput(result.output);
-  // Editorial HTML is allowlist-sanitized before anything is stored.
-  parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
-  await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
-  return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
+  // One bounded retry at the token ceiling: a truncated envelope is the usual cause.
+  const attempts = [writerMaxTokens(briefArtifact.brief.targetLengthRange.max), 8000];
+  for (let attempt = 0; attempt < attempts.length; attempt++) {
+    const result = await getArticleWriter().generate({
+      prompt: writerPrompt.userPrompt,
+      systemPrompt: writerPrompt.systemPrompt,
+      maxTokens: attempts[attempt],
+      language: ctx.input.language,
+    });
+    await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
+    const parsed = parseWriterOutput(result.output);
+    if (parsed) {
+      // Editorial HTML is allowlist-sanitized before anything is stored.
+      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
+      return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
+    }
+    structuredEvent("production.writer_output_invalid", { jobId: ctx.jobId, attempt: attempt + 1, maxTokens: attempts[attempt], outputChars: result.output.length }, "warn");
+  }
+  // Nothing is materialized: the raw output stays on the generation record only, never in a ContentVersion.
+  throw new Error(`writer_output_invalid: the writer did not return a complete JSON article after ${attempts.length} attempts (likely truncated). Retry the job; if it persists, shorten the target length or switch the AI provider.`);
 }
 
 async function seo(ctx: StageContext): Promise<SeoPackage> {
@@ -166,6 +176,8 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
     entityNames: input.entities.map((entity) => entity.name),
     enrichmentKnowledge: enrichmentKnowledgeOf(input.enrichments),
     enrichmentDates: input.enrichments.map((enrichment) => enrichment.releaseDate).filter((date): date is string => Boolean(date)),
+    plannedOutline: outlineHeadings(input.plan?.record ?? {}),
+    language: input.language,
   });
   const record = input.plan?.record ?? {};
   const overlap = ctx.kind !== "cluster" && duplicate.similarity >= 0.6;
@@ -178,6 +190,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         contentType: record.contentType ?? null,
         primaryIntent: record.primaryIntent ?? record.searchIntent ?? briefArtifact.brief.searchIntent,
         primaryKeyword: briefArtifact.brief.primaryKeyword,
+        outline: record.outline ?? [],
       },
       siteType: input.site.type,
       recommendedWordCountMin: briefArtifact.brief.targetLengthRange.min,
@@ -245,6 +258,8 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   let projectId = input.ownProjectId ?? jobProject?.id ?? (duplicate.decision === "update_existing" ? duplicate.targetProjectId : null);
   const existing = projectId ? await prisma.contentProject.findFirst({ where: { id: projectId, tenantId: ctx.tenantId } }) : null;
   if (!existing) projectId = null;
+  // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
+  const sourceOrigins = input.ledgerFacts.flatMap((fact) => (fact.origin ? [{ ...fact.origin, url: fact.sourceUrl }] : [])).slice(0, 40);
 
   if (!existing) {
     const firstItem = input.cluster
@@ -260,13 +275,14 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
         status: "draft",
         primaryLanguage: input.language,
         clusterId: input.cluster?.id ?? null,
-        sourceItemId: firstItem?.id ?? null,
+        sourceItemId: firstItem?.id ?? sourceOrigins[0]?.itemId ?? null,
         origin: ctx.kind === "cluster" ? "editorial_engine" : "manual",
         metadata: {
           generationId: ctx.generationId,
           productionJobId: ctx.jobId,
           articleType: duplicate.decision === "update_existing" ? "article_update" : "create_new",
           provenance: gate.provenance.slice(0, 40),
+          ...(sourceOrigins.length ? { sourceOrigins } : {}),
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
       },
@@ -283,6 +299,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           lastGenerationId: ctx.generationId,
           productionJobId: ctx.jobId,
           provenance: gate.provenance.slice(0, 40),
+          ...(sourceOrigins.length ? { sourceOrigins } : {}),
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),
         } as Prisma.InputJsonValue,
@@ -323,6 +340,14 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   }
 
   if (input.cluster) {
+    // Engine drafts keep their editorial QA (no hero), but still get in-body images unless already published.
+    if (!result.publicationId) {
+      try {
+        await productionStages.requestInlineImages(ctx.tenantId, version.id);
+      } catch (error) {
+        result.imageRequestError = (error instanceof Error ? error.message : String(error)).slice(0, 400);
+      }
+    }
     if (input.cluster.status === "open") {
       await prisma.storyCluster.update({ where: { id: input.cluster.id }, data: { status: "selected" } });
     }
@@ -359,6 +384,10 @@ const defaultStages = {
   materialize,
   requestImage: async (tenantId: string, versionId: string): Promise<void> => {
     await requestImageGenerationForVersion(tenantId, versionId);
+    await requestInlineImagesForVersion(tenantId, versionId);
+  },
+  requestInlineImages: async (tenantId: string, versionId: string): Promise<void> => {
+    await requestInlineImagesForVersion(tenantId, versionId);
   },
 };
 

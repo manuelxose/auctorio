@@ -16,6 +16,8 @@ import {
   acceptSiteSourceRecommendation,
   discoverSourceRecommendations,
   getSourceEvidenceForPlanning,
+  listSiteSourceRecommendations,
+  listSiteSources,
   rejectSiteSourceRecommendation,
   setSiteSourceState,
   testSiteSource,
@@ -94,7 +96,7 @@ function installFetch(): () => void {
     const route = ROUTES[url];
     if (route) return new Response(route.body, { status: 200, headers: { "content-type": route.type } });
     if (host === SITE && /\/(electric|cycling)/.test(new URL(url).pathname)) {
-      return new Response(`<html><body><main><a href="https://${RIVAL}/review">rival</a> <a href="https://facebook.com/x">fb</a></main></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+      return new Response(`<html><body><main><a href="https://${RIVAL}/review">rival</a> <a href="https://facebook.com/x">fb</a> <a href="https://wa.me/34600000000">chat</a> <a href="https://web-agency-credit.example/">site by</a></main></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
     }
     void init;
     return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
@@ -237,6 +239,30 @@ test("SRC-02: accept/pause/resume/archive change ingestion and planning evidence
   }
 });
 
+test("SRC-03: the site view merges shared sources and workspace-wide recommendations", async () => {
+  const { tenant, site } = await seed("src03");
+  const shared = await prisma.contentSource.create({ data: { tenantId: tenant.id, name: "Shared wire", type: "rss", url: `https://${RIVAL}/feed/` } });
+  const legacy = await prisma.sourceRecommendation.create({ data: { tenantId: tenant.id, domain: "wire.example.org", score: 80, reasonSummary: "Cited by peers" } });
+  const dismissed = await prisma.sourceRecommendation.create({ data: { tenantId: tenant.id, domain: "noise.example.org", score: 20 } });
+
+  const sources = await listSiteSources(tenant.id, site.id);
+  assert.equal(sources.find((source) => source.id === shared.id)?.shared, true, "shared sources appear in every site's list");
+
+  const recommendations = await listSiteSourceRecommendations(tenant.id, site.id);
+  const mapped = recommendations.find((row) => row.id === legacy.id);
+  assert.ok(mapped && mapped.shared, "workspace-wide recommendations appear in the site list");
+  assert.equal(mapped.url, "https://wire.example.org");
+  assert.equal(mapped.assessmentReason, "Cited by peers");
+
+  await rejectSiteSourceRecommendation(tenant.id, site.id, dismissed.id, null);
+  assert.equal((await prisma.sourceRecommendation.findUnique({ where: { id: dismissed.id } }))?.status, "dismissed", "legacy rows keep their own dismiss state");
+  assert.ok((await listSiteSourceRecommendations(tenant.id, site.id, { status: "rejected" })).some((row) => row.id === dismissed.id));
+
+  const accepted = (await acceptSiteSourceRecommendation(tenant.id, site.id, legacy.id, null)) as { id: string; siteId: string | null };
+  assert.equal(accepted.siteId, null, "accepting a workspace-wide recommendation creates a shared source");
+  assert.equal((await prisma.sourceRecommendation.findUnique({ where: { id: legacy.id } }))?.status, "accepted");
+});
+
 test("CMP-01: competitor accept/edit/remove keeps evidence; Add to plan creates exactly one linked proposal", async () => {
   const restoreFetch = installFetch();
   try {
@@ -250,6 +276,7 @@ test("CMP-01: competitor accept/edit/remove keeps evidence; Add to plan creates 
     assert.ok(evidence.some((entry) => entry.kind === "outbound_link"));
     assert.ok(evidence.some((entry) => entry.kind === "feed_fetched"));
     assert.equal(await prisma.competitor.count({ where: { siteId: site.id, domain: "facebook.com" } }), 0, "platforms are never competitors");
+    assert.equal(await prisma.competitor.count({ where: { siteId: site.id, domain: { in: ["wa.me", "web-agency-credit.example"] } } }), 0, "chat links and unverifiable footer credits are never shortlisted");
     const mention = await prisma.competitor.findUnique({ where: { siteId_domain: { siteId: site.id, domain: "rival-bikes.com" } } });
     assert.ok(mention, "content mention becomes a candidate");
     assert.equal(mention.verification, "speculative", "unreachable candidates stay speculative");

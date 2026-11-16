@@ -22,7 +22,7 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
         <div>
           <p class="au-page__eyebrow">Editorial production</p>
           <h1 class="au-page__title">Content</h1>
-          <p class="au-page__subtitle">Every article across your sites, in one workflow.</p>
+          <p class="au-page__subtitle">Every article for this site, from draft to published.</p>
         </div>
         <div class="au-page__actions">
           <a class="au-btn au-btn--primary" routerLink="/studio/content/new">
@@ -55,10 +55,6 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
             (keyup.enter)="applyFilters()"
           />
         </div>
-        <select class="au-select au-filter-select" [(ngModel)]="filters.siteId" (ngModelChange)="applyFilters()" aria-label="Filter by site">
-          <option value="">All sites</option>
-          <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-        </select>
         <select class="au-select au-filter-select" [(ngModel)]="filters.origin" (ngModelChange)="applyFilters()" aria-label="Filter by origin">
           <option value="">All origins</option>
           <option value="manual">Manual</option>
@@ -221,10 +217,6 @@ import { CONTENT_FILTERS, contentFilterOf, formatRelativeTime, stageLabel, stage
                           <app-icon name="copy"></app-icon>
                           Duplicate
                         </button>
-                        <button class="au-menu__item" type="button" *ngIf="item.reviewGate.approvalReady && !showArchived && item.automationMode !== 'autopilot'" (click)="rowMenu.hide(); approveOne(item)">
-                          <app-icon name="circle-check"></app-icon>
-                          Approve
-                        </button>
                         <div class="au-menu__sep"></div>
                         <button class="au-menu__item is-danger" type="button" *ngIf="!showArchived" (click)="rowMenu.hide(); removeOne(item)">
                           <app-icon name="trash"></app-icon>
@@ -263,7 +255,6 @@ export class ContentListPageComponent implements OnInit {
   projectStatuses: ProjectStatus[] = ['draft', 'ai_generated', 'qa_failed', 'qa_passed', 'in_review', 'approved', 'publish_queued', 'published', 'publish_failed'];
   quickFilters = CONTENT_FILTERS;
   items: StudioProjectSummary[] = [];
-  sites: StudioSite[] = [];
   page = 1;
   pageSize = 20;
   total = 0;
@@ -271,7 +262,7 @@ export class ContentListPageComponent implements OnInit {
   loading = false;
   selectedIds = new Set<string>();
   filters = {
-    siteId: '',
+    siteId: this.appContext.activeSite()?.id ?? '',
     status: 'all' as string,
     origin: '',
     search: '',
@@ -286,7 +277,6 @@ export class ContentListPageComponent implements OnInit {
   }
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
     this.load();
   }
 
@@ -440,16 +430,6 @@ export class ContentListPageComponent implements OnInit {
         this.selectedIds.add(item.id);
       }
     }
-  }
-
-  approveOne(item: StudioProjectSummary): void {
-    this.api.approveProject(item.id).subscribe({
-      next: () => {
-        this.toast.success('Piece approved.');
-        this.load();
-      },
-      error: () => this.toast.error('The piece could not be approved.'),
-    });
   }
 
   duplicateOne(item: StudioProjectSummary): void {

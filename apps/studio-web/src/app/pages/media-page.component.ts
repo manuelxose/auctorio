@@ -31,10 +31,6 @@ import { formatRelativeTime } from '../utils/content-status';
           <button class="au-segmented__item" [class.is-active]="statusFilter === 'done'" type="button" (click)="setStatus('done')">Ready</button>
           <button class="au-segmented__item" [class.is-active]="statusFilter === 'failed'" type="button" (click)="setStatus('failed')">Failed</button>
         </div>
-        <select class="au-select au-filter-select" [(ngModel)]="siteFilter" (ngModelChange)="load()" aria-label="Filter by site">
-          <option value="">All sites</option>
-          <option *ngFor="let site of sites" [ngValue]="site.id">{{ site.name }}</option>
-        </select>
         <label class="au-checkbox">
           <input type="checkbox" [(ngModel)]="unusedOnly" (ngModelChange)="load()" />
           Unused only
@@ -128,7 +124,6 @@ export class MediaPageComponent implements OnInit {
   private readonly toast = inject(ToastService);
 
   items: StudioMediaItem[] = [];
-  sites: StudioSite[] = [];
   siteFilter = '';
   statusFilter = '';
   unusedOnly = false;
@@ -137,7 +132,6 @@ export class MediaPageComponent implements OnInit {
   selected: StudioMediaItem | null = null;
 
   ngOnInit(): void {
-    this.sites = this.appContext.sites();
     this.siteFilter = this.appContext.activeSite()?.id ?? '';
     this.load();
   }

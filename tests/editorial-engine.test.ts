@@ -43,6 +43,12 @@ import {
 } from "../src/studio/editorial-engine/writer-provider";
 import { FakeWriter } from "./support/fake-editorial-writer";
 import { generateArticleFromCluster } from "../src/studio/editorial-engine/orchestrator";
+import { getStructureSpec, renderStructureSpec } from "../src/studio/editorial-engine/structure";
+import { missingOutlineHeadings, runVersionQaV2 } from "../src/studio/qa";
+import { setProductionStageOverrides } from "../src/studio/production/stages";
+
+// No image queue in these scenarios: engine drafts would otherwise queue their in-body images for real.
+setProductionStageOverrides({ requestInlineImages: async () => undefined });
 import type {
   FactLicense,
   LedgerFact,
@@ -413,10 +419,13 @@ test("writer prompt: embeds originality rules, fact ledger and structure; parser
       claims: [{ text: "c", factKey: "headline", attributionRequired: false }],
     })}\n\`\`\``,
   );
-  assert.equal(parsed.title, "T");
-  assert.equal(parsed.claims.length, 1);
+  assert.equal(parsed?.title, "T");
+  assert.equal(parsed?.claims.length, 1);
 
   assert.equal(extractJsonObject("plain text with no json"), null);
+  // PROD-07: malformed/truncated envelopes are rejected, never turned into a body.
+  assert.equal(parseWriterOutput('{"title":"T","bodyHtml":"<h2>A</h2><p>trunc'), null);
+  assert.equal(parseWriterOutput("plain prose without json"), null);
 });
 
 test("SEO package: deterministic slug, no invented volume, stuffing detection", () => {
@@ -1024,4 +1033,22 @@ test("classifier override seam: deterministic tests can inject an override", () 
   } finally {
     setClassifierOverride(null);
   }
+});
+
+test("PROD-07c: structure template is localized; QA v2 blocks a body missing approved outline sections", () => {
+  const spec = getStructureSpec("evergreen_explainer");
+  assert.match(renderStructureSpec(spec, "es"), /\(heading: Lo que necesitas saber\) \[required\]/);
+  assert.match(renderStructureSpec(spec, "en"), /\(heading: What you need to know\) \[required\]/);
+  const outlined = renderStructureSpec(spec, "es", ["Dónde ver la serie", "Reparto"]);
+  assert.doesNotMatch(outlined, /Lo que necesitas saber|Datos clave/);
+  assert.match(outlined, /\(heading: Dónde ver la serie\) \[required\]/);
+
+  assert.deepEqual(missingOutlineHeadings(["Dónde ver la serie", "Reparto principal"], "<h2>Donde ver la serie hoy</h2><h2>Otros</h2>"), ["Reparto principal"]);
+  const report = runVersionQaV2(
+    { title: "Guía de series de misterio para ver hoy", excerpt: "e", bodyHtml: "<h2>Otra cosa</h2><p>texto</p>", seoTitle: "s", seoDescription: "d" },
+    { imageReady: true, metadata: { outline: [{ heading: "Reparto principal" }] } },
+  );
+  const coverage = report.findings.find((finding) => finding.key === "outline_coverage");
+  assert.equal(coverage?.passed, false);
+  assert.match(coverage?.message ?? "", /Reparto principal/);
 });

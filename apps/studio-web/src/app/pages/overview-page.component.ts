@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Subscription, forkJoin, of, timer } from 'rxjs';
 import { catchError, switchMap } from 'rxjs/operators';
@@ -18,6 +18,8 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
  * Overview: what Auctorio did and will do for the active site, what is still needed to run
  * on autopilot, and what it learned about the site. Every figure comes from the API.
  */
+const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verified: 'Not verified', authenticated: 'Authenticated', read_only: 'Read-only', ready: 'Ready', stale: 'Stale', error: 'Error' } as const;
+
 @Component({
   selector: 'app-overview-page',
   standalone: true,
@@ -32,7 +34,6 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
             <span class="ov__dot" aria-hidden="true"></span>{{ headline().text }}
           </p>
         </div>
-        <a class="au-btn au-btn--primary" routerLink="/studio/content/new"><app-icon name="plus"></app-icon>New content</a>
       </header>
 
       @for (alert of attentionItems(); track alert.title) {
@@ -45,11 +46,11 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
 
       <dl class="ov__kpis" aria-label="Key figures">
         @if (overview(); as o) {
-          <div><dt>Published today</dt><dd>{{ o.today.articlesPublished }}</dd><span>of {{ o.today.articlesPlanned }} planned</span></div>
-          <div><dt>Waiting for review</dt><dd>{{ o.pipeline.review }}</dd><span>{{ o.pipeline.drafts }} drafts in progress</span></div>
-          <div><dt>Scheduled</dt><dd>{{ o.pipeline.scheduled }}</dd><span>ready to go out</span></div>
-          <div [class.is-bad]="o.pipeline.failed > 0"><dt>Failed</dt><dd>{{ o.pipeline.failed }}</dd><span>{{ o.pipeline.failed ? 'need a retry' : 'nothing to fix' }}</span></div>
-          <div><dt>Next 7 days</dt><dd>{{ weekTopicCount() }}</dd><span>topics planned</span></div>
+          <div><dt>Published today</dt><dd>{{ o.today.articlesPublished }}</dd><dd class="ov__sub">of {{ o.today.articlesPlanned }} planned</dd></div>
+          <div><dt>Waiting for review</dt><dd>{{ o.pipeline.review }}</dd><dd class="ov__sub">{{ o.pipeline.drafts }} drafts in progress</dd></div>
+          <div><dt>Scheduled</dt><dd>{{ o.pipeline.scheduled }}</dd><dd class="ov__sub">ready to go out</dd></div>
+          <div [class.is-bad]="o.pipeline.failed > 0"><dt>Failed</dt><dd>{{ o.pipeline.failed }}</dd><dd class="ov__sub">{{ o.pipeline.failed ? 'need a retry' : 'nothing to fix' }}</dd></div>
+          <div><dt>Next 7 days</dt><dd>{{ weekTopicCount() }}</dd><dd class="ov__sub">topics planned</dd></div>
         } @else {
           @for (n of [1, 2, 3, 4, 5]; track n) { <div class="is-loading"><dt>&nbsp;</dt><dd>&nbsp;</dd></div> }
         }
@@ -117,7 +118,7 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
               }
             </ul>
             @if (!featured() && dayOperations().length === 0) {
-              <p class="ov__empty">{{ dayOffset() > 0 ? 'Nothing planned for this day yet.' : 'Nothing ran on this day.' }} @if (!planReady()) { <button class="au-link" type="button" (click)="runStep('plan')">Plan the next 30 days</button> }</p>
+              <p class="ov__empty">{{ dayOffset() > 0 ? 'Nothing planned for this day yet.' : 'Nothing ran on this day.' }} @if (!planReady()) { <a class="au-link" routerLink="/studio/editorial-plan" [queryParams]="{ new: 1 }">Plan the next 30 days</a> }</p>
             }
           </section>
 
@@ -174,22 +175,20 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
                     <div class="ov__step-body">
                       <span class="ov__step-label">{{ step.label }}<span class="au-sr-only">{{ step.done ? ', done' : ', to do' }}</span></span>
                       <span class="ov__step-detail">{{ step.detail }}</span>
-                      @if (step.id === 'autopilot' && (modePickerOpen() || !step.done)) {
+                      @if (step.id === 'autopilot') {
                         <div class="ov__modes" role="radiogroup" aria-label="How much runs on its own">
                           @for (m of modes; track m.id) {
-                            <button type="button" role="radio" class="ov__mode" [attr.aria-checked]="policy()?.mode === m.id && policy()?.enabled" [disabled]="busy() === 'autopilot'" (click)="setMode(m.id)">
-                              {{ m.short }}
-                            </button>
+                            <button type="button" role="radio" class="ov__mode" [attr.aria-checked]="policy()?.enabled && policy()?.mode === m.id" [disabled]="modeBusy()" (click)="setMode(m.id)">{{ m.short }}</button>
                           }
                         </div>
-                        <p class="ov__mode-note">{{ modeNote() }}</p>
+                        @if (modeError()) { <span class="au-error" role="alert">{{ modeError() }}</span> }
                       }
                     </div>
                     @switch (step.id) {
                       @case ('website') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/connections/wizard">Connect</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a> } }
-                      @case ('learn') { <button class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" type="button" (click)="runStep('learn')" [disabled]="busy() === 'learn' || indexing()">{{ busy() === 'learn' || indexing() ? 'Reading…' : step.done ? 'Read again' : 'Analyze' }}</button> }
-                      @case ('plan') { @if (!step.done) { <button class="au-btn au-btn--sm au-btn--primary" type="button" (click)="runStep('plan')" [disabled]="busy() === 'plan' || planGenerating()">{{ busy() === 'plan' || planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</button> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/editorial-plan">Open</a> } }
-                      @case ('autopilot') { @if (step.done) { <button class="au-btn au-btn--sm" type="button" (click)="modePickerOpen.set(!modePickerOpen())">Change</button> } }
+                      @case ('learn') { <a class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading…' : step.done ? 'Review' : 'Analyze' }}</a> }
+                      @case ('plan') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/editorial-plan" [queryParams]="{ new: 1 }">{{ planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/editorial-plan">Open</a> } }
+                      @case ('autopilot') { <a class="au-btn au-btn--sm" routerLink="/studio/automation">Settings</a> }
                       @case ('instagram') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'instagram.com' }">Connect</a> } }
                       @case ('x') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'x.com' }">Connect</a> } }
                       @case ('sources') { <a class="au-btn au-btn--sm" routerLink="/studio/sources">{{ step.done ? 'Manage' : 'Add' }}</a> }
@@ -198,7 +197,6 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
                 }
               </ul>
             }
-            @if (stepError()) { <p class="au-error" role="alert">{{ stepError() }}</p> }
           </section>
           <!-- What we learned -->
           <section class="au-panel ov__card" aria-labelledby="ov-learned">
@@ -224,19 +222,19 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
               }
               <div class="ov__actions">
                 <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence">Not quite right, review it</a>
-                <button class="au-btn au-btn--sm" type="button" (click)="runStep('learn')" [disabled]="busy() === 'learn' || indexing()">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</button>
+                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</a>
               </div>
             } @else {
               <p class="ov__empty">Nothing learned yet. Auctorio reads your public pages to find your topics, audience and tone.</p>
-              <div class="ov__actions"><button class="au-btn au-btn--sm au-btn--primary" type="button" (click)="runStep('learn')" [disabled]="busy() === 'learn' || indexing()">{{ indexing() ? 'Reading the site…' : 'Analyze my site' }}</button></div>
+              <div class="ov__actions"><a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading the site…' : 'Analyze my site' }}</a></div>
             }
           </section>
 
           <section class="au-panel ov__card" aria-labelledby="ov-dest">
             <div class="ov__card-head"><h2 id="ov-dest" class="ov__title">Publishing to</h2><a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a></div>
             <ul class="ov__dest">
-              @for (c of overview()?.connections ?? []; track c.id) {
-                <li><span class="ov__dest-dot" [attr.data-state]="connectionState(c)"></span>{{ c.displayName }}<span class="au-muted">{{ connectionLabel(c) }}</span></li>
+              @for (c of siteConnections(); track c.id) {
+                <li [attr.title]="c.reason || null"><span class="ov__dest-dot" [attr.data-state]="connectionState(c)"></span>{{ c.displayName }}<span class="au-muted">{{ connectionLabel(c) }}{{ c.lastVerifiedAt ? ' · checked ' + checkedAge(c.lastVerifiedAt) : '' }}</span>@if (c.platform === 'website' && c.connectionState !== 'connected') { <a class="au-link" routerLink="/studio/connections">{{ c.connectionState === 'provider_error' ? 'Fix' : 'Verify' }}</a> }</li>
               } @empty {
                 <li class="au-muted">No destinations yet · <a class="au-link" routerLink="/studio/connections/wizard">connect one</a></li>
               }
@@ -260,8 +258,8 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
       .ov__kpis > div { display: flex; flex-direction: column; gap: 2px; padding: var(--au-s4); border: 1px solid var(--au-border); border-radius: 14px; background: var(--au-surface); box-shadow: var(--au-shadow-glass); }
       .ov__kpis dt { color: var(--au-muted); font-size: var(--au-fs-caption); }
       .ov__kpis dd { margin: 0; font: 600 26px/1.15 var(--au-font); font-variant-numeric: tabular-nums; }
-      .ov__kpis span { color: var(--au-faint); font-size: var(--au-fs-caption); }
-      .ov__kpis .is-bad dd { color: var(--au-danger); }
+      .ov__kpis dd.ov__sub { font: 400 var(--au-fs-caption) var(--au-font); color: var(--au-faint); }
+      .ov__kpis .is-bad dd:not(.ov__sub) { color: var(--au-danger); }
       .ov__kpis .is-loading { min-height: 88px; }
       .ov__card { padding: var(--au-s5); display: flex; flex-direction: column; gap: var(--au-s4); }
       .ov__card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--au-s3); }
@@ -309,9 +307,9 @@ type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
       .ov__step-label { font-weight: 500; font-size: var(--au-fs-body-sm); }
       .ov__step-detail { color: var(--au-muted); font-size: var(--au-fs-caption); }
       .ov__modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin-top: var(--au-s2); padding: 2px; border: 1px solid var(--au-border); border-radius: 10px; background: var(--au-surface-2); }
-      .ov__mode { padding: 6px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--au-text-2); font: 500 var(--au-fs-caption) / 1.2 var(--au-font); cursor: pointer; }
+      .ov__mode { min-height: 32px; padding: 6px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--au-text-2); font: 500 var(--au-fs-caption) / 1.2 var(--au-font); cursor: pointer; }
       .ov__mode[aria-checked='true'] { background: var(--au-surface); color: var(--au-text); box-shadow: var(--au-shadow-glass); }
-      .ov__mode-note { margin-top: 4px; color: var(--au-muted); font-size: var(--au-fs-caption); }
+      .ov__mode:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 1px; }
       .ov__summary { color: var(--au-text-2); line-height: 1.6; }
       .ov__tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
       .ov__tags li { padding: 2px 10px; border-radius: 8px; background: var(--au-surface-2); color: var(--au-text-2); font-size: var(--au-fs-caption); }
@@ -343,6 +341,8 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     { id: 'assisted', short: 'I approve' },
     { id: 'autopilot', short: 'Autopilot' },
   ];
+  readonly modeBusy = signal(false);
+  readonly modeError = signal<string | null>(null);
 
   readonly overview = signal<StudioOverview | null>(null);
   readonly policy = signal<AutomationPolicy | null>(null);
@@ -351,9 +351,6 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
   readonly planItems = signal<EditorialPlanItem[]>([]);
   readonly operations = signal<OperationItem[]>([]);
   readonly dayOffset = signal(0);
-  readonly busy = signal<'learn' | 'plan' | 'autopilot' | null>(null);
-  readonly stepError = signal<string | null>(null);
-  readonly modePickerOpen = signal(false);
 
   private refresh: Subscription | null = null;
 
@@ -373,10 +370,16 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     return this.plans().some((plan) => plan.status === 'ready' && new Date(plan.dateTo) >= now);
   });
 
+  /** Destinations of the active site, plus workspace-wide ones (social accounts without a site). */
+  readonly siteConnections = computed(() => {
+    const siteId = this.siteId();
+    return (this.overview()?.connections ?? []).filter((c) => !siteId || !c.siteId || c.siteId === siteId);
+  });
+
   readonly steps = computed<SetupStep[]>(() => {
     const o = this.overview();
-    const connections = o?.connections ?? [];
-    const connected = (platform: string) => connections.some((c) => c.platform === platform && c.enabled && (c.status === 'active' || c.connectionState === 'connected'));
+    const connections = this.siteConnections();
+    const connected = (platform: string) => connections.some((c) => c.platform === platform && c.enabled && this.connectionState(c) === 'ok');
     const p = this.policy();
     return setupSteps({
       websiteConnected: connected('website'),
@@ -431,12 +434,21 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     }),
   );
   readonly weekTopicCount = computed(() => this.week().reduce((sum, d) => sum + d.items.length, 0));
-  readonly modeNote = computed(() => { const p = this.policy(); return p?.enabled && p.mode ? modeSummary(p.mode) : 'Pick one; you can change it any time'; });
   readonly weekSummary = computed(() => {
     const items = this.week().flatMap((d) => d.items);
     if (!items.length) return this.planReady() ? 'No topics in the next 7 days' : 'No plan yet';
     const count = (chip: PlanChip) => items.filter((i) => i.chip === chip).length;
     return [`${items.length} topic${items.length === 1 ? '' : 's'}`, count('Written') ? `${count('Written')} written` : '', count('Queued') ? `${count('Queued')} queued` : '', count('Needs approval') ? `${count('Needs approval')} need approval` : ''].filter(Boolean).join(' · ');
+  });
+
+  /** Reload when the active site changes so destination rows never show the previous site's state. */
+  private lastSiteId: string | null | undefined;
+  private readonly reloadOnSiteChange = effect(() => {
+    const id = this.siteId();
+    untracked(() => {
+      if (this.lastSiteId !== undefined && this.lastSiteId !== id) this.load();
+      this.lastSiteId = id;
+    });
   });
 
   ngOnInit(): void {
@@ -455,12 +467,12 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
 
   load(): void {
     const siteId = this.siteId() ?? undefined;
-    this.api.getOverview().subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
+    this.api.getOverview(siteId).subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
     this.api.getAutomationPolicy(siteId).subscribe({ next: (p) => this.policy.set(p), error: () => undefined });
     if (siteId) this.api.getSiteIntelligence(siteId).subscribe({ next: (i) => this.intelligence.set(i), error: () => undefined });
     this.api.listOperations({ page: 1, pageSize: 100, siteId }).subscribe({ next: (r) => this.operations.set(r.items), error: () => undefined });
     this.api
-      .listEditorialPlans(1, 10)
+      .listEditorialPlans(1, 10, this.appContext.activeSite()?.id)
       .pipe(
         switchMap((page) => {
           const plans = page.items.filter((plan) => !siteId || !plan.siteId || plan.siteId === siteId);
@@ -498,73 +510,39 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     return difficultyLabel(item.difficultyEstimate);
   }
 
-  runStep(step: 'learn' | 'plan'): void {
-    const siteId = this.siteId();
-    if (!siteId) {
-      this.stepError.set('Choose a site first');
-      return;
-    }
-    this.stepError.set(null);
-    this.busy.set(step);
-    const done = (message: string) => {
-      this.busy.set(null);
-      this.toast.success(message);
-      this.load();
-    };
-    const fail = (err: { error?: { error?: { message?: string } | string; message?: string } }) => {
-      this.busy.set(null);
-      const body = err?.error;
-      this.stepError.set((typeof body?.error === 'object' ? body.error?.message : body?.message) || 'That step could not start. Try again.');
-    };
-    if (step === 'learn') {
-      this.api.indexSite(siteId, { crawl: true }).subscribe({ next: () => done('Reading your site. This page updates when it is done.'), error: fail });
-      return;
-    }
-    const from = new Date();
-    const to = new Date();
-    to.setDate(to.getDate() + 29);
-    const perDay = Math.max(1, this.policy()?.articlesPerDay ?? 1);
-    this.api
-      .generateEditorialPlan({
-        siteId,
-        dateFrom: from.toISOString().slice(0, 10),
-        dateTo: to.toISOString().slice(0, 10),
-        channels: ['website'],
-        publicationCount: 30 * perDay,
-        frequency: 'daily',
-        timezone: this.policy()?.timezone,
-      })
-      .subscribe({ next: () => done('Planning the next 30 days. Topics appear here as soon as they are ready.'), error: fail });
-  }
-
   setMode(mode: Mode): void {
-    const siteId = this.siteId();
-    this.busy.set('autopilot');
-    this.stepError.set(null);
-    this.api.updateAutomationPolicy({ siteId, mode }).subscribe({
+    this.modeBusy.set(true);
+    this.modeError.set(null);
+    this.api.updateAutomationPolicy({ siteId: this.siteId(), mode }).subscribe({
       next: (policy) => {
         this.policy.set(policy);
-        this.busy.set(null);
-        this.modePickerOpen.set(false);
+        this.modeBusy.set(false);
         this.toast.success(modeSummary(mode));
       },
       error: (err) => {
-        this.busy.set(null);
-        this.stepError.set(err?.error?.error?.message || err?.error?.message || 'The mode could not be saved.');
+        this.modeBusy.set(false);
+        this.modeError.set(err?.error?.error?.message || err?.error?.message || 'The mode could not be saved.');
       },
     });
   }
 
-  connectionState(c: { enabled: boolean; status: string; connectionState: string | null }): 'ok' | 'bad' | 'idle' {
+  connectionState(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): 'ok' | 'bad' | 'idle' {
     if (!c.enabled) return 'idle';
+    // Website installs are only ready once verified; a stored/active status alone is not proof.
+    if (c.platform === 'website') return c.connectionState === 'connected' ? 'ok' : c.connectionState === 'provider_error' ? 'bad' : 'idle';
     if (c.connectionState === 'connected' || c.status === 'active') return 'ok';
     if (c.status === 'error' || ['expired', 'provider_error', 'permissions_required'].includes(c.connectionState ?? '')) return 'bad';
     return 'idle';
   }
 
-  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null }): string {
+  checkedAge(iso: string): string {
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
+    return days <= 0 ? 'today' : `${days}d ago`;
+  }
+
+  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string; stage?: keyof typeof STAGE_LABELS }): string {
     const state = this.connectionState(c);
-    return !c.enabled ? 'Disabled' : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
+    return !c.enabled ? 'Disabled' : c.platform === 'website' && c.stage ? STAGE_LABELS[c.stage] : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
   }
 
   attentionItems(): Array<{ title: string; detail: string; action: string; link: string }> {
@@ -572,8 +550,9 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     if (!o) return [];
     const items: Array<{ title: string; detail: string; action: string; link: string }> = [];
     if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/publications' });
-    for (const c of o.connections) {
+    for (const c of this.siteConnections()) {
       if (this.connectionState(c) === 'bad') items.push({ title: `${c.displayName} needs attention`, detail: 'Its credentials stopped working', action: 'Fix', link: '/studio/connections' });
+      else if (c.platform === 'website' && c.enabled && (c.connectionState === 'not_verified' || c.connectionState === 'stale')) items.push({ title: `${c.displayName} is ${c.connectionState === 'stale' ? 'stale' : 'not verified'}`, detail: c.connectionState === 'stale' ? 'Last verification is over 30 days old' : 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });
     }
     if (o.sources.failing > 0) items.push({ title: `${o.sources.failing} failing source${o.sources.failing === 1 ? '' : 's'}`, detail: 'They stopped feeding the inbox', action: 'Review', link: '/studio/sources' });
     return items;

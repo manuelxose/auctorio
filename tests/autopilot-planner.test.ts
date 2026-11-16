@@ -282,3 +282,52 @@ test("assisted mode prepares approved automatic content without scheduling a rel
     await cleanupWorkspace(workspace.tenantId);
   }
 });
+
+test("manual mode never auto-approves or schedules, even QA-passed content", async () => {
+  const workspace = await createWorkspace();
+  try {
+    await prisma.automationPolicy.update({
+      where: { id: workspace.policyId },
+      data: { mode: "manual", autoGenerate: false, autoRepair: false, autoApprove: false, autoSchedule: false, autoPublish: false },
+    });
+    const passed = await prisma.contentProject.create({
+      data: {
+        tenantId: workspace.tenantId,
+        siteId: workspace.siteId,
+        topicId: workspace.topicId,
+        title: PASSING_TITLE,
+        brief: "Brief",
+        origin: "auto",
+        status: "qa_passed",
+        automationMode: "manual",
+        automationSubstate: "qa_passed",
+      },
+    });
+    await prisma.contentVersion.create({
+      data: {
+        tenantId: workspace.tenantId,
+        projectId: passed.id,
+        versionNumber: 1,
+        status: "qa_passed",
+        title: PASSING_TITLE,
+        excerpt: PASSING_EXCERPT,
+        bodyHtml: passingBody(),
+        seoTitle: PASSING_SEO_TITLE,
+        seoDescription: PASSING_SEO_DESC,
+        qaReport: { passed: true, score: 94, checks: [], findings: [] },
+        contentImageId: workspace.imageId,
+      },
+    });
+
+    await runAutomationTick();
+    await runAutomationTick();
+
+    const after = await prisma.contentProject.findUniqueOrThrow({ where: { id: passed.id } });
+    assert.equal(after.status, "qa_passed");
+    const version = await prisma.contentVersion.findFirstOrThrow({ where: { projectId: passed.id } });
+    assert.equal(version.approvedBy, null);
+    assert.equal(await prisma.publication.count({ where: { projectId: passed.id } }), 0);
+  } finally {
+    await cleanupWorkspace(workspace.tenantId);
+  }
+});

@@ -21,8 +21,8 @@ export class PlanningApiService {
   private readonly http = inject(HttpClient);
   private readonly base = `${inject(STUDIO_ORIGIN)}/studio/api/backend/v2`;
 
-  listPlans(): Observable<PaginatedResponse<PlanDetail>> {
-    return this.http.get<PaginatedResponse<PlanDetail>>(`${this.base}/editorial-plans`, { params: { page: 1, pageSize: 100 } });
+  listPlans(siteId?: string): Observable<PaginatedResponse<PlanDetail>> {
+    return this.http.get<PaginatedResponse<PlanDetail>>(`${this.base}/editorial-plans`, { params: { page: 1, pageSize: 100, ...(siteId ? { siteId } : {}) } });
   }
   getPlan(planId: string): Observable<PlanDetail> {
     return this.http.get<PlanDetail>(`${this.base}/editorial-plans/${planId}`);

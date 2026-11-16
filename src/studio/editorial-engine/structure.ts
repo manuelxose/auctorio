@@ -242,13 +242,50 @@ export function getStructureSpec(articleType: ArticleType): StructureSpec {
   return STRUCTURE_SPECS[articleType];
 }
 
-export function renderStructureSpec(spec: StructureSpec): string {
+/** Spanish wording of the template headings: the writer copies headings literally, so English ones leaked into Spanish articles. */
+const HEADINGS_ES: Record<string, string> = {
+  Context: "Contexto",
+  "What we know": "Lo que sabemos",
+  "Key details": "Claves",
+  "What has been reported so far": "Lo que se sabe hasta ahora",
+  "What we know so far": "Lo que sabemos hasta ahora",
+  "Confirmed cast": "Reparto confirmado",
+  "The confirmed date": "La fecha confirmada",
+  "What the trailer shows": "Qué muestra el tráiler",
+  "Where to stream": "Dónde verlo",
+  Availability: "Disponibilidad",
+  "Programming details": "Detalles de la programación",
+  "What it's about": "De qué trata",
+  "Key facts": "Datos clave",
+  "What you need to know": "Lo que necesitas saber",
+  "Updated information": "Información actualizada",
+};
+
+export function localizedHeading(heading: string, language: "es" | "en"): string {
+  return language === "es" ? (HEADINGS_ES[heading] ?? heading) : heading;
+}
+
+/**
+ * Renders the template in the article language. An approved plan outline replaces
+ * the template's own headings: its entries become the required H2s, in order.
+ */
+export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" = "en", plannedOutline: string[] = []): string {
   const lines: string[] = [`Article type: ${spec.articleType}`, spec.description, "Structure:"];
+  const outline = plannedOutline.map((heading) => heading.replace(/[()\n]/g, " ").trim()).filter(Boolean);
   for (const section of spec.sections) {
-    const heading = section.heading ? ` (heading: ${section.heading})` : "";
+    if (outline.length > 0 && section.heading) {
+      lines.push(`- ${section.kind} [guidance]: ${section.instruction} Place this material under the approved H2 sections below.`);
+      continue;
+    }
+    const heading = section.heading ? ` (heading: ${localizedHeading(section.heading, language)})` : "";
     const required = section.required ? " [required]" : " [optional]";
     lines.push(`- ${section.kind}${heading}${required}: ${section.instruction}`);
   }
+  if (outline.length > 0) {
+    lines.push("Approved outline — use each entry below as an H2, with this exact wording and in this order:");
+    for (const heading of outline) lines.push(`- outline (heading: ${heading}) [required]: cover this section with verified facts only.`);
+  }
+  if (language === "es") lines.push("All headings and body text must be written in Spanish.");
   lines.push(`Conclusion: ${spec.allowsConclusion ? "allowed when it adds value" : "NOT appropriate for this type — do not add one"}.`);
   lines.push(`FAQ section: ${spec.allowsFaq ? "allowed only if genuinely useful" : "NOT appropriate — do not force a FAQ onto this article"}.`);
   return lines.join("\n");

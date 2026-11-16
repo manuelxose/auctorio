@@ -33,6 +33,7 @@ export type EvidenceEntry = { kind: string; url: string | null; note: string; ob
 const NON_COMPETITOR_DOMAINS = new Set([
   "facebook.com", "twitter.com", "x.com", "instagram.com", "youtube.com", "youtu.be", "tiktok.com", "linkedin.com", "pinterest.com",
   "whatsapp.com", "t.me", "telegram.org", "google.com", "goo.gl", "wikipedia.org", "wikimedia.org", "apple.com", "amazon.com",
+  "wa.me", "api.whatsapp.com", "m.me", "fb.me", "fb.com", "ig.me", "lnkd.in", "ow.ly", "buff.ly", "paypal.com", "play.google.com", "maps.app.goo.gl",
   "wordpress.org", "wordpress.com", "w3.org", "schema.org", "gravatar.com", "github.com", "bit.ly", "t.co", "reddit.com", "spotify.com",
 ]);
 
@@ -250,7 +251,7 @@ export async function discoverCompetitors(tenantId: string, siteId: string, opti
   } else {
     for (const topic of vocabulary.slice(0, 3)) {
       try {
-        const hits = await provider.search(topic.name, { limit: 8, language: site.locale.slice(0, 2) });
+        const hits = await provider.search(topic.name, { limit: 8, language: site.locale.slice(0, 2), country: /[-_]([A-Za-z]{2})$/.exec(site.locale)?.[1].toUpperCase() ?? null });
         await recordWebUsage({ tenantId, siteId, provider: provider.name, operation: "search", queries: 1 });
         for (const hit of hits) note(registrableHost(hit.domain || hit.url), { kind: "search_result", url: hit.url, note: `Ranks in ${provider.name} results for "${topic.name}"`, observedAt });
       } catch (error) {
@@ -279,6 +280,15 @@ export async function discoverCompetitors(tenantId: string, siteId: string, opti
     }
     if (competitor.status === "rejected" || competitor.status === "removed") continue;
     competitor = await verifyCompetitor(competitor, vocabulary);
+    // A page linking to a host (footer credit, chat link) is not proof of competition: a candidate whose only
+    // evidence is outbound links, with no topic overlap, created in this run (no operator decision yet) is dropped.
+    // Content mentions stay as speculative candidates.
+    if (competitor.verification !== "verified" && !existing && candidate.entries.every((entry) => entry.kind === "outbound_link")) {
+      await prisma.competitor.delete({ where: { id: competitor.id } });
+      result.created -= 1;
+      result.candidates -= 1;
+      continue;
+    }
     if (competitor.verification === "verified") result.verified += 1;
     else result.speculative += 1;
   }

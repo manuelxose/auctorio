@@ -256,7 +256,8 @@ test("onboarding routes are tenant-scoped", async () => {
 test("a hung step handler times out, fails the step and ends the run as retryable", async () => {
   const tenant = await createTenant();
   const site = await createSite(tenant.id);
-  process.env.ONBOARDING_STEP_TIMEOUT_MS = "100";
+  // Applies to every step: must exceed the real index/profile steps (DB writes) or they time out first.
+  process.env.ONBOARDING_STEP_TIMEOUT_MS = "2000";
   registerOnboardingStep("strategy", () => new Promise(() => undefined));
   try {
     await (await startSiteOnboarding(tenant.id, site.id, null)).promise;

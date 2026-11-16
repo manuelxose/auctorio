@@ -102,3 +102,9 @@ test("circuit breaker opens after consecutive failures and resets on success", a
     await prisma.tenant.delete({ where: { id: tenant.id } });
   }
 });
+
+test("a failed publication can be rescheduled directly (one record, no duplicate)", () => {
+  assert.equal(canTransition("failed", "scheduled"), true);
+  assert.equal(canTransition("queued", "scheduled"), false);
+  assert.equal(canTransition("publishing", "scheduled"), false);
+});

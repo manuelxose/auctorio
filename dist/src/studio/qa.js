@@ -1,7 +1,9 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.missingOutlineHeadings = missingOutlineHeadings;
 exports.runVersionQaV2 = runVersionQaV2;
 exports.runVersionQa = runVersionQa;
+const inline_images_1 = require("./inline-images");
 const GENERIC_AI_PHRASES = [
     "in today's digital world",
     "in today's fast-paced world",
@@ -77,6 +79,22 @@ function containsKeyword(html, keyword) {
     const normalizedHtml = stripHtml(html).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
     return normalizedHtml.includes(normalizedKeyword);
 }
+function headingTokens(value) {
+    return value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").split(/[^a-z0-9ñ]+/).filter((token) => token.length > 2);
+}
+/** Outline entries with no H2 sharing at least half of their meaningful words (the writer may lightly rephrase). */
+function missingOutlineHeadings(outline, html) {
+    const h2s = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].map((match) => new Set(headingTokens(stripHtml(match[1]))));
+    return outline
+        .map((entry) => (entry && typeof entry === "object" ? String(entry.heading ?? "") : String(entry ?? "")).trim())
+        .filter(Boolean)
+        .filter((heading) => {
+        const tokens = headingTokens(heading);
+        if (tokens.length === 0)
+            return false;
+        return !h2s.some((h2) => tokens.filter((token) => h2.has(token)).length / tokens.length >= 0.5);
+    });
+}
 /**
  * Intent-aware editorial QA. The score is explainable: every finding carries a
  * reason, group and severity. Errors block publication; warnings are visible.
@@ -149,7 +167,8 @@ function runVersionQaV2(version, context) {
     const externalLinks = countExternalLinks(body);
     add("evidence_links", "External evidence links", externalLinks >= 1 || !(intent === "news" || intent === "commercial-investigation"), intent === "news" || intent === "commercial-investigation" ? "warning" : "info", "El contenido de actualidad o comparación debe citar fuentes externas verificables.", "seo");
     const imageCount = countImages(body);
-    add("image_presence", "Inline images", imageCount >= 1 || !context.imageReady, "info", "Las imágenes inline mejoran el contenido; el hero image ya cubre la portada.", "seo");
+    // Checked once the hero exists: inline images are queued with it and land in the body as they finish.
+    add("image_presence", "Inline images", imageCount >= inline_images_1.INLINE_IMAGE_MIN || !context.imageReady, "error", `El artículo debe llevar al menos ${inline_images_1.INLINE_IMAGE_MIN} imágenes dentro del cuerpo (actual: ${imageCount}).`, "seo");
     add("image_alt", "Image alt text", hasImageAlt(body), "warning", "Todas las imágenes deben llevar texto alternativo descriptivo.", "seo");
     if (faqCandidates > 0 || intent === "informational" || intent === "commercial-investigation" || intent === "transactional") {
         add("faq_section", "FAQ section", hasFaqSection(body), "warning", "Esta intención se beneficia de una sección FAQ con preguntas frecuentes.", "seo");
@@ -158,7 +177,10 @@ function runVersionQaV2(version, context) {
         add("faq_section", "FAQ section", true, "info", "No se requiere FAQ para este formato.", "seo");
     }
     if (outlineCount > 0) {
-        add("outline_coverage", "Outline coverage", h2Count >= Math.min(3, Math.max(1, outlineCount - 1)), "info", `El brief sugería ${outlineCount} secciones; el artículo tiene ${h2Count} H2.`, "seo");
+        const missing = missingOutlineHeadings(metadata.outline, body);
+        add("outline_coverage", "Approved outline covered", missing.length === 0, "error", missing.length === 0
+            ? `Las ${outlineCount} secciones del outline aprobado están presentes como H2.`
+            : `Faltan secciones del outline aprobado como H2: ${missing.map((heading) => `«${heading}»`).join(", ")}. Añádelas o edita el outline del plan.`, "structural");
     }
     if (context.cannibalizationRisk && context.cannibalizationRisk !== "none") {
         add("cannibalization", "Cannibalization risk", false, "warning", `Riesgo de canibalización detectado: ${context.cannibalizationRisk}. Revisa el query objetivo.`, "seo");

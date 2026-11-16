@@ -18,7 +18,10 @@ function version(bodyHtml: string): {
   };
 }
 
+const images = '<figure><img src="https://example.test/a.webp" alt="Ilustración" /></figure>'.repeat(3);
+
 const richBody = `<p>${"palabra ".repeat(60)}</p>
+${images}
 <h2>Plataformas disponibles</h2>
 <p>${"palabra ".repeat(80)}</p>
 <h3>Telecinco y Mitele</h3>
@@ -101,7 +104,7 @@ test("runVersionQa remains backward compatible with legacy call sites", () => {
     {
       title: "Comparativa de plataformas de streaming para elegir mejor en 2026",
       excerpt: "Analizamos precios, catalogo y perfil de uso para ayudarte a elegir la mejor plataforma segun tu caso.",
-      bodyHtml: "<p>Intro detallada con suficiente contexto para el lector profesional.</p><h2>Comparativa</h2><p>" + "palabra ".repeat(220) + "</p>",
+      bodyHtml: "<p>Intro detallada con suficiente contexto para el lector profesional.</p><h2>Comparativa</h2><p>" + "palabra ".repeat(220) + "</p>" + images,
       seoTitle: "Comparativa de plataformas de streaming 2026",
       seoDescription: "Guia clara para comparar Netflix, Max, Disney+ y otras plataformas segun catalogo, precio y tipo de usuario.",
     },

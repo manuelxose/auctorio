@@ -100,3 +100,25 @@ test("evaluateDomainQuality matches topics against the description", () => {
   );
   assert.ok(matched.dimensions.relevance > unmatched.dimensions.relevance);
 });
+
+test("rankRecommendation: Spanish TV guide ranks first-party and Spanish sources above an English movie feed", async () => {
+  const { rankRecommendation } = await import("../src/studio/source-registry-discovery");
+  const base = { topicMatches: 2, trust: "high" as const, verified: true, siteLanguage: "es", siteCountry: "ES" };
+  const firstParty = rankRecommendation({ ...base, relationship: "first_party", candidateLanguage: "es", candidateCountry: "ES" });
+  const spanish = rankRecommendation({ ...base, relationship: "external", candidateLanguage: "es", candidateCountry: "ES" });
+  const english = rankRecommendation({ ...base, relationship: "external", candidateLanguage: "en", candidateCountry: "US" });
+  assert.ok(firstParty.score > spanish.score && spanish.score > english.score);
+  assert.equal(english.relevance, "medium");
+  assert.ok(english.factors.some((factor) => /differs from site language/.test(factor)));
+});
+
+test("source pack catalog offers a Spanish TV/streaming pack with only Spanish-market https RSS entries", async () => {
+  const { listPackCatalog } = await import("../src/studio/source-registry");
+  const pack = listPackCatalog().find((entry) => entry.key === "tv-streaming-es");
+  assert.ok(pack && pack.entries.length >= 5);
+  for (const entry of pack.entries) {
+    assert.equal(entry.language, "es");
+    assert.equal(entry.country, "ES");
+    assert.ok(entry.endpoint.startsWith("https://") && entry.endpoint.includes(entry.domain));
+  }
+});

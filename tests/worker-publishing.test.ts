@@ -305,3 +305,38 @@ test("processPublishingJob routes talkaris draft publications through updateDraf
     "clear-published",
   ]);
 });
+
+test("processPublishingJob keeps a remote draft id from a failed attempt and reuses it on retry", async () => {
+  const jobUpdates: Array<Record<string, unknown>> = [];
+  const publishedWith: Array<string | null | undefined> = [];
+  const dependencies = (job: ReturnType<typeof buildPublication>, publish: PublisherAdapter["publish"]) => ({
+    getPublicationJobById: async () => job as never,
+    updatePublicationJob: async (_id: string, data: Record<string, unknown>) => {
+      jobUpdates.push(data);
+      return {} as never;
+    },
+    updateProjectStatus: async () => ({}) as never,
+    getLatestPublishedExternalId: async () => null,
+    buildAssetPublicUrl: async () => null,
+    getPublisher: () => buildPublisher({ publish }),
+    markProjectPublished: async () => ({}) as never,
+    clearProjectPublicationState: async () => ({}) as never,
+    verifyWebsitePublication: noopVerification(),
+  });
+
+  await assert.rejects(
+    processPublishingJob("publication-1", dependencies(buildPublication(), async (_context, externalId) => {
+      publishedWith.push(externalId);
+      throw Object.assign(new Error("http_error status=503"), { externalId: "remote-draft-9" });
+    })),
+    /status=503/,
+  );
+  assert.ok(jobUpdates.some((data) => data.externalId === "remote-draft-9" && data.status === "failed"));
+
+  // The retried job row carries the persisted id: publish finishes that record.
+  await processPublishingJob("publication-1", dependencies(buildPublication({ externalId: "remote-draft-9" }), async (_context, externalId) => {
+    publishedWith.push(externalId);
+    return { externalId: externalId ?? null, externalUrl: "https://remote.example/items/9", effectiveTargetStatus: "publish", responsePayload: {} };
+  }));
+  assert.deepEqual(publishedWith, [null, "remote-draft-9"]);
+});

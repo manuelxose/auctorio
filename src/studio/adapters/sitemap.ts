@@ -114,6 +114,8 @@ export function parseSitemapItems(xml: string, sourceUrl: string, maxItems: numb
   return items;
 }
 
+const SITEMAP_INDEX_MAX_CHILDREN = 5;
+
 export class SitemapAdapter implements SourceAdapter {
   readonly type = "sitemap" as const;
 
@@ -126,6 +128,7 @@ export class SitemapAdapter implements SourceAdapter {
     if (policies.respectRobots && !(await robotsAllows(url))) {
       throw new Error("robots_disallow");
     }
+    let items: DiscoveredSourceItem[];
     try {
       const response = await fetchSourceHttp(url, {
         accept: "application/xml,text/xml",
@@ -137,7 +140,7 @@ export class SitemapAdapter implements SourceAdapter {
         signal: context.signal,
       });
       observeResponse(context, response);
-      return parseSitemapItems(response.body, response.finalUrl || source.url, policies.maxItems);
+      items = parseSitemapItems(response.body, response.finalUrl || source.url, policies.maxItems);
     } catch (error) {
       if (error instanceof SourceNotModifiedError) {
         observeNotModified(context, error.etag);
@@ -145,6 +148,32 @@ export class SitemapAdapter implements SourceAdapter {
       }
       throw error;
     }
+
+    // A sitemap index lists child sitemaps, not pages: expand one level so items are real URLs.
+    const children = items.filter((item) => item.rawMetadata?.sitemapIndexEntry === true);
+    if (children.length === 0) return items;
+    const pages = items.filter((item) => item.rawMetadata?.sitemapIndexEntry !== true);
+    const newestFirst = [...children].sort((a, b) => String(b.rawMetadata?.lastmod ?? "").localeCompare(String(a.rawMetadata?.lastmod ?? "")));
+    for (const child of newestFirst.slice(0, SITEMAP_INDEX_MAX_CHILDREN)) {
+      if (pages.length >= policies.maxItems || !child.canonicalUrl) break;
+      try {
+        const childUrl = new URL(child.canonicalUrl);
+        if (policies.respectRobots && !(await robotsAllows(childUrl))) continue;
+        const response = await fetchSourceHttp(childUrl, {
+          accept: "application/xml,text/xml",
+          timeoutMs: policies.timeoutMs,
+          retryAttempts: policies.retryAttempts,
+          backoffBaseMs: policies.backoffBaseMs,
+          backoffMaxMs: policies.backoffMaxMs,
+          signal: context.signal,
+        });
+        const childItems = parseSitemapItems(response.body, response.finalUrl || child.canonicalUrl, policies.maxItems - pages.length);
+        pages.push(...childItems.filter((item) => item.rawMetadata?.sitemapIndexEntry !== true));
+      } catch {
+        // One broken child sitemap must not fail the whole source.
+      }
+    }
+    return pages;
   }
 
   async healthCheck(source: SourceRef, context: DiscoveryContext): Promise<SourceHealthCheck> {

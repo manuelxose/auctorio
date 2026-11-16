@@ -51,6 +51,8 @@ export type LedgerFact = {
   conflictingStatements: string[];
   /** Number of independent publisher groups supporting this exact statement. */
   supportingGroups: number;
+  /** Source-registry origin of plan evidence (server-stamped), kept for provenance. */
+  origin?: { sourceId: string; itemId: string };
 };
 
 export type FactUsage =

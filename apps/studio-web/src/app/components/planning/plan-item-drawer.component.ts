@@ -261,14 +261,16 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
 
         <fieldset>
           <legend>Schedule and priority</legend>
+          <!-- Dates have a single home: the calendar. -->
+          <p class="au-hint">Dates are changed in <a routerLink="/studio/calendar">Calendar</a>; drag the card or use Move.</p>
           <div class="pd__grid">
             <label class="au-field">
               <span class="au-field__label">Date ({{ timezone }})</span>
-              <input class="au-input" type="date" name="date" [(ngModel)]="draft.date" />
+              <input class="au-input" type="date" name="date" [ngModel]="draft.date" readonly aria-readonly="true" />
             </label>
             <label class="au-field">
               <span class="au-field__label">Time</span>
-              <input class="au-input" type="time" name="time" [(ngModel)]="draft.time" />
+              <input class="au-input" type="time" name="time" [ngModel]="draft.time" readonly aria-readonly="true" />
             </label>
             <label class="au-field">
               <span class="au-field__label">Priority (1 low – 10 high)</span>
