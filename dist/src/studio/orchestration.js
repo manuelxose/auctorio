@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.stripLeadingDuplicateTitle = stripLeadingDuplicateTitle;
 exports.buildAssetPublicUrl = buildAssetPublicUrl;
+exports.isProjectGenerationInFlight = isProjectGenerationInFlight;
 exports.startProjectGeneration = startProjectGeneration;
 exports.requestImageGenerationForVersion = requestImageGenerationForVersion;
 exports.syncTextResultToStudio = syncTextResultToStudio;
@@ -118,6 +119,18 @@ async function buildAssetPublicUrl(relativePath) {
         return null;
     }
     return `${(0, env_1.getPublicBaseUrl)()}/assets/${relativePath.replace(/^\/+/, "")}`;
+}
+/** True while the project's latest version is still being written: a second run would fork a parallel version. */
+async function isProjectGenerationInFlight(tenantId, projectId) {
+    const latest = await prisma.contentVersion.findFirst({
+        where: { tenantId, projectId },
+        orderBy: { versionNumber: "desc" },
+        select: { contentText: { select: { status: true, updatedAt: true } } },
+    });
+    const text = latest?.contentText;
+    // A text untouched for 30 min is a lost job, not a live one: let the user regenerate.
+    const fresh = Boolean(text && Date.now() - text.updatedAt.getTime() < 30 * 60_000);
+    return fresh && (text?.status === "queued" || text?.status === "processing");
 }
 async function startProjectGeneration(projectId, tenantId, feedback, promptPresetVersionId) {
     const project = await prisma.contentProject.findFirst({

@@ -977,8 +977,21 @@ function registerStudioRoutes(fastify) {
         if (!project) {
             return (0, http_utils_1.notFound)(reply, "project not found");
         }
+        if (await (0, orchestration_1.isProjectGenerationInFlight)(context.tenantId, project.id)) {
+            return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
+        }
         const body = (0, http_utils_1.parseBody)(request);
-        const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback ?? null, body.promptPresetVersionId?.trim() || null);
+        const presetVersionId = body.promptPresetVersionId?.trim() || null;
+        // An unknown or foreign preset would otherwise start a real (paid) run that silently ignores it.
+        if (presetVersionId) {
+            const preset = (0, http_utils_1.isUuid)(presetVersionId)
+                ? await prisma.studioPromptVersion.findFirst({ where: { id: presetVersionId, preset: { tenantId: context.tenantId } }, select: { id: true } })
+                : null;
+            if (!preset) {
+                return (0, http_utils_1.notFound)(reply, "prompt preset version not found");
+            }
+        }
+        const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback ?? null, presetVersionId);
         return reply.code(202).send({
             project_id: project.id,
             version_id: result.versionId,
@@ -1003,6 +1016,9 @@ function registerStudioRoutes(fastify) {
         const project = await (0, repository_1.getProjectById)(context.tenantId, projectId);
         if (!project) {
             return (0, http_utils_1.notFound)(reply, "project not found");
+        }
+        if (await (0, orchestration_1.isProjectGenerationInFlight)(context.tenantId, project.id)) {
+            return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
         }
         const result = await (0, orchestration_1.startProjectGeneration)(project.id, context.tenantId, body.feedback.trim(), null);
         return reply.code(202).send({

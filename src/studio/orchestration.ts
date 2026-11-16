@@ -143,6 +143,19 @@ export async function buildAssetPublicUrl(relativePath: string | null | undefine
   return `${getPublicBaseUrl()}/assets/${relativePath.replace(/^\/+/, "")}`;
 }
 
+/** True while the project's latest version is still being written: a second run would fork a parallel version. */
+export async function isProjectGenerationInFlight(tenantId: string, projectId: string): Promise<boolean> {
+  const latest = await prisma.contentVersion.findFirst({
+    where: { tenantId, projectId },
+    orderBy: { versionNumber: "desc" },
+    select: { contentText: { select: { status: true, updatedAt: true } } },
+  });
+  const text = latest?.contentText;
+  // A text untouched for 30 min is a lost job, not a live one: let the user regenerate.
+  const fresh = Boolean(text && Date.now() - text.updatedAt.getTime() < 30 * 60_000);
+  return fresh && (text?.status === "queued" || text?.status === "processing");
+}
+
 export async function startProjectGeneration(
   projectId: string,
   tenantId: string,

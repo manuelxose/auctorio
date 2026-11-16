@@ -22,7 +22,8 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 
 const EMAIL = process.env.E2E_EMAIL || "";
 const PASSWORD = process.env.E2E_PASSWORD || "";
-const FEED_URL = process.env.E2E_RSS_FEED_URL || "https://hnrss.org/newest";
+// On-topic for the GuíaTV test site (Spanish TV news).
+const FEED_URL = process.env.E2E_RSS_FEED_URL || "https://www.vertele.com/rss/";
 const ALLOW_REAL_PUBLISH = process.env.E2E_ALLOW_REAL_PUBLISH === "1";
 
 let api: APIRequestContext;
@@ -75,6 +76,7 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
   });
 
   test("journey: source → test → discovery → items → cluster → enrich → brief → generate → QA → approve → schedule → publish", async () => {
+    test.setTimeout(600_000);
     const suffix = randomSuffix();
 
     // 1. Configure source (draft) and 2. test it before creating it.
@@ -157,44 +159,40 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
     expect(briefResponse.status()).toBe(201);
 
     // 8. Create a project from the item and generate an article.
-    const projectResponse = await api.post(
-      `/studio/api/backend/v2/source-items/${items[0]!.id}/create-project`,
-      { data: { siteId } },
-    );
-    expect([200, 201]).toContain(projectResponse.status());
+    // Items already turned into a project by an earlier run answer 409 already_covered: take the first fresh one.
+    let projectResponse = await api.post(`/studio/api/backend/v2/source-items/${items[0]!.id}/create-project`, { data: { siteId } });
+    for (const item of items.slice(1)) {
+      if (projectResponse.status() !== 409) break;
+      projectResponse = await api.post(`/studio/api/backend/v2/source-items/${item.id}/create-project`, { data: { siteId } });
+    }
+    expect([200, 201], `create-project: ${projectResponse.status()} ${await projectResponse.text()}`).toContain(projectResponse.status());
     const project = (await projectResponse.json()) as { id?: string; projectId?: string };
     createdProjectId = project.id ?? project.projectId ?? null;
     expect(createdProjectId, "expected project id").toBeTruthy();
 
+    // create-project already starts generation; a second run while it is in flight is refused.
     const generated = await api.post(`/studio/api/backend/v2/projects/${createdProjectId}/generate`);
-    expect(generated.status()).toBe(202);
-    const generation = (await generated.json()) as { job_id?: string; version_id?: string };
-    expect(generation.job_id ?? generation.version_id).toBeTruthy();
+    expect(generated.status(), "parallel generation must be refused").toBe(409);
 
-    // 9. Inspect QA: poll the project until its latest version has a QA report.
-    let qaReport: { passed?: boolean; score?: number } | null = null;
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+    // 9. Inspect QA: text, hero and inline images render in sequence (minutes), and the
+    // verdict is only written once they all settle.
+    let qaState = "";
+    for (let attempt = 0; attempt < 80 && !["passed", "failed", "approved"].includes(qaState); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5_000));
       const projectGet = await api.get(`/studio/api/backend/v2/projects/${createdProjectId}`);
       expect(projectGet.status()).toBe(200);
-      const projectBody = (await projectGet.json()) as {
-        versions?: Array<{ qaReport?: { passed?: boolean; score?: number } | null; status?: string }>;
-      };
-      const latest = projectBody.versions?.[0];
-      if (latest?.qaReport) {
-        qaReport = latest.qaReport;
-        break;
-      }
-      if (latest && ["qa_passed", "qa_failed", "in_review", "generated", "approved"].includes(latest.status ?? "")) {
-        break;
-      }
+      const projectBody = (await projectGet.json()) as { latestVersion?: { qaState?: string } | null };
+      qaState = projectBody.latestVersion?.qaState ?? "";
     }
-    if (qaReport) {
-      expect(typeof qaReport.passed).toBe("boolean");
-    }
+    expect(["passed", "failed"], `QA must reach a verdict (last state: ${qaState || "none"})`).toContain(qaState);
 
-    // 10. Approve.
+    // 10. Approve. QA failure is a valid editorial outcome: the gate must then refuse approval.
     const approved = await api.post(`/studio/api/backend/v2/projects/${createdProjectId}/approve`);
+    if (qaState === "failed") {
+      expect(approved.status(), "approval must be refused while QA fails").toBe(400);
+      test.info().annotations.push({ type: "qa", description: "QA failed on real content; stopped at the approval gate" });
+      return;
+    }
     expect([200, 202]).toContain(approved.status());
 
     // 11. Create a publication and schedule it into the future.
@@ -251,7 +249,7 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
       );
       expect(cancelled.status()).toBe(200);
       const cancelledBody = (await cancelled.json()) as { status?: string };
-      expect(cancelledBody.status).toBe("cancelled");
+      expect(cancelledBody.status).toBe("canceled"); // PublicationStatus enum spelling
     }
   });
 
@@ -291,7 +289,8 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
       `/studio/api/backend/v2/projects/${createdProjectId}/generate`,
       { data: { promptPresetVersionId: "00000000-0000-0000-0000-000000000000" } },
     );
-    expect([400, 404, 422, 202]).toContain(generated.status());
+    // 202 would mean a real (paid) run started with the bogus preset silently ignored.
+    expect([400, 404, 422]).toContain(generated.status());
   });
 
   test("failure path: publisher failure surfaces as a failed publication or structured rejection", async () => {
@@ -299,6 +298,12 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
     // structured rejection (4xx) or a publication record in a failed state —
     // never an unhandled crash.
     if (!createdProjectId) return;
+    if (!ALLOW_REAL_PUBLISH) {
+      // Safe by default: never trigger a real release; an unknown publication must be a structured 404.
+      const missing = await api.post("/studio/api/backend/v2/publications/00000000-0000-4000-8000-000000000000/publish-now");
+      expect([400, 404]).toContain(missing.status());
+      return;
+    }
     const publicationResponse = await api.post("/studio/api/backend/v2/publications", {
       data: { projectId: createdProjectId, channel: "website", scheduledFor: new Date().toISOString() },
     });
