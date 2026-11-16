@@ -22,7 +22,7 @@ import {
   startOperation,
   touchOperationProgress,
 } from "../operations";
-import { generateContentFromEditorialPlanItem } from "../editorial-plan";
+import { generateSocialForPlanItem } from "../editorial-plan";
 import { resolveClusterSite } from "../editorial-engine/cluster-production";
 import { ensurePlanItemProject, slotOrNow } from "./plan-item";
 import { getOrCreatePolicy } from "../automation";
@@ -214,6 +214,11 @@ async function resolveTarget(tenantId: string, request: ProductionRequest) {
   if (!request.title?.trim() || !request.brief?.trim()) throw new ProductionError("manual_title_and_brief_required");
   const site = await prisma.site.findFirst({ where: { id: request.siteId, tenantId }, select: { id: true } });
   if (!site) throw new ProductionError("site_not_found", undefined, 404);
+  if (request.projectId) {
+    const project = await prisma.contentProject.findFirst({ where: { id: request.projectId, tenantId, siteId: site.id }, select: { id: true } });
+    if (!project) throw new ProductionError("project_not_found", undefined, 404);
+    return { siteId: site.id, key: `project:${project.id}`, item: null };
+  }
   return { siteId: site.id, key: `manual:${manualKey(request)}`, item: null };
 }
 
@@ -280,7 +285,7 @@ export async function startProduction(
     metadata: { kind: request.kind, planItemId: job.planItemId, clusterId: job.clusterId },
   });
 
-  let projectId: string | null = null;
+  let projectId: string | null = request.kind === "manual" ? request.projectId ?? null : null;
   if (target.item) {
     projectId = (await ensurePlanItemProject(target.item, job.id)).id;
   }
@@ -536,20 +541,46 @@ export async function listProductionJobs(
   return { items: rows.map(toProductionJobView), page, pageSize, total, counts: statusCounts };
 }
 
-// ────────────────────────────────────────────────────────────── Plan item entry (replaces generateContentFromEditorialPlanItem)
+// ────────────────────────────────────────────────────────────── Existing project entry
+
+/** (Re)write an existing project through the pipeline; a run already in flight is returned, not forked. */
+export async function startProductionForProject(
+  tenantId: string,
+  projectId: string,
+  options: { feedback?: string | null; presetVersionId?: string | null; brief?: string | null; userId?: string | null } = {},
+): Promise<ProductionJobView> {
+  const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId } });
+  if (!project) throw new ProductionError("project_not_found", undefined, 404);
+  const { job } = await startProduction(
+    tenantId,
+    {
+      kind: "manual",
+      projectId: project.id,
+      siteId: project.siteId,
+      title: project.title,
+      brief: options.brief?.trim() || project.brief?.trim() || project.title,
+      language: project.primaryLanguage === "en" ? "en" : "es",
+      feedback: options.feedback ?? null,
+      presetVersionId: options.presetVersionId ?? null,
+    },
+    { userId: options.userId ?? null },
+  );
+  return job;
+}
+
+// ────────────────────────────────────────────────────────────── Plan item entry
 
 /**
- * Drop-in replacement for generateContentFromEditorialPlanItem: same return
- * shape ({ item, project }) plus `job`. Website items run through the governed
- * pipeline; social items (x/instagram) still use the legacy social generator.
+ * Plan item entry: returns { item, project, job }. Website items run through
+ * the governed pipeline; social items get a pipeline-written base article.
  */
 export async function startProductionForPlanItem(tenantId: string, planItemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId }, include: { project: true } });
   if (!item) return null;
   if (item.channel !== "website") {
-    // shortcut: the article writer cannot produce social packs; move social to the pipeline once a social writer stage exists.
-    const legacy = await generateContentFromEditorialPlanItem(tenantId, planItemId, userId);
-    return legacy ? { ...legacy, job: null } : null;
+    // shortcut: social items get a pipeline article as the base for their social pack; add a social writer stage to skip it.
+    const social = await generateSocialForPlanItem(tenantId, planItemId, userId);
+    return social;
   }
   const jobByItem = await prisma.productionJob.findFirst({ where: { tenantId, planItemId: item.id }, orderBy: { createdAt: "desc" } });
   if (item.projectId && item.project && !jobByItem) {

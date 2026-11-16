@@ -209,7 +209,8 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   );
   const allowedDates = new Set(
     [
-      ...licenses.map((license) => normalizeDate(license.statement)),
+      // Each date in a sentence: normalizing the whole sentence picks up unrelated numbers ("temporada 2") as the day.
+      ...licenses.flatMap((license) => [normalizeDate(license.statement), ...extractDates(license.statement).map(normalizeDate)]),
       ...input.enrichmentDates.map((date) => normalizeDate(date)),
     ].filter((value): value is string => Boolean(value)),
   );

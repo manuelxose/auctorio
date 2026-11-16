@@ -70,9 +70,9 @@ import {
   requestInlineImagesForVersion,
   retryImageGeneration,
   isProjectGenerationInFlight,
-  startProjectGeneration,
 } from "./orchestration";
 import { archiveProject } from "./projects";
+import { startProductionForProject } from "./production/pipeline";
 import { linkDurableWebsitePublication } from "./publication";
 import { runVersionQaV2 } from "./qa";
 import { getStudioGoogleClientId } from "./google";
@@ -1238,19 +1238,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         return notFound(reply, "prompt preset version not found");
       }
     }
-    const result = await startProjectGeneration(
-      project.id,
-      context.tenantId,
-      body.feedback ?? null,
-      presetVersionId,
-    );
-    return reply.code(202).send({
-      project_id: project.id,
-      version_id: result.versionId,
-      content_text_id: result.contentTextId,
-      job_id: result.jobId,
-      status: "queued",
-    });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback ?? null, presetVersionId, userId: context.userId });
+    return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 
   fastify.post("/v2/projects/:id/revise", async (request, reply) => {
@@ -1277,19 +1266,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
     }
 
-    const result = await startProjectGeneration(
-      project.id,
-      context.tenantId,
-      body.feedback.trim(),
-      null,
-    );
-    return reply.code(202).send({
-      project_id: project.id,
-      version_id: result.versionId,
-      content_text_id: result.contentTextId,
-      job_id: result.jobId,
-      status: "queued",
-    });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback.trim(), userId: context.userId });
+    return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 
   fastify.post("/v2/projects/:id/approve", async (request, reply) => {

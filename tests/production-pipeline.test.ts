@@ -13,6 +13,7 @@ import {
   reviewProductionJob,
   startProduction,
   startProductionForPlanItem,
+  startProductionForProject,
 } from "../src/studio/production/pipeline";
 import { getDefaultProductionStages, setProductionStageOverrides } from "../src/studio/production/stages";
 import { listOperations } from "../src/studio/operations";
@@ -37,7 +38,7 @@ async function fixture() {
 }
 
 async function cleanup(tenantId: string) {
-  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "publicationJob", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "editorialPlan", "operation", "site"] as const) {
+  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "publicationJob", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
     await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where: { tenantId } });
   }
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
@@ -283,5 +284,56 @@ test("M1: approving after the slot passed publishes now; manual mode creates no 
     assert.equal(await prisma.publication.count({ where: { tenantId: m.tenantId } }), 0);
   } finally {
     await cleanup(m.tenantId);
+  }
+});
+
+test("M2: rewriting an existing project runs the pipeline into that project with the editor's feedback", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  const prompts: string[] = [];
+  const writer = new FakeWriter();
+  setArticleWriterFactory(() => ({ generate: async (input: Parameters<FakeWriter["generate"]>[0]) => (prompts.push(input.prompt), writer.generate(input)) }));
+  const project = await prisma.contentProject.create({ data: { tenantId: f.tenantId, siteId: f.siteId, title: "Series de misterio para maratonear", brief: "Guia propia de series de misterio", status: "draft" } });
+  try {
+    const job = await startProductionForProject(f.tenantId, project.id, { feedback: "Añade una tabla comparativa" });
+    const again = await startProductionForProject(f.tenantId, project.id);
+    assert.equal(again.id, job.id, "a run in flight is returned, not forked");
+    let done = await getProductionJob(f.tenantId, job.id);
+    for (let i = 0; i < 100 && done && ["queued", "running"].includes(done.status); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      done = await getProductionJob(f.tenantId, job.id);
+    }
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+    assert.ok(prompts.some((prompt) => prompt.includes("Añade una tabla comparativa")));
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: f.tenantId } }), 1);
+    assert.equal(await prisma.contentVersion.count({ where: { tenantId: f.tenantId, projectId: project.id } }), 1);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M2: a source-item project's stored facts reach the ledger, so its rewrite is not rejected as unsupported", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const topic = await prisma.topic.create({ data: { tenantId: f.tenantId, title: "Estrenos de series" } });
+  await prisma.fact.create({
+    data: {
+      tenantId: f.tenantId, topicId: topic.id, sourceType: "rss", sourceRef: "https://news-a.example/estrenos",
+      content: "La plataforma estrena tres series de misterio este viernes por la noche. La primera temporada tiene ocho episodios de una hora cada uno.",
+      contentHash: `facts-${f.tenantId}`,
+    },
+  });
+  const project = await prisma.contentProject.create({ data: { tenantId: f.tenantId, siteId: f.siteId, topicId: topic.id, title: "Estrenos de series de misterio este viernes", brief: "Noticia de estrenos", status: "draft" } });
+  try {
+    const job = await startProductionForProject(f.tenantId, project.id);
+    let done = await getProductionJob(f.tenantId, job.id);
+    for (let i = 0; i < 100 && done && ["queued", "running"].includes(done.status); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      done = await getProductionJob(f.tenantId, job.id);
+    }
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+  } finally {
+    await cleanup(f.tenantId);
   }
 });

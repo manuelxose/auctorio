@@ -468,11 +468,11 @@ test("SEO package: deterministic slug, no invented volume, stuffing detection", 
   assert.equal(seo.keywordDensity.stuffingRisk, true, "heavy repetition must be flagged as stuffing");
 });
 
-test("editorial QA: unsupported years hard-fail publication", () => {
+function qaForLedger(statement: string, bodyHtml: string) {
   const licenses: FactLicense[] = [
     {
       factKey: "headline",
-      statement: "Studio announces movie",
+      statement,
       usage: "state",
       sensitivity: "normal",
       reasons: [],
@@ -485,7 +485,7 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     title: "T",
     h1: "T",
     excerpt: "e",
-    bodyHtml: "<p>Studio announces movie. It all started in 1931.</p>",
+    bodyHtml,
     seoTitle: "T".padEnd(40, "x"),
     seoDescription: "d".padEnd(120, "x"),
     claims: [],
@@ -510,7 +510,7 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     contentWarnings: [],
     generatedAt: new Date().toISOString(),
   };
-  const report = runEditorialQa({
+  return runEditorialQa({
     article,
     brief,
     licenses,
@@ -537,8 +537,19 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     enrichmentKnowledge: [],
     enrichmentDates: [],
   });
+}
+
+test("editorial QA: unsupported years hard-fail publication", () => {
+  const report = qaForLedger("Studio announces movie", "<p>Studio announces movie. It all started in 1931.</p>");
   assert.equal(report.passed, false, "unsupported year must hard-fail");
   assert.equal(report.criticalUnsupportedClaims.length, 1);
+});
+
+test("editorial QA: a date anywhere in a ledger sentence is supported, even after another number", () => {
+  const statement = "Si vamos título a título vemos que la temporada 2 de Celeste, que se estrena el 19 de noviembre, está nominada.";
+  const report = qaForLedger(statement, "<p>Studio announces movie. La temporada 2 de Celeste se estrena el 19 de noviembre.</p>");
+  assert.deepEqual(report.criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger(statement, "<p>Se estrena el 21 de noviembre.</p>").criticalUnsupportedClaims.length, 1, "a different date stays unsupported");
 });
 
 test("publication gates: configurable ladder from auto_publish to reject", () => {

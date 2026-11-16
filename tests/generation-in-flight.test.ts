@@ -5,7 +5,6 @@ import assert from "node:assert/strict";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
 import { isProjectGenerationInFlight } from "../src/studio/orchestration";
-import { createQueuedText } from "../src/studio/repository";
 
 const prisma = getPrismaClient();
 
@@ -13,7 +12,7 @@ test.after(async () => {
   await prisma.$disconnect();
 });
 
-test("generation in flight: live text blocks, finished or stale text does not", async () => {
+test("generation in flight: live text or production job blocks, finished or stale ones do not", async () => {
   const seed = `gif-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   const tenant = await prisma.tenant.create({ data: { name: seed, apiKeyHash: sha256(`${seed}-key`), status: "active" } });
   try {
@@ -22,7 +21,7 @@ test("generation in flight: live text blocks, finished or stale text does not", 
     const project = await prisma.contentProject.create({ data: { tenantId: tenant.id, siteId: site.id, topicId: topic.id, title: "T", brief: "B", status: "draft" } });
     assert.equal(await isProjectGenerationInFlight(tenant.id, project.id), false, "no version yet");
 
-    const text = await createQueuedText(tenant.id, topic.id, "es");
+    const text = await prisma.contentText.create({ data: { tenantId: tenant.id, topicId: topic.id, type: "seo", language: "es", status: "queued" } });
     await prisma.contentVersion.create({ data: { tenantId: tenant.id, projectId: project.id, versionNumber: 1, status: "draft", contentTextId: text.id } });
     assert.equal(await isProjectGenerationInFlight(tenant.id, project.id), true, "queued text is in flight");
 
@@ -31,7 +30,13 @@ test("generation in flight: live text blocks, finished or stale text does not", 
 
     await prisma.contentText.update({ where: { id: text.id }, data: { status: "done" } });
     assert.equal(await isProjectGenerationInFlight(tenant.id, project.id), false, "finished text");
+
+    const job = await prisma.productionJob.create({ data: { tenantId: tenant.id, siteId: site.id, kind: "manual", projectId: project.id, status: "running", idempotencyKey: `project:${project.id}`, request: {} } });
+    assert.equal(await isProjectGenerationInFlight(tenant.id, project.id), true, "running production job");
+    await prisma.productionJob.update({ where: { id: job.id }, data: { status: "needs_review" } });
+    assert.equal(await isProjectGenerationInFlight(tenant.id, project.id), false, "finished production job");
   } finally {
+    await prisma.productionJob.deleteMany({ where: { tenantId: tenant.id } });
     await prisma.contentVersion.deleteMany({ where: { tenantId: tenant.id } });
     await prisma.contentProject.deleteMany({ where: { tenantId: tenant.id } });
     await prisma.contentText.deleteMany({ where: { tenantId: tenant.id } });

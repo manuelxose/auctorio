@@ -5,7 +5,6 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { SOURCE_DATA_RULES } from "./prompt-injection";
 import { writeAudit } from "./audit";
 import { createProject } from "./repository";
-import { startProjectGeneration } from "./orchestration";
 import { structuredEvent } from "../shared/utils/logger";
 import { getNumberEnv } from "../shared/utils/env";
 import { generateStructured, StructuredOutputError, type StructuredGenerationAttempt } from "../infrastructure/ai/structured";
@@ -1487,17 +1486,19 @@ export function buildProjectInputFromPlanItem(item: BriefSourceItem, options: { 
   };
 }
 
-export async function generateContentFromEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
+/** Social plan items: a project from the item, written by the production pipeline. */
+export async function generateSocialForPlanItem(tenantId: string, itemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { project: true, plan: { select: { configuration: true } } } });
   if (!item) return null;
-  if (item.projectId && item.project) return { item, project: item.project };
+  if (item.projectId && item.project) return { item, project: item.project, job: null };
   if (item.status !== "approved") throw new Error("editorial_plan_item_must_be_approved");
   if (!item.siteId) throw new Error("editorial_plan_item_site_required");
 
   const language = ((item.plan.configuration ?? {}) as { language?: unknown }).language;
   const project = await createProject(tenantId, buildProjectInputFromPlanItem(item, { language: typeof language === "string" ? language : "es" }));
   await prisma.editorialPlanItem.update({ where: { id: item.id }, data: { projectId: project.id, status: "generating", contentGenerationStatus: "generating" } });
-  await startProjectGeneration(project.id, tenantId);
-  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.content_generation_started", entityType: "editorial_plan_item", entityId: item.id, metadata: { projectId: project.id } });
-  return { item: await prisma.editorialPlanItem.findUnique({ where: { id: item.id } }), project };
+  const { startProductionForProject } = await import("./production/pipeline");
+  const job = await startProductionForProject(tenantId, project.id, { userId });
+  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.content_generation_started", entityType: "editorial_plan_item", entityId: item.id, metadata: { projectId: project.id, productionJobId: job.id } });
+  return { item: await prisma.editorialPlanItem.findUnique({ where: { id: item.id } }), project, job };
 }

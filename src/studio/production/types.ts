@@ -23,12 +23,16 @@ export type ProductionRequestOptions = {
   searchIntentOverride?: string | null;
   /** Cluster runs only: when false the draft is not materialized (dry run). */
   persistDraft?: boolean;
+  /** Editor feedback for a rewrite, passed to the writer as guidance. */
+  feedback?: string | null;
+  /** Approved Studio prompt preset version whose instructions the writer follows. */
+  presetVersionId?: string | null;
 };
 
 export type ProductionRequest =
   | ({ kind: "plan_item"; planItemId: string } & ProductionRequestOptions)
   | ({ kind: "cluster"; clusterId: string; siteId?: string | null } & ProductionRequestOptions)
-  | ({ kind: "manual"; title: string; brief: string; siteId: string } & ProductionRequestOptions);
+  | ({ kind: "manual"; title: string; brief: string; siteId: string; /** Rewrite into this existing project. */ projectId?: string | null } & ProductionRequestOptions);
 
 export type ProductionKind = ProductionRequest["kind"];
 

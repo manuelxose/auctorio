@@ -32,6 +32,7 @@ import {
   type MaterializeArtifact,
   type PreparedInput,
   type ProductionRequest,
+  type ProductionRequestOptions,
   type QaArtifact,
   type StageContext,
   type WriteArtifact,
@@ -104,6 +105,20 @@ export function writerMaxTokens(targetWordMax: number): number {
   return Math.min(8000, Math.max(3000, Math.round(targetWordMax * 5)));
 }
 
+/** Per-run editor input (rewrite feedback, prompt preset) on top of the brief's guidance. */
+async function requestGuidance(tenantId: string, options: ProductionRequestOptions): Promise<string[]> {
+  const out: string[] = [];
+  if (options.feedback?.trim()) out.push(`Revision feedback from the editor (apply it in this rewrite):
+${options.feedback.trim().slice(0, 4000)}`);
+  if (options.presetVersionId) {
+    const version = await prisma.studioPromptVersion.findFirst({ where: { id: options.presetVersionId, status: "approved", preset: { tenantId } }, select: { systemTemplate: true, userTemplate: true } });
+    const text = version?.systemTemplate?.trim() || version?.userTemplate?.trim();
+    if (text) out.push(`House writing instructions (prompt preset):
+${text.slice(0, 4000)}`);
+  }
+  return out;
+}
+
 async function write(ctx: StageContext): Promise<WriteArtifact> {
   const briefArtifact = need(ctx.artifacts.brief, "brief");
   const factSafety = need(ctx.artifacts.evidence, "evidence");
@@ -115,7 +130,7 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     previousArticle: briefArtifact.previousArticle,
     updateDelta: briefArtifact.updateDelta,
     language: ctx.input.language,
-    editorialGuidance: briefArtifact.guidance,
+    editorialGuidance: [...briefArtifact.guidance, ...(await requestGuidance(ctx.tenantId, ctx.request))],
     plannedOutline: outlineHeadings(ctx.input.plan?.record ?? {}),
   });
   await updateGeneration(ctx, {

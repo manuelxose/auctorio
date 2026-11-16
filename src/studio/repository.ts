@@ -527,18 +527,6 @@ export async function addManualFact(tenantId: string, topicId: string, content: 
   });
 }
 
-export async function createQueuedText(tenantId: string, topicId: string, language: "es" | "en") {
-  return prisma.contentText.create({
-    data: {
-      tenantId,
-      topicId,
-      type: "seo",
-      language,
-      status: "queued",
-    },
-  });
-}
-
 export async function createQueuedImage(tenantId: string, topicId: string, textId: string | null) {
   return prisma.contentImage.create({
     data: {
@@ -546,25 +534,6 @@ export async function createQueuedImage(tenantId: string, topicId: string, textI
       topicId,
       textId,
       status: "queued",
-    },
-  });
-}
-
-export async function createVersion(tenantId: string, projectId: string, contentTextId: string, feedback?: string | null) {
-  const latest = await prisma.contentVersion.findFirst({
-    where: { tenantId, projectId },
-    orderBy: { versionNumber: "desc" },
-    select: { versionNumber: true },
-  });
-
-  return prisma.contentVersion.create({
-    data: {
-      tenantId,
-      projectId,
-      contentTextId,
-      versionNumber: (latest?.versionNumber ?? 0) + 1,
-      status: "draft",
-      feedback: feedback ?? null,
     },
   });
 }

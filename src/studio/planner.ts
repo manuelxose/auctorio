@@ -4,7 +4,6 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { structuredEvent } from "../shared/utils/logger";
 import { writeAudit } from "./audit";
 import { approveVersion, createProject, ensureProjectTopic } from "./repository";
-import { startProjectGeneration } from "./orchestration";
 import { createSocialGenerationJobs } from "./social";
 import { createPublication } from "./publication";
 import { findDuplicateCoverage } from "./editorial";
@@ -21,7 +20,7 @@ import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import type { QaReportV2 } from "./qa";
 import { PLAN_LEAD_TIME_MINUTES, type AutomationMode } from "./automation-mode";
 import { bulkApproveEditorialPlanItems } from "./editorial-plan";
-import { startProductionForPlanItem } from "./production/pipeline";
+import { startProductionForPlanItem, startProductionForProject } from "./production/pipeline";
 
 const prisma = getPrismaClient();
 
@@ -111,7 +110,7 @@ export type CreateProjectFromSourceItemInput = {
 export type CreateProjectFromSourceItemResult = {
   kind: "created" | "update";
   projectId: string;
-  versionId: string | null;
+  productionJobId: string;
   coveredByProjectId?: string;
 };
 
@@ -143,7 +142,11 @@ export async function createProjectFromSourceItem(
       project_id: coverage.project.id,
       source_item_id: item.id,
     });
-    const result = await startProjectGeneration(coverage.project.id, tenantId);
+    const update = `${coverage.project.brief}
+
+Nueva fuente: ${item.title}
+${(item.cleanedText ?? item.description ?? "").trim().slice(0, 3500)}`;
+    const job = await startProductionForProject(tenantId, coverage.project.id, { brief: update, userId: input.userId ?? null });
     await prisma.sourceItem.update({ where: { id: item.id }, data: { processingStatus: "processed" } });
     await prisma.contentProject.update({
       where: { id: coverage.project.id },
@@ -167,7 +170,7 @@ export async function createProjectFromSourceItem(
     return {
       kind: "update",
       projectId: coverage.project.id,
-      versionId: result.versionId,
+      productionJobId: job.id,
       coveredByProjectId: coverage.project.id,
     };
   }
@@ -210,7 +213,7 @@ export async function createProjectFromSourceItem(
     source_item_id: item.id,
   });
 
-  const result = await startProjectGeneration(project.id, tenantId);
+  const job = await startProductionForProject(tenantId, project.id, { userId: input.userId ?? null });
 
   await prisma.sourceItem.update({ where: { id: item.id }, data: { processingStatus: "selected" } });
   await markClusterSelected(tenantId, item.clusterId);
@@ -225,7 +228,7 @@ export async function createProjectFromSourceItem(
     metadata: { sourceItemId: item.id, sourceUrl: item.canonicalUrl },
   });
 
-  return { kind: "created", projectId: project.id, versionId: result.versionId };
+  return { kind: "created", projectId: project.id, productionJobId: job.id };
 }
 
 async function markClusterSelected(tenantId: string, clusterId: string | null) {
@@ -415,7 +418,7 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       // ── Legacy / assisted path (human approval semantics preserved). ──
       if (!latestVersion) {
         if (policy.autoGenerate) {
-          await startProjectGeneration(project.id, tenantId);
+          await startProductionForProject(tenantId, project.id);
           progress.projectsAdvanced += 1;
         }
         continue;
@@ -474,7 +477,7 @@ async function advanceAutopilotProject(
 
   if (!latestVersion) {
     if (policy.autoGenerate) {
-      await startProjectGeneration(project.id, tenantId);
+      await startProductionForProject(tenantId, project.id);
       await prisma.contentProject.update({
         where: { id: project.id },
         data: { automationSubstate: "generating" },

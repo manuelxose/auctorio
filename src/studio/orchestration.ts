@@ -1,10 +1,10 @@
 import crypto from "node:crypto";
 import { Prisma, type ContentProject, type DerivativeType, type Site } from "@prisma/client";
-import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob, getPublishingQueue } from "../infrastructure/queue/producer";
+import { enqueueImageJob, enqueuePublishingJob, getPublishingQueue } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
-import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
+import { attachImageToVersion, createQueuedImage, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
 import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
 import { createOperation } from "./operations";
@@ -145,6 +145,8 @@ export async function buildAssetPublicUrl(relativePath: string | null | undefine
 
 /** True while the project's latest version is still being written: a second run would fork a parallel version. */
 export async function isProjectGenerationInFlight(tenantId: string, projectId: string): Promise<boolean> {
+  const activeJob = await prisma.productionJob.findFirst({ where: { tenantId, projectId, status: { in: ["queued", "running"] }, updatedAt: { gte: new Date(Date.now() - 30 * 60_000) } }, select: { id: true } });
+  if (activeJob) return true;
   const latest = await prisma.contentVersion.findFirst({
     where: { tenantId, projectId },
     orderBy: { versionNumber: "desc" },
@@ -154,94 +156,6 @@ export async function isProjectGenerationInFlight(tenantId: string, projectId: s
   // A text untouched for 30 min is a lost job, not a live one: let the user regenerate.
   const fresh = Boolean(text && Date.now() - text.updatedAt.getTime() < 30 * 60_000);
   return fresh && (text?.status === "queued" || text?.status === "processing");
-}
-
-export async function startProjectGeneration(
-  projectId: string,
-  tenantId: string,
-  feedback?: string | null,
-  promptPresetVersionId?: string | null,
-) {
-  const project = await prisma.contentProject.findFirst({
-    where: { id: projectId, tenantId },
-    include: { site: true },
-  });
-  if (!project) {
-    throw new Error("project_not_found");
-  }
-
-  const topicId = await ensureProjectTopic(tenantId, projectId, project.title, project.brief);
-  await prisma.fact.create({
-    data: {
-      tenantId,
-      topicId,
-      sourceType: "manual",
-      content: feedback?.trim() ? `${project.brief}\n\nFeedback de revision:\n${feedback.trim()}` : project.brief,
-      contentHash: `${projectId}:${Date.now()}`,
-      metadata: {
-        project_id: projectId,
-        goal: project.goal,
-      },
-    },
-  });
-
-  const contentText = await createQueuedText(
-    tenantId,
-    topicId,
-    project.primaryLanguage === "en" ? "en" : "es",
-  );
-  const version = await createVersion(tenantId, projectId, contentText.id, feedback);
-  const textJob = await prisma.job.create({
-    data: {
-      tenantId,
-      type: "text",
-      status: "queued",
-    },
-  });
-
-  const operation = await createOperation({
-    tenantId,
-    siteId: project.siteId,
-    type: "text_generation",
-    initiatorUserId: null,
-    entityType: "content_project",
-    entityId: projectId,
-    queueName: "queue_text",
-    jobKey: textJob.id,
-    metadata: { goal: project.goal },
-  });
-
-  await enqueueTextJob(textJob.id, {
-    jobId: textJob.id,
-    tenantId,
-    operationId: operation.id,
-    topicId,
-    contentTextId: contentText.id,
-    type: "seo",
-    language: project.primaryLanguage === "en" ? "en" : "es",
-    options: {
-      goal: project.goal,
-      site_id: project.siteId,
-      site_name: project.site.name,
-      site_type: project.site.type,
-      brand_voice: project.site.brandVoice ?? {},
-      seo_rules: project.site.seoRules ?? {},
-      metadata: project.metadata ?? {},
-      revision_feedback: feedback ?? undefined,
-      promptPresetVersionId: promptPresetVersionId ?? undefined,
-    },
-  });
-
-  await updateProjectStatus(tenantId, projectId, "draft");
-
-  if (project.origin === "auto") {
-    await prisma.contentProject.update({
-      where: { id: projectId },
-      data: { automationSubstate: "generating" },
-    });
-  }
-
-  return { versionId: version.id, contentTextId: contentText.id, jobId: textJob.id };
 }
 
 export async function requestImageGenerationForVersion(

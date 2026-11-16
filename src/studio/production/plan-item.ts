@@ -1,5 +1,5 @@
 // Plan item + manual pre-stages of the unified production pipeline.
-// Everything generateContentFromEditorialPlanItem used to put in the project
+// Everything the legacy plan-item generator used to put in the project
 // brief/metadata is kept; the plan item is additionally mapped onto the same
 // EditorialBrief the cluster path uses so both converge on one writer + QA.
 
@@ -162,6 +162,22 @@ export function planEvidenceToLedger(sourceEvidence: unknown): { facts: LedgerFa
 
 // ────────────────────────────────────────────────────────────── Prepare
 
+/** Source facts already stored on the project's topic (source-item projects), as ledger entries. */
+async function projectFactLedger(tenantId: string, projectId: string): Promise<{ facts: LedgerFact[]; groups: number }> {
+  const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId }, select: { topicId: true } });
+  if (!project?.topicId) return { facts: [], groups: 0 };
+  const rows = await prisma.fact.findMany({ where: { tenantId, topicId: project.topicId, sourceType: { not: "manual" } }, orderBy: { createdAt: "desc" }, take: 6 });
+  const evidence = rows.flatMap((row) =>
+    row.content
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => sentence.trim())
+      .filter((sentence) => sentence.length >= 30)
+      .slice(0, 15)
+      .map((title) => ({ title, url: row.sourceRef ?? null, sourceType: row.sourceType })),
+  );
+  return planEvidenceToLedger(evidence.slice(0, 40));
+}
+
 async function loadSite(tenantId: string, siteId: string) {
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId } });
   if (!site) throw new Error("site_not_found");
@@ -261,10 +277,11 @@ export async function preparePlanItemInput(
 
 export async function prepareManualInput(
   tenantId: string,
-  request: { title: string; brief: string; siteId: string },
+  request: { title: string; brief: string; siteId: string; projectId?: string | null },
   options: ProductionRequestOptions,
 ): Promise<PreparedInput> {
   const site = await loadSite(tenantId, request.siteId);
+  const evidence = request.projectId ? await projectFactLedger(tenantId, request.projectId) : { facts: [], groups: 0 };
   return {
     kind: "manual",
     tenantId,
@@ -275,15 +292,15 @@ export async function prepareManualInput(
     summary: request.brief.slice(0, 500),
     entities: [],
     enrichments: [],
-    ledgerFacts: [],
-    factContext: { clusterVerificationState: "unverified", independentPublisherGroups: 0 },
-    memberTitles: [],
-    sourceTexts: [request.brief],
+    ledgerFacts: evidence.facts,
+    factContext: { clusterVerificationState: evidence.groups >= 2 ? "unverified" : "single_source", independentPublisherGroups: evidence.groups },
+    memberTitles: evidence.facts.map((fact) => fact.statement),
+    sourceTexts: [request.brief, ...evidence.facts.map((fact) => fact.statement)],
     internalLinks: await loadInternalLinks(tenantId, site.id, request.title, request.title, []),
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: null,
     primaryEntityNames: [request.title],
-    ownProjectId: null,
+    ownProjectId: request.projectId ?? null,
     cluster: null,
     plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`] },
     options,
