@@ -9,15 +9,18 @@ import { AppEmptyStateComponent } from '../components/ui/app-empty-state.compone
 import { OnboardingTimelineComponent } from '../components/intelligence/onboarding-timeline.component';
 import { IntelligenceApiService } from '../services/intelligence-api.service';
 import { EditorialContextService } from '../services/editorial-context.service';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { sectionFor } from '../layout/studio-nav';
 import type { ClusterCoverage, Provenance, StrategyConfig, StrategyField, StrategyLayers, StrategyPillar, StrategyVersion } from '../models/intelligence.models';
 import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '../models/studio.models';
 
 const STYLES = `
-  .tabs { display: flex; gap: 4px; flex-wrap: wrap; border-bottom: 1px solid var(--au-border); margin-bottom: 16px; }
-  .tab { background: none; border: 0; padding: 10px 14px; cursor: pointer; font: inherit; color: var(--au-text-muted, inherit); border-bottom: 2px solid transparent; }
-  .tab[aria-selected='true'] { color: var(--au-text, inherit); border-bottom-color: var(--au-brand, currentColor); font-weight: 600; }
-  .tab:focus-visible { outline: 2px solid var(--au-brand, currentColor); outline-offset: 2px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 var(--au-s4, 16px); color: var(--au-muted); font-size: var(--au-fs-body-sm); }
+  .summary strong { color: var(--au-text); font-variant-numeric: tabular-nums; }
+  .summary a { color: inherit; text-decoration: none; }
+  .summary a:hover { text-decoration: underline; }
+  .summary .is-alert, .summary .is-alert strong { color: var(--au-danger, #b42318); }
+  .summary__live { color: var(--au-accent); font-weight: 600; }
   .form-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
   .field label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
   .field textarea { width: 100%; box-sizing: border-box; }
@@ -34,7 +37,6 @@ const STYLES = `
   .group { border: 0; padding: 0; margin: 0 0 var(--au-s5, 20px); min-width: 0; }
   .group legend { padding: 0; font-weight: 600; }
   .group__hint { margin: 2px 0 10px; }
-  .summary { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
   .detected { display: grid; gap: 16px 24px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 `;
 
@@ -93,35 +95,20 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
       </div>
 
-      <!-- Summary: same on every tab -->
+      <!-- One-line summary, the same in every section; sections are picked in the sidebar -->
       <ng-container *ngIf="overview">
-        <div class="au-stat-row summary au-mb-3" aria-label="Site summary">
-          <div class="au-stat">
-            <span class="au-stat__value">{{ overview.extractedPages }}<span class="au-muted"> / {{ overview.totalPages }}</span></span>
-            <span class="au-stat__label">Pages read / found</span>
-          </div>
-          <div class="au-stat">
-            <span class="au-stat__value">{{ overview.profile?.topicClusters?.length ?? 0 }}</span>
-            <span class="au-stat__label">Topic clusters</span>
-          </div>
-          <div class="au-stat" [class.is-alert]="healthySitemaps < overview.sitemaps.length">
-            <span class="au-stat__value">{{ healthySitemaps }}/{{ overview.sitemaps.length }}</span>
-            <span class="au-stat__label">Healthy sitemaps</span>
-          </div>
-          <div class="au-stat">
-            <span class="au-stat__value">{{ busy ? 'Now' : overview.lastRun ? (overview.lastRun | date: 'd MMM') : 'Never' }}</span>
-            <span class="au-stat__label">{{ busy ? 'Reading the site' : overview.lastRun ? 'Last read · ' + (overview.lastRun | date: 'HH:mm') : 'Last read' }}</span>
-          </div>
-        </div>
+        <p class="summary" aria-label="Site summary">
+          <span><strong>{{ overview.extractedPages }}</strong> of {{ overview.totalPages }} pages read</span>
+          <span><strong>{{ overview.profile?.topicClusters?.length ?? 0 }}</strong> topic clusters</span>
+          <a routerLink="." [queryParams]="{ tab: 'crawl' }" [class.is-alert]="healthySitemaps < overview.sitemaps.length"><strong>{{ healthySitemaps }}/{{ overview.sitemaps.length }}</strong> sitemaps healthy</a>
+          <span *ngIf="busy" class="summary__live">Reading the site now…</span>
+          <span *ngIf="!busy">Last read {{ overview.lastRun ? (overview.lastRun | date: 'd MMM, HH:mm') : 'never' }}</span>
+        </p>
         <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview.profile?.warnings?.length">
           <app-icon name="warning"></app-icon>
           <span class="au-banner__text">{{ overview.profile?.warnings?.join(' · ') }}</span>
         </div>
       </ng-container>
-
-      <nav class="tabs" role="tablist" aria-label="Site intelligence sections">
-        <button class="tab" type="button" role="tab" *ngFor="let t of tabs" [attr.aria-selected]="tab === t.id" (click)="tab = t.id">{{ t.label }}</button>
-      </nav>
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'seo'">
         <h2 class="au-panel__title">On-page signals</h2>
@@ -138,34 +125,11 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             </tbody>
           </table>
         </ng-container>
-        <ng-template #noSeo><p class="au-muted">No pages analysed yet. Read the site from Crawl health to see on-page signals.</p></ng-template>
+        <ng-template #noSeo><p class="au-muted">No pages analysed yet. Use "Read the whole site" above to see on-page signals.</p></ng-template>
       </section>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'opportunities'">
-        <h2 class="au-panel__title">Content opportunities</h2>
-        <ng-container *ngIf="overview?.opportunities?.length; else noOpp">
-          <p class="au-muted">Inferred from approved pillar subtopics that no analysed page title or H1 mentions. A gap in our sample may not be a gap on the site; confidence follows how much of the site was read. No search volume or difficulty is estimated.</p>
-          <table class="au-table">
-            <thead><tr><th>Pillar</th><th>Subtopic</th><th>Why</th><th>Confidence</th><th></th></tr></thead>
-            <tbody>
-              <tr *ngFor="let o of overview?.opportunities">
-                <td>{{ o.pillar }}</td>
-                <td>{{ o.subtopic }}</td>
-                <td>{{ o.reason }}</td>
-                <td>{{ o.confidence }}</td>
-                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
-              </tr>
-            </tbody>
-          </table>
-        </ng-container>
-        <ng-template #noOpp>
-          <p class="au-muted" *ngIf="overview?.opportunitiesBasis === 'detected-keywords'">No pillars with subtopics are defined yet, so gaps cannot be detected. Add them in Pillars &amp; clusters.</p>
-          <p class="au-muted" *ngIf="overview?.opportunitiesBasis !== 'detected-keywords'">No uncovered subtopics found in the pages analysed so far.</p>
-        </ng-template>
-      </section>
-
-      <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'coverage'">
+      <!-- Pages & crawl: what was read, sitemaps, the setup run and the page inventory -->
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'crawl'">
         <h2 class="au-panel__title">What was actually read</h2>
         <ng-container *ngIf="overview?.evidence as ev; else noEvidence">
           <p>{{ ev.discovered }} URLs found in sitemaps · {{ ev.fetched }} fetched · {{ ev.extracted }} analysed · {{ ev.failed }} failed · {{ ev.skipped }} skipped</p>
@@ -177,9 +141,10 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
             </tbody>
           </table>
         </ng-container>
-        <ng-template #noEvidence><p class="au-muted">No crawl yet. Read the site from Crawl health to see coverage.</p></ng-template>
+        <ng-template #noEvidence><p class="au-muted">No crawl yet. Use "Read the whole site" above to see coverage.</p></ng-template>
       </section>
 
+      <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && overview?.profile as p">
         <h2 class="au-panel__title">What Auctorio detected</h2>
         <div class="detected au-mt-2">
@@ -288,9 +253,32 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         <p class="au-error" *ngIf="strategyError">{{ strategyError }}</p>
       </section>
 
+      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'pillars'">
+        <h2 class="au-panel__title">Content gaps</h2>
+        <ng-container *ngIf="overview?.opportunities?.length; else noOpp">
+          <p class="au-muted">Approved pillar subtopics that no analysed page title or H1 mentions. A gap in our sample may not be a gap on the site; confidence follows how much of the site was read. No search volume or difficulty is estimated.</p>
+          <table class="au-table">
+            <thead><tr><th>Pillar</th><th>Subtopic</th><th>Why</th><th>Confidence</th><th></th></tr></thead>
+            <tbody>
+              <tr *ngFor="let o of overview?.opportunities">
+                <td>{{ o.pillar }}</td>
+                <td>{{ o.subtopic }}</td>
+                <td>{{ o.reason }}</td>
+                <td>{{ o.confidence }}</td>
+                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </ng-container>
+        <ng-template #noOpp>
+          <p class="au-muted" *ngIf="overview?.opportunitiesBasis === 'detected-keywords'">No pillars with subtopics are defined yet, so gaps cannot be detected. Add subtopics to the pillars above.</p>
+          <p class="au-muted" *ngIf="overview?.opportunitiesBasis !== 'detected-keywords'">No uncovered subtopics found in the pages analysed so far.</p>
+        </ng-template>
+      </section>
+
       <ng-container *ngIf="overview">
         <!-- Sitemaps -->
-        <section class="au-panel au-mb-3" *ngIf="tab === 'health'">
+        <section class="au-panel au-mb-3" *ngIf="tab === 'crawl'">
           <header class="au-panel__header">
             <h2 class="au-panel__title">Sitemaps</h2>
             <span class="au-badge au-badge--neutral">{{ overview.sitemaps.length }}</span>
@@ -317,13 +305,13 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
         </section>
 
         <!-- Setup run: the one-off onboarding (read → profile → sources → competitors → strategy) -->
-        <details class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'health' && selectedSiteId">
+        <details class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'crawl' && selectedSiteId">
           <summary>Setup run</summary>
           <app-onboarding-timeline class="au-mt-2" [siteId]="selectedSiteId" [allowStart]="true"></app-onboarding-timeline>
         </details>
 
         <!-- Indexed pages -->
-        <section class="au-panel" *ngIf="tab === 'inventory'">
+        <section class="au-panel" *ngIf="tab === 'crawl'">
           <header class="au-panel__header">
             <h2 class="au-panel__title">Discovered pages <span class="au-muted">(from sitemap; not Google-indexed)</span></h2>
             <span class="au-badge au-badge--neutral">{{ pagesTotal }}</span>
@@ -383,19 +371,17 @@ export class SiteIntelligencePageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly intel = inject(IntelligenceApiService);
   private readonly editorialContext = inject(EditorialContextService);
-  readonly tabs: Array<{ id: string; label: string }> = [
-    { id: 'profile', label: 'Profile & audience' },
-    { id: 'pillars', label: 'Pillars & clusters' },
-    { id: 'coverage', label: 'Coverage' },
-    { id: 'seo', label: 'SEO signals' },
-    { id: 'opportunities', label: 'Opportunities' },
-    { id: 'inventory', label: 'Pages' },
-    { id: 'health', label: 'Crawl health' },
-  ];
   readonly fieldGroups = FIELD_GROUPS.map((g) => ({ ...g, fields: FIELDS.filter((f) => g.keys.includes(f.key)) }));
-  // ?tab= deep-links a section, e.g. Overview "Read the site again" opens Crawl health; the old Onboarding tab lives there now.
-  private readonly requestedTab = inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap.get('tab');
-  tab = this.requestedTab === 'onboarding' ? 'health' : (this.tabs.find((t) => t.id === this.requestedTab)?.id ?? 'profile');
+  // ?tab= picks the section (sidebar sub-items); old tab ids still deep-link to the section that absorbed them.
+  tab = 'profile';
+  private readonly router = inject(Router);
+  private readonly tabSub = inject(ActivatedRoute, { optional: true })?.queryParamMap.subscribe((query) => {
+    const legacy: Record<string, string> = { onboarding: 'crawl', health: 'crawl', inventory: 'crawl', coverage: 'crawl', opportunities: 'pillars' };
+    const renamed = legacy[query.get('tab') ?? ''];
+    // Rewrite the URL so the sidebar highlights the same section.
+    if (renamed) void this.router.navigate([], { queryParams: { tab: renamed }, queryParamsHandling: 'merge', replaceUrl: true });
+    this.tab = sectionFor('/studio/site-intelligence', renamed ?? query.get('tab'));
+  });
   layers: StrategyLayers | null = null;
   draft: StrategyConfig | null = null;
   versions: StrategyVersion[] = [];

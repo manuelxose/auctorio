@@ -47,7 +47,7 @@ test('admin keeps team, roles and System health; autopilot saves without opening
 
   await page.goto('/studio/operations', { waitUntil: 'networkidle' });
   await expect(page).toHaveURL(/\/studio\/operations/);
-  await expect(page.getByRole('tab', { name: 'Workers' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Workers', exact: true })).toBeVisible();
   await context.close();
 });
 

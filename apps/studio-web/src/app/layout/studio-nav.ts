@@ -11,7 +11,10 @@ export type StudioNavItem = {
   heading?: string;
   /** One line: what the user does on this step. Shown in the step bar and the "Next step" footer. */
   hint?: string;
+  /** Sections of the page, listed under the item in the sidebar and opened with ?tab=<id>; the first is the default. */
+  sections?: StudioNavSection[];
 };
+export type StudioNavSection = { id: string; label: string };
 /** A primary area (horizontal nav). Its items are the contextual sidebar's tools. */
 export type StudioNavGroup = {
   id: string;
@@ -50,7 +53,18 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     icon: 'scan',
     step: 1,
     items: [
-      { label: 'Site intelligence', path: '/studio/site-intelligence', icon: 'scan', hint: 'Read the site, set its audience, pillars and clusters.' },
+      {
+        label: 'Site intelligence',
+        path: '/studio/site-intelligence',
+        icon: 'scan',
+        hint: 'Read the site, set its audience, pillars and clusters.',
+        sections: [
+          { id: 'profile', label: 'Profile & strategy' },
+          { id: 'pillars', label: 'Pillars & gaps' },
+          { id: 'seo', label: 'SEO signals' },
+          { id: 'crawl', label: 'Pages & crawl' },
+        ],
+      },
       { label: 'Competitors', path: '/studio/competitors', icon: 'globe', hint: 'Compare coverage and send gaps to the plan.' },
     ],
   },
@@ -69,7 +83,18 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     label: 'Plan',
     icon: 'plan',
     step: 3,
-    items: [{ label: 'Editorial plan', path: '/studio/editorial-plan', icon: 'plan', hint: 'Decide what to publish: generate, review and approve briefs.' }],
+    items: [
+      {
+        label: 'Editorial plan',
+        path: '/studio/editorial-plan',
+        icon: 'plan',
+        hint: 'Decide what to publish: generate, review and approve briefs.',
+        sections: [
+          { id: 'backlog', label: 'Backlog' },
+          { id: 'pipeline', label: 'Pipeline' },
+        ],
+      },
+    ],
   },
   {
     id: 'production',
@@ -112,7 +137,21 @@ export const STUDIO_NAV: StudioNavGroup[] = [
       { label: 'Web discovery', path: '/studio/settings/discovery', icon: 'sources' },
       { label: 'Autopilot', path: '/studio/automation', icon: 'automation' },
       { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },
-      { label: 'System health', path: '/studio/operations', icon: 'operations', heading: 'System', adminOnly: true },
+      {
+        label: 'System health',
+        path: '/studio/operations',
+        icon: 'operations',
+        heading: 'System',
+        adminOnly: true,
+        sections: [
+          { id: 'overview', label: 'Overview' },
+          { id: 'workers', label: 'Workers' },
+          { id: 'queues', label: 'Queues' },
+          { id: 'production', label: 'Production jobs' },
+          { id: 'failures', label: 'Failures' },
+          { id: 'cost', label: 'Cost controls' },
+        ],
+      },
       { label: 'Usage', path: '/studio/admin/overview', icon: 'overview', heading: 'All workspaces', platformAdminOnly: true },
       { label: 'Workspaces', path: '/studio/admin/workspaces', icon: 'globe', platformAdminOnly: true },
       { label: 'AI providers', path: '/studio/admin/ai', icon: 'sparkles', platformAdminOnly: true },
@@ -139,7 +178,13 @@ export function activeNavItem(url: string): { group: StudioNavGroup; item: Studi
   return best;
 }
 
-export type GuidedStep = { group: StudioNavGroup; item: StudioNavItem; number: string };
+/** The section ?tab= names on the page at `path`, else its first section. */
+export function sectionFor(path: string, tab: string | null | undefined): string {
+  const sections = STUDIO_NAV.flatMap((group) => group.items).find((item) => item.path === path)?.sections ?? [];
+  return sections.find((section) => section.id === tab)?.id ?? sections[0]?.id ?? '';
+}
+
+export type GuidedStep ={ group: StudioNavGroup; item: StudioNavItem; number: string };
 
 /** Numbered steps of the guided process, in order ("1.1", "1.2", "2.1"…). */
 export const GUIDED_STEPS: GuidedStep[] = STUDIO_NAV.filter((group) => group.step && !group.hidden).flatMap((group) =>

@@ -186,7 +186,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
                     </div>
                     @switch (step.id) {
                       @case ('website') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/connections/wizard">Connect</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a> } }
-                      @case ('learn') { <a class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading…' : step.done ? 'Review' : 'Analyze' }}</a> }
+                      @case ('learn') { <a class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading…' : step.done ? 'Review' : 'Analyze' }}</a> }
                       @case ('plan') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/editorial-plan" [queryParams]="{ new: 1 }">{{ planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/editorial-plan">Open</a> } }
                       @case ('autopilot') { <a class="au-btn au-btn--sm" routerLink="/studio/automation">Settings</a> }
                       @case ('instagram') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'instagram.com' }">Connect</a> } }
@@ -222,11 +222,11 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
               }
               <div class="ov__actions">
                 <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence">Not quite right, review it</a>
-                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</a>
+                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</a>
               </div>
             } @else {
               <p class="ov__empty">Nothing learned yet. Auctorio reads your public pages to find your topics, audience and tone.</p>
-              <div class="ov__actions"><a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'health' }">{{ indexing() ? 'Reading the site…' : 'Analyze my site' }}</a></div>
+              <div class="ov__actions"><a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading the site…' : 'Analyze my site' }}</a></div>
             }
           </section>
 

@@ -13,7 +13,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, canSeeNavItem, currentStep, nextStep, type GuidedStep, type StudioNavGroup } from './studio-nav';
+import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, canSeeNavItem, currentStep, nextStep, sectionFor, type GuidedStep, type StudioNavGroup } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
@@ -225,6 +225,17 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
                   {{ item.label }}
                 </span>
               </a>
+              @if (item.sections && activePath() === item.path) {
+                <ul class="au-sb__sub" [attr.aria-label]="item.label + ' sections'">
+                  @for (section of item.sections; track section.id) {
+                    <li>
+                      <a class="au-sb__item au-sb__item--sub" [routerLink]="item.path" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">
+                        <span class="au-sb__label">{{ section.label }}</span>
+                      </a>
+                    </li>
+                  }
+                </ul>
+              }
             </li>
           </ul>
         </nav>
@@ -255,6 +266,14 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               <span class="au-stepbar__area">{{ current.group.label }}</span>
               <span class="au-stepbar__hint">{{ current.item.hint }}</span>
             </p>
+          }
+          <!-- The icon rail hides the sidebar's section list, so it moves here. -->
+          @if (collapsed() && !isPhone() && activeSections(); as sections) {
+            <nav class="au-sectionbar" aria-label="Page sections">
+              @for (section of sections; track section.id) {
+                <a [routerLink]="activePath()" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
+              }
+            </nav>
           }
           <!-- Re-created per site so pages reload their data instead of showing the previous site's. -->
           @for (siteKey of [activeSiteId]; track siteKey) {
@@ -350,6 +369,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
   readonly location = signal<{ group: string; title: string }>({ group: 'Workspace', title: 'Overview' });
   /** Area of the current route; routes outside the nav (settings) keep the last one. */
   readonly activeArea = signal<StudioNavGroup>(STUDIO_NAV[0]);
+  /** Nav path of the current page and its open section, for the sidebar's section list. */
+  readonly activePath = signal('');
+  readonly activeSection = signal('');
+  activeSections = () => this.sidebarItems().find((item) => item.path === this.activePath())?.sections ?? null;
 
   readonly shortcut = this.isMac() ? '⌘K' : 'Ctrl K';
   readonly copilotShortcut = this.isMac() ? '⌘J' : 'Ctrl J';
@@ -396,6 +419,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
         const url = this.router.url.split(/[?#]/)[0];
         const match = activeNavItem(url);
         if (match) this.activeArea.set(match.group);
+        this.activePath.set(match?.item.path === url ? url : '');
+        this.activeSection.set(match ? sectionFor(match.item.path, this.router.parseUrl(this.router.url).queryParamMap.get('tab')) : '');
         this.step.set(currentStep(url));
         this.next.set(nextStep(url));
       });
