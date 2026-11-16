@@ -341,11 +341,13 @@ async function requestInlineImagesForVersion(tenantId, versionId) {
     }
     return ids;
 }
+/** Pre-approval statuses: QA may still be (re)computed. Never pull an approved, queued or published piece back. */
+const QA_REFRESHABLE_STATUSES = ["draft", "ai_generated", "qa_failed", "qa_passed", "in_review"];
 /** Places a finished inline image in its version's body and refreshes QA while the piece is still in review. */
 async function syncInlineImageToVersion(tenantId, contentImageId) {
     const image = await prisma.contentImage.findFirst({ where: { id: contentImageId, tenantId }, include: { assetVariants: true } });
     const ref = (0, inline_images_1.parseInlineImageHash)(image?.dedupeHash);
-    if (!image || !ref || image.status !== "done") {
+    if (!image || !ref || (image.status !== "done" && image.status !== "failed")) {
         return;
     }
     const version = await prisma.contentVersion.findFirst({
@@ -353,6 +355,14 @@ async function syncInlineImageToVersion(tenantId, contentImageId) {
         include: { project: true, contentImage: true },
     });
     if (!version) {
+        return;
+    }
+    if (image.status === "failed") {
+        // A permanently failed inline image still settles the version: QA then reports the real image count.
+        const heroDone = version.contentImage?.status === "done" || version.contentImage?.status === "failed";
+        if (version.contentImageId && heroDone && QA_REFRESHABLE_STATUSES.includes(version.project.status)) {
+            await syncImageResultToStudio(tenantId, version.contentImageId);
+        }
         return;
     }
     const variant = image.assetVariants.find((item) => item.kind === "hero") ?? image.assetVariants.find((item) => item.kind === "original");
@@ -370,7 +380,7 @@ async function syncInlineImageToVersion(tenantId, contentImageId) {
     await prisma.contentVersion.update({ where: { id: version.id }, data: { bodyHtml: next } });
     // Never pull an approved, scheduled or published piece back into review.
     const heroSettled = version.contentImage?.status === "done" || version.contentImage?.status === "failed";
-    if (version.contentImageId && heroSettled && ["ai_generated", "qa_failed", "qa_passed", "in_review"].includes(version.project.status)) {
+    if (version.contentImageId && heroSettled && QA_REFRESHABLE_STATUSES.includes(version.project.status)) {
         await syncImageResultToStudio(tenantId, version.contentImageId);
     }
 }
@@ -381,6 +391,14 @@ async function syncImageResultToStudio(tenantId, contentImageId) {
     }
     const version = await (0, repository_1.findVersionByImageId)(tenantId, contentImageId);
     if (!version) {
+        return;
+    }
+    // Inline images still rendering would make image_presence report a false failure;
+    // the last one to land (or fail) re-runs this.
+    const inlinePending = await prisma.contentImage.count({
+        where: { tenantId, dedupeHash: { startsWith: `inline:${version.id}:` }, status: { in: ["queued", "processing"] } },
+    });
+    if (inlinePending > 0) {
         return;
     }
     const isAuto = version.project.origin === "auto";

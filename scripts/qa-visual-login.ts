@@ -1,6 +1,6 @@
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { hashStudioPassword } from "../src/studio/passwords";
-import { resolveTenantBySlug } from "../src/studio/auth";
+import { listStudioRoles, resolveTenantBySlug } from "../src/studio/auth";
 
 /**
  * Provisions a dedicated Studio account for local visual QA.
@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     },
   });
 
+  await listStudioRoles(tenant.id); // seeds system roles on a freshly provisioned tenant
   const adminRole = await prisma.studioRole.findUnique({
     where: { tenantId_key: { tenantId: tenant.id, key: "admin" } },
   });

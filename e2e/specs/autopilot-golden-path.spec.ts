@@ -136,6 +136,7 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
   });
 
   test("autopilot: source item → automatic project → strict QA → repair/auto-approval → publication without any manual step", async () => {
+    test.setTimeout(420_000);
     const suffix = randomSuffix();
 
     // 1. Select AUTOPILOT for the site. The API must produce an internally
@@ -184,7 +185,8 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
 
     // 3. Wait for the automation tick to create an origin=auto project.
     let project: ProjectSummary | null = null;
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    // 150 s: must outlast one control-worker tick (AUTOMATION_INTERVAL_MS, default 120 s).
+    for (let attempt = 0; attempt < 30; attempt += 1) {
       await sleep(5_000);
       const listed = await api.get(
         `/studio/api/backend/v2/projects?origin=auto&siteId=${siteId}&page=1&pageSize=5`,
@@ -312,7 +314,8 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
     };
     expect(typeof body.redisConfigured).toBe("boolean");
     expect(Array.isArray(body.workers)).toBe(true);
-    expect(body.workers!.some((worker) => worker.name === "automation-worker" || worker.name.includes("automation"))).toBe(true);
+    // The automation tick runs in the single control-plane worker (src/infrastructure/workers/worker-automation.ts).
+    expect(body.workers!.some((worker) => worker.name === "control")).toBe(true);
     expect(Array.isArray(body.policies)).toBe(true);
   });
 

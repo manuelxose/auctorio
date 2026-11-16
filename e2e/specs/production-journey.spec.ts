@@ -159,6 +159,7 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
     // 8. Create a project from the item and generate an article.
     const projectResponse = await api.post(
       `/studio/api/backend/v2/source-items/${items[0]!.id}/create-project`,
+      { data: { siteId } },
     );
     expect([200, 201]).toContain(projectResponse.status());
     const project = (await projectResponse.json()) as { id?: string; projectId?: string };
@@ -274,7 +275,8 @@ test.describe("Phase 5 production journey (live, opt-in)", () => {
     const enriched = await api.post(
       `/studio/api/backend/v2/intelligence/source-items/${bogusId}/enrich`,
     );
-    expect([404, 422, 200]).toContain(enriched.status());
+    // 400: the nil UUID is rejected by id validation, also a structured result.
+    expect([400, 404, 422, 200]).toContain(enriched.status());
     if (enriched.status() === 200) {
       const body = (await enriched.json()) as { filtered?: boolean; filteredReason?: string };
       expect(body.filtered === true || typeof body.filteredReason === "string").toBe(true);

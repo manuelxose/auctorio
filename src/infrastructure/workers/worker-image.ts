@@ -283,7 +283,11 @@ export async function runImageWorker() {
       if (!retryable && data.tenantId) {
         // QA must not be blocked by a permanently failed hero image.
         try {
-          await syncImageResultToStudio(data.tenantId, data.contentImageId);
+          if (data.options?.image_role === "inline") {
+            await syncInlineImageToVersion(data.tenantId, data.contentImageId);
+          } else {
+            await syncImageResultToStudio(data.tenantId, data.contentImageId);
+          }
         } catch (qaError) {
           console.warn("[worker:image] qa-after-failure skipped", qaError instanceof Error ? qaError.message : String(qaError));
         }
