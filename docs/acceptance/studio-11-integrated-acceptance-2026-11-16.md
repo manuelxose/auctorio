@@ -26,7 +26,7 @@ Rama `feat/editorial-operating-system` (HEAD antes de este trabajo: `06c108d`). 
 | 12 | `/generate` con un `promptPresetVersionId` inexistente o de otro tenant respondía 202 y lanzaba una generación real (de pago) ignorando el preset; en el e2e regeneró un artículo ya aprobado y lo devolvió a `ai_generated` | CONFIRMED RUNTIME + CODE | el id se pasaba al worker sin comprobarlo | 404 si el preset no existe en el tenant. Test en `tests/studio-routes.test.ts` |
 | 13 | El test e2e "publisher failure" creaba una publicación para *ahora* y llamaba a `publish-now` aunque no hubiera `E2E_ALLOW_REAL_PUBLISH`: contra un entorno real habría **publicado de verdad en GuíaTV** | CONFIRMED CODE (test, riesgo alto) | el resto del spec respetaba la bandera, ese test no | sin la bandera solo comprueba un 404 estructurado sobre una publicación inexistente |
 
-Resultado tras la segunda iteración: `production-journey` **6/6 PASS** (proyecto "Movistar Plus lanza el tráiler…", una sola versión, QA 91, aprobado, programado y cancelado). `autopilot-golden-path`: crea proyectos temáticos y llegan a `qa_passed` sin falso fallo, pero la puerta autónoma estricta los bloquea (intención no definida, palabras, 0 enlaces internos, SEO 75 < 90, marcador de posición) y las reparaciones automáticas no cambian el contenido (QA 91→91): resultado final del spec pendiente de verificar.
+Resultado tras la segunda iteración: `production-journey` **6/6 PASS** (proyecto "Movistar Plus lanza el tráiler…", una sola versión, QA 91, aprobado, programado y cancelado). `autopilot-golden-path` **4/4 PASS** (12 min): crea proyectos temáticos desde vertele.com que llegan a `qa_passed` sin falso fallo; la puerta autónoma estricta los bloquea (intención no definida, palabras, 0 enlaces internos, SEO 75 < 90, marcador de posición) y, tras agotar las reparaciones, el proyecto termina en `intervention_required` sin ninguna publicación, salida segura que el spec acepta. La política volvió a Manual. **No queda demostrado** el camino feliz hasta publicar: las reparaciones automáticas no cambian el contenido (QA 91→91).
 
 Specs live corregidos (segunda iteración): `production-journey` ya no lanza una segunda generación (espera 409), espera el veredicto QA real (hasta 6,5 min), acepta la puerta de QA como resultado válido, toma el primer item no cubierto y usa el estado `canceled` del enum; `autopilot-golden-path` usa un feed de TV en español (`vertele.com`) en lugar de Hacker News, respeta el umbral de relevancia por defecto, calcula el cupo diario ya usado y pide solo uno más, filtra por proyectos de esta ejecución, espera hasta 12 min al pipeline y restaura también `minimumStoryScore`.
 
@@ -39,8 +39,8 @@ Incidencia de la propia verificación: al detener un run e2e a mitad, el `afterA
 - Playwright suite completa sobre BD limpia: 26 OK / 10 fallos / 2 omitidos. Tras correcciones, re-ejecutados los fallidos:
   - `guiatv-seo-golden-path`: 1, 2.1, 2.2, 3, 4 PASS; 2.3 PARTIAL (#8).
   - `sources-flow` 2/2, `calendar-publications` 1/1 PASS.
-  - `production-journey`: 5/6. El recorrido completo falla en "aprobar": el spec espera el QA solo 36 s y la API rechaza correctamente (400) aprobar antes de que terminen las 4 imágenes en serie (~3 min). Temporización del spec, no defecto.
-  - `autopilot-golden-path`: 2/3 (salud y recuperación OK). El recorrido no llega a programar publicaciones en la ventana del spec: los proyectos automáticos quedan `waiting_for_image` detrás de la cola de imágenes. Además el spec baja `minimumStoryScore` a 0,01 y usa un feed en inglés de Hacker News, lo que mete contenido fuera de tema en GuíaTV. No verificado en verde.
+  - `production-journey`: tras la segunda iteración 6/6 (ver arriba).
+  - `autopilot-golden-path`: tras la segunda iteración 4/4 (ver arriba), con salida `intervention_required`.
 - Capturas 1440/1024/390 de Overview, Plan, Contenido, Calendario, Publicaciones y Fuentes: `docs/studio-rebuild/evidence/studio-11/` (0 errores de consola, sin desbordamiento horizontal).
 - No ejecutado: auditoría axe (no instalada), lectores de pantalla, publicación real o borrador real en GuíaTV (no autorizado), despliegue.
 
@@ -54,19 +54,19 @@ Incidencia de la propia verificación: al detener un run e2e a mitad, el `afterA
 | Brief → artículo + imágenes + QA | PASS | golden 3: proyecto `f6898faa-7a24-43fa-a4a5-ac6d6654929c` ("Miniseries de casos reales en Netflix: dónde ver…"), QA 89, 3 imágenes inline; la versión queda en `draft` sin veredicto hasta la última imagen |
 | Programación | PASS | `calendar-publications` (una sola publicación canónica, guarda de fecha pasada) |
 | Publicación borrador (destino simulado) | PASS (simulado) | golden 4: `draft_synced`, `externalId=dryrun-e1589426b0620982`, URL `…/dry-run/…`; ninguna escritura en guiaprogramaciontv.com |
-| Modos Manual/Asistido/Autopilot | PASS (unit) / PARTIAL (e2e) | `autopilot-planner` 4/4 (Manual y Asistido nunca publican; Autopilot solo tras la puerta de QA); e2e de autopilot no completo |
+| Modos Manual/Asistido/Autopilot | PASS (unit) / PARTIAL (e2e) | `autopilot-planner` 4/4 (Manual y Asistido nunca publican; Autopilot solo tras la puerta de QA); e2e autopilot 4/4 pero termina en `intervention_required`, sin camino feliz hasta publicar |
 | Aislamiento de tenants y roles | PASS | `tenant-isolation`, `site-isolation`, `studio-rbac-matrix`, e2e `studio-role-separation` 4/4, `connection-installer` 5/5 |
 
 ## Veredictos por dimensión
 | Dimensión | Veredicto | Motivo |
 |---|---|---|
 | IMPLEMENTATION | PASS | 3 defectos de producto corregidos con test (sitemap índice, QA falso, regresión `draft`); typecheck y build OK |
-| FUNCTIONALITY | PARTIAL | golden path GuíaTV completo en verde con IA real; 7×3 parcial; journey y autopilot e2e no completos |
+| FUNCTIONALITY | PARTIAL | golden path GuíaTV y production-journey en verde con IA real; autopilot e2e verde solo por la salida segura; 7×3 parcial; auto-reparación ineficaz |
 | UX/UI | PARTIAL | 18 capturas en 3 anchos, 0 errores de consola, sin desbordamiento; sin comparación antes/después (no hubo cambios de UI) |
 | ACCESSIBILITY | PARTIAL | e2e de teclado/foco (`studio-shell-nav`, `site-intelligence-coverage`) OK; sin axe ni lector de pantalla |
 | SECURITY | PASS | aislamiento de tenant/sitio y matriz RBAC en verde; ningún secreto en logs, capturas ni commit |
 | INTEGRATION | PARTIAL | Site→Source→Plan→Job→Version→Publication verificado con destino simulado; destino real no probado |
-| REGRESSION | PARTIAL | suites afectadas en verde salvo `ONB-01` intermitente; 2 specs live con fallos de temporización |
+| REGRESSION | PARTIAL | suites afectadas en verde salvo `ONB-01` intermitente; specs live en verde tras corregirlos |
 | PRODUCTION READINESS | BLOCKED | sin despliegue ni escritura real en GuíaTV autorizados; worker de imágenes no se recupera tras suspensión |
 
 ## Riesgos pendientes
@@ -76,7 +76,8 @@ Incidencia de la propia verificación: al detener un run e2e a mitad, el `afterA
 - Plan 7×3 con DeepSeek sobre un inventario pequeño no llena todos los huecos.
 - Las imágenes se generan en serie (concurrencia 1, ~40 s cada una): un artículo tarda ~3 min en tener veredicto QA y cualquier cola previa lo retrasa.
 - Los specs live `production-journey` y `autopilot-golden-path` siguen con esperas cortas; si se interrumpen, el de autopilot deja el sitio en autopilot.
+- Auto-reparación del autopilot ineficaz: dos intentos por proyecto sin cambio de contenido (QA 91→91), así que todo lo que no supera la puerta estricta acaba en intervención manual.
 - Rollback: revertir el commit; sin cambios de esquema.
 
 ## Siguiente prompt recomendado
-Endurecer la preparación para producción: (1) mensaje accionable cuando no hay proveedor IA, (2) auto-recuperación de workers atascados tras suspensión, (3) limpieza de items de índice ya guardados, (4) prueba de borrador real en GuíaTV con autorización explícita del propietario (crear/eliminar borrador).
+Endurecer la preparación para producción: (0) que la auto-reparación corrija de verdad intención, extensión, enlaces internos y marcadores de posición, (1) mensaje accionable cuando no hay proveedor IA, (2) auto-recuperación de workers atascados tras suspensión, (3) limpieza de items de índice ya guardados, (4) prueba de borrador real en GuíaTV con autorización explícita del propietario (crear/eliminar borrador).
