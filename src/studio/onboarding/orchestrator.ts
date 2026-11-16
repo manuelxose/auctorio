@@ -272,9 +272,14 @@ async function runSteps(
 
 async function finish(runId: string, tenantId: string, siteId: string, operationId: string, steps: OnboardingStepState[]) {
   const failed = steps.find((step) => step.status === "failed");
-  await saveSteps(runId, steps, { status: failed ? "failed" : "succeeded", finishedAt: new Date() });
+  // Settle the operation before the run: a reader that sees the run finished must never find its operation still running.
   if (failed) {
     await failOperation(operationId, { errorCode: "onboarding_step_failed", errorSummary: `${failed.id}: ${failed.error ?? "failed"}`, retryable: true, phase: failed.id });
+  } else {
+    await completeOperation(operationId, { phase: "done" });
+  }
+  await saveSteps(runId, steps, { status: failed ? "failed" : "succeeded", finishedAt: new Date() });
+  if (failed) {
     await publishEvent({ tenantId, siteId, type: "operation.failed", payload: { operationId } });
     await notify({
       tenantId,
@@ -289,7 +294,6 @@ async function finish(runId: string, tenantId: string, siteId: string, operation
       dedupeKey: `onboarding.${siteId}.failed`,
     });
   } else {
-    await completeOperation(operationId, { phase: "done" });
     await publishEvent({ tenantId, siteId, type: "operation.completed", payload: { operationId } });
   }
   structuredEvent("site_onboarding.finished", { tenantId, siteId, operationId, status: failed ? "failed" : "succeeded" });
