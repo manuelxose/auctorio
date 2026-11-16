@@ -232,3 +232,56 @@ test("PROD-07b: a Spanish plan item gets Spanish template headings and its appro
     await cleanup(f.tenantId);
   }
 });
+
+test("M1: an assisted plan item waits as ready in its slot; approval schedules it there", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 3 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const done = await getProductionJob(f.tenantId, job.id);
+    assert.equal(done!.status, "needs_review", done!.error ?? "");
+    const pending = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" } });
+    assert.equal(pending.status, "ready");
+    assert.equal(pending.scheduledFor?.toISOString(), slot.toISOString());
+
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const released = await prisma.publication.findUniqueOrThrow({ where: { id: pending.id } });
+    assert.equal(released.status, "scheduled");
+    assert.equal(released.manualOverride, true);
+    assert.equal(released.scheduledFor?.toISOString(), slot.toISOString());
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M1: approving after the slot passed publishes now; manual mode creates no publication", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: new Date(Date.now() - 3_600_000) } });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const before = Date.now();
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const released = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" } });
+    assert.equal(released.status, "scheduled");
+    assert.ok(released.scheduledFor!.getTime() >= before - 1000);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+
+  const m = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  await prisma.automationPolicy.create({ data: { tenantId: m.tenantId, siteId: m.siteId, mode: "manual", enabled: false } });
+  try {
+    const { job } = await startProduction(m.tenantId, { kind: "plan_item", planItemId: m.itemId }, { wait: true });
+    await reviewProductionJob(m.tenantId, job.id, { decision: "approve" }, null);
+    assert.equal(await prisma.publication.count({ where: { tenantId: m.tenantId } }), 0);
+  } finally {
+    await cleanup(m.tenantId);
+  }
+});

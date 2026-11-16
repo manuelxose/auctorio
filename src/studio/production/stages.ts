@@ -23,7 +23,8 @@ import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
 import { buildClusterBrief, enrichmentKnowledgeOf, prepareClusterInput } from "../editorial-engine/cluster-production";
 import type { SeoPackage } from "../editorial-engine/types";
-import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput } from "./plan-item";
+import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput, slotOrNow } from "./plan-item";
+import { approveVersion } from "../repository";
 import {
   ProductionStop,
   type BriefArtifact,
@@ -336,6 +337,20 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
       await enqueuePublication(publication.id);
       result.publicationId = publication.id;
       await writeAudit({ tenantId: ctx.tenantId, action: "editorial_engine.auto_published", entityType: "article_generation", entityId: ctx.generationId, actorType: "automation", metadata: { projectId, publicationId: publication.id, productionJobId: ctx.jobId } });
+    }
+  }
+
+  if (ctx.request.kind === "plan_item") {
+    // Plan items publish in their calendar slot, never earlier: assisted waits for approval, autopilot schedules itself.
+    const policy = await getOrCreatePolicy(ctx.tenantId, ctx.siteId);
+    const autopilot = policy.mode === "autopilot" && gate.decision.decision === "auto_publish";
+    if (autopilot || policy.mode === "assisted") {
+      const item = await prisma.editorialPlanItem.findFirst({ where: { id: ctx.request.planItemId, tenantId: ctx.tenantId }, select: { scheduledFor: true } });
+      const scheduledFor = slotOrNow(item?.scheduledFor ?? null, ctx.now);
+      if (autopilot) await approveVersion(ctx.tenantId, projectId!, version.id, "automation", null);
+      // The scheduler claims the row once its slot is due.
+      const publication = await createPublication({ tenantId: ctx.tenantId, projectId: projectId!, versionId: version.id, channel: "website", siteId: ctx.siteId, scheduledFor, ...(autopilot ? {} : { status: "ready" as const }) });
+      if (autopilot) result.publicationId = publication.id;
     }
   }
 

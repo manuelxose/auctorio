@@ -24,7 +24,9 @@ import {
 } from "../operations";
 import { generateContentFromEditorialPlanItem } from "../editorial-plan";
 import { resolveClusterSite } from "../editorial-engine/cluster-production";
-import { ensurePlanItemProject } from "./plan-item";
+import { ensurePlanItemProject, slotOrNow } from "./plan-item";
+import { getOrCreatePolicy } from "../automation";
+import { createPublication } from "../publication";
 import { productionStages } from "./stages";
 import {
   ACTIVE_JOB_STATUSES,
@@ -467,6 +469,7 @@ export async function reviewProductionJob(
       await prisma.contentVersion.updateMany({ where: { id: job.versionId, tenantId }, data: { status: "qa_passed" } });
     }
     if (job.generationId) await prisma.articleGeneration.updateMany({ where: { id: job.generationId, tenantId }, data: { status: "approved" } });
+    if (job.kind === "plan_item") await releasePlanItemPublication(updated, new Date());
     await syncPlanItem(updated, "ready");
   } else {
     // Rejection keeps the draft for reference; a retry writes a new version into the same project.
@@ -479,6 +482,24 @@ export async function reviewProductionJob(
   }
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId ?? null, action: `production.job.${approved ? "approved" : "rejected"}`, entityType: "production_job", entityId: job.id, metadata: { notes, projectId: job.projectId, versionId: job.versionId } });
   return toProductionJobView(updated);
+}
+
+/**
+ * Human approval of a plan-item draft is the release: the article goes out in
+ * its calendar slot (or now if the slot passed). Manual mode only marks it ready.
+ */
+export async function releasePlanItemPublication(job: ProductionJob, now: Date): Promise<string | null> {
+  if (!job.versionId || !job.projectId || !job.planItemId) return null;
+  const policy = await getOrCreatePolicy(job.tenantId, job.siteId);
+  if (policy.mode === "manual") return null;
+  const item = await prisma.editorialPlanItem.findFirst({ where: { id: job.planItemId, tenantId: job.tenantId }, select: { scheduledFor: true } });
+  const pending = await prisma.publication.findFirst({ where: { tenantId: job.tenantId, versionId: job.versionId, channel: "website", status: "ready" } });
+  if (pending) {
+    await prisma.publication.update({ where: { id: pending.id }, data: { status: "scheduled", manualOverride: true, scheduledFor: slotOrNow(pending.scheduledFor, now) } });
+    return pending.id;
+  }
+  const created = await createPublication({ tenantId: job.tenantId, projectId: job.projectId, versionId: job.versionId, channel: "website", siteId: job.siteId, scheduledFor: slotOrNow(item?.scheduledFor ?? null, now), manualOverride: true });
+  return created.id;
 }
 
 // ────────────────────────────────────────────────────────────── Queries

@@ -174,6 +174,8 @@ export type CreatePublicationInput = {
   scheduledFor?: Date | string | null;
   campaignId?: string | null;
   manualOverride?: boolean;
+  /** A dated row that waits for a human release (assisted plan items). */
+  status?: "ready";
 };
 
 export async function createPublication(input: CreatePublicationInput): Promise<Publication> {
@@ -238,7 +240,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       socialContentId: input.socialContentId ?? null,
       campaignId: input.campaignId ?? null,
       scheduledFor,
-      status: scheduledFor ? "scheduled" : "draft",
+      status: input.status ?? (scheduledFor ? "scheduled" : "draft"),
       manualOverride: input.manualOverride ?? false,
       idempotencyKey,
       metadata: Prisma.JsonNull,
@@ -247,7 +249,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
 
   await writeAudit({
     tenantId: input.tenantId,
-    action: scheduledFor ? "publication.scheduled" : "publication.created",
+    action: scheduledFor && !input.status ? "publication.scheduled" : "publication.created",
     entityType: "publication",
     entityId: publication.id,
     actorType: input.manualOverride ? "user" : "system",

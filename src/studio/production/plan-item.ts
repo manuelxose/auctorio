@@ -352,3 +352,8 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
   };
   return { brief, siteValueBlocks: [], previousArticle: null, updateDelta: null, guidance: plan.guidance };
 }
+
+/** A plan item publishes at its calendar slot, or now when the slot already passed. */
+export function slotOrNow(slot: Date | null, now: Date): Date {
+  return slot && slot.getTime() > now.getTime() ? slot : now;
+}
