@@ -201,9 +201,10 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
     for (let attempt = 0; attempt < 30; attempt += 1) {
       await sleep(5_000);
       const listed = await api.get(
-        `/studio/api/backend/v2/projects?origin=auto&siteId=${siteId}&page=1&pageSize=5`,
+        `/studio/api/backend/v2/projects?origin=auto&siteId=${siteId}&page=1&pageSize=50`,
       );
       expect(listed.status()).toBe(200);
+      // Sorted by updatedAt: older auto projects the workers keep touching can fill a small page and hide this run's.
       const body = (await listed.json()) as { items?: Array<ProjectSummary & { createdAt?: string }> };
       // Only projects this run produced: older autopilot projects would prove nothing.
       const candidates = (body.items ?? []).filter(

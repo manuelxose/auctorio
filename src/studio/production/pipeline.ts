@@ -10,6 +10,7 @@
 import crypto from "node:crypto";
 import { Prisma, type ProductionJob, type ProductionJobStatus } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
+import { withAiTenant } from "../../infrastructure/ai/ai-settings";
 import { structuredEvent } from "../../shared/utils/logger";
 import { writeAudit } from "../audit";
 import {
@@ -332,6 +333,12 @@ async function finishCancelled(job: ProductionJob): Promise<void> {
 
 /** Execute (or resume) a job. Safe to call concurrently: only the caller that claims the queued job runs it. */
 export async function runProductionJob(jobId: string, options: { now?: Date } = {}): Promise<ProductionJobView | null> {
+  // Automation ticks run jobs outside any HTTP request: without the workspace scope the writer falls back to the env default (mock).
+  const row = await prisma.productionJob.findUnique({ where: { id: jobId }, select: { tenantId: true } });
+  return withAiTenant(row?.tenantId, () => executeProductionJob(jobId, options));
+}
+
+async function executeProductionJob(jobId: string, options: { now?: Date } = {}): Promise<ProductionJobView | null> {
   const claim = await prisma.productionJob.updateMany({
     where: { id: jobId, status: "queued" },
     data: { status: "running", attempts: { increment: 1 }, startedAt: new Date(), error: null, errorCode: null },

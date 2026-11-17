@@ -14,7 +14,7 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M1 · Autopilot/Asistido desde el plan, publicación en su hueco | `feat/m1-plan-driven-autopilot` | Hecho (390b82a) |
 | M2 · Un solo sistema de generación | `feat/m2-single-generation` | Hecho (a47c29e) |
 | M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho |
-| M3b · Publicar sin `PublicationJob` | — | Hecho en código, sin commit (falta e2e y publicación real) |
+| M3b · Publicar sin `PublicationJob` | — | Hecho (falta la publicación real en guiaprogramaciontv.com) |
 | M4 · Plantilla tipo guía + JSON-LD | — | Pendiente |
 | M5 · Nueva arquitectura de información | — | Pendiente |
 | M6 · Limpieza final | — | Pendiente |

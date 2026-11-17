@@ -15,8 +15,9 @@ test('STUDIO-08: one canonical schedule, past-time guard and calendar projection
   expect((await api.post('/studio/api/auth/login/password', { data: { email: EMAIL, password: PASSWORD } })).status()).toBe(200);
 
   const projects = await (await api.get('/studio/api/backend/v2/projects?page=1&pageSize=50')).json();
-  const project = (projects.items as Array<{ id: string; siteId: string | null; versions?: unknown[] }>).find((item) => item.siteId);
-  test.skip(!project, 'needs a content project with a site');
+  // A plan-item project with no draft yet has no version to schedule.
+  const project = (projects.items as Array<{ id: string; siteId: string | null; versionCount: number }>).find((item) => item.siteId && item.versionCount > 0);
+  test.skip(!project, 'needs a content project with a site and a version');
 
   const at = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
   const create = (scheduledFor: string) => api.post('/studio/api/backend/v2/publications', { data: { projectId: project!.id, channel: 'website', scheduledFor } });
