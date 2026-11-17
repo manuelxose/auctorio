@@ -13,8 +13,8 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M0 · Estudio del flujo de referencia | — | Hecho: `BABYLOVEGROWTH-FLOW.md` |
 | M1 · Autopilot/Asistido desde el plan, publicación en su hueco | `feat/m1-plan-driven-autopilot` | Hecho (390b82a) |
 | M2 · Un solo sistema de generación | `feat/m2-single-generation` | Hecho (a47c29e) |
-| M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho |
-| M3b · Publicar sin `PublicationJob` | — | Hecho (falta la publicación real en guiaprogramaciontv.com) |
+| M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho (e3d8b43) |
+| M3b · Publicar sin `PublicationJob` | `feat/m3b-publish-without-publication-job` | Hecho (f4d68a6, d5cefe3, 942134a, 30a4ad7); falta la publicación real en guiaprogramaciontv.com |
 | M4 · Plantilla tipo guía + JSON-LD | — | Pendiente |
 | M5 · Nueva arquitectura de información | — | Pendiente |
 | M6 · Limpieza final | — | Pendiente |
@@ -54,6 +54,9 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - Al desplegar, drenar o traducir los mensajes de cola que aún lleven ids de `PublicationJob`.
 - **Tests:** `worker-publishing`, e2e `autopilot-golden-path` y `calendar-publications`, más una publicación real en guiaprogramaciontv.com.
 - Requisito de M6 (borrar la tabla).
+- **Hecho:** `startWebsiteAttempt` reclama la `Publication`, crea el `PublicationAttempt` y encola su id; el worker reutiliza `startAttempt`/`succeedAttempt`/`failAttempt` (mismos reintentos y circuit breaker que social). El id remoto de un intento fallido se guarda en la `Publication`. Los mensajes antiguos con id de `PublicationJob` se relanzan como intento nuevo (atajo, se borra en M6). `PublicationJob` solo se lee ya para ids externos anteriores y para `/v2/publication-jobs`.
+- **Arreglos descubiertos en las e2e:** `runProductionJob` corre dentro de `withAiTenant` (desde M2 el tick de automatización escribía con el proveedor `mock`); el estado `connected` de Overview cuenta un sitio con credenciales guardadas (guiaprogramaciontv.com), sin afirmar que se verificó con borrador de prueba.
+- **Tests:** `worker-publishing` 5/5; `autopilot-golden-path` pasa (con `minimumStoryScore` 0,3 en el spec). `calendar-publications` se salta en una base limpia: necesita un proyecto con versión.
 
 ### M4 · Plantilla tipo guía + JSON-LD
 - **Estructura** (`editorial-engine/structure.ts`, spec `guide`): unas 2.300 palabras; intro de ~110; caja "En resumen" de 5 puntos; índice; 8–12 H2 con H3; tabla comparativa; "Cómo elegir"; FAQ de 5; "Fuentes"; **"Lecturas recomendadas"**; **tarjeta CTA hacia una página del sitio**; 15–20 enlaces internos; ~4 externos; 5 imágenes con alt.
@@ -98,6 +101,10 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 ## Riesgos abiertos
 - **M1:** al desplegar, los plan items aprobados con el hueco ya pasado se redactan (y en Autopilot se publican). Revisar los planes en producción antes de desplegar.
 - **M2:** los presets de prompt llegan al escritor como instrucciones; sus variables de plantilla ya no se rellenan. `worker-text` sigue vivo para el caso de uso de topics de `src/domain`.
+- **M3b:** al desplegar, los mensajes de cola sin publicación enlazada se descartan (normalmente despublicaciones o borradores de «publicar ahora»). Una despublicación web que falla del todo ya activa el circuit breaker del sitio.
+- **Entorno local:** el e2e de Autopilot depende del feed externo; la base local se limpia conservando tenant, usuario QA, sitios y datos del crawl de guiaprogramaciontv.com.
+- **M3b:** al desplegar, los mensajes de cola sin publicación enlazada se descartan (normalmente despublicaciones o borradores de «publicar ahora»). Una despublicación web que falla del todo ya activa el circuit breaker del sitio.
+- **Entorno local:** el e2e de Autopilot depende del feed externo. La base local se limpió conservando tenant, usuario QA, sitios y datos del crawl de guiaprogramaciontv.com.
 - `npm run dev` aborta a veces al reiniciar: `taskkill` falla con un proceso hijo ya cerrado. Una segunda ejecución funciona.
 
 ## Verificación
