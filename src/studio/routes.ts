@@ -14,9 +14,6 @@ import { writeAudit } from "./audit";
 import {
   approveVersion,
   createProject,
-  createPublicationJob,
-  findPublicationJobByIdempotency,
-  resetPublicationJobForRetry,
   getLatestPublishedExternalId,
   createSite,
   getLatestVersion,
@@ -65,7 +62,6 @@ import {
 } from "./auth";
 import {
   buildAssetPublicUrl,
-  queuePublication,
   requestImageGenerationForVersion,
   requestInlineImagesForVersion,
   retryImageGeneration,
@@ -73,7 +69,7 @@ import {
 } from "./orchestration";
 import { archiveProject } from "./projects";
 import { startProductionForProject } from "./production/pipeline";
-import { linkDurableWebsitePublication } from "./publication";
+import { ensureWebsitePublication, startWebsiteAttempt } from "./publication";
 import { runVersionQaV2 } from "./qa";
 import { getStudioGoogleClientId } from "./google";
 import {
@@ -132,13 +128,11 @@ import {
 } from "./http-utils";
 import {
   buildProjectReviewGate,
-  mapPublicationState,
   mapQaState,
   toProjectDetail,
   toVersionSummary,
   type ProjectRecord,
   type ProjectVersionRecord,
-  type PublicationRecord,
 } from "./views";
 import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
@@ -1355,91 +1349,32 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "project has no published or synced external content");
     }
 
-    const idempotencyKey = [
-      "pub",
-      project.site.id,
-      project.id,
-      latestVersion.id,
-      action,
-      targetStatus,
-    ].join(":");
-
-    const existing = await findPublicationJobByIdempotency(context.tenantId, idempotencyKey);
-    if (existing) {
-      if (existing.status === "queued" || existing.status === "processing") {
-        await queuePublication(existing.id);
-        return reply.code(202).send({
-          publication_id: existing.id,
-          project_id: project.id,
-          version_id: latestVersion.id,
-          status: existing.status,
-          reused: true,
-        });
-      }
-
-      if (existing.status === "draft_synced" || existing.status === "published") {
-        return reply.code(202).send({
-          publication_id: existing.id,
-          project_id: project.id,
-          version_id: latestVersion.id,
-          status: existing.status,
-          reused: true,
-        });
-      }
-
-      const retried = await resetPublicationJobForRetry(
-        existing.id,
-        {
-          action,
-          targetStatus,
-          requestedBy: context.userId ? "studio_user" : "studio",
-        },
-        context.userId,
-      );
-      await updateProjectStatus(context.tenantId, project.id, "publish_queued");
-      await queuePublication(retried.id);
-
+    const publication = await ensureWebsitePublication(context.tenantId, project.site.id, project.id, latestVersion.id);
+    // In flight, or this version is already live: a second click must not post again ("update" re-sends on purpose).
+    const alreadyDone = publication.status === "published" && action === "publish" && targetStatus === "publish";
+    if (publication.status === "publishing" || alreadyDone) {
       return reply.code(202).send({
-        publication_id: retried.id,
+        publication_id: publication.id,
         project_id: project.id,
         version_id: latestVersion.id,
-        status: "queued",
-        retried: true,
+        status: publication.status,
+        reused: true,
       });
     }
 
-    const publication = await createPublicationJob(
-      context.tenantId,
-      project.site.id,
-      project.id,
-      latestVersion.id,
-      action,
-      {
-        action,
-        targetStatus,
-        requestedBy: context.userId ? "studio_user" : "studio",
-      },
-      context.userId,
-      idempotencyKey,
-    );
-    await updateProjectStatus(context.tenantId, project.id, "publish_queued");
-    await queuePublication(publication.id);
-
-    if (action === "publish" || action === "update") {
-      await linkDurableWebsitePublication(
-        context.tenantId,
-        project.site.id,
-        project.id,
-        latestVersion.id,
-        publication.id,
-      );
-    }
+    const attempt = await startWebsiteAttempt(publication.id, {
+      targetStatus,
+      unpublish: action === "unpublish",
+      requestedBy: context.userId ? "studio_user" : "studio",
+      requestedByUserId: context.userId,
+    });
 
     return reply.code(202).send({
       publication_id: publication.id,
       project_id: project.id,
       version_id: latestVersion.id,
       status: "queued",
+      ...(attempt ? {} : { reused: true }),
     });
   });
 

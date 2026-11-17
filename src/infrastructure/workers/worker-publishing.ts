@@ -1,38 +1,51 @@
-import { Prisma } from "@prisma/client";
 import { Worker } from "bullmq";
 import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
 import {
   clearProjectPublicationState,
-  getPublicationJobById,
   getLatestPublishedExternalId,
   markProjectPublished,
   updateProjectStatus,
-  updatePublicationJob,
 } from "../../studio/repository";
 import { getPublisher } from "../../studio/publishers";
 import { buildAssetPublicUrl } from "../../studio/orchestration";
-import type { PublicationStatus } from "@prisma/client";
-import type { PublishResult, PublicationTargetStatus } from "../../studio/types";
+import type { PublishResult } from "../../studio/types";
 import { getPrismaClient } from "../db/prisma";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
 import { incrementCounter } from "../../studio/metrics";
-import { classifyPublicationError, maxPublicationRetries, nextRetryDelay, verifyWebsitePublication } from "../../studio/publication";
+import { failAttempt, startAttempt, startWebsiteAttempt, succeedAttempt, verifyWebsitePublication } from "../../studio/publication";
 import { assertRedisConfigured } from "../queue/redis";
+import { structuredEvent } from "../../shared/utils/logger";
 
 const prisma = getPrismaClient();
 
-type PublishingJobData = {
-  publicationJobId: string;
+/** One website delivery: the attempt created by startWebsiteAttempt. */
+export type PublishingJobData = {
+  attemptId: string;
+  publicationId: string;
+  operationId?: string;
 };
 
-type LoadedPublication = NonNullable<Awaited<ReturnType<typeof getPublicationJobById>>>;
+async function loadPublication(publicationId: string) {
+  return prisma.publication.findUnique({
+    where: { id: publicationId },
+    include: {
+      site: true,
+      project: true,
+      version: { include: { contentImage: true, contentText: true, derivatives: true } },
+    },
+  });
+}
+
+type LoadedPublication = NonNullable<Awaited<ReturnType<typeof loadPublication>>>;
 
 type PublishingDependencies = {
-  getPublicationJobById: typeof getPublicationJobById;
-  updatePublicationJob: typeof updatePublicationJob;
-  updateProjectStatus: typeof updateProjectStatus;
+  loadPublication: (publicationId: string) => Promise<LoadedPublication | null>;
+  startAttempt: (tenantId: string, attemptId: string) => Promise<unknown>;
+  succeedAttempt: typeof succeedAttempt;
+  /** Persists a remote id a failed attempt already created, so the retry finishes that post. */
+  recordExternalId: (publicationId: string, externalId: string) => Promise<unknown>;
   getLatestPublishedExternalId: typeof getLatestPublishedExternalId;
   buildAssetPublicUrl: typeof buildAssetPublicUrl;
   getPublisher: typeof getPublisher;
@@ -42,9 +55,10 @@ type PublishingDependencies = {
 };
 
 const defaultDependencies: PublishingDependencies = {
-  getPublicationJobById,
-  updatePublicationJob,
-  updateProjectStatus,
+  loadPublication,
+  startAttempt,
+  succeedAttempt,
+  recordExternalId: (id, externalId) => prisma.publication.update({ where: { id }, data: { externalId } }),
   getLatestPublishedExternalId,
   buildAssetPublicUrl,
   getPublisher,
@@ -53,187 +67,87 @@ const defaultDependencies: PublishingDependencies = {
   verifyWebsitePublication,
 };
 
-function readTargetStatus(publication: LoadedPublication): PublicationTargetStatus {
-  const requestPayload =
-    publication.requestPayload && typeof publication.requestPayload === "object"
-      ? (publication.requestPayload as Record<string, unknown>)
-      : null;
-  return requestPayload?.targetStatus === "draft" ? "draft" : "publish";
+function readRequest(publication: LoadedPublication) {
+  const metadata = publication.metadata && typeof publication.metadata === "object" ? (publication.metadata as Record<string, unknown>) : {};
+  return {
+    unpublish: metadata.unpublishRequested === true,
+    targetStatus: metadata.targetStatus === "draft" ? ("draft" as const) : ("publish" as const),
+  };
 }
 
-function resolvePublicationStatus(
-  publication: LoadedPublication,
-  result: PublishResult,
-): PublicationStatus {
-  if (publication.action === "unpublish") {
-    return "canceled";
+export async function processPublishingJob(data: Pick<PublishingJobData, "attemptId" | "publicationId">, dependencies: PublishingDependencies = defaultDependencies) {
+  const publication = await dependencies.loadPublication(data.publicationId);
+  if (!publication || !publication.site || !publication.siteId) {
+    throw new Error("publication_not_found");
   }
+  const { site } = publication;
+  await dependencies.startAttempt(publication.tenantId, data.attemptId);
 
-  if (result.effectiveTargetStatus === "publish") {
-    return "published";
-  }
+  const { unpublish, targetStatus } = readRequest(publication);
+  // The row's own remote id first (a failed attempt may have created the post), then any earlier delivery of the project.
+  const externalId =
+    publication.externalId ?? (await dependencies.getLatestPublishedExternalId(publication.tenantId, publication.siteId, publication.projectId));
 
-  return readTargetStatus(publication) === "draft" ? "draft_synced" : "published";
-}
-
-async function runPublisherAction(
-  publication: LoadedPublication,
-  externalId: string | null,
-  dependencies: PublishingDependencies,
-): Promise<PublishResult> {
-  const publisher = dependencies.getPublisher(publication.site);
-  const assetUrl = await dependencies.buildAssetPublicUrl(
-    publication.version.contentImage?.storagePath,
-  );
+  const publisher = dependencies.getPublisher(site);
   const context = {
-    site: publication.site,
+    site,
     project: publication.project,
     version: publication.version,
-    assetUrl,
+    assetUrl: await dependencies.buildAssetPublicUrl(publication.version.contentImage?.storagePath),
   };
 
-  if (publication.action === "unpublish") {
-    if (!externalId) {
-      throw new Error("publication_missing_external_id_for_unpublish");
-    }
-    return publisher.unpublish(context, externalId);
-  }
-
-  const targetStatus = readTargetStatus(publication);
-  if (targetStatus === "draft") {
-    return externalId
-      ? publisher.updateDraft(context, externalId)
-      : publisher.publishDraft(context);
-  }
-
-  return publisher.publish(context, externalId);
-}
-
-export async function processPublishingJob(
-  publicationJobId: string,
-  dependencies: PublishingDependencies = defaultDependencies,
-) {
-  const publication = await dependencies.getPublicationJobById(null, publicationJobId);
-  if (!publication) {
-    throw new Error("publication_job_not_found");
-  }
-
-  await dependencies.updatePublicationJob(publication.id, {
-    status: "processing",
-  });
-
-  await dependencies.updateProjectStatus(publication.tenantId, publication.projectId, "publish_queued");
-
-  // A failed attempt that already created the remote record left its id on this
-  // job; reusing it makes the retry finish that record instead of creating another.
-  const externalId = (await dependencies.getLatestPublishedExternalId(
-    publication.tenantId,
-    publication.siteId,
-    publication.projectId,
-  )) ?? publication.externalId ?? null;
   let result: PublishResult;
   try {
-    result = await runPublisherAction(publication, externalId, dependencies);
+    if (unpublish) {
+      if (!externalId) {
+        throw new Error("publication_missing_external_id_for_unpublish");
+      }
+      result = await publisher.unpublish(context, externalId);
+    } else if (targetStatus === "draft") {
+      result = externalId ? await publisher.updateDraft(context, externalId) : await publisher.publishDraft(context);
+    } else {
+      result = await publisher.publish(context, externalId);
+    }
   } catch (error) {
     const remoteId = (error as { externalId?: unknown }).externalId;
     if (typeof remoteId === "string" && remoteId && !externalId) {
-      await dependencies.updatePublicationJob(publication.id, { status: "failed", externalId: remoteId });
+      await dependencies.recordExternalId(publication.id, remoteId);
     }
     throw error;
   }
-  const status = resolvePublicationStatus(publication, result);
 
-  await dependencies.updatePublicationJob(publication.id, {
-    status,
+  // A provider that cannot keep drafts publishes anyway: then it is published.
+  const draft = !unpublish && targetStatus === "draft" && result.effectiveTargetStatus !== "publish";
+  await dependencies.succeedAttempt(publication.tenantId, data.attemptId, {
     externalId: result.externalId ?? externalId ?? null,
     externalUrl: result.externalUrl ?? null,
-    responsePayload: result.responsePayload
-      ? (result.responsePayload as unknown as Prisma.JsonObject)
-      : null,
-    publishedAt: status === "canceled" ? null : new Date(),
+    responsePayload: (result.responsePayload as Record<string, unknown> | undefined) ?? null,
+    draft,
   });
 
-  await syncDurablePublication(publication.id, status, result, externalId);
-
-  if (status === "published") {
-    await dependencies.markProjectPublished(
-      publication.tenantId,
-      publication.projectId,
-      publication.versionId,
-      "published",
-    );
-    // Post-publish verification: a publisher response alone is not enough.
-    // Remote success must never be replayed, so verification never mutates
-    // the publication state back to a retryable status.
-    const durable = await prisma.publication.findFirst({
-      where: { publicationJobId: publication.id },
-    });
-    if (durable) {
-      await dependencies.verifyWebsitePublication(publication.tenantId, durable.id);
-    }
+  if (!unpublish && !draft) {
+    await dependencies.markProjectPublished(publication.tenantId, publication.projectId, publication.versionId, "published");
+    // Remote success must never be replayed, so verification never moves the row back to a retryable status.
+    await dependencies.verifyWebsitePublication(publication.tenantId, publication.id);
     return;
   }
 
-  await dependencies.clearProjectPublicationState(
-    publication.tenantId,
-    publication.projectId,
-    publication.versionId,
-  );
+  await dependencies.clearProjectPublicationState(publication.tenantId, publication.projectId, publication.versionId);
 }
 
-async function syncDurablePublication(
-  publicationJobId: string,
-  jobStatus: PublicationStatus,
-  result: PublishResult,
-  externalId: string | null,
-): Promise<void> {
-  const durable = await prisma.publication.findFirst({
-    where: { publicationJobId },
-  });
-  if (!durable) {
+/**
+ * shortcut: messages enqueued before M3b carry a PublicationJob id. They restart as a
+ * fresh attempt on their linked publication; jobs without one are dropped. Delete in M6.
+ */
+async function translateLegacyMessage(publicationJobId: string): Promise<void> {
+  const publication = await prisma.publication.findFirst({ where: { publicationJobId } });
+  if (!publication || ["published", "unpublished", "deleted", "canceled"].includes(publication.status)) {
+    structuredEvent("publishing.legacy_message.dropped", { publicationJobId, publicationId: publication?.id ?? null }, "warn");
     return;
   }
-
-  if (jobStatus === "published") {
-    await prisma.publication.update({
-      where: { id: durable.id },
-      data: {
-        status: "published",
-        publishedAt: new Date(),
-        externalId: result.externalId ?? externalId ?? durable.externalId,
-        externalUrl: result.externalUrl ?? durable.externalUrl,
-        lastError: null,
-        failureReason: null,
-        failureClass: null,
-      },
-    });
-    return;
-  }
-
-  if (jobStatus === "canceled") {
-    const wasUnpublish =
-      durable.metadata && typeof durable.metadata === "object"
-        ? (durable.metadata as Record<string, unknown>).unpublishRequested === true
-        : false;
-    await prisma.publication.update({
-      where: { id: durable.id },
-      data: wasUnpublish
-        ? { status: "unpublished", publishedAt: null }
-        : { status: "canceled", lastError: null },
-    });
-    return;
-  }
-
-  if (jobStatus === "draft_synced") {
-    await prisma.publication.update({
-      where: { id: durable.id },
-      data: {
-        status: "ready",
-        externalId: result.externalId ?? externalId ?? durable.externalId,
-        externalUrl: result.externalUrl ?? durable.externalUrl,
-      },
-    });
-  }
+  // The legacy link set the row to publishing; free it so the claim can take it.
+  await prisma.publication.updateMany({ where: { id: publication.id, status: "publishing" }, data: { status: "failed", lastError: "requeued_after_m3b" } });
+  await startWebsiteAttempt(publication.id, { requestedBy: "legacy_queue" });
 }
 
 export async function runPublishingWorker() {
@@ -242,8 +156,15 @@ export async function runPublishingWorker() {
   const worker = new Worker(
     QUEUE_NAMES.publishing,
     async (job) => {
-      const data = job.data as PublishingJobData;
-      await processPublishingJob(data.publicationJobId);
+      const data = job.data as Partial<PublishingJobData> & { publicationJobId?: string };
+      if (!data.attemptId && data.publicationJobId) {
+        await translateLegacyMessage(data.publicationJobId);
+        return;
+      }
+      if (!data.attemptId || !data.publicationId) {
+        throw new Error("publishing_job_invalid_payload");
+      }
+      await processPublishingJob({ attemptId: data.attemptId, publicationId: data.publicationId });
     },
     {
       connection: getRedisConnectionOptions(),
@@ -252,50 +173,18 @@ export async function runPublishingWorker() {
   );
 
   worker.on("failed", async (job, err) => {
-    const publicationJobId = String((job?.data as PublishingJobData | undefined)?.publicationJobId || "");
-    if (publicationJobId) {
-      await failOperationForJob(job?.data, err);
-    }
-    if (!publicationJobId) {
+    await failOperationForJob(job?.data, err);
+    const attemptId = (job?.data as Partial<PublishingJobData> | undefined)?.attemptId;
+    if (!attemptId) {
       return;
     }
-
-    const publication = await getPublicationJobById(null, publicationJobId);
-    if (!publication) {
+    const attempt = await prisma.publicationAttempt.findFirst({ where: { id: attemptId }, include: { publication: true } });
+    if (!attempt) {
       return;
     }
-
-    await updatePublicationJob(publication.id, {
-      status: "failed",
-      error: err.message.slice(0, 500),
-    });
-    await updateProjectStatus(publication.tenantId, publication.projectId, "publish_failed");
-
-    // Bounded retry with classification (same ladder as social publications):
-    // transient errors retry with exponential backoff until maxPublicationRetries,
-    // permanent errors and exhausted retries terminate.
-    const durable = await prisma.publication.findFirst({ where: { publicationJobId } });
-    if (durable) {
-      const failureClass = classifyPublicationError(err.message);
-      const retryCount = durable.retryCount + 1;
-      const terminal = failureClass === "permanent" || retryCount > maxPublicationRetries();
-      await prisma.publication.update({
-        where: { id: durable.id },
-        data: {
-          status: "failed",
-          retryCount,
-          lastError: err.message.slice(0, 500),
-          failureClass,
-          failureReason: terminal
-            ? failureClass === "permanent"
-              ? "permanent_failure"
-              : "retries_exhausted"
-            : "awaiting_retry",
-          nextRetryAt: terminal ? null : new Date(Date.now() + nextRetryDelay(retryCount)),
-        },
-      });
-    }
-
+    // Same bounded retry ladder and circuit breaker as social publications.
+    await failAttempt(attempt.tenantId, attempt.id, err);
+    await updateProjectStatus(attempt.tenantId, attempt.publication.projectId, "publish_failed");
     incrementCounter("publications_failed_total", 1);
   });
 

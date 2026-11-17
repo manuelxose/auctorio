@@ -8,7 +8,6 @@ import type {
   ContentVersion,
   DerivativeType,
   PublicationAction,
-  PublicationJob,
   PublicationStatus,
   Site,
   VersionStatus,
@@ -26,6 +25,7 @@ import type {
   GeneratedDerivative,
   ListProjectsInput,
   PaginatedResult,
+  PublicationExecutionState,
   PublicationTargetStatus,
   StudioMediaItem,
   StudioProjectSummary,
@@ -130,17 +130,11 @@ export async function listSites(
             projects: true,
           },
         },
-        publicationJobs: {
-          orderBy: { createdAt: "desc" },
+        publications: {
+          where: WEBSITE_DELIVERY_WHERE,
+          orderBy: { updatedAt: "desc" },
           take: 1,
-          select: {
-            id: true,
-            status: true,
-            externalUrl: true,
-            createdAt: true,
-            publishedAt: true,
-            error: true,
-          },
+          select: WEBSITE_DELIVERY_SELECT,
         },
         projects: {
           where: { status: "published" },
@@ -163,7 +157,7 @@ export async function listSites(
       updatedAt: site.updatedAt,
       projectCount: site._count.projects,
       publishedProjectCount: site.projects.length,
-      latestPublicationJob: site.publicationJobs[0] ?? null,
+      latestPublicationJob: site.publications[0] ? mapWebsiteDelivery(site.publications[0]) : null,
     })),
     page,
     pageSize,
@@ -253,11 +247,7 @@ export async function getProjectById(tenantId: string, projectId: string) {
             },
           },
           derivatives: true,
-          publicationJobs: { orderBy: { createdAt: "desc" } },
         },
-      },
-      publicationJobs: {
-        orderBy: { createdAt: "desc" },
       },
       socialContents: { orderBy: { createdAt: "asc" } },
       publications: {
@@ -335,19 +325,11 @@ export async function listProjects(
               },
             },
             derivatives: true,
-            publicationJobs: {
-              orderBy: { createdAt: "desc" },
-              take: 1,
-            },
           },
-        },
-        publicationJobs: {
-          orderBy: { createdAt: "desc" },
-          take: 1,
         },
         publications: {
           where: { status: { not: "deleted" } },
-          select: { id: true, channel: true, status: true, scheduledFor: true, publishedAt: true },
+          select: { ...WEBSITE_DELIVERY_SELECT, scheduledFor: true },
           orderBy: { scheduledFor: "desc" },
           take: 10,
         },
@@ -358,6 +340,9 @@ export async function listProjects(
   return {
     items: projects.map((project) => {
       const latestVersion = project.versions[0] ?? null;
+      const deliveries = project.publications
+        .filter(isWebsiteDelivery)
+        .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
       return {
         id: project.id,
@@ -456,15 +441,14 @@ export async function listProjects(
             repairAttempts: latestVersion.repairAttempts,
             autonomousGatePassed: latestVersion.autonomousGatePassed,
             autonomousGateReport: latestVersion.autonomousGateReport,
-            latestPublicationJob: latestVersion.publicationJobs[0]
-              ? mapPublicationJob(latestVersion.publicationJobs[0])
-              : null,
+            latestPublicationJob: (() => {
+              const delivery = deliveries.find((publication) => publication.versionId === latestVersion.id);
+              return delivery ? mapWebsiteDelivery(delivery) : null;
+            })(),
             qaReport: latestVersion.qaReport,
           }
         : null,
-        latestPublicationJob: project.publicationJobs[0]
-          ? mapPublicationJob(project.publicationJobs[0])
-          : null,
+        latestPublicationJob: deliveries[0] ? mapWebsiteDelivery(deliveries[0]) : null,
       };
     }),
     page,
@@ -646,72 +630,7 @@ export async function approveVersion(
   return updateProjectStatus(tenantId, projectId, "approved");
 }
 
-export async function createPublicationJob(
-  tenantId: string,
-  siteId: string,
-  projectId: string,
-  versionId: string,
-  action: PublicationAction = "publish",
-  requestPayload?: {
-    action?: PublicationAction;
-    targetStatus?: PublicationTargetStatus;
-    requestedBy?: string;
-  } | null,
-  requestedByStudioUserId?: string | null,
-  idempotencyKey?: string | null,
-): Promise<PublicationJob> {
-  return prisma.publicationJob.create({
-    data: {
-      tenantId,
-      siteId,
-      projectId,
-      versionId,
-      action,
-      status: "queued",
-      idempotencyKey: idempotencyKey ?? null,
-      requestedByStudioUserId: requestedByStudioUserId ?? null,
-      requestPayload: requestPayload
-        ? (requestPayload as Prisma.InputJsonObject)
-        : Prisma.JsonNull,
-    },
-  });
-}
-
-export async function findPublicationJobByIdempotency(
-  tenantId: string,
-  idempotencyKey: string,
-) {
-  return prisma.publicationJob.findFirst({
-    where: {
-      tenantId,
-      idempotencyKey,
-    },
-  });
-}
-
-export async function resetPublicationJobForRetry(
-  publicationJobId: string,
-  requestPayload?: {
-    action?: PublicationAction;
-    targetStatus?: PublicationTargetStatus;
-    requestedBy?: string;
-  } | null,
-  requestedByStudioUserId?: string | null,
-) {
-  return prisma.publicationJob.update({
-    where: { id: publicationJobId },
-    data: {
-      status: "queued",
-      error: null,
-      responsePayload: Prisma.JsonNull,
-      requestedByStudioUserId: requestedByStudioUserId ?? null,
-      requestPayload: requestPayload
-        ? (requestPayload as Prisma.InputJsonObject)
-        : Prisma.JsonNull,
-    },
-  });
-}
-
+// Legacy PublicationJob reads: only the read-only /v2/publication-jobs history uses them until M6.
 export async function getPublicationJobById(tenantId: string | null | undefined, publicationJobId: string) {
   return prisma.publicationJob.findFirst({
     where: {
@@ -771,34 +690,6 @@ export async function listPublicationJobs(
   };
 }
 
-export async function updatePublicationJob(
-  publicationJobId: string,
-  data: {
-    status: PublicationStatus;
-    externalId?: string | null;
-    externalUrl?: string | null;
-    requestPayload?: Prisma.InputJsonValue | null;
-    responsePayload?: Prisma.InputJsonValue | null;
-    error?: string | null;
-    publishedAt?: Date | null;
-  },
-) {
-  return prisma.publicationJob.update({
-    where: { id: publicationJobId },
-    data: {
-      status: data.status,
-      externalId: data.externalId ?? undefined,
-      externalUrl: data.externalUrl ?? undefined,
-      requestPayload:
-        data.requestPayload === null ? Prisma.JsonNull : data.requestPayload ?? undefined,
-      responsePayload:
-        data.responsePayload === null ? Prisma.JsonNull : data.responsePayload ?? undefined,
-      error: data.error ?? undefined,
-      publishedAt: data.publishedAt ?? undefined,
-    },
-  });
-}
-
 export async function markProjectPublished(tenantId: string, projectId: string, versionId: string, status: ContentProject["status"]) {
   await prisma.contentVersion.update({
     where: { id: versionId },
@@ -856,6 +747,14 @@ export async function getLatestVersion(projectId: string, tenantId: string) {
 }
 
 export async function getLatestPublishedExternalId(tenantId: string, siteId: string, projectId: string) {
+  const publication = await prisma.publication.findFirst({
+    where: { tenantId, siteId, projectId, channel: "website", status: { in: ["published", "ready"] }, externalId: { not: null } },
+    orderBy: { updatedAt: "desc" },
+  });
+  if (publication?.externalId) {
+    return publication.externalId;
+  }
+  // shortcut: read-only fallback for posts delivered before M3b; drop with the table in M6.
   const record = await prisma.publicationJob.findFirst({
     where: {
       tenantId,
@@ -1075,35 +974,59 @@ function mapQaState(
   }
 }
 
-function mapPublicationJob(
-  publication: Pick<
-    PublicationJob,
-    | "id"
-    | "status"
-    | "action"
-    | "externalId"
-    | "externalUrl"
-    | "error"
-    | "createdAt"
-    | "updatedAt"
-    | "publishedAt"
-    | "requestPayload"
-  >,
-) {
-  const requestPayload =
-    publication.requestPayload && typeof publication.requestPayload === "object"
-      ? (publication.requestPayload as Record<string, unknown>)
-      : null;
-  const targetStatus = readPublicationTargetStatus(requestPayload?.targetStatus);
+/** Website rows that were actually sent (or came from a pre-M3b job). Drafts the calendar still holds are not deliveries. */
+export const WEBSITE_DELIVERY_WHERE = {
+  channel: "website",
+  OR: [{ currentAttempt: { gt: 0 } }, { publicationJobId: { not: null } }],
+} satisfies Prisma.PublicationWhereInput;
 
+export const WEBSITE_DELIVERY_SELECT = {
+  id: true,
+  versionId: true,
+  channel: true,
+  status: true,
+  currentAttempt: true,
+  publicationJobId: true,
+  externalId: true,
+  externalUrl: true,
+  lastError: true,
+  metadata: true,
+  createdAt: true,
+  updatedAt: true,
+  publishedAt: true,
+} satisfies Prisma.PublicationSelect;
+
+type WebsiteDeliveryRecord = Prisma.PublicationGetPayload<{ select: typeof WEBSITE_DELIVERY_SELECT }>;
+
+export function isWebsiteDelivery(publication: Pick<WebsiteDeliveryRecord, "channel" | "currentAttempt" | "publicationJobId">): boolean {
+  return publication.channel === "website" && (publication.currentAttempt > 0 || publication.publicationJobId !== null);
+}
+
+// The project views keep the old execution vocabulary so the Studio UI reads them unchanged.
+const EXECUTION_STATUS: Record<WebsiteDeliveryRecord["status"], PublicationStatus> = {
+  draft: "queued",
+  scheduled: "queued",
+  queued: "queued",
+  publishing: "processing",
+  ready: "draft_synced",
+  published: "published",
+  failed: "failed",
+  canceled: "canceled",
+  deleted: "canceled",
+  unpublished: "canceled",
+};
+
+export function mapWebsiteDelivery(publication: WebsiteDeliveryRecord): PublicationExecutionState {
+  const metadata = publication.metadata && typeof publication.metadata === "object" ? (publication.metadata as Record<string, unknown>) : {};
+  const action: PublicationAction = metadata.unpublishRequested === true ? "unpublish" : "publish";
   return {
     id: publication.id,
-    status: publication.status,
-    action: publication.action,
-    targetStatus,
+    status: EXECUTION_STATUS[publication.status],
+    action,
+    targetStatus: readPublicationTargetStatus(metadata.targetStatus),
     externalId: publication.externalId,
     externalUrl: publication.externalUrl,
-    error: publication.error,
+    error: publication.lastError,
     createdAt: publication.createdAt,
     updatedAt: publication.updatedAt,
     publishedAt: publication.publishedAt,

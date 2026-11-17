@@ -131,39 +131,9 @@ async function enqueueUnpublishForWebsite(
   tenantId: string,
   publication: { id: string; projectId: string; versionId: string; siteId: string | null },
 ) {
-  const { createPublicationJob, resetPublicationJobForRetry } = await import("./repository");
-  const { queuePublication } = await import("./orchestration");
   if (!publication.siteId) {
     return;
   }
-  const idempotencyKey = `unpublish:${tenantId}:${publication.siteId}:${publication.projectId}:${publication.versionId}`;
-  const existing = await prisma.publicationJob.findFirst({
-    where: { tenantId, idempotencyKey },
-  });
-  if (existing && ["queued", "processing"].includes(existing.status)) {
-    await queuePublication(existing.id);
-    return;
-  }
-  if (existing) {
-    // failed/canceled: reset the stable-key row and requeue instead of hitting
-    // the (tenant_id, idempotency_key) unique index with a new row.
-    const retried = await resetPublicationJobForRetry(existing.id, {
-      action: "unpublish",
-      targetStatus: "publish",
-      requestedBy: "archive_flow",
-    });
-    await queuePublication(retried.id);
-    return;
-  }
-  const job = await createPublicationJob(
-    tenantId,
-    publication.siteId,
-    publication.projectId,
-    publication.versionId,
-    "unpublish",
-    { action: "unpublish", targetStatus: "publish", requestedBy: "archive_flow" },
-    null,
-    idempotencyKey,
-  );
-  await queuePublication(job.id);
+  const { startWebsiteAttempt } = await import("./publication");
+  await startWebsiteAttempt(publication.id, { unpublish: true, requestedBy: "archive_flow" });
 }

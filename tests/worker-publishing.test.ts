@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { PublishResult, PublisherAdapter } from "../src/studio/types";
 import { processPublishingJob } from "../src/infrastructure/workers/worker-publishing";
 
+const JOB = { attemptId: "attempt-1", publicationId: "publication-1" };
+
 function buildPublication(overrides?: Record<string, unknown>) {
   const now = new Date();
   return {
@@ -11,16 +13,11 @@ function buildPublication(overrides?: Record<string, unknown>) {
     siteId: "site-1",
     projectId: "project-1",
     versionId: "version-1",
-    status: "queued",
-    action: "publish",
+    channel: "website",
+    status: "publishing",
     externalId: null,
     externalUrl: null,
-    requestPayload: {
-      targetStatus: "publish",
-    },
-    responsePayload: null,
-    error: null,
-    publishedAt: null,
+    metadata: { targetStatus: "publish", unpublishRequested: false },
     createdAt: now,
     updatedAt: now,
     site: {
@@ -38,40 +35,15 @@ function buildPublication(overrides?: Record<string, unknown>) {
       createdAt: now,
       updatedAt: now,
     },
-    project: {
-      id: "project-1",
-      tenantId: "tenant-1",
-      siteId: "site-1",
-      topicId: null,
-      title: "Proyecto",
-      brief: "Brief",
-      goal: "article",
-      status: "approved",
-      primaryLanguage: "es",
-      metadata: null,
-      createdAt: now,
-      updatedAt: now,
-    },
+    project: { id: "project-1", tenantId: "tenant-1", siteId: "site-1", title: "Proyecto", status: "approved", createdAt: now, updatedAt: now },
     version: {
       id: "version-1",
       tenantId: "tenant-1",
       projectId: "project-1",
-      contentTextId: null,
-      contentImageId: null,
       versionNumber: 1,
       status: "approved",
       title: "Titulo",
-      excerpt: "Resumen",
       bodyHtml: "<p>Contenido</p>",
-      seoTitle: "SEO",
-      seoDescription: "Descripcion",
-      qaReport: null,
-      feedback: null,
-      approvedAt: now,
-      approvedBy: "studio",
-      publishedAt: null,
-      createdAt: now,
-      updatedAt: now,
       contentImage: null,
       contentText: null,
       derivatives: [],
@@ -87,7 +59,6 @@ function buildPublisher(overrides?: Partial<PublisherAdapter>): PublisherAdapter
     effectiveTargetStatus: "publish",
     responsePayload: { ok: true },
   };
-
   return {
     publishDraft: async () => ({ ...defaultResult, effectiveTargetStatus: "draft" }),
     updateDraft: async () => ({ ...defaultResult, effectiveTargetStatus: "draft" }),
@@ -97,46 +68,26 @@ function buildPublisher(overrides?: Partial<PublisherAdapter>): PublisherAdapter
   };
 }
 
-function noopVerification() {
-  return async () => ({
-    ok: true,
-    detail: "unused",
-    externalId: null,
-    externalUrl: null,
-    checkedAt: new Date().toISOString(),
-  });
-}
-
-test("processPublishingJob uses publishDraft and keeps the project approved when syncing a draft", async () => {
-  const publication = buildPublication({
-    requestPayload: { targetStatus: "draft" },
-  });
-  const calls: string[] = [];
-
-  await processPublishingJob("publication-1", {
-    getPublicationJobById: async () => publication as never,
-    updatePublicationJob: async (_id, data) => {
-      calls.push(`update:${data.status}`);
-      if (data.status === "draft_synced") {
-        assert.equal(data.externalId, "remote-1");
-      }
-      return {} as never;
+function dependencies(
+  publication: ReturnType<typeof buildPublication>,
+  calls: string[],
+  options: { latestExternalId?: string | null; publisher?: Partial<PublisherAdapter> } = {},
+) {
+  return {
+    loadPublication: async () => publication as never,
+    startAttempt: async () => {
+      calls.push("attempt:running");
     },
-    updateProjectStatus: async (_tenantId, _projectId, status) => {
-      calls.push(`project:${status}`);
-      return {} as never;
+    succeedAttempt: async (_tenantId: string, _attemptId: string, input: { externalId?: string | null; draft?: boolean }) => {
+      calls.push(`attempt:succeeded${input.draft ? ":draft" : ""}:${input.externalId ?? "none"}`);
+      return null;
     },
-    getLatestPublishedExternalId: async () => null,
+    recordExternalId: async (_id: string, externalId: string) => {
+      calls.push(`record:${externalId}`);
+    },
+    getLatestPublishedExternalId: async () => options.latestExternalId ?? null,
     buildAssetPublicUrl: async () => null,
-    getPublisher: () =>
-      buildPublisher({
-        publishDraft: async () => ({
-          externalId: "remote-1",
-          externalUrl: "https://remote.example/drafts/1",
-          effectiveTargetStatus: "draft",
-          responsePayload: { mode: "draft" },
-        }),
-      }),
+    getPublisher: () => buildPublisher(options.publisher),
     markProjectPublished: async () => {
       calls.push("mark-published");
       return {} as never;
@@ -145,198 +96,87 @@ test("processPublishingJob uses publishDraft and keeps the project approved when
       calls.push("clear-published");
       return {} as never;
     },
-    verifyWebsitePublication: noopVerification(),
-  });
+    verifyWebsitePublication: async () => {
+      calls.push("verify");
+      return { ok: true, detail: "unused", externalId: null, externalUrl: null, checkedAt: new Date().toISOString() } as never;
+    },
+  };
+}
 
-  assert.deepEqual(calls, [
-    "update:processing",
-    "project:publish_queued",
-    "update:draft_synced",
-    "clear-published",
-  ]);
+test("processPublishingJob publishes, marks the project published and verifies the post", async () => {
+  const calls: string[] = [];
+  await processPublishingJob(JOB, dependencies(buildPublication(), calls));
+  assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:remote-1", "mark-published", "verify"]);
+});
+
+test("processPublishingJob uses publishDraft and keeps the project approved when syncing a draft", async () => {
+  const calls: string[] = [];
+  await processPublishingJob(JOB, dependencies(buildPublication({ metadata: { targetStatus: "draft" } }), calls));
+  assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:draft:remote-1", "clear-published"]);
 });
 
 test("processPublishingJob upgrades to published when the provider cannot keep a draft", async () => {
-  const publication = buildPublication({
-    requestPayload: { targetStatus: "draft" },
-  });
   const calls: string[] = [];
-
-  await processPublishingJob("publication-1", {
-    getPublicationJobById: async () => publication as never,
-    updatePublicationJob: async (_id, data) => {
-      calls.push(`update:${data.status}`);
-      return {} as never;
-    },
-    updateProjectStatus: async (_tenantId, _projectId, status) => {
-      calls.push(`project:${status}`);
-      return {} as never;
-    },
-    getLatestPublishedExternalId: async () => "remote-1",
-    buildAssetPublicUrl: async () => null,
-    getPublisher: () =>
-      buildPublisher({
-        updateDraft: async () => ({
-          externalId: "remote-1",
-          externalUrl: "https://remote.example/items/1",
-          effectiveTargetStatus: "publish",
-          responsePayload: { mode: "published" },
-        }),
-      }),
-    markProjectPublished: async () => {
-      calls.push("mark-published");
-      return {} as never;
-    },
-    clearProjectPublicationState: async () => {
-      calls.push("clear-published");
-      return {} as never;
-    },
-    verifyWebsitePublication: noopVerification(),
-  });
-
-  assert.deepEqual(calls, [
-    "update:processing",
-    "project:publish_queued",
-    "update:published",
-    "mark-published",
-  ]);
+  await processPublishingJob(
+    JOB,
+    dependencies(buildPublication({ metadata: { targetStatus: "draft" } }), calls, {
+      latestExternalId: "remote-1",
+      publisher: {
+        updateDraft: async () => ({ externalId: "remote-1", externalUrl: "https://remote.example/items/1", effectiveTargetStatus: "publish", responsePayload: {} }),
+      },
+    }),
+  );
+  assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:remote-1", "mark-published", "verify"]);
 });
 
-test("processPublishingJob calls unpublish and clears published state", async () => {
-  const publication = buildPublication({
-    action: "unpublish",
-    requestPayload: { targetStatus: "publish" },
-  });
+test("processPublishingJob calls unpublish with the earlier delivery's id and clears published state", async () => {
   const calls: string[] = [];
-
-  await processPublishingJob("publication-1", {
-    getPublicationJobById: async () => publication as never,
-    updatePublicationJob: async (_id, data) => {
-      calls.push(`update:${data.status}`);
-      return {} as never;
-    },
-    updateProjectStatus: async (_tenantId, _projectId, status) => {
-      calls.push(`project:${status}`);
-      return {} as never;
-    },
-    getLatestPublishedExternalId: async () => "remote-1",
-    buildAssetPublicUrl: async () => null,
-    getPublisher: () =>
-      buildPublisher({
+  await processPublishingJob(
+    JOB,
+    dependencies(buildPublication({ metadata: { unpublishRequested: true } }), calls, {
+      latestExternalId: "remote-1",
+      publisher: {
         unpublish: async (_context, externalId) => {
           calls.push(`unpublish:${externalId}`);
-          return {
-            externalId,
-            responsePayload: { deleted: true },
-          };
+          return { externalId, responsePayload: { deleted: true } };
         },
-      }),
-    markProjectPublished: async () => {
-      calls.push("mark-published");
-      return {} as never;
-    },
-    clearProjectPublicationState: async () => {
-      calls.push("clear-published");
-      return {} as never;
-    },
-    verifyWebsitePublication: noopVerification(),
-  });
-
-  assert.deepEqual(calls, [
-    "update:processing",
-    "project:publish_queued",
-    "unpublish:remote-1",
-    "update:canceled",
-    "clear-published",
-  ]);
+      },
+    }),
+  );
+  assert.deepEqual(calls, ["attempt:running", "unpublish:remote-1", "attempt:succeeded:remote-1", "clear-published"]);
 });
 
-test("processPublishingJob routes talkaris draft publications through updateDraft when an external id already exists", async () => {
-  const publication = buildPublication({
-    site: {
-      ...buildPublication().site,
-      type: "talkaris",
-      key: "talkaris-blog",
-    },
-    requestPayload: { targetStatus: "draft" },
-  });
+test("processPublishingJob keeps a remote id from a failed attempt and reuses it on retry", async () => {
   const calls: string[] = [];
-
-  await processPublishingJob("publication-1", {
-    getPublicationJobById: async () => publication as never,
-    updatePublicationJob: async (_id, data) => {
-      calls.push(`update:${data.status}`);
-      return {} as never;
-    },
-    updateProjectStatus: async (_tenantId, _projectId, status) => {
-      calls.push(`project:${status}`);
-      return {} as never;
-    },
-    getLatestPublishedExternalId: async () => "talkaris-remote-1",
-    buildAssetPublicUrl: async () => "https://auctorio.com/assets/example.webp",
-    getPublisher: () =>
-      buildPublisher({
-        updateDraft: async (_context, externalId) => {
-          calls.push(`talkaris-update:${externalId}`);
-          return {
-            externalId,
-            externalUrl: "https://talkaris.com/blog/example",
-            effectiveTargetStatus: "draft",
-            responsePayload: { mode: "draft" },
-          };
-        },
-      }),
-    markProjectPublished: async () => {
-      calls.push("mark-published");
-      return {} as never;
-    },
-    clearProjectPublicationState: async () => {
-      calls.push("clear-published");
-      return {} as never;
-    },
-    verifyWebsitePublication: noopVerification(),
-  });
-
-  assert.deepEqual(calls, [
-    "update:processing",
-    "project:publish_queued",
-    "talkaris-update:talkaris-remote-1",
-    "update:draft_synced",
-    "clear-published",
-  ]);
-});
-
-test("processPublishingJob keeps a remote draft id from a failed attempt and reuses it on retry", async () => {
-  const jobUpdates: Array<Record<string, unknown>> = [];
   const publishedWith: Array<string | null | undefined> = [];
-  const dependencies = (job: ReturnType<typeof buildPublication>, publish: PublisherAdapter["publish"]) => ({
-    getPublicationJobById: async () => job as never,
-    updatePublicationJob: async (_id: string, data: Record<string, unknown>) => {
-      jobUpdates.push(data);
-      return {} as never;
-    },
-    updateProjectStatus: async () => ({}) as never,
-    getLatestPublishedExternalId: async () => null,
-    buildAssetPublicUrl: async () => null,
-    getPublisher: () => buildPublisher({ publish }),
-    markProjectPublished: async () => ({}) as never,
-    clearProjectPublicationState: async () => ({}) as never,
-    verifyWebsitePublication: noopVerification(),
-  });
 
   await assert.rejects(
-    processPublishingJob("publication-1", dependencies(buildPublication(), async (_context, externalId) => {
-      publishedWith.push(externalId);
-      throw Object.assign(new Error("http_error status=503"), { externalId: "remote-draft-9" });
-    })),
+    processPublishingJob(
+      JOB,
+      dependencies(buildPublication(), calls, {
+        publisher: {
+          publish: async (_context, externalId) => {
+            publishedWith.push(externalId);
+            throw Object.assign(new Error("http_error status=503"), { externalId: "remote-draft-9" });
+          },
+        },
+      }),
+    ),
     /status=503/,
   );
-  assert.ok(jobUpdates.some((data) => data.externalId === "remote-draft-9" && data.status === "failed"));
+  assert.ok(calls.includes("record:remote-draft-9"));
 
-  // The retried job row carries the persisted id: publish finishes that record.
-  await processPublishingJob("publication-1", dependencies(buildPublication({ externalId: "remote-draft-9" }), async (_context, externalId) => {
-    publishedWith.push(externalId);
-    return { externalId: externalId ?? null, externalUrl: "https://remote.example/items/9", effectiveTargetStatus: "publish", responsePayload: {} };
-  }));
+  // The retry reads the persisted id from the publication row: publish finishes that post.
+  await processPublishingJob(
+    JOB,
+    dependencies(buildPublication({ externalId: "remote-draft-9" }), calls, {
+      publisher: {
+        publish: async (_context, externalId) => {
+          publishedWith.push(externalId);
+          return { externalId: externalId ?? null, externalUrl: "https://remote.example/items/9", effectiveTargetStatus: "publish", responsePayload: {} };
+        },
+      },
+    }),
+  );
   assert.deepEqual(publishedWith, [null, "remote-draft-9"]);
 });

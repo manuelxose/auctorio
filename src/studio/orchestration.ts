@@ -1,6 +1,6 @@
 import crypto from "node:crypto";
 import { Prisma, type ContentProject, type DerivativeType, type Site } from "@prisma/client";
-import { enqueueImageJob, enqueuePublishingJob, getPublishingQueue } from "../infrastructure/queue/producer";
+import { enqueueImageJob } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
@@ -436,37 +436,6 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
       data: { automationSubstate: qaReport.passed ? "qa_passed" : "qa_failed" },
     });
   }
-}
-
-export async function queuePublication(publicationJobId: string) {
-  const queue = await getPublishingQueue();
-  const inFlight = await queue.getJobs(["waiting", "active", "delayed"], 0, -1);
-  const alreadyQueued = inFlight.some((job) => job.data?.publicationJobId === publicationJobId);
-  if (alreadyQueued) {
-    return;
-  }
-
-  const publicationJob = await prisma.publicationJob.findUnique({ where: { id: publicationJobId } });
-  let operationId: string | null = null;
-  if (publicationJob) {
-    const operation = await createOperation({
-      tenantId: publicationJob.tenantId,
-      siteId: publicationJob.siteId ?? null,
-      type: publicationJob.action === "unpublish" ? "unpublish" : "publish",
-      initiatorUserId: null,
-      entityType: "publication_job",
-      entityId: publicationJobId,
-      queueName: "queue_publishing",
-      metadata: { action: publicationJob.action ?? null },
-    });
-    operationId = operation.id;
-  }
-
-  const jobId = crypto.randomUUID();
-  await enqueuePublishingJob(jobId, {
-    publicationJobId,
-    ...(operationId ? { operationId } : {}),
-  });
 }
 
 export async function retryImageGeneration(tenantId: string, contentImageId: string) {
