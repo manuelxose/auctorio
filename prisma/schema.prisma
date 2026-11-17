@@ -1992,7 +1992,14 @@ model EditorialPlanItem {
   recommendedWordCountMin        Int?                    @map("recommended_word_count_min")
   recommendedWordCountMax        Int?                    @map("recommended_word_count_max")
   difficultyEstimate             Int?                    @map("difficulty_estimate")
-  opportunityScore               Float?                  @map("opportunity_score")
+  /// Measured demand from a keyword provider (never estimated); null = no data.
+  searchVolume                   Int?                    @map("search_volume")
+  /// Provider keyword difficulty 0–100 (unlike the 1–10 model estimate above).
+  keywordDifficulty              Int?                    @map("keyword_difficulty")
+  /// Provider that was queried (e.g. "dataforseo"); null = never checked.
+  keywordMetricsSource           String?                 @map("keyword_metrics_source")
+  keywordMetricsAt               DateTime?               @map("keyword_metrics_at")
+  opportunityScore              Float?                  @map("opportunity_score")
   relevanceScore                 Float?                  @map("relevance_score")
   cannibalizationRisk            String?                 @map("cannibalization_risk")
   confidence                     Float?

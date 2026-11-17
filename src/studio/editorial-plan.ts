@@ -20,6 +20,7 @@ import {
 import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
+import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
 import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
@@ -797,6 +798,9 @@ ${SOURCE_DATA_RULES}`;
       });
     });
 
+    // Measured demand (volume + difficulty) when a keyword provider is configured; never blocks the plan.
+    await enrichPlanItemsWithKeywordMetrics(input.tenantId, plan.id);
+
     // Register target queries so future plans avoid cannibalization.
     const targetItems = items.filter((item) => item.targetQuery);
     if (targetItems.length > 0) {
@@ -1261,9 +1265,13 @@ export async function updateEditorialPlanItem(
     if (missing.length) throw new Error(`editorial_plan_item_url_not_in_inventory: ${missing.slice(0, 3).join(", ")}`);
   }
   const metadata = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata : {}) as Record<string, unknown>;
-  return prisma.editorialPlanItem.update({
+  const nextKeyword = input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null;
+  // A new keyword invalidates the measured demand of the old one.
+  const keywordChanged = nextKeyword !== undefined && nextKeyword !== item.primaryKeyword;
+  const updated = await prisma.editorialPlanItem.update({
     where: { id: item.id },
     data: {
+      ...(keywordChanged ? { searchVolume: null, keywordDifficulty: null, keywordMetricsSource: null, keywordMetricsAt: null } : {}),
       secondaryKeywords: input.secondaryKeywords === undefined ? undefined : input.secondaryKeywords?.length ? (input.secondaryKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
       relatedEntities: input.relatedEntities === undefined ? undefined : input.relatedEntities?.length ? (input.relatedEntities as Prisma.InputJsonArray) : Prisma.JsonNull,
       audience: input.audience === undefined ? undefined : input.audience?.trim() || null,
@@ -1282,7 +1290,7 @@ export async function updateEditorialPlanItem(
       editorialObjective: input.editorialObjective === undefined ? undefined : input.editorialObjective?.trim() || null,
       competitorAngle: input.competitorAngle === undefined ? undefined : input.competitorAngle?.trim() || null,
       scheduledFor: input.scheduledFor,
-      primaryKeyword: input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null,
+      primaryKeyword: nextKeyword,
       seoTitle: input.seoTitle === undefined ? undefined : input.seoTitle?.trim() || null,
       metaDescription: input.metaDescription === undefined ? undefined : input.metaDescription?.trim() || null,
       socialHook: input.socialHook === undefined ? undefined : input.socialHook?.trim() || null,
@@ -1311,6 +1319,9 @@ export async function updateEditorialPlanItem(
       freshnessRequirement: input.freshnessRequirement === undefined ? undefined : input.freshnessRequirement?.trim() || null,
     },
   });
+  if (!keywordChanged || !nextKeyword) return updated;
+  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId);
+  return (await prisma.editorialPlanItem.findUnique({ where: { id: item.id } })) ?? updated;
 }
 
 export async function setEditorialPlanItemStatus(
