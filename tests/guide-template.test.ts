@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { runQualityChecklist, type ChecklistInput } from "../src/studio/editorial-engine/quality-checklist";
 import { GUIDE_TARGETS, getStructureSpec, renderStructureSpec, resolveArticleTargets } from "../src/studio/editorial-engine/structure";
 import { mapArticleType, siteGuidance } from "../src/studio/production/plan-item";
-import { serpResultsToFacts } from "../src/studio/serp-sources";
+import { pickSourceExcerpt, serpResultsToFacts } from "../src/studio/serp-sources";
+import { rankOwnPosts } from "../src/studio/internal-linking";
+import { OWN_POST_REASON, renderBriefForWriter } from "../src/studio/editorial-engine/brief-builder";
+import type { EditorialBrief } from "../src/studio/editorial-engine/types";
 import { parseSerpOrganic } from "../src/infrastructure/seo/dataforseo";
 import { withTableOfContents } from "../src/studio/editorial-engine/seo-package";
 import { buildPublicationJsonLd, faqItemsFromHtml } from "../src/studio/editorial-engine/json-ld";
@@ -146,6 +149,44 @@ test("M4 SERP sources: latest snapshot, organic only, own site + competitors + k
   assert.equal(facts[0].statement, "Canales TDT: Lista de canales.");
   assert.equal(facts[0].sourceUrl, "https://www.xataka.com/tdt");
   assert.equal(serpResultsToFacts(results, { domains: [], urls: [] }, 2).length, 2);
+});
+
+test("M4 source pages: the cited excerpt is the page's sentences with figures and the keyword", () => {
+  const content = [
+    "Bienvenido a nuestra web, la mejor del sector desde siempre y para siempre.",
+    "La TDT en España emite 30 canales nacionales gratuitos desde el 5 de noviembre de 2026.",
+    "Suscríbete a nuestro boletín para no perderte ninguna novedad de la semana.",
+    "Para resintonizar la TDT basta con abrir el menú del televisor y buscar canales.",
+  ].join(" ");
+  assert.equal(
+    pickSourceExcerpt(content, "canales tdt"),
+    "La TDT en España emite 30 canales nacionales gratuitos desde el 5 de noviembre de 2026. Para resintonizar la TDT basta con abrir el menú del televisor y buscar canales.",
+  );
+  assert.equal(pickSourceExcerpt("Texto corto sin nada útil que citar aquí dentro.", "canales tdt"), "");
+});
+
+test("M4 own posts: closest to the keyword first, then newest; marked in the writer brief", () => {
+  const posts = rankOwnPosts(
+    [
+      { url: "https://guiaprogramaciontv.com/blog/futbol-hoy", title: "Fútbol hoy en TV" },
+      { url: "https://guiaprogramaciontv.com/blog/canales-tdt-2026", title: "Todos los canales de la TDT" },
+      { url: "https://guiaprogramaciontv.com/blog/futbol-hoy", title: "Duplicado" },
+      { url: "no es url", title: "Rota" },
+    ],
+    "canales tdt gratis",
+    5,
+  );
+  assert.deepEqual(posts.map((post) => post.url), ["https://guiaprogramaciontv.com/blog/canales-tdt-2026", "https://guiaprogramaciontv.com/blog/futbol-hoy"]);
+  assert.ok(posts.every((post) => post.reason === OWN_POST_REASON));
+  const brief = {
+    storyAngle: "", targetSite: { name: "GuíaTV", type: "guiatv", locale: "es-ES" }, audience: "", searchIntent: "informational", articleType: "guide",
+    primaryKeyword: "canales tdt", secondaryKeywords: [], entities: [], verifiedFacts: [], unresolvedFacts: [], requiredAttribution: [],
+    internalLinkOpportunities: [...posts, { url: "https://guiaprogramaciontv.com/canales", title: "Canales", anchor: "Canales", reason: "title matches keywords", score: 50 }],
+    relatedSiteContent: [], uniqueValueProposition: "", targetLengthRange: { min: 1, max: 2 }, freshnessConstraints: [], contentWarnings: [],
+  } as unknown as EditorialBrief;
+  const text = renderBriefForWriter(brief);
+  assert.match(text, /Todos los canales de la TDT → https:\/\/guiaprogramaciontv\.com\/blog\/canales-tdt-2026 \(own post\)/);
+  assert.match(text, /Canales → https:\/\/guiaprogramaciontv\.com\/canales\n/);
 });
 
 test("TOC: built from the H2s after the summary box, stable ids, idempotent, survives the sanitizer", () => {

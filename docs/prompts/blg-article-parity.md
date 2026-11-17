@@ -242,7 +242,7 @@ checklist exija la tabla solo cuando hay comparación.
    todas listadas en «Fuentes».
 3. Recomendaciones: 3–5 posts del mismo sitio con mayor afinidad temática.
 
-**Estado M4 (2026-11-17, parcial — los enlaces pasan a ser requisito, no adorno)**: los artículos publicados de BLG
+**Estado M4 (2026-11-17, hecho — los enlaces pasan a ser requisito, no adorno)**: los artículos publicados de BLG
 llevan ≥10 internos y a menudo 25+ externos. Antes el redactor recibía como mucho 6 internos (`loadInternalLinks`
 limit 6) y los externos solo salían de `sourceEvidence` del plan (2–4 URLs), con objetivo 4. Ahora:
 - Objetivos: `externalLinks` por defecto 20 (máx. 40), `internalLinks` 15. El prompt exige «AT LEAST N» de cada uno.
@@ -255,8 +255,16 @@ limit 6) y los externos solo salían de `sourceEvidence` del plan (2–4 URLs), 
   comprobación anti‑bot. Solo se aplica a items keyword-first (`guide`).
 - QA: «Fuente creíble» exige `min(externalLinks, fuentes con URL del ledger)` (`externalSourceInventorySize` en
   los metadatos del proyecto), no ≥1.
-Pendiente: leer las páginas fuente (ahora el redactor cita título + snippet, no el contenido), posts propios
-publicados como candidatos y Recomendaciones por afinidad, anchors sin repetir URL, y medir en BLG con sesión iniciada.
+- Topes que lo anulaban: `loadInternalLinks` cortaba a 8 y `brief-builder` a 6 enlaces; ahora el brief admite 40.
+- Páginas fuente: cada fuente SERP se lee (`fetchUrl` con guardia SSRF + `extractPageFromHtml`) y el hecho cita
+  las 2 frases de la página con cifras/fechas y palabras de la keyword (`pickSourceExcerpt`; caché `source_page`
+  7 días por URL + keyword); PDFs, errores o páginas pobres → snippet. ~3 s para 25 fuentes la primera vez.
+- Posts propios: `suggestOwnPosts` (`internal-linking.ts`) toma las publicaciones `published` del sitio con URL
+  real, ordenadas por afinidad con la keyword y luego por fecha (≤5, sin el propio proyecto); van primero en el
+  brief marcadas «(own post)» y «Recommended reading» lista 3–5 de ellas.
+- Anchors: cada URL una sola vez en el cuerpo (las listas Fuentes/Recomendaciones pueden repetirla), nunca «aquí».
+Pendiente (fuera de M4): medir en BLG con sesión iniciada; editor «Título, Editor» con el nombre real del medio
+(hoy el editor es el dominio); aplicar enlazado/fuentes también a artículos manuales y de noticias.
 
 ### M5 — CTAs y marca
 

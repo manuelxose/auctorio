@@ -7,12 +7,65 @@ import type { LedgerFact } from "./editorial-engine/types";
 import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
 import { recordAiSpend } from "./cost-budgets";
 import { structuredEvent } from "../shared/utils/logger";
+import { fetchUrl, validateScrapeUrl } from "../infrastructure/scraping";
+import { extractPageFromHtml } from "./site-intelligence/crawler";
 
 const PROVIDER = "dataforseo";
 const RESOURCE = "serp_organic";
 const TTL_MS = 7 * 24 * 60 * 60 * 1000; // Labs snapshots refresh every few weeks
 
 type Fetcher = typeof fetchSerpOrganic;
+type PageReader = (url: string) => Promise<string | null>;
+
+const fold = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+
+/**
+ * The 2 sentences of a source page a guide can cite: ones with figures or dates and the keyword's words first,
+ * kept in page order. Empty when nothing qualifies (the SERP snippet is used instead).
+ */
+export function pickSourceExcerpt(content: string, keyword: string, maxChars = 360): string {
+  const tokens = fold(keyword).split(/\s+/).filter((token) => token.length > 2); // keep short brand words like «tdt»
+  const sentences = content.split(/(?<=[.!?])\s+/).map((sentence) => sentence.trim()).filter((sentence) => sentence.length >= 40 && sentence.length <= 300);
+  const scored = sentences.map((sentence, index) => {
+    const folded = fold(sentence);
+    return { sentence, index, score: (/\d/.test(sentence) ? 2 : 0) + tokens.filter((token) => folded.includes(token)).length };
+  });
+  const best = scored.filter((entry) => entry.score >= 2).sort((a, b) => b.score - a.score || a.index - b.index).slice(0, 2);
+  return best.sort((a, b) => a.index - b.index).map((entry) => entry.sentence).join(" ").slice(0, maxChars);
+}
+
+/** Main text of a public HTML page (SSRF-guarded); null for PDFs, errors and thin pages. */
+async function readPageText(url: string): Promise<string | null> {
+  try {
+    const parsed = new URL(url);
+    await validateScrapeUrl(parsed);
+    const { body, contentType } = await fetchUrl(parsed, { accept: "text/html" });
+    if (!/html/i.test(contentType)) return null;
+    return extractPageFromHtml(parsed.origin, url, body)?.content ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Facts whose statement carries what the page itself says (cached per URL + keyword), falling back to the snippet. */
+async function withPageExcerpts(tenantId: string, facts: LedgerFact[], keyword: string, readPage: PageReader): Promise<LedgerFact[]> {
+  return Promise.all(
+    facts.map(async (fact) => {
+      const url = fact.sourceUrl!;
+      const key = `${keyword}|${url}`;
+      const cached = await lookupProviderCache(tenantId, PROVIDER, "source_page", key);
+      let excerpt = cached.hit ? (cached.negative ? "" : String(cached.payload ?? "")) : null;
+      if (excerpt === null) {
+        const text = await readPage(url);
+        excerpt = text ? pickSourceExcerpt(text, keyword) : "";
+        await storeProviderCache(tenantId, PROVIDER, "source_page", key, excerpt, { ttlMs: TTL_MS, negative: !excerpt });
+      }
+      if (!excerpt) return fact;
+      const title = fact.statement.split(": ")[0];
+      return { ...fact, statement: `${title}: ${excerpt}`.slice(0, 400) };
+    }),
+  );
+}
 
 /** Ranked results to ledger facts, minus excluded domains (own site, competitors) and URLs already in the ledger. */
 export function serpResultsToFacts(results: SerpResult[], exclude: { domains: string[]; urls: string[] }, max: number): LedgerFact[] {
@@ -41,6 +94,7 @@ export function serpResultsToFacts(results: SerpResult[], exclude: { domains: st
 export async function serpSourceFacts(
   input: { tenantId: string; siteId: string; locale: string | null; keyword: string; exclude: { domains: string[]; urls: string[] }; max: number },
   fetcher: Fetcher = fetchSerpOrganic,
+  readPage: PageReader = readPageText,
 ): Promise<LedgerFact[]> {
   const location = dataForSeoLocation(input.locale);
   const keyword = normalizeKeyword(input.keyword);
@@ -55,7 +109,7 @@ export async function serpSourceFacts(
       results = fetched.results;
       await storeProviderCache(input.tenantId, PROVIDER, RESOURCE, key, results, { ttlMs: TTL_MS, negative: results.length === 0 });
     }
-    return serpResultsToFacts(results, input.exclude, input.max);
+    return await withPageExcerpts(input.tenantId, serpResultsToFacts(results, input.exclude, input.max), keyword, readPage);
   } catch (error) {
     structuredEvent("serp_sources.failed", { tenantId: input.tenantId, siteId: input.siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
     return [];

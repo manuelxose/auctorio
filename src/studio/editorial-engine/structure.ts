@@ -461,7 +461,7 @@ export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
       },
       { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a self-contained 2–4 sentence answer.", required: true },
       { kind: "sources", heading: "Sources", instruction: "Bulleted list «Título, Editor», each linked to its URL (only URLs from the fact ledger).", required: true },
-      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of the site's own posts from the brief's internal links, with descriptive anchors.", required: true },
+      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of 3–5 of the brief's internal links marked «(own post)», with descriptive anchors; when none is marked, the most related brief URLs not linked in the body.", required: true },
     ],
     allowsConclusion: false,
     allowsFaq: true,
@@ -560,7 +560,7 @@ export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" =
   if (targets) {
     lines.push(
       `Targets: about ${targets.words} words; ${targets.sections.faq ? `${targets.faqCount} FAQ questions; ` : ""}every image needs a descriptive alt.`,
-      `Links are mandatory, not optional: AT LEAST ${targets.internalLinks} internal links spread through the body with descriptive anchors (only brief URLs; fewer only if the brief has fewer), and AT LEAST ${targets.externalLinks} external links to distinct sources from the fact ledger (inline attributions plus the Sources list; fewer only if the ledger has fewer).`,
+      `Links are mandatory, not optional: AT LEAST ${targets.internalLinks} internal links spread through the body with descriptive anchors (only brief URLs; fewer only if the brief has fewer), and AT LEAST ${targets.externalLinks} external links to distinct sources from the fact ledger (inline attributions plus the Sources list; fewer only if the ledger has fewer). Each URL once in the body (the Sources and Recommended reading lists may repeat it); anchors describe the target page, never «aquí» or «click here».`,
     );
   }
   if (language === "es") lines.push("All headings and body text must be written in Spanish.");

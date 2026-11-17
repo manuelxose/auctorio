@@ -1,4 +1,5 @@
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { OWN_POST_REASON } from "./editorial-engine/brief-builder";
 
 const prisma = getPrismaClient();
 
@@ -108,4 +109,41 @@ function urlDepth(url: string): number {
   } catch {
     return 99;
   }
+}
+
+/**
+ * Posts this site already published through Auctorio (real external URLs), closest to the keyword first,
+ * then newest: the "Recommended reading" candidates (BLG parity M4).
+ */
+export async function suggestOwnPosts(
+  tenantId: string,
+  siteId: string,
+  options: { keyword?: string | null; topic?: string | null; excludeProjectId?: string | null; limit?: number } = {},
+): Promise<InternalLinkSuggestion[]> {
+  const publications = await prisma.publication.findMany({
+    where: { tenantId, siteId, status: "published", externalUrl: { not: null }, ...(options.excludeProjectId ? { projectId: { not: options.excludeProjectId } } : {}) },
+    select: { externalUrl: true, publishedAt: true, project: { select: { title: true } } },
+    orderBy: { publishedAt: "desc" },
+    take: 200,
+  });
+  return rankOwnPosts(
+    publications.map((publication) => ({ url: publication.externalUrl!, title: publication.project.title })),
+    `${options.keyword ?? ""} ${options.topic ?? ""}`,
+    options.limit ?? 5,
+  );
+}
+
+/** Pure ranking: keyword-token overlap on title + slug; input order (newest first) breaks ties; one entry per URL. */
+export function rankOwnPosts(posts: Array<{ url: string; title: string }>, query: string, limit: number): InternalLinkSuggestion[] {
+  const queryTokens = tokenize(query);
+  const seen = new Set<string>();
+  return posts
+    .filter((post) => URL.canParse(post.url) && !seen.has(post.url) && seen.add(post.url))
+    .map((post, index) => {
+      const tokens = new Set([...tokenize(post.title), ...slugTokens(post.url)]);
+      return { post, index, hits: queryTokens.filter((token) => tokens.has(token)).length };
+    })
+    .sort((a, b) => b.hits - a.hits || a.index - b.index)
+    .slice(0, limit)
+    .map(({ post, hits }) => ({ url: post.url, title: post.title, anchor: anchorFromTitle(post.title), reason: OWN_POST_REASON, score: Math.min(100, hits * 20) }));
 }

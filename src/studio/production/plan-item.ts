@@ -6,7 +6,7 @@
 import { Prisma, type EditorialPlanItem } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { createProject } from "../repository";
-import { suggestInternalLinks } from "../internal-linking";
+import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
 import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
@@ -187,7 +187,15 @@ async function loadSite(tenantId: string, siteId: string) {
   return site;
 }
 
-async function loadInternalLinks(tenantId: string, siteId: string, keyword: string, topic: string, planUrls: string[], limit = 6): Promise<EngineInternalLink[]> {
+async function loadInternalLinks(
+  tenantId: string,
+  siteId: string,
+  keyword: string,
+  topic: string,
+  planUrls: string[],
+  limit = 6,
+  ownPosts: { excludeProjectId: string | null } | null = null,
+): Promise<EngineInternalLink[]> {
   const suggested = await suggestInternalLinks(tenantId, siteId, { keyword, topic, limit, fillWithHubs: limit > 6 });
   const links: EngineInternalLink[] = suggested.map((link) => ({ ...link }) as EngineInternalLink);
   const missing = planUrls.filter((url) => !links.some((link) => link.url === url));
@@ -197,7 +205,12 @@ async function loadInternalLinks(tenantId: string, siteId: string, keyword: stri
       links.unshift({ url: page.url, title: page.title ?? page.url, anchor: page.title ?? page.url, reason: "suggested by the editorial plan", score: 1 });
     }
   }
-  return links.slice(0, 8);
+  const capped = links.slice(0, Math.max(8, limit));
+  if (!ownPosts) return capped;
+  // Recommended reading: the site's own published posts closest to the keyword, listed first.
+  const posts = await suggestOwnPosts(tenantId, siteId, { keyword, topic, excludeProjectId: ownPosts.excludeProjectId, limit: 5 });
+  const postUrls = new Set(posts.map((post) => post.url));
+  return [...posts, ...capped.filter((link) => !postUrls.has(link.url))];
 }
 
 async function indexedTitles(tenantId: string, siteId: string): Promise<string[]> {
@@ -296,7 +309,7 @@ export async function preparePlanItemInput(
     sourceTexts: evidence.facts.map((fact) => fact.statement),
     // Site writing settings: internal linking can be off, and URLs follow its www / trailing-slash choice.
     internalLinks: writing.internalLinks.enabled
-      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks), targets.internalLinks + 5)).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks), targets.internalLinks + 5, { excludeProjectId: item.projectId })).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
       : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: typeof item.relevanceScore === "number" ? Math.max(0, Math.min(1, item.relevanceScore > 1 ? item.relevanceScore / 100 : item.relevanceScore)) : null,
