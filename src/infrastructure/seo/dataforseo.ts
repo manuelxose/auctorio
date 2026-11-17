@@ -90,8 +90,10 @@ export async function fetchKeywordOverview(
       body: JSON.stringify([{ keywords: keywords.slice(i, i + MAX_KEYWORDS_PER_TASK), location_code: location.locationCode, language_code: location.languageCode }]),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!response.ok) throw new Error(`dataforseo_http_${response.status}`);
-    const parsed = parseKeywordOverview(await response.json());
+    const body = await response.json().catch(() => null);
+    // Errors carry DataForSEO's own reason (e.g. 40104 account not verified), not just the HTTP status.
+    if (!response.ok) throw new Error(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim());
+    const parsed = parseKeywordOverview(body);
     out.items.push(...parsed.items);
     out.costUsd += parsed.costUsd;
   }
