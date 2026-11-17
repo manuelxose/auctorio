@@ -92,7 +92,7 @@ Produccion: unit files systemd en `infra/systemd/` (api, studio, 8 workers).
 - `/v2/*`: studio multi-site + plataforma editorial:
   - `sites`, `projects`, `versions`, `prompts`, `users/roles` (existente)
   - `sources`, `source-items`, `story-clusters` (ingesta y wire)
-  - `publications`, `publication-jobs`, `calendar` (programacion durable)
+  - `publications`, `calendar` (programacion durable)
   - `projects/:id/social`, `social/:id` (derivados sociales)
   - `publishing-accounts` (X / Instagram)
   - `automation` (+ pause/resume/status), `campaigns`, `briefs`, `audit`, `overview`
@@ -103,7 +103,7 @@ Produccion: unit files systemd en `infra/systemd/` (api, studio, 8 workers).
 
 - `PUBLISH_DRY_RUN=true` por defecto fuera de produccion. Aplica a websites, X e Instagram.
 - En dry-run: pipeline completo, payload validado, IDs externos simulados (`dryrun-*`),
-  trazabilidad normal en `publications`/`publication_attempts`/`publication_jobs`. Nunca crea contenido publico real.
+  trazabilidad normal en `publications`/`publication_attempts`. Nunca crea contenido publico real.
 - Sin credenciales resueltas en produccion, los publishers fallan con `publishing_missing_credentials`.
 
 ## Fiabilidad

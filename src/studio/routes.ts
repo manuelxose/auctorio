@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
-import type { ProjectGoal, ProjectStatus, PublicationStatus, SiteType } from "@prisma/client";
+import type { ProjectGoal, ProjectStatus, SiteType } from "@prisma/client";
 import { Queue } from "bullmq";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
@@ -18,11 +18,9 @@ import {
   createSite,
   getLatestVersion,
   getProjectById,
-  getPublicationJobById,
   getSiteById,
   listMediaImages,
   listProjects,
-  listPublicationJobs,
   listSites,
   updateProject,
   updateProjectStatus,
@@ -92,7 +90,6 @@ import type {
   CreateStudioPromptVersionInput,
   CreateStudioRoleInput,
   PublicationPayload,
-  PublicationTargetStatus,
   UpdateStudioIdentityProviderInput,
   UpdateProjectInput,
   UpdateStudioPromptVersionInput,
@@ -174,14 +171,6 @@ const PROJECT_STATUSES: ProjectStatus[] = [
   "publish_failed",
 ];
 const CONTENT_STATUSES = ["queued", "processing", "done", "failed", "retryable", "canceled"] as const;
-const PUBLICATION_STATUSES: PublicationStatus[] = [
-  "queued",
-  "processing",
-  "draft_synced",
-  "published",
-  "failed",
-  "canceled",
-];
 const STUDIO_USER_STATUSES = ["invited", "active", "suspended"] as const;
 const STUDIO_PROMPT_SURFACES = [
   "text_seo",
@@ -235,10 +224,6 @@ function getAuthErrorStatus(message: string): number {
   }
 
   return 500;
-}
-
-function parsePublicationTargetStatus(value: unknown): PublicationTargetStatus | null {
-  return value === "draft" || value === "publish" ? value : null;
 }
 
 async function handleReadyCheck() {
@@ -1786,90 +1771,6 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       const message = error instanceof Error ? error.message : String(error);
       return badRequest(reply, message);
     }
-  });
-
-  fastify.get("/v2/publication-jobs", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
-    if (!context) {
-      return;
-    }
-
-    const query = request.query as { page?: string; pageSize?: string; status?: string };
-    const page = parsePage(query.page, 1);
-    const pageSize = parsePageSize(query.pageSize, 20);
-    if (query.status && !isOneOf(query.status, PUBLICATION_STATUSES)) {
-      return badRequest(reply, `status must be one of: ${PUBLICATION_STATUSES.join(", ")}`);
-    }
-
-    const publications = await listPublicationJobs(
-      context.tenantId,
-      page,
-      pageSize,
-      query.status as PublicationStatus | undefined,
-    );
-
-    const items = await Promise.all(
-      publications.items.map(async (publication) => ({
-        id: publication.id,
-        status: publication.status,
-        action: publication.action,
-        targetStatus: parsePublicationTargetStatus(
-          publication.requestPayload && typeof publication.requestPayload === "object"
-            ? (publication.requestPayload as Record<string, unknown>).targetStatus
-            : null,
-        ),
-        externalId: publication.externalId,
-        externalUrl: publication.externalUrl,
-        error: publication.error,
-        createdAt: publication.createdAt,
-        updatedAt: publication.updatedAt,
-        publishedAt: publication.publishedAt,
-        site: {
-          id: publication.site.id,
-          key: publication.site.key,
-          name: publication.site.name,
-          type: publication.site.type,
-        },
-        project: {
-          id: publication.project.id,
-          title: publication.project.title,
-          status: publication.project.status,
-        },
-        version: {
-          id: publication.version.id,
-          versionNumber: publication.version.versionNumber,
-          status: publication.version.status,
-        },
-        assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath),
-      })),
-    );
-
-    return reply.send({
-      ...publications,
-      items,
-    });
-  });
-
-  fastify.get("/v2/publication-jobs/:id", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
-    if (!context) {
-      return;
-    }
-
-    const publicationId = (request.params as { id: string }).id;
-    if (!isUuid(publicationId)) {
-      return badRequest(reply, "invalid publication id");
-    }
-
-    const publication = await getPublicationJobById(context.tenantId, publicationId);
-    if (!publication) {
-      return notFound(reply, "publication not found");
-    }
-
-    return reply.send({
-      ...publication,
-      assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath),
-    });
   });
 
   fastify.get("/v2/workspace/identity-provider", async (request, reply) => {

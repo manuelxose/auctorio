@@ -74,7 +74,6 @@ async function createFixture(): Promise<Fixture> {
 }
 
 async function cleanupFixture(tenantId: string) {
-  await prisma.publicationJob.deleteMany({ where: { tenantId } });
   await prisma.contentDerivative.deleteMany({ where: { tenantId } });
   await prisma.contentVersion.deleteMany({ where: { tenantId } });
   await prisma.contentProject.deleteMany({ where: { tenantId } });

@@ -142,7 +142,8 @@ export async function processPublishingJob(data: Pick<PublishingJobData, "attemp
 
 /**
  * shortcut: messages enqueued before M3b carry a PublicationJob id. They restart as a
- * fresh attempt on their linked publication; jobs without one are dropped. Delete in M6.
+ * fresh attempt on their linked publication; jobs without one are dropped. Delete once
+ * production has drained the publishing queue after the M3b–M6 deploy.
  */
 async function translateLegacyMessage(publicationJobId: string): Promise<void> {
   const publication = await prisma.publication.findFirst({ where: { publicationJobId } });

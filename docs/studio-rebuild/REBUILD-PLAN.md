@@ -16,8 +16,8 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho (e3d8b43) |
 | M3b · Publicar sin `PublicationJob` | `feat/m3b-publish-without-publication-job` | Hecho (f4d68a6, d5cefe3, 942134a, 30a4ad7); entrega real verificada en M4 |
 | M4 · Plantilla tipo guía + JSON-LD | `feat/m4-guide-template` | Hecho; borrador real entregado en guiaprogramaciontv.com |
-| M5 · Nueva arquitectura de información | `feat/m5-information-architecture` | Hecho (sin commit) |
-| M6 · Limpieza final | — | Pendiente |
+| M5 · Nueva arquitectura de información | `feat/m5-information-architecture` | Hecho (f0a89d3) |
+| M6 · Limpieza final | `feat/m6-final-cleanup` | Hecho; migración sin desplegar |
 
 Cada hito va en su propia rama, apilada sobre la anterior. Nada está publicado.
 
@@ -119,6 +119,13 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 ### M6 · Limpieza final
 - Migración que borra `PublicationJob` y `PublicationStatus`. Es la única destructiva: solo con backup y tras confirmar 0 escrituras desde M3b.
 - Se borran rutas y componentes muertos tras M5 y `grant-studio-admin.tmp.ts`.
+- **Hecho (2026-11-17):**
+  - Migración `20261117180000_drop_publication_jobs`. Antes de borrar, conserva los ids remotos: los copia a la `Publication` enlazada que no los tenga y, para entregas antiguas sin enlace, crea una `Publication` web (`published`/`ready`) con la última por proyecto y sitio. Así `getLatestPublishedExternalId` sigue actualizando el post en vez de duplicarlo, ya sin leer la tabla. Luego borra `publication_jobs`, `PublicationStatus` y `PublicationAction`.
+  - Fuera `GET /v2/publication-jobs` y `/:id` (sin uso en la UI) y sus lecturas en `repository.ts`. El vocabulario que lee la UI (`queued`, `draft_synced`…) pasa a tipos TS en `types.ts` (`PublicationExecutionStatus`, `PublicationAction`).
+  - Borrado `scripts/grant-studio-admin.tmp.ts`. No quedan componentes sin referencia; las rutas antiguas ya son redirecciones.
+  - **Se queda** el traductor de mensajes antiguos del worker (`translateLegacyMessage`): no lee la tabla, solo `publications.publication_job_id`, y producción aún no tiene M3b, así que habrá mensajes con id de `PublicationJob` en cola al desplegar. Se borra cuando esa cola se haya drenado. La columna `publication_job_id` también se queda (marca entregas antiguas en `isWebsiteDelivery`).
+  - **Tests:** `worker-publishing` 7/7, `studio-routes` 15/15, `production-pipeline` 12/12, `editorial-engine` 24/24; `tsc` limpio. Migración aplicada en local.
+  - **Para desplegar:** backup de la base antes; el backfill cubre los ids remotos, pero el resto de columnas de `publication_jobs` (payloads, errores) se pierde.
 
 ### Fuera de alcance
 - Reescritura automática de artículos antiguos ("Mejoras" en la referencia): idea futura.

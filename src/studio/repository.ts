@@ -7,8 +7,6 @@ import type {
   ContentText,
   ContentVersion,
   DerivativeType,
-  PublicationAction,
-  PublicationStatus,
   Site,
   VersionStatus,
 } from "@prisma/client";
@@ -25,7 +23,9 @@ import type {
   GeneratedDerivative,
   ListProjectsInput,
   PaginatedResult,
+  PublicationAction,
   PublicationExecutionState,
+  PublicationExecutionStatus,
   PublicationTargetStatus,
   StudioMediaItem,
   StudioProjectSummary,
@@ -630,66 +630,6 @@ export async function approveVersion(
   return updateProjectStatus(tenantId, projectId, "approved");
 }
 
-// Legacy PublicationJob reads: only the read-only /v2/publication-jobs history uses them until M6.
-export async function getPublicationJobById(tenantId: string | null | undefined, publicationJobId: string) {
-  return prisma.publicationJob.findFirst({
-    where: {
-      id: publicationJobId,
-      ...(tenantId ? { tenantId } : {}),
-    },
-    include: {
-      site: true,
-      project: true,
-      version: {
-        include: {
-          contentImage: true,
-          contentText: true,
-          derivatives: true,
-        },
-      },
-    },
-  });
-}
-
-export async function listPublicationJobs(
-  tenantId: string,
-  page: number,
-  pageSize: number,
-  status?: PublicationStatus,
-) {
-  const skip = (page - 1) * pageSize;
-  const where: Prisma.PublicationJobWhereInput = {
-    tenantId,
-    ...(status ? { status } : {}),
-  };
-
-  const [total, items] = await prisma.$transaction([
-    prisma.publicationJob.count({ where }),
-    prisma.publicationJob.findMany({
-      where,
-      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-      skip,
-      take: pageSize,
-      include: {
-        site: true,
-        project: true,
-        version: {
-          include: {
-            contentImage: true,
-          },
-        },
-      },
-    }),
-  ]);
-
-  return {
-    items,
-    page,
-    pageSize,
-    total,
-  };
-}
-
 export async function markProjectPublished(tenantId: string, projectId: string, versionId: string, status: ContentProject["status"]) {
   await prisma.contentVersion.update({
     where: { id: versionId },
@@ -752,23 +692,7 @@ export async function getLatestPublishedExternalId(tenantId: string, siteId: str
     where: { tenantId, siteId, projectId, channel: "website", status: { in: ["published", "ready"] }, externalId: { not: null }, NOT: { externalId: { startsWith: "dryrun-" } } },
     orderBy: { updatedAt: "desc" },
   });
-  if (publication?.externalId) {
-    return publication.externalId;
-  }
-  // shortcut: read-only fallback for posts delivered before M3b; drop with the table in M6.
-  const record = await prisma.publicationJob.findFirst({
-    where: {
-      tenantId,
-      siteId,
-      projectId,
-      status: { in: ["published", "draft_synced"] },
-      externalId: { not: null },
-      NOT: { externalId: { startsWith: "dryrun-" } },
-    },
-    orderBy: { createdAt: "desc" },
-  });
-
-  return record?.externalId ?? null;
+  return publication?.externalId ?? null;
 }
 
 export async function getContentTextById(tenantId: string, contentTextId: string): Promise<ContentText | null> {
@@ -1005,7 +929,7 @@ export function isWebsiteDelivery(publication: Pick<WebsiteDeliveryRecord, "chan
 }
 
 // The project views keep the old execution vocabulary so the Studio UI reads them unchanged.
-const EXECUTION_STATUS: Record<WebsiteDeliveryRecord["status"], PublicationStatus> = {
+const EXECUTION_STATUS: Record<WebsiteDeliveryRecord["status"], PublicationExecutionStatus> = {
   draft: "queued",
   scheduled: "queued",
   queued: "queued",

@@ -39,7 +39,7 @@ async function fixture() {
 }
 
 async function cleanup(tenantId: string) {
-  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "publicationJob", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
+  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
     await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where: { tenantId } });
   }
   await prisma.tenant.deleteMany({ where: { id: tenantId } });

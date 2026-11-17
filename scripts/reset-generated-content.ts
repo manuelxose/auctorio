@@ -38,7 +38,6 @@ const TRUNCATE_TABLES = [
   "jobs",
   "publications",
   "publication_attempts",
-  "publication_jobs",
   "search_targets",
   "site_entities",
   "site_indexed_pages",

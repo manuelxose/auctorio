@@ -105,21 +105,6 @@ enum DerivativeType {
   social_thread
 }
 
-enum PublicationStatus {
-  queued
-  processing
-  draft_synced
-  published
-  failed
-  canceled
-}
-
-enum PublicationAction {
-  publish
-  update
-  unpublish
-}
-
 enum AssetKind {
   original
   hero
@@ -338,7 +323,6 @@ model Tenant {
   contentProjects                ContentProject[]
   contentVersions                ContentVersion[]
   contentDerivatives             ContentDerivative[]
-  publicationJobs                PublicationJob[]
   assetVariants                  AssetVariant[]
   studioIdentityProvider         StudioIdentityProvider?
   studioAccountsLastWorkspace    StudioAccount[]                  @relation("StudioAccountLastWorkspace")
@@ -582,7 +566,6 @@ model Site {
 
   tenant                 Tenant                   @relation(fields: [tenantId], references: [id])
   projects               ContentProject[]
-  publicationJobs        PublicationJob[]
   assetVariants          AssetVariant[]
   promptPresets          StudioPromptPreset[]
   promptAssignments      StudioPromptAssignment[]
@@ -661,7 +644,6 @@ model ContentProject {
   articleGenerations ArticleGeneration[]
   versions           ContentVersion[]
   derivatives        ContentDerivative[]
-  publicationJobs    PublicationJob[]
   socialContents     SocialContent[]
   publications       Publication[]
   editorialPlanItems EditorialPlanItem[]
@@ -756,7 +738,6 @@ model ContentVersion {
   contentText          ContentText?        @relation(fields: [contentTextId], references: [id], onDelete: SetNull)
   contentImage         ContentImage?       @relation(fields: [contentImageId], references: [id], onDelete: SetNull)
   derivatives          ContentDerivative[]
-  publicationJobs      PublicationJob[]
   publications         Publication[]
   socialContents       SocialContent[]
   articleGenerations   ArticleGeneration[]
@@ -790,40 +771,6 @@ model ContentDerivative {
 
   @@index([tenantId, projectId, versionId])
   @@map("content_derivatives")
-}
-
-model PublicationJob {
-  id                      String            @id @default(uuid()) @db.Uuid
-  tenantId                String            @map("tenant_id") @db.Uuid
-  siteId                  String            @map("site_id") @db.Uuid
-  projectId               String            @map("project_id") @db.Uuid
-  versionId               String            @map("version_id") @db.Uuid
-  status                  PublicationStatus @default(queued)
-  action                  PublicationAction @default(publish)
-  idempotencyKey          String?           @map("idempotency_key")
-  externalId              String?           @map("external_id")
-  externalUrl             String?           @map("external_url")
-  requestPayload          Json?             @map("request_payload")
-  responsePayload         Json?             @map("response_payload")
-  error                   String?           @db.Text
-  requestedByStudioUserId String?           @map("requested_by_studio_user_id") @db.Uuid
-  publishedAt             DateTime?         @map("published_at")
-  createdAt               DateTime          @default(now()) @map("created_at")
-  updatedAt               DateTime          @updatedAt @map("updated_at")
-
-  tenant                Tenant         @relation(fields: [tenantId], references: [id])
-  site                  Site           @relation(fields: [siteId], references: [id])
-  project               ContentProject @relation(fields: [projectId], references: [id])
-  version               ContentVersion @relation(fields: [versionId], references: [id])
-  requestedByStudioUser StudioUser?    @relation("StudioUserRequestedPublications", fields: [requestedByStudioUserId], references: [id], onDelete: SetNull)
-
-  @@index([tenantId, siteId, status])
-  @@index([tenantId, projectId, versionId])
-  @@index([tenantId, requestedByStudioUserId])
-  // Uniqueness on (tenantId, idempotencyKey) is a partial unique index
-  // created manually in migration 20260824000000_social_connections_and_web_discovery
-  // (WHERE idempotency_key IS NOT NULL) — Prisma cannot model partial indexes.
-  @@map("publication_jobs")
 }
 
 model AssetVariant {
@@ -926,7 +873,6 @@ model StudioUser {
   createdInvitations       StudioInvitation[]       @relation("StudioInvitationCreator")
   launchTickets            StudioLaunchTicket[]
   approvedVersions         ContentVersion[]         @relation("StudioUserApprovedVersions")
-  requestedPublications    PublicationJob[]         @relation("StudioUserRequestedPublications")
   createdPromptPresets     StudioPromptPreset[]     @relation("StudioPromptPresetCreatedBy")
   updatedPromptPresets     StudioPromptPreset[]     @relation("StudioPromptPresetUpdatedBy")
   createdPromptVersions    StudioPromptVersion[]    @relation("StudioPromptVersionCreatedBy")

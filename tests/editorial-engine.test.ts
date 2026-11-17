@@ -141,7 +141,6 @@ async function cleanupEngineFixture(fixture: EngineFixture): Promise<void> {
   await prisma.articleGeneration.deleteMany({ where: { tenantId } });
   await prisma.publicationAttempt.deleteMany({ where: { tenantId } });
   await prisma.publication.deleteMany({ where: { tenantId } });
-  await prisma.publicationJob.deleteMany({ where: { tenantId } });
   await prisma.contentDerivative.deleteMany({ where: { tenantId } });
   await prisma.socialContent.deleteMany({ where: { tenantId } });
   await prisma.contentVersion.deleteMany({ where: { tenantId } });

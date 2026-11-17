@@ -5,8 +5,6 @@ import type {
   DerivativeType,
   ProjectGoal,
   ProjectStatus,
-  PublicationAction,
-  PublicationJob,
   Site,
   SiteType,
   StudioIdentityProvider,
@@ -410,7 +408,7 @@ export type StudioSiteSummary = Pick<
   projectCount: number;
   publishedProjectCount: number;
   latestPublicationJob: Pick<
-    PublicationJob,
+    PublicationExecutionState,
     "id" | "status" | "externalUrl" | "createdAt" | "publishedAt" | "error"
   > | null;
 };
@@ -424,18 +422,20 @@ export type ListProjectsInput = PaginationQuery & {
   origin?: "manual" | "auto";
 };
 
-export type PublicationExecutionState = Pick<
-  PublicationJob,
-  | "id"
-  | "status"
-  | "action"
-  | "externalId"
-  | "externalUrl"
-  | "error"
-  | "createdAt"
-  | "updatedAt"
-  | "publishedAt"
-> & {
+export type PublicationAction = "publish" | "update" | "unpublish";
+// The old PublicationJob vocabulary the Studio UI still reads; mapped from Publication.status.
+export type PublicationExecutionStatus = "queued" | "processing" | "draft_synced" | "published" | "failed" | "canceled";
+
+export type PublicationExecutionState = {
+  id: string;
+  status: PublicationExecutionStatus;
+  action: PublicationAction;
+  externalId: string | null;
+  externalUrl: string | null;
+  error: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  publishedAt: Date | null;
   targetStatus: PublicationTargetStatus | null;
 };
 
