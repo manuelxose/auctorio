@@ -19,7 +19,7 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M5 · Nueva arquitectura de información | `feat/m5-information-architecture` | Hecho (f0a89d3) |
 | M6 · Limpieza final | `feat/m6-final-cleanup` | Hecho; migración sin desplegar |
 
-Cada hito va en su propia rama, apilada sobre la anterior. Nada está publicado.
+Cada hito va en su propia rama, apilada sobre la anterior. M1–M6 van juntos en un PR a `main`; nada está desplegado.
 
 ## Ciclo de vida
 
@@ -114,7 +114,7 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
   - **Results:** cabecera "Results". El asistente de conexión ya no lista Webflow, Shopify, Wix, Ghost ni Framer (no tienen publisher).
   - La sección "Advanced" de Sources pasa a "Technical settings" para no chocar con el área Advanced.
   - **Tests:** `overview-model.spec` + `studio-nav.spec` 12/12; e2e `home-article-m5` 5/5, `calendar-m5` 3/3, `studio-shell-nav` 2/2, `calendar-publications` 1/1, `sources-tabs` 1/1, `studio-role-separation` 4/4, `site-intelligence-coverage` 1/1. Capturas en `evidence/m5/`.
-  - **Abierto:** el bundle inicial supera en ~4 kB su presupuesto de 500 kB (aviso de build).
+  - **Bundle inicial (cerrado en M6):** pasaba de 504 kB a 495,9 kB al cargar con `@defer` los iconos del host de toasts, que metían el mapa de iconos (~13 kB) en el bundle inicial.
 
 ### M6 · Limpieza final
 - Migración que borra `PublicationJob` y `PublicationStatus`. Es la única destructiva: solo con backup y tras confirmar 0 escrituras desde M3b.
@@ -124,7 +124,7 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
   - Fuera `GET /v2/publication-jobs` y `/:id` (sin uso en la UI) y sus lecturas en `repository.ts`. El vocabulario que lee la UI (`queued`, `draft_synced`…) pasa a tipos TS en `types.ts` (`PublicationExecutionStatus`, `PublicationAction`).
   - Borrado `scripts/grant-studio-admin.tmp.ts`. No quedan componentes sin referencia; las rutas antiguas ya son redirecciones.
   - **Se queda** el traductor de mensajes antiguos del worker (`translateLegacyMessage`): no lee la tabla, solo `publications.publication_job_id`, y producción aún no tiene M3b, así que habrá mensajes con id de `PublicationJob` en cola al desplegar. Se borra cuando esa cola se haya drenado. La columna `publication_job_id` también se queda (marca entregas antiguas en `isWebsiteDelivery`).
-  - **Tests:** `worker-publishing` 7/7, `studio-routes` 15/15, `production-pipeline` 12/12, `editorial-engine` 24/24; `tsc` limpio. Migración aplicada en local.
+  - **Tests:** `worker-publishing` 7/7, `studio-routes` 15/15, `production-pipeline` 12/12, `editorial-engine` 24/24 (el escenario 2 falló una vez con los workers locales corriendo y pasó al repetir); specs de Studio 34/34; `tsc` limpio con el cliente Prisma regenerado. Migración aplicada en local.
   - **Para desplegar:** backup de la base antes; el backfill cubre los ids remotos, pero el resto de columnas de `publication_jobs` (payloads, errores) se pierde.
 
 ### Fuera de alcance

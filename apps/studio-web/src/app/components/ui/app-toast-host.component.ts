@@ -11,7 +11,8 @@ import { ToastService, type ToastItem } from '../../services/toast.service';
     <div class="au-toasts" aria-live="polite" aria-atomic="false">
       @for (toast of toasts; track toast.id) {
         <div class="au-toast" [class]="'au-toast--' + toast.tone" role="status">
-          <app-icon [name]="iconFor(toast)"></app-icon>
+          <!-- Deferred so the icon map stays out of the initial bundle; toasts only show after an action. -->
+          @defer (on immediate) { <app-icon [name]="iconFor(toast)"></app-icon> }
           <span class="au-toast__text">{{ toast.message }}</span>
           <button
             class="au-toast__dismiss"
@@ -19,7 +20,7 @@ import { ToastService, type ToastItem } from '../../services/toast.service';
             [attr.aria-label]="'Dismiss notification: ' + toast.message"
             (click)="dismiss(toast.id)"
           >
-            <app-icon name="close"></app-icon>
+            @defer (on immediate) { <app-icon name="close"></app-icon> }
           </button>
         </div>
       }
