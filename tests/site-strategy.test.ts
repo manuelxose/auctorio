@@ -252,7 +252,7 @@ test("strategy routes: save versions, cluster include/exclude, coverage and tena
   assert.equal(coverageBody.pages.length, 1);
   assert.ok(coverageBody.coverage.find((entry) => entry.subtopic === "tarta")!.pagesCovering >= 1);
   assert.ok(coverageBody.gaps.includes("pan"));
-  assert.match(coverageBody.proposalsUrl, /\/studio\/editorial-plan\?siteId=.*&pillar=Recetas/);
+  assert.match(coverageBody.proposalsUrl, /\/studio\/plan\?siteId=.*&pillar=Recetas/);
 
   const put = await server.inject({ method: "PUT", url: `/v2/sites/${siteId}/strategy`, payload: { config: { primaryAudience: "x".repeat(900) }, note: "audience" } });
   assert.equal(put.statusCode, 200);
