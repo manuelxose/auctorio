@@ -5,7 +5,7 @@ import { GUIDE_TARGETS, getStructureSpec, renderStructureSpec, resolveArticleTar
 import { withTableOfContents } from "../src/studio/editorial-engine/seo-package";
 import { buildPublicationJsonLd, faqItemsFromHtml } from "../src/studio/editorial-engine/json-ld";
 import { sanitizeEditorialHtml } from "../src/studio/html-sanitizer";
-import { buildGuiaTvPayload } from "../src/studio/publishers";
+import { buildGuiaTvPayload, publicationJsonLd } from "../src/studio/publishers";
 import type { PublisherContext } from "../src/studio/types";
 
 // ────────────────────────────────────────────────────────────── Reference guide fixture
@@ -116,15 +116,28 @@ test("JSON-LD: Article, BreadcrumbList and FAQPage from the guide body", () => {
   assert.equal((blocks[2].mainEntity as unknown[]).length, 5);
 });
 
-test("GuiaTV payload: carries JSON-LD and body FAQ items; a site can switch JSON-LD off", () => {
+test("GuiaTV payload: no TOC, FAQ moved from the body to faqItems (GuíaTV renders both itself)", () => {
   const context = {
     site: { name: "GuíaTV", baseUrl: "https://guiaprogramaciontv.com", locale: "es-ES" },
     project: { title: "Dónde ver fútbol", primaryLanguage: "es", metadata: { slug: "donde-ver-futbol" } },
     version: { title: "Dónde ver fútbol", excerpt: "x", bodyHtml: guideHtml(), seoTitle: "t", seoDescription: "d", publishedAt: null, updatedAt: new Date("2026-11-17") },
   } as unknown as PublisherContext;
   const payload = buildGuiaTvPayload(context, null, "draft");
-  assert.deepEqual((payload.jsonLd as Array<Record<string, unknown>>).map((block) => block["@type"]), ["Article", "BreadcrumbList", "FAQPage"]);
+  const content = String(payload.content);
   assert.equal((payload.faqItems as unknown[]).length, 5);
+  assert.ok(!content.includes("Preguntas frecuentes") && !content.includes("¿Pregunta 1?"));
+  assert.ok(!content.includes('data-block="toc"'));
+  assert.ok(content.includes("<h2>Fuentes</h2>"), "sections after the FAQ stay");
+  assert.equal(payload.jsonLd, undefined);
+});
+
+test("generic REST: JSON-LD only when the site keeps it on", () => {
+  const context = {
+    site: { name: "Blog", baseUrl: "https://blog.example.com", locale: "es" },
+    project: { title: "t", primaryLanguage: "es", metadata: {} },
+    version: { title: "t", excerpt: "x", bodyHtml: guideHtml(), seoTitle: "t", seoDescription: "d", publishedAt: null, updatedAt: new Date("2026-11-17") },
+  } as unknown as PublisherContext;
+  assert.deepEqual(publicationJsonLd(context, null)?.map((block) => block["@type"]), ["Article", "BreadcrumbList", "FAQPage"]);
   (context.project.metadata as Record<string, unknown>).articleTargets = { sections: { jsonLd: false } };
-  assert.equal(buildGuiaTvPayload(context, null, "draft").jsonLd, undefined);
+  assert.equal(publicationJsonLd(context, null), undefined);
 });

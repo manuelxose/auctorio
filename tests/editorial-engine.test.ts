@@ -468,7 +468,7 @@ test("SEO package: deterministic slug, no invented volume, stuffing detection", 
   assert.equal(seo.keywordDensity.stuffingRisk, true, "heavy repetition must be flagged as stuffing");
 });
 
-function qaForLedger(statement: string, bodyHtml: string) {
+function qaForLedger(statement: string, bodyHtml: string, articleType: "standard_news" | "guide" = "standard_news") {
   const licenses: FactLicense[] = [
     {
       factKey: "headline",
@@ -495,7 +495,7 @@ function qaForLedger(statement: string, bodyHtml: string) {
     targetSite: { id: null, name: null, type: null, locale: null },
     audience: "r",
     searchIntent: "informational" as const,
-    articleType: "standard_news" as const,
+    articleType,
     primaryKeyword: "Studio",
     secondaryKeywords: [],
     entities: [],
@@ -543,6 +543,14 @@ test("editorial QA: unsupported years hard-fail publication", () => {
   const report = qaForLedger("Studio announces movie", "<p>Studio announces movie. It all started in 1931.</p>");
   assert.equal(report.passed, false, "unsupported year must hard-fail");
   assert.equal(report.criticalUnsupportedClaims.length, 1);
+});
+
+test("editorial QA: durable content may name the current year; news and invented dates may not", () => {
+  const year = String(new Date().getFullYear());
+  const body = `<p>Studio announces movie: la guía de ${year}.</p>`;
+  assert.deepEqual(qaForLedger("Studio announces movie", body, "guide").criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger("Studio announces movie", body).criticalUnsupportedClaims.length, 1);
+  assert.equal(qaForLedger("Studio announces movie", `<p>Actualizado el 16 de noviembre de ${year}.</p>`, "guide").criticalUnsupportedClaims.length, 1);
 });
 
 test("editorial QA: a date anywhere in a ledger sentence is supported, even after another number", () => {

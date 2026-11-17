@@ -85,8 +85,9 @@ export async function processPublishingJob(data: Pick<PublishingJobData, "attemp
 
   const { unpublish, targetStatus } = readRequest(publication);
   // The row's own remote id first (a failed attempt may have created the post), then any earlier delivery of the project.
-  const externalId =
-    publication.externalId ?? (await dependencies.getLatestPublishedExternalId(publication.tenantId, publication.siteId, publication.projectId));
+  // A dry-run id was never created remotely: updating it would hit a post that does not exist.
+  const ownId = publication.externalId?.startsWith("dryrun-") ? null : publication.externalId;
+  const externalId = ownId ?? (await dependencies.getLatestPublishedExternalId(publication.tenantId, publication.siteId, publication.projectId));
 
   const publisher = dependencies.getPublisher(site);
   const context = {

@@ -12,7 +12,8 @@ import type {
 import { buildAssetPublicUrl } from "./orchestration";
 import { isProductionEnv } from "../shared/utils/env";
 import { sanitizeEditorialHtml } from "./html-sanitizer";
-import { buildPublicationJsonLd, faqItemsFromHtml } from "./editorial-engine/json-ld";
+import { load } from "cheerio";
+import { buildPublicationJsonLd, faqItemsFromHtml, splitFaqSection } from "./editorial-engine/json-ld";
 import { loadActiveInstallationForSite } from "./connectors/installation";
 import { validateScrapeUrl } from "../infrastructure/scraping";
 
@@ -156,13 +157,14 @@ export function buildGuiaTvPayload(
   const metadata = getMetadata(context.project);
   const categories = getStringArray(metadata.categories);
   const keywords = getStringArray(metadata.keywords);
+  const body = guiaTvBody(context);
 
   return {
     title: context.version.title || context.project.title,
     slug: String(metadata.slug || "").trim() || undefined,
     status,
     excerpt: sanitizeEditorialHtml(context.version.excerpt || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-    content: sanitizeEditorialHtml(context.version.bodyHtml || ""),
+    content: sanitizeEditorialHtml(body.html),
     categories,
     contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
     featured: Boolean(metadata.featured),
@@ -170,8 +172,7 @@ export function buildGuiaTvPayload(
     targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
     relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
     relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
-    faqItems: articleFaqItems(context),
-    jsonLd: publicationJsonLd(context, assetUrl),
+    faqItems: body.faqItems,
     evergreen: metadata.evergreen !== false,
     featuredImage: assetUrl ?? undefined,
     coverImage: assetUrl ?? undefined,
@@ -292,6 +293,18 @@ function getFaqItems(project: ContentProject): Array<{ question: string; answer:
       question: String(item.question),
       answer: String(item.answer),
     }));
+}
+
+/**
+ * GuíaTV builds the contents list from the headings and renders faqItems as its own FAQ block (with
+ * FAQPage JSON-LD) next to its Article schema: the body ships without our TOC and with its FAQ moved to faqItems.
+ */
+function guiaTvBody(context: PublisherContext): { html: string; faqItems: Array<{ question: string; answer: string }> } {
+  const $ = load(context.version.bodyHtml || "", null, false);
+  $('nav[data-block="toc"]').remove();
+  const stored = getFaqItems(context.project);
+  if (stored.length) return { html: $.html(), faqItems: stored };
+  return splitFaqSection($.html());
 }
 
 /** Editor-set FAQ items win; otherwise the questions under the body's FAQ H2 (guides). */

@@ -76,9 +76,17 @@ const FAQ_HEADING = /preguntas frecuentes|faq|frequently asked/i;
 
 /** Questions (H3) and answers (text until the next H3/H2) under the article's FAQ H2. */
 export function faqItemsFromHtml(html: string): FaqItem[] {
+  return splitFaqSection(html).faqItems;
+}
+
+/**
+ * The FAQ H2 block moved out of the body, for destinations that render FAQ items themselves (GuíaTV).
+ * The body keeps its FAQ when no question/answer pair could be read from it.
+ */
+export function splitFaqSection(html: string): { html: string; faqItems: FaqItem[] } {
   const $ = load(html, null, false);
   const faq = $("h2").filter((_index, el) => FAQ_HEADING.test($(el).text())).first();
-  if (!faq.length) return [];
+  if (!faq.length) return { html, faqItems: [] };
   const items: FaqItem[] = [];
   let current: FaqItem | null = null;
   for (let node = faq.next(); node.length && !node.is("h2"); node = node.next()) {
@@ -89,7 +97,12 @@ export function faqItemsFromHtml(html: string): FaqItem[] {
       current.answer = `${current.answer} ${node.text()}`.replace(/\s+/g, " ").trim();
     }
   }
-  return items.filter((item) => item.question && item.answer).slice(0, 12);
+  const faqItems = items.filter((item) => item.question && item.answer).slice(0, 12);
+  if (!faqItems.length) return { html, faqItems };
+  const block = [faq];
+  for (let node = faq.next(); node.length && !node.is("h2"); node = node.next()) block.push(node);
+  block.forEach((node) => node.remove());
+  return { html: $.html(), faqItems };
 }
 
 /** Everything a destination needs: Article, BreadcrumbList and, when the body has a FAQ, FAQPage. */

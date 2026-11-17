@@ -14,8 +14,8 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M1 · Autopilot/Asistido desde el plan, publicación en su hueco | `feat/m1-plan-driven-autopilot` | Hecho (390b82a) |
 | M2 · Un solo sistema de generación | `feat/m2-single-generation` | Hecho (a47c29e) |
 | M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho (e3d8b43) |
-| M3b · Publicar sin `PublicationJob` | `feat/m3b-publish-without-publication-job` | Hecho (f4d68a6, d5cefe3, 942134a, 30a4ad7); falta la publicación real en guiaprogramaciontv.com |
-| M4 · Plantilla tipo guía + JSON-LD | `feat/m4-guide-template` | Hecho; faltan el paso 4 del e2e y la publicación real en guiaprogramaciontv.com |
+| M3b · Publicar sin `PublicationJob` | `feat/m3b-publish-without-publication-job` | Hecho (f4d68a6, d5cefe3, 942134a, 30a4ad7); entrega real verificada en M4 |
+| M4 · Plantilla tipo guía + JSON-LD | `feat/m4-guide-template` | Hecho; borrador real entregado en guiaprogramaciontv.com |
 | M5 · Nueva arquitectura de información | — | Pendiente |
 | M6 · Limpieza final | — | Pendiente |
 
@@ -70,7 +70,11 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **Tests:** fixture de referencia pasa; sin tabla o sin FAQ falla; forma del JSON-LD; e2e `guiatv-seo-golden-path`.
 - **Hecho:** tipo `guide` (plan items con `contentType` guide/tutorial). `structure.ts` lleva la spec, `GUIDE_TARGETS` y `resolveArticleTargets(sitio, artículo)`; las secciones apagadas salen del prompt y del QA. Migración `20261117120000_site_article_targets`; `PUT /v2/sites/:id/planning-settings` acepta `articleTargets` (null lo borra). El override por artículo es `generation.articleTargets` del plan item. La etapa seo genera el índice (`withTableOfContents`) y el sanitizer permite `aside`, `nav` e `id` en H2/H3. `editorial-engine/quality-checklist.ts` añade los 10 checks como `qaReport.checklist`; cada re-run de QA v2 los recalcula desde los metadatos del proyecto (`articleTargets`, `internalLinkInventorySize`). El rail «Quality» del workspace los lista, y «¿Por qué este tema?» muestra el `rationale` que ahora se copia al proyecto. `editorial-engine/json-ld.ts` reúne los builders del feed y añade BreadcrumbList y la extracción de FAQ del cuerpo. El JSON-LD se construye al publicar, no se guarda en la publicación: `jsonLd` en el payload de GuíaTV y `meta._auctorio_json_ld` en generic_rest.
 - **Tests:** `tests/guide-template.test.ts` 8/8; los 11 ficheros relacionados siguen en verde. E2E `guiatv-seo-golden-path` pasos 1–3 en verde en local: generó una guía real con índice, caja de resumen, tabla y los 10 checks. El escritor no puso enlaces internos (0/7); el check lo marca bien. `related-cluster` ya no cuenta como plagio.
-- **Pendiente:** los interruptores por sitio no tienen UI todavía (irán en Ajustes · Artículos, M5). El paso 4 del e2e lee `latestPublicationJob`, que M3b ya no rellena.
+- **GuíaTV (visto en su repo):** su página de post monta el índice desde los H2/H3, pinta `faqItems` como bloque FAQ con su FAQPage y genera su propio Article, y descarta los campos desconocidos. Por eso su payload va sin nuestro índice y con la FAQ del cuerpo convertida en `faqItems`, sin `jsonLd`. El JSON-LD de `json-ld.ts` queda para generic_rest y el feed.
+- **Fechas en guías:** QA aceptaba solo los años del ledger y rechazaba guías por «2026» o una fecha de «actualizado el» inventada. En contenido no noticioso se admite el año actual; el prompt lo da y prohíbe fechas de actualización. Las noticias siguen igual.
+- **Entrega real (cierra M3b):** e2e `guiatv-seo-golden-path` 4/4 en local, pero el paso 4 pasa en dry-run (local publica en dry-run por defecto). Con solo el worker de publicación en vivo (`PUBLISH_DRY_RUN=false`, worker de automatización parado), GuíaTV creó el borrador `6afc4988ab6af65bec7d8c4c` (`/guias/realities-convivencia-tv-streaming-donde-ver`): contentType guide, 5 `faqItems`, sin índice duplicado y con la tarjeta CTA.
+- **Bug arreglado en esa entrega:** el worker reutilizaba el id `dryrun-…` de una entrega simulada y hacía `PUT /v2/blog/dryrun-…` (GuíaTV respondía 500). Ese id ya no cuenta como remoto, ni en la fila ni en `getLatestPublishedExternalId`; test en `worker-publishing` (6/6).
+- **Pendiente:** los interruptores por sitio no tienen UI todavía (irán en Ajustes · Artículos, M5). El borrador de prueba sigue en GuíaTV como borrador. Su portada apunta a `localhost:4301` porque salió del entorno local.
 
 ### M5 · Nueva arquitectura de información
 - **Navegación:** Inicio · Calendario · Artículos · Resultados · Ajustes. Avanzado agrupa Site intelligence, Competidores, Fuentes, Inbox, Media, Review queue y Trabajos.
@@ -106,7 +110,8 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **M2:** los presets de prompt llegan al escritor como instrucciones; sus variables de plantilla ya no se rellenan. `worker-text` sigue vivo para el caso de uso de topics de `src/domain`.
 - **M3b:** al desplegar, los mensajes de cola sin publicación enlazada se descartan (normalmente despublicaciones o borradores de «publicar ahora»). Una despublicación web que falla del todo ya activa el circuit breaker del sitio.
 - **Entorno local:** el e2e de Autopilot depende del feed externo; la base local se limpia conservando tenant, usuario QA, sitios y datos del crawl de guiaprogramaciontv.com.
-- **M4:** el campo `jsonLd` del payload de GuíaTV no está confirmado en su API. Si la API valida en modo estricto, rechazará el post: se comprueba con la publicación real.
+- **M4:** los plan items `guide` heredan los `recommendedWordCount*` del generador de planes (350–600 en la prueba) y mandan sobre las ~2.300 de la plantilla. Con tan poco espacio el escritor suprime la tabla y el resumen, y el check «Estructura» lo marca. Decidir si el generador debe proponer ~2.300 para guías.
+- **GuíaTV:** responde 500 (no 404) a un `PUT /v2/blog/:id` con id inválido.
 - **M4:** los plan items `guide` piden unas 2.300 palabras; los planes ya generados con `recommendedWordCount*` conservan su rango.
 - `npm run dev` aborta a veces al reiniciar: `taskkill` falla con un proceso hijo ya cerrado. Una segunda ejecución funciona.
 

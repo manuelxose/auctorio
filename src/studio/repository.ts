@@ -748,7 +748,8 @@ export async function getLatestVersion(projectId: string, tenantId: string) {
 
 export async function getLatestPublishedExternalId(tenantId: string, siteId: string, projectId: string) {
   const publication = await prisma.publication.findFirst({
-    where: { tenantId, siteId, projectId, channel: "website", status: { in: ["published", "ready"] }, externalId: { not: null } },
+    // Dry-run ids (publishers.ts buildDryRunExternalId) never exist at the destination.
+    where: { tenantId, siteId, projectId, channel: "website", status: { in: ["published", "ready"] }, externalId: { not: null }, NOT: { externalId: { startsWith: "dryrun-" } } },
     orderBy: { updatedAt: "desc" },
   });
   if (publication?.externalId) {
@@ -762,6 +763,7 @@ export async function getLatestPublishedExternalId(tenantId: string, siteId: str
       projectId,
       status: { in: ["published", "draft_synced"] },
       externalId: { not: null },
+      NOT: { externalId: { startsWith: "dryrun-" } },
     },
     orderBy: { createdAt: "desc" },
   });

@@ -8,6 +8,7 @@
 import type { FactLicense } from "./types";
 import { renderBriefForWriter } from "./brief-builder";
 import { renderStructureSpec, getStructureSpec } from "./structure";
+import { NEWS_TYPES } from "./editorial-qa";
 import { clampUntrustedContent, SOURCE_DATA_RULES, wrapUntrustedContent } from "../prompt-injection";
 import type { EditorialBrief, ParsedArticle, SiteValueBlock } from "./types";
 
@@ -104,6 +105,9 @@ export function buildWriterPrompt(input: WriterPromptInput): WriterPrompt {
     `Search intent: ${brief.searchIntent}. SEO decisions must follow this intent.`,
     `Primary keyword: «${brief.primaryKeyword}». Use it naturally in the H1/lead — never keyword-stuff.`,
     "Length guidance is a target, not a quota.",
+    ...(NEWS_TYPES.has(brief.articleType)
+      ? []
+      : [`Current year: ${brief.generatedAt.slice(0, 4)}. Never write a publication or "updated on" date — the destination adds it; any other date must come from the fact ledger.`]),
     "Use short readable paragraphs. Bold sparingly when useful. Use lists/tables only where genuinely useful.",
     "Internal links: only use URLs provided in the brief — never invent URLs.",
     "Conclusion and FAQ only where the structure template allows them.",

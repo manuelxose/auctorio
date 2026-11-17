@@ -155,7 +155,7 @@ export function sentenceSplit(value: string): string[] {
 
 // ────────────────────────────────────────────────────────────── QA
 
-const NEWS_TYPES = new Set([
+export const NEWS_TYPES = new Set([
   "breaking_news",
   "standard_news",
   "developing_story",
@@ -207,6 +207,8 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   const allowedYears = new Set(
     licenses.flatMap((license) => extractYears(license.statement)).concat(input.enrichmentDates.flatMap((date) => extractYears(date))),
   );
+  // Durable content (guides, explainers) may name the current year ("guía 2026"); news still needs it in the ledger.
+  if (!NEWS_TYPES.has(brief.articleType) && /^\d{4}/.test(brief.generatedAt)) allowedYears.add(brief.generatedAt.slice(0, 4));
   const allowedDates = new Set(
     [
       // Each date in a sentence: normalizing the whole sentence picks up unrelated numbers ("temporada 2") as the day.

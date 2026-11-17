@@ -180,3 +180,21 @@ test("processPublishingJob keeps a remote id from a failed attempt and reuses it
   );
   assert.deepEqual(publishedWith, [null, "remote-draft-9"]);
 });
+
+test("processPublishingJob never updates a dry-run id: a real delivery after a simulated one creates the post", async () => {
+  const calls: string[] = [];
+  const updated: string[] = [];
+  await processPublishingJob(
+    JOB,
+    dependencies(buildPublication({ externalId: "dryrun-f1ac075fcb4b50de", metadata: { targetStatus: "draft" } }), calls, {
+      publisher: {
+        updateDraft: async (_context, externalId) => {
+          updated.push(externalId);
+          return { externalId, responsePayload: {} };
+        },
+      },
+    }),
+  );
+  assert.deepEqual(updated, []);
+  assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:draft:remote-1", "clear-published"]);
+});
