@@ -21,7 +21,10 @@ export type StructureSection = {
     | "faq"
     | "sources"
     | "further_reading"
-    | "cta";
+    | "cta"
+    | "link_card"
+    | "promo"
+    | "key_takeaways";
   heading: string | null; // null → no heading (lead/body)
   instruction: string;
   required: boolean;
@@ -75,8 +78,13 @@ export type ArticleSections = {
   faq: boolean;
   sources: boolean;
   jsonLd: boolean;
+  /** "Recommended reads": the site's own posts. */
   furtherReading: boolean;
   cta: boolean;
+  /** Site card (name, domain, headline, «Visitar») right after the intro. */
+  linkCard: boolean;
+  /** Brand paragraph under its own H2 before the FAQ. */
+  promo: boolean;
 };
 
 export type ArticleTargets = {
@@ -86,6 +94,8 @@ export type ArticleTargets = {
   images: number;
   faqCount: number;
   sections: ArticleSections;
+  /** From the site's writing settings: «En resumen» bullets or «Puntos clave» thesis + table. */
+  summaryVariant: WritingSettings["summaryVariant"];
 };
 
 export const GUIDE_TARGETS: ArticleTargets = {
@@ -94,10 +104,11 @@ export const GUIDE_TARGETS: ArticleTargets = {
   externalLinks: 4,
   images: 5,
   faqCount: 5,
-  sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true },
+  sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true, linkCard: true, promo: true },
+  summaryVariant: "tldr",
 };
 
-const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections">, [number, number]> = {
+const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections" | "summaryVariant">, [number, number]> = {
   words: [300, 6000],
   internalLinks: [0, 40],
   externalLinks: [0, 20],
@@ -105,7 +116,7 @@ const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections">, [number, 
   faqCount: [0, 12],
 };
 
-export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings };
+export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "summaryVariant">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings };
 
 // ────────────────────────────────────────────────────────────── Writing settings
 // "Customize future articles" (BLG parity M8): stored next to the targets in
@@ -219,7 +230,12 @@ export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
   return overrides.reduce<ArticleTargets>((acc, value) => {
     const { writing, ...override } = readArticleTargetsOverride(value);
     const fixedWords = writing ? LENGTH_MODES[writing.length] : null;
-    return { ...acc, ...override, ...(fixedWords ? { words: fixedWords } : {}), sections: { ...acc.sections, ...override.sections } };
+    return {
+      ...acc,
+      ...override,
+      ...(fixedWords ? { words: fixedWords } : {}),
+      ...(writing ? { summaryVariant: writing.summaryVariant } : {}),
+      sections: { ...acc.sections, ...override.sections } };
   }, { ...GUIDE_TARGETS, sections: { ...GUIDE_TARGETS.sections } });
 }
 
@@ -235,9 +251,15 @@ const SECTION_SWITCH: Partial<Record<StructureSection["kind"], keyof ArticleSect
   sources: "sources",
   further_reading: "furtherReading",
   cta: "cta",
+  link_card: "linkCard",
+  promo: "promo",
+  key_takeaways: "summary",
 };
 
 export function sectionEnabled(section: StructureSection, targets: ArticleTargets | null | undefined): boolean {
+  // Exactly one of the two summary variants is rendered (TL;DR by default).
+  const keyTakeaways = targets?.summaryVariant === "key_takeaways";
+  if ((section.kind === "summary" && keyTakeaways) || (section.kind === "key_takeaways" && !keyTakeaways)) return false;
   const key = SECTION_SWITCH[section.kind];
   return !targets || !key || targets.sections[key];
 }
@@ -390,28 +412,55 @@ export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
   },
   guide: {
     articleType: "guide",
-    description: "In-depth search guide (~2,300 words): the answer first, then every option the reader weighs, a comparison table and the questions they still have.",
+    description:
+      "Keyword-first search guide (BLG anatomy), in this fixed order: answer-first intro → link card → summary → TOC → body of sub-query H2s → brand promo H2 → FAQ → Sources → Recommended reading → disclaimer. No «Conclusión» H2.",
     sections: [
-      { kind: "lead", heading: null, instruction: "Intro of about 110 words whose first sentence directly answers the search question with the primary keyword.", required: true },
+      {
+        kind: "lead",
+        heading: null,
+        instruction:
+          "Answer-first intro, exactly 2 paragraphs (no heading): P1 answers the search query in its first sentence with the primary keyword and presents the target site with its value proposition; P2 announces the scope («Este artículo expone qué…, cómo… y dónde…»).",
+        required: true,
+      },
+      {
+        kind: "link_card",
+        heading: null,
+        instruction:
+          "Right after the intro: <aside data-block=\"link_card\"><p><strong>(site name)</strong> · (site domain)</p><p><strong>(short headline of what the site lets the reader do)</strong></p><p>(one sentence)</p><p><a href=\"(site home URL)\">Visitar</a></p></aside> («Visit» in English).",
+        required: true,
+      },
       {
         kind: "summary",
         heading: null,
-        instruction: "Right after the intro: <aside data-block=\"summary\"><p><strong>En resumen</strong></p><ul> with exactly 5 <li> takeaways</ul></aside> (use «In short» in English).",
+        instruction: "After the link card: <aside data-block=\"summary\"><p><strong>En resumen</strong></p><ul> with 3–5 <li>, each a self-contained fact</ul></aside> (use «In short» in English).",
+        required: true,
+      },
+      {
+        kind: "key_takeaways",
+        heading: null,
+        instruction:
+          "After the link card: <aside data-block=\"summary\"><p><strong>Puntos clave</strong></p><p>(one thesis sentence)</p><table><thead><tr><th>Punto</th><th>Detalle</th></tr></thead><tbody>(3–5 rows)</tbody></table></aside> («Key takeaways», «Point / Detail» in English).",
         required: true,
       },
       { kind: "toc", heading: null, instruction: "Do NOT write a table of contents: it is generated from your H2s.", required: false },
-      { kind: "detail", heading: null, instruction: "8–12 H2 sections, each split into H3s where useful. Include at least one concrete figure, date or statistic from the fact ledger.", required: true },
-      { kind: "table", heading: null, instruction: "One comparison <table> with <thead> (options as rows, criteria as columns) inside the most relevant H2.", required: true },
-      { kind: "detail", heading: "How to choose", instruction: "Practical criteria to decide between the options.", required: true },
-      { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a short answer paragraph.", required: true },
-      { kind: "sources", heading: "Sources", instruction: "Bulleted list of the external sources used, as links (only URLs from the fact ledger).", required: true },
-      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of internal links from the brief, with descriptive anchors.", required: true },
       {
-        kind: "cta",
+        kind: "detail",
         heading: null,
-        instruction: "Close with <aside data-block=\"cta\"><p><strong>a short call to action</strong></p><p><a href=\"(the most relevant internal URL from the brief)\">action label</a></p></aside>.",
+        instruction:
+          "Body: 8–12 H2s phrased as sub-queries of the primary keyword («Qué…», «Cómo…», «Dónde…», «Cuánto…»), split into H3s where useful; for a list/ranking keyword, one H2 per entry. Use <ol> for steps and <ul> for lists. Give concrete dates and figures from the fact ledger, each attributed inline to its publisher with a link to its source URL («según X, en mayo de 2026…»).",
         required: true,
       },
+      { kind: "table", heading: null, instruction: "At least one <table> with <thead> wherever options or criteria are compared (options as rows, criteria as columns).", required: true },
+      {
+        kind: "promo",
+        heading: null,
+        instruction:
+          "Right before the FAQ, an H2 of its own named after what the site offers for this need (not «Conclusión»): one paragraph on how the site helps, with 2 links to its most relevant internal URLs from the brief.",
+        required: true,
+      },
+      { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a self-contained 2–4 sentence answer.", required: true },
+      { kind: "sources", heading: "Sources", instruction: "Bulleted list «Título, Editor», each linked to its URL (only URLs from the fact ledger).", required: true },
+      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of the site's own posts from the brief's internal links, with descriptive anchors.", required: true },
     ],
     allowsConclusion: false,
     allowsFaq: true,

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { runQualityChecklist, type ChecklistInput } from "../src/studio/editorial-engine/quality-checklist";
 import { GUIDE_TARGETS, getStructureSpec, renderStructureSpec, resolveArticleTargets } from "../src/studio/editorial-engine/structure";
+import { mapArticleType, siteGuidance } from "../src/studio/production/plan-item";
 import { withTableOfContents } from "../src/studio/editorial-engine/seo-package";
 import { buildPublicationJsonLd, faqItemsFromHtml } from "../src/studio/editorial-engine/json-ld";
 import { sanitizeEditorialHtml } from "../src/studio/html-sanitizer";
@@ -80,6 +81,32 @@ test("guide targets: site override then article override; invalid values are dro
   const prompt = renderStructureSpec(getStructureSpec("guide"), "es", [], resolveArticleTargets({ sections: { faq: false } }));
   assert.ok(!prompt.includes("Preguntas frecuentes"));
   assert.ok(prompt.includes("Lecturas recomendadas"));
+});
+
+test("M3 keyword-first template: fixed BLG order, no conclusion, summary variant from writing settings", () => {
+  const prompt = renderStructureSpec(getStructureSpec("guide"), "es", [], resolveArticleTargets({}));
+  const order = ["- lead", "- link_card", "- summary", "- toc", "- detail", "- table", "- promo", "- faq", "- sources", "- further_reading"].map((kind) => prompt.indexOf(kind));
+  assert.ok(order.every((index, i) => index >= 0 && (i === 0 || index > order[i - 1])), `order: ${order}`);
+  assert.ok(!prompt.includes("key_takeaways") && !prompt.includes("How to choose") && !prompt.includes("Cómo elegir"));
+  assert.match(prompt, /Conclusion: NOT appropriate/);
+  assert.match(prompt, /attributed inline to its publisher with a link/);
+  const takeaways = resolveArticleTargets({ writing: { summaryVariant: "key_takeaways", length: "short" } });
+  assert.equal(takeaways.summaryVariant, "key_takeaways");
+  const variant = renderStructureSpec(getStructureSpec("guide"), "es", [], takeaways);
+  assert.ok(variant.includes("- key_takeaways") && !variant.includes("- summary") && variant.includes("about 1400 words"));
+  const off = renderStructureSpec(getStructureSpec("guide"), "es", [], resolveArticleTargets({ sections: { linkCard: false, promo: false } }));
+  assert.ok(!off.includes("link_card") && !off.includes("- promo"));
+});
+
+test("M3: plan items with a primary keyword use the guide template; news and reviews keep theirs", () => {
+  assert.equal(mapArticleType({ primaryKeyword: "ver tdt", contentType: "listicle" }, {}), "guide");
+  assert.equal(mapArticleType({ primaryKeyword: "ver tdt", contentType: "explainer" }, {}), "guide");
+  assert.equal(mapArticleType({ primaryKeyword: "ver tdt", newsOrEvergreen: "news" }, {}), "standard_news");
+  assert.equal(mapArticleType({ primaryKeyword: "serie x", contentType: "review" }, {}), "review_info");
+  assert.equal(mapArticleType({ contentType: "listicle" }, {}), "list_ranking");
+  assert.deepEqual(siteGuidance({ name: "GuíaTV", baseUrl: "https://www.guiaprogramaciontv.com" }), [
+    "Site name: GuíaTV — domain: guiaprogramaciontv.com — home URL (allowed link): https://www.guiaprogramaciontv.com",
+  ]);
 });
 
 test("TOC: built from the H2s after the summary box, stable ids, idempotent, survives the sanitizer", () => {

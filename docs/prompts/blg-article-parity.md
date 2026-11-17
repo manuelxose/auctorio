@@ -215,6 +215,19 @@ En `structure.ts` (no crear otro sistema):
 5. Longitud: modos *Dinámica (según intención)* | 1200–1600 | 1700–2300 | 2400–2800 → mapear a
    `ArticleTargets.words`.
 
+**Estado M3 (2026-11-17, hecho)**: plantilla `guide` de `structure.ts` reescrita en el orden BLG (intro answer-first
+de 2 párrafos → `link_card` → `summary` | `key_takeaways` → TOC → cuerpo con H2 = subconsultas, H3, `ol` para pasos,
+tabla al comparar, atribución inline enlazada con fechas y cifras → `promo` (H2 propio) → FAQ (`faqCount`) → Fuentes
+«Título, Editor» → Lecturas recomendadas → disclaimer de `writing`); sin «Cómo elegir», sin CTA final ni «Conclusión».
+Switches nuevos en `ArticleSections`: `linkCard`, `promo` (on por defecto); `summaryVariant` pasa de
+`article_targets.writing` a `ArticleTargets` y `sectionEnabled` deja solo una de las dos variantes (también en QA).
+`citations`/`authorPerspective`/`mentionCompetitors` siguen en `renderWritingGuidance`; `furtherReading` = Recommended
+reads (sin alias). `mapArticleType` (`production/plan-item.ts`): items con `primaryKeyword` y no noticia ni review →
+`guide` (también listicles: un H2 por entrada); `siteGuidance` da al redactor nombre, dominio y home del sitio para la
+link card y el promo. `inlineAttributed` lo calcula `provenance.ts` cuando el claim nombra al editor (la plantilla lo
+exige). Pendiente: los toggles `linkCard`/`promo` en Settings › Writing, check M7 «link card/promo presentes», y que el
+checklist exija la tabla solo cuando hay comparación.
+
 ### M4 — Enlazado interno y externo a nivel BLG
 
 1. Interno: candidatos desde `SiteIndexedPage` (sitemap completo) + posts propios publicados; puntuación

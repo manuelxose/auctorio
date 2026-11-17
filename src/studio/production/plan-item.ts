@@ -230,6 +230,12 @@ export function planGuidance(item: EditorialPlanItem): string[] {
   return lines;
 }
 
+/** Brand data for the guide's link card and promo block. */
+export function siteGuidance(site: { name: string; baseUrl: string | null }): string[] {
+  const domain = hostOf(site.baseUrl);
+  return [domain ? `Site name: ${site.name} — domain: ${domain} — home URL (allowed link): ${site.baseUrl}` : `Site name: ${site.name}`];
+}
+
 export async function preparePlanItemInput(
   tenantId: string,
   planItemId: string,
@@ -283,7 +289,7 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: [...planGuidance(item), ...renderWritingGuidance(writing, language)],
+      guidance: [...planGuidance(item), ...siteGuidance(site), ...renderWritingGuidance(writing, language)],
     },
     options,
   };
@@ -331,9 +337,12 @@ function mapIntent(value: unknown): SearchIntent {
   return "informational";
 }
 
-function mapArticleType(record: Record<string, unknown>, generation: Record<string, unknown>): ArticleType {
+export function mapArticleType(record: Record<string, unknown>, generation: Record<string, unknown>): ArticleType {
   if (typeof generation.articleType === "string" && isArticleType(generation.articleType)) return generation.articleType;
   const contentType = String(record.contentType ?? "").toLowerCase();
+  const news = String(record.newsOrEvergreen ?? "").toLowerCase() === "news";
+  // Keyword-first items (guide/explainer/listicle) all use the BLG guide template (M3).
+  if (!news && String(record.primaryKeyword ?? "").trim() && !/review|analisis|análisis/.test(contentType)) return "guide";
   if (/list|ranking|top/.test(contentType)) return "list_ranking";
   if (/review|analisis|análisis/.test(contentType)) return "review_info";
   if (/guide|guia|guía|tutorial/.test(contentType)) return "guide";
