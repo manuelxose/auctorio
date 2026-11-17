@@ -118,7 +118,7 @@ export function buildWriterPrompt(input: WriterPromptInput): WriterPrompt {
   userLines.push(wrapUntrustedContent("site-value", renderSiteValueBlock(input.siteValueBlocks).join("\n")));
   userLines.push("");
   userLines.push("STRUCTURE TEMPLATE:");
-  userLines.push(renderStructureSpec(getStructureSpec(brief.articleType), language, input.plannedOutline));
+  userLines.push(renderStructureSpec(getStructureSpec(brief.articleType), language, input.plannedOutline, brief.articleTargets));
   userLines.push("");
 
   if (input.editorialGuidance && input.editorialGuidance.length > 0) {

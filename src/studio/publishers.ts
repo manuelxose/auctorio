@@ -12,6 +12,7 @@ import type {
 import { buildAssetPublicUrl } from "./orchestration";
 import { isProductionEnv } from "../shared/utils/env";
 import { sanitizeEditorialHtml } from "./html-sanitizer";
+import { buildPublicationJsonLd, faqItemsFromHtml } from "./editorial-engine/json-ld";
 import { loadActiveInstallationForSite } from "./connectors/installation";
 import { validateScrapeUrl } from "../infrastructure/scraping";
 
@@ -169,7 +170,8 @@ export function buildGuiaTvPayload(
     targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
     relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
     relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
-    faqItems: getFaqItems(context.project),
+    faqItems: articleFaqItems(context),
+    jsonLd: publicationJsonLd(context, assetUrl),
     evergreen: metadata.evergreen !== false,
     featuredImage: assetUrl ?? undefined,
     coverImage: assetUrl ?? undefined,
@@ -290,6 +292,30 @@ function getFaqItems(project: ContentProject): Array<{ question: string; answer:
       question: String(item.question),
       answer: String(item.answer),
     }));
+}
+
+/** Editor-set FAQ items win; otherwise the questions under the body's FAQ H2 (guides). */
+function articleFaqItems(context: PublisherContext): Array<{ question: string; answer: string }> {
+  const stored = getFaqItems(context.project);
+  return stored.length ? stored : faqItemsFromHtml(context.version.bodyHtml || "");
+}
+
+/** Article + BreadcrumbList (+ FAQPage); undefined when the site switched JSON-LD off (project metadata.articleTargets). */
+export function publicationJsonLd(context: PublisherContext, assetUrl: string | null): Array<Record<string, unknown>> | undefined {
+  const metadata = getMetadata(context.project);
+  if (asRecord(asRecord(metadata.articleTargets).sections).jsonLd === false) return undefined;
+  return buildPublicationJsonLd({
+    title: context.version.title || context.project.title,
+    description: context.version.seoDescription || context.version.excerpt || "",
+    image: assetUrl,
+    publishedAt: (context.version.publishedAt ?? new Date()).toISOString(),
+    modifiedAt: (context.version.updatedAt ?? new Date()).toISOString(),
+    languageCode: context.project.primaryLanguage || context.site.locale || "es",
+    url: metadata.canonicalUrl ? String(metadata.canonicalUrl) : null,
+    siteName: context.site.name,
+    siteUrl: context.site.baseUrl || null,
+    faqItems: articleFaqItems(context),
+  });
 }
 
 function imageFileName(assetUrl: string): string {
@@ -1184,6 +1210,7 @@ class GenericRestPublisher implements PublisherAdapter {
 
   private buildPayload(context: PublisherContext, assetUrl: string | null, status: "draft" | "publish") {
     const metadata = getMetadata(context.project);
+    const jsonLd = publicationJsonLd(context, assetUrl);
     return {
       title: context.version.title || context.project.title,
       slug: String(metadata.slug || "").trim() || undefined,
@@ -1197,6 +1224,7 @@ class GenericRestPublisher implements PublisherAdapter {
       meta: {
         _auctorio_seo_title: context.version.seoTitle || undefined,
         _auctorio_seo_description: context.version.seoDescription || undefined,
+        _auctorio_json_ld: jsonLd ? JSON.stringify(jsonLd) : undefined,
       },
     };
   }

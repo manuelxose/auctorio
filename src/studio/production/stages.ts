@@ -17,7 +17,7 @@ import { buildFactSafetyReport, hasCopyrightWarningCues, type FactSafetyReport }
 import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editorial-engine/duplicate-check";
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
 import { getArticleWriter } from "../editorial-engine/writer-provider";
-import { buildSeoPackage } from "../editorial-engine/seo-package";
+import { buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
 import { buildProvenance, summarizeProvenance } from "../editorial-engine/provenance";
 import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
@@ -166,9 +166,12 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
 }
 
 async function seo(ctx: StageContext): Promise<SeoPackage> {
+  const brief = need(ctx.artifacts.brief, "brief").brief;
+  const article = need(ctx.artifacts.write, "write").parsed;
+  if (brief.articleTargets?.sections.toc) article.bodyHtml = withTableOfContents(article.bodyHtml, ctx.input.language);
   return buildSeoPackage({
-    brief: need(ctx.artifacts.brief, "brief").brief,
-    article: need(ctx.artifacts.write, "write").parsed,
+    brief,
+    article,
     internalLinks: ctx.input.internalLinks,
     factSourceUrls: ctx.input.ledgerFacts.map((fact) => ({ url: fact.sourceUrl, publisher: fact.publisher })),
   });
@@ -207,6 +210,8 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         primaryIntent: record.primaryIntent ?? record.searchIntent ?? briefArtifact.brief.searchIntent,
         primaryKeyword: briefArtifact.brief.primaryKeyword,
         outline: record.outline ?? [],
+        secondaryKeywords: briefArtifact.brief.secondaryKeywords,
+        ...(briefArtifact.brief.articleTargets ? { articleTargets: briefArtifact.brief.articleTargets } : {}),
       },
       siteType: input.site.type,
       recommendedWordCountMin: briefArtifact.brief.targetLengthRange.min,
@@ -275,6 +280,9 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   const existing = projectId ? await prisma.contentProject.findFirst({ where: { id: projectId, tenantId: ctx.tenantId } }) : null;
   if (!existing) projectId = null;
   // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
+  // Guide targets + inventory size: QA v2 re-runs rebuild the checklist from project metadata; publishers read the JSON-LD switch.
+  const articleTargets = need(ctx.artifacts.brief, "brief").brief.articleTargets;
+  const guideMetadata = articleTargets ? { articleTargets, internalLinkInventorySize: input.internalLinks.length } : {};
   const sourceOrigins = input.ledgerFacts.flatMap((fact) => (fact.origin ? [{ ...fact.origin, url: fact.sourceUrl }] : [])).slice(0, 40);
 
   if (!existing) {
@@ -299,6 +307,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           articleType: duplicate.decision === "update_existing" ? "article_update" : "create_new",
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
+          ...guideMetadata,
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
       },
@@ -316,6 +325,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           productionJobId: ctx.jobId,
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
+          ...guideMetadata,
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),
         } as Prisma.InputJsonValue,

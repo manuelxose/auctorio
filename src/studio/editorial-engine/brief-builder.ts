@@ -37,6 +37,7 @@ const STORY_ANGLE_BY_TYPE: Record<string, string> = {
   tv_programming: "report the programming/schedule facts and the channel",
   review_info: "inform the reader about the work using validated metadata",
   evergreen_explainer: "explain the work or topic durably for search readers",
+  guide: "answer the search question first, then guide the reader through every option in depth",
   list_ranking: "rank/select works using only grounded facts",
   what_to_watch: "recommend what to watch using only validated availability",
   article_update: "update the existing article with the new verified facts",

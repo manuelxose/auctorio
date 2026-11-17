@@ -2,6 +2,8 @@ import type { ContentVersion } from "@prisma/client";
 import type { QaCheck, QaReport } from "./types";
 import { INLINE_IMAGE_MIN } from "./inline-images";
 import { wordBandForContentType } from "./quality-gate";
+import { runQualityChecklist, type ChecklistItem } from "./editorial-engine/quality-checklist";
+import type { ArticleTargets } from "./editorial-engine/structure";
 
 export type QaSeverity = "error" | "warning" | "info";
 export type QaGroup = "structural" | "seo" | "editorial" | "evidence" | "publishing";
@@ -20,6 +22,8 @@ export type QaReportV2 = {
   score: number;
   checks: QaCheck[];
   findings: QaFinding[];
+  /** The 10 checks listed in the article panel (absent on reports stored before M4). */
+  checklist?: ChecklistItem[];
 };
 
 export type QaVersionContext = {
@@ -288,7 +292,21 @@ export function runVersionQaV2(
       severity: finding.severity as "error" | "warning",
     }));
 
-  return { passed, score, checks, findings };
+  const stringList = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+  const storedInventory = typeof metadata.internalLinkInventorySize === "number" ? metadata.internalLinkInventorySize : null;
+  const checklist = runQualityChecklist({
+    bodyHtml: body,
+    seoTitle,
+    seoDescription,
+    primaryKeyword,
+    semanticKeywords: [...stringList(metadata.semanticKeywords), ...stringList(metadata.secondaryKeywords)],
+    // Stored by the plan brief for guides only (structure.ts resolveArticleTargets).
+    targets: metadata.articleTargets && typeof metadata.articleTargets === "object" ? (metadata.articleTargets as ArticleTargets) : null,
+    cannibalizationRisk: context.cannibalizationRisk ?? null,
+    internalLinkInventorySize: context.internalLinkInventorySize ?? storedInventory,
+  });
+
+  return { passed, score, checks, findings, checklist };
 }
 
 /** Backward-compatible entry point used by existing call sites. */

@@ -475,6 +475,17 @@ function strOf(value: unknown): string {
                   {{ issue.message }}
                 </li>
               </ul>
+              <ng-container *ngIf="checklist.length">
+                <h3 class="au-panel__subtitle au-mt-2 au-mb-1"><strong>{{ checklistPassed }}/{{ checklist.length }} checks</strong></h3>
+                <ul class="au-qa__list" aria-label="Quality checks">
+                  <li *ngFor="let item of checklist" [title]="item.detail">
+                    <span class="au-qa__mark">
+                      <app-icon [name]="item.passed ? 'circle-check' : 'warning'"></app-icon>
+                    </span>
+                    <span><strong>{{ item.label }}</strong><span class="au-muted au-block">{{ item.detail }}</span></span>
+                  </li>
+                </ul>
+              </ng-container>
               <p class="au-hint" *ngIf="project.reviewGate.blockerCount > 0">
                 {{ project.reviewGate.blockerCount }} issue{{ project.reviewGate.blockerCount === 1 ? '' : 's' }} must be fixed before publishing.
               </p>
@@ -484,6 +495,11 @@ function strOf(value: unknown): string {
               </button>
             </div>
             <ng-template #noVersion><p class="au-hint">Quality checks run after generation.</p></ng-template>
+          </section>
+
+          <section class="au-panel au-panel--padded" *ngIf="whyThisTopic">
+            <h2 class="au-panel__title au-mb-2">¿Por qué este tema?</h2>
+            <p class="au-hint">{{ whyThisTopic }}</p>
           </section>
 
           <section class="au-panel au-panel--padded">
@@ -592,6 +608,22 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     }
     const passed = report.checks.filter((check) => check.passed).length;
     return Math.round((passed / report.checks.length) * 100);
+  }
+
+  /** The 10 checks QA v2 stores for the latest version (absent on reports from before M4). */
+  get checklist(): Array<{ key: string; label: string; passed: boolean; detail: string }> {
+    const report = this.project?.latestVersion?.qaReport as { checklist?: Array<{ key: string; label: string; passed: boolean; detail: string }> } | null;
+    return report?.checklist ?? [];
+  }
+
+  get checklistPassed(): number {
+    return this.checklist.filter((item) => item.passed).length;
+  }
+
+  /** The plan item's rationale, copied to the project when the plan item was produced. */
+  get whyThisTopic(): string | null {
+    const value = (this.project?.metadata as Record<string, unknown> | undefined)?.['rationale'];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
   get seoFindings(): Array<{ key: string; label: string; passed: boolean; severity: string; message: string; group: string }> {

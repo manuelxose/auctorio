@@ -9,7 +9,7 @@
 // ledger) are errors and hard-fail publication.
 
 import { detectVerbatimOverlap } from "./fact-safety";
-import { getStructureSpec, localizedHeading } from "./structure";
+import { getStructureSpec, localizedHeading, sectionEnabled } from "./structure";
 import { stripHtml, wordCount } from "./seo-package";
 import { titleSimilarity } from "../editorial";
 import type {
@@ -394,7 +394,7 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   const spec = getStructureSpec(brief.articleType);
   const h2s = [...article.bodyHtml.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)].map((match) => normalize(stripHtml(match[1])));
   const outlined = (input.plannedOutline?.length ?? 0) > 0;
-  for (const section of spec.sections.filter((entry) => entry.required && !(outlined && entry.heading))) {
+  for (const section of spec.sections.filter((entry) => entry.required && sectionEnabled(entry, brief.articleTargets) && !(outlined && entry.heading))) {
     let present: boolean;
     if (section.kind === "lead" || section.kind === "update_note") {
       present = bodyWords.length > 40;

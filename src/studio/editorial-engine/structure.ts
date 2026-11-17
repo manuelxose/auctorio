@@ -7,7 +7,21 @@
 import type { ArticleType } from "./types";
 
 export type StructureSection = {
-  kind: "lead" | "context" | "detail" | "list" | "table" | "recommendations" | "update_note" | "conclusion";
+  kind:
+    | "lead"
+    | "context"
+    | "detail"
+    | "list"
+    | "table"
+    | "recommendations"
+    | "update_note"
+    | "conclusion"
+    | "summary"
+    | "toc"
+    | "faq"
+    | "sources"
+    | "further_reading"
+    | "cta";
   heading: string | null; // null → no heading (lead/body)
   instruction: string;
   required: boolean;
@@ -51,6 +65,85 @@ const CONCLUSION: StructureSection = {
   instruction: "Short closing paragraph summarizing what happens next.",
   required: false,
 };
+
+// ────────────────────────────────────────────────────────────── Guide targets
+
+/** Optional guide blocks a site (or one article) can switch off. */
+export type ArticleSections = {
+  summary: boolean;
+  toc: boolean;
+  faq: boolean;
+  sources: boolean;
+  jsonLd: boolean;
+  furtherReading: boolean;
+  cta: boolean;
+};
+
+export type ArticleTargets = {
+  words: number;
+  internalLinks: number;
+  externalLinks: number;
+  images: number;
+  faqCount: number;
+  sections: ArticleSections;
+};
+
+export const GUIDE_TARGETS: ArticleTargets = {
+  words: 2300,
+  internalLinks: 15,
+  externalLinks: 4,
+  images: 5,
+  faqCount: 5,
+  sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true },
+};
+
+const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections">, [number, number]> = {
+  words: [300, 6000],
+  internalLinks: [0, 40],
+  externalLinks: [0, 20],
+  images: [0, 12],
+  faqCount: [0, 12],
+};
+
+export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections">> & { sections?: Partial<ArticleSections> };
+
+/** Valid keys of an override (site `article_targets` or plan item `generation.articleTargets`); anything else is dropped. */
+export function readArticleTargetsOverride(value: unknown): ArticleTargetsOverride {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const raw = value as Record<string, unknown>;
+  const out: ArticleTargetsOverride = {};
+  for (const [key, [min, max]] of Object.entries(TARGET_LIMITS) as Array<[keyof typeof TARGET_LIMITS, [number, number]]>) {
+    const number = raw[key];
+    if (typeof number === "number" && Number.isInteger(number) && number >= min && number <= max) out[key] = number;
+  }
+  const sections = raw.sections && typeof raw.sections === "object" && !Array.isArray(raw.sections) ? (raw.sections as Record<string, unknown>) : {};
+  for (const key of Object.keys(GUIDE_TARGETS.sections) as Array<keyof ArticleSections>) {
+    if (typeof sections[key] === "boolean") (out.sections ??= {})[key] = sections[key] as boolean;
+  }
+  return out;
+}
+
+/** Guide defaults, then each override in order (site first, article last). */
+export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
+  return overrides.reduce<ArticleTargets>((acc, value) => {
+    const override = readArticleTargetsOverride(value);
+    return { ...acc, ...override, sections: { ...acc.sections, ...override.sections } };
+  }, { ...GUIDE_TARGETS, sections: { ...GUIDE_TARGETS.sections } });
+}
+
+const SECTION_SWITCH: Partial<Record<StructureSection["kind"], keyof ArticleSections>> = {
+  summary: "summary",
+  toc: "toc",
+  faq: "faq",
+  sources: "sources",
+  further_reading: "furtherReading",
+  cta: "cta",
+};
+
+export function sectionEnabled(section: StructureSection, targets: ArticleTargets | null | undefined): boolean {
+  const key = SECTION_SWITCH[section.kind];
+  return !targets || !key || targets.sections[key];
+}
 
 export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
   breaking_news: {
@@ -198,6 +291,34 @@ export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
     allowsConclusion: true,
     allowsFaq: true,
   },
+  guide: {
+    articleType: "guide",
+    description: "In-depth search guide (~2,300 words): the answer first, then every option the reader weighs, a comparison table and the questions they still have.",
+    sections: [
+      { kind: "lead", heading: null, instruction: "Intro of about 110 words whose first sentence directly answers the search question with the primary keyword.", required: true },
+      {
+        kind: "summary",
+        heading: null,
+        instruction: "Right after the intro: <aside data-block=\"summary\"><p><strong>En resumen</strong></p><ul> with exactly 5 <li> takeaways</ul></aside> (use «In short» in English).",
+        required: true,
+      },
+      { kind: "toc", heading: null, instruction: "Do NOT write a table of contents: it is generated from your H2s.", required: false },
+      { kind: "detail", heading: null, instruction: "8–12 H2 sections, each split into H3s where useful. Include at least one concrete figure, date or statistic from the fact ledger.", required: true },
+      { kind: "table", heading: null, instruction: "One comparison <table> with <thead> (options as rows, criteria as columns) inside the most relevant H2.", required: true },
+      { kind: "detail", heading: "How to choose", instruction: "Practical criteria to decide between the options.", required: true },
+      { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a short answer paragraph.", required: true },
+      { kind: "sources", heading: "Sources", instruction: "Bulleted list of the external sources used, as links (only URLs from the fact ledger).", required: true },
+      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of internal links from the brief, with descriptive anchors.", required: true },
+      {
+        kind: "cta",
+        heading: null,
+        instruction: "Close with <aside data-block=\"cta\"><p><strong>a short call to action</strong></p><p><a href=\"(the most relevant internal URL from the brief)\">action label</a></p></aside>.",
+        required: true,
+      },
+    ],
+    allowsConclusion: false,
+    allowsFaq: true,
+  },
   list_ranking: {
     articleType: "list_ranking",
     description: "List/ranking article: one H2 per entry, each grounded in facts.",
@@ -259,6 +380,10 @@ const HEADINGS_ES: Record<string, string> = {
   "Key facts": "Datos clave",
   "What you need to know": "Lo que necesitas saber",
   "Updated information": "Información actualizada",
+  "How to choose": "Cómo elegir",
+  "Frequently asked questions": "Preguntas frecuentes",
+  Sources: "Fuentes",
+  "Recommended reading": "Lecturas recomendadas",
 };
 
 export function localizedHeading(heading: string, language: "es" | "en"): string {
@@ -269,10 +394,10 @@ export function localizedHeading(heading: string, language: "es" | "en"): string
  * Renders the template in the article language. An approved plan outline replaces
  * the template's own headings: its entries become the required H2s, in order.
  */
-export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" = "en", plannedOutline: string[] = []): string {
+export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" = "en", plannedOutline: string[] = [], targets?: ArticleTargets): string {
   const lines: string[] = [`Article type: ${spec.articleType}`, spec.description, "Structure:"];
   const outline = plannedOutline.map((heading) => heading.replace(/[()\n]/g, " ").trim()).filter(Boolean);
-  for (const section of spec.sections) {
+  for (const section of spec.sections.filter((entry) => sectionEnabled(entry, targets))) {
     if (outline.length > 0 && section.heading) {
       lines.push(`- ${section.kind} [guidance]: ${section.instruction} Place this material under the approved H2 sections below.`);
       continue;
@@ -285,8 +410,14 @@ export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" =
     lines.push("Approved outline — use each entry below as an H2, with this exact wording and in this order:");
     for (const heading of outline) lines.push(`- outline (heading: ${heading}) [required]: cover this section with verified facts only.`);
   }
+  if (targets) {
+    lines.push(
+      `Targets: about ${targets.words} words; ${targets.internalLinks} internal links (only brief URLs, fewer if the brief has fewer); about ${targets.externalLinks} external source links; ${targets.sections.faq ? `${targets.faqCount} FAQ questions; ` : ""}every image needs a descriptive alt.`,
+    );
+  }
   if (language === "es") lines.push("All headings and body text must be written in Spanish.");
   lines.push(`Conclusion: ${spec.allowsConclusion ? "allowed when it adds value" : "NOT appropriate for this type — do not add one"}.`);
-  lines.push(`FAQ section: ${spec.allowsFaq ? "allowed only if genuinely useful" : "NOT appropriate — do not force a FAQ onto this article"}.`);
+  const faqOff = targets ? !targets.sections.faq : false;
+  lines.push(`FAQ section: ${faqOff ? "switched off for this site — do not add one" : spec.allowsFaq ? "allowed only if genuinely useful" : "NOT appropriate — do not force a FAQ onto this article"}.`);
   return lines.join("\n");
 }

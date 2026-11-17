@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { writeAudit } from "./audit";
+import { readArticleTargetsOverride, type ArticleTargetsOverride } from "./editorial-engine/structure";
 
 const prisma = getPrismaClient();
 const INDEXED_STATES = ["extracted", "stale"] as const;
@@ -120,6 +121,8 @@ export type PlanningSettingsInput = {
   publishTimes?: string[];
   channels?: string[];
   defaultPresetId?: string | null;
+  /** Guide targets override; null clears it. */
+  articleTargets?: ArticleTargetsOverride | null;
 };
 
 /** Pure validation/normalisation of a settings update; throws a stable error code on bad input. */
@@ -152,6 +155,10 @@ export function normalizePlanningSettings(input: PlanningSettingsInput): Plannin
     out.channels = channels;
   }
   if (input.defaultPresetId !== undefined) out.defaultPresetId = input.defaultPresetId;
+  if (input.articleTargets !== undefined) {
+    if (input.articleTargets !== null && (typeof input.articleTargets !== "object" || Array.isArray(input.articleTargets))) throw new Error("planning_settings_invalid_article_targets");
+    out.articleTargets = input.articleTargets === null ? null : readArticleTargetsOverride(input.articleTargets);
+  }
   return out;
 }
 
@@ -166,6 +173,7 @@ export async function getSitePlanningSettings(tenantId: string, siteId: string) 
     publishTimes: (stored?.publishTimes as string[] | undefined) ?? [],
     channels: (stored?.channels as string[] | undefined) ?? ["website"],
     defaultPresetId: stored?.defaultPresetId ?? null,
+    articleTargets: (stored?.articleTargets as ArticleTargetsOverride | null | undefined) ?? null,
     persisted: Boolean(stored),
   };
 }
@@ -191,6 +199,7 @@ export async function putSitePlanningSettings(tenantId: string, siteId: string, 
         publishTimes: merged.publishTimes as Prisma.InputJsonArray,
         channels: merged.channels as Prisma.InputJsonArray,
         defaultPresetId: merged.defaultPresetId,
+        articleTargets: merged.articleTargets ?? Prisma.DbNull,
       },
       update: {
         articlesPerDay: merged.articlesPerDay,
@@ -198,6 +207,7 @@ export async function putSitePlanningSettings(tenantId: string, siteId: string, 
         publishTimes: merged.publishTimes as Prisma.InputJsonArray,
         channels: merged.channels as Prisma.InputJsonArray,
         defaultPresetId: merged.defaultPresetId,
+        articleTargets: merged.articleTargets ?? Prisma.DbNull,
       },
     }),
   ]);

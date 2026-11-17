@@ -33,10 +33,15 @@ const ALLOWED_TAGS = new Set([
   "br",
   "figure",
   "figcaption",
+  "aside",
+  "nav",
 ]);
 
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   a: ["href", "title", "rel", "target"],
+  // TOC anchors (withTableOfContents).
+  h2: ["id"],
+  h3: ["id"],
   img: ["src", "alt", "width", "height", "loading"],
   table: [],
   thead: [],

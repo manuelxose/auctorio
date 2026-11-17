@@ -52,6 +52,7 @@ import {
   listPlanPresets,
   putSitePlanningSettings,
   siteTimezone,
+  type PlanningSettingsInput,
   updatePlanPreset,
 } from "./planning-settings";
 import { listWorkerHeartbeats } from "./worker-health";
@@ -1821,6 +1822,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
             publishTimes: strings(body.publishTimes),
             channels: strings(body.channels),
             defaultPresetId: body.defaultPresetId as string | null | undefined,
+            articleTargets: body.articleTargets as PlanningSettingsInput["articleTargets"],
           },
           context.userId,
         ),

@@ -2108,6 +2108,8 @@ model SitePlanningSettings {
   publishTimes    Json     @map("publish_times")
   channels        Json
   defaultPresetId String?  @map("default_preset_id") @db.Uuid
+  /// Guide targets and section switches (structure.ts ArticleTargets override); null = defaults.
+  articleTargets  Json?    @map("article_targets")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 

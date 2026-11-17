@@ -9,6 +9,7 @@ import { createProject } from "../repository";
 import { suggestInternalLinks } from "../internal-linking";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
+import { resolveArticleTargets } from "../editorial-engine/structure";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
 import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
@@ -117,6 +118,7 @@ export async function ensurePlanItemProject(item: EditorialPlanItem, jobId: stri
       suggestedSlug: item.suggestedSlug ?? null,
       freshnessRequirement: item.freshnessRequirement ?? null,
       angle: item.angle ?? null,
+      rationale: item.rationale ?? null,
       cta: item.cta ?? null,
       generation,
     } as Prisma.InputJsonObject,
@@ -233,6 +235,7 @@ export async function preparePlanItemInput(
   if (!item.siteId) throw new Error("editorial_plan_item_site_required");
   const site = await loadSite(tenantId, item.siteId);
   const generation = readGenerationSettings(item);
+  const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
   const evidence = planEvidenceToLedger(item.sourceEvidence);
@@ -262,6 +265,7 @@ export async function preparePlanItemInput(
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: typeof item.relevanceScore === "number" ? Math.max(0, Math.min(1, item.relevanceScore > 1 ? item.relevanceScore / 100 : item.relevanceScore)) : null,
     primaryEntityNames: [keyword],
+    siteArticleTargets: planningSettings?.articleTargets ?? null,
     ownProjectId: item.projectId,
     cluster: null,
     plan: {
@@ -322,6 +326,7 @@ function mapArticleType(record: Record<string, unknown>, generation: Record<stri
   const contentType = String(record.contentType ?? "").toLowerCase();
   if (/list|ranking|top/.test(contentType)) return "list_ranking";
   if (/review|analisis|análisis/.test(contentType)) return "review_info";
+  if (/guide|guia|guía|tutorial/.test(contentType)) return "guide";
   if (String(record.newsOrEvergreen ?? "").toLowerCase() === "news") return "standard_news";
   return "evergreen_explainer";
 }
@@ -352,8 +357,11 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
     ageHours: 24 * 30,
     now,
   });
-  const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || LENGTH_BY_TYPE[articleType].min;
-  const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, LENGTH_BY_TYPE[articleType].max);
+  // Guides: site override, then the article's own (generation.articleTargets).
+  const articleTargets = articleType === "guide" ? resolveArticleTargets(input.siteArticleTargets, plan.generation.articleTargets) : undefined;
+  const typeLength = articleTargets ? { min: Math.round(articleTargets.words * 0.87), max: Math.round(articleTargets.words * 1.13) } : LENGTH_BY_TYPE[articleType];
+  const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || typeLength.min;
+  const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, typeLength.max);
   const keywords = [...stringList(record.secondaryKeywords), ...stringList(record.semanticKeywords)];
   const brief = {
     ...base,
@@ -366,6 +374,7 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
       ...(record.freshnessRequirement ? [String(record.freshnessRequirement)] : []),
       "all dates and availability statements must come from the fact ledger",
     ],
+    ...(articleTargets ? { articleTargets } : {}),
   };
   return { brief, siteValueBlocks: [], previousArticle: null, updateDelta: null, guidance: plan.guidance };
 }

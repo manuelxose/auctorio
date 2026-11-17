@@ -2,6 +2,7 @@
 // parsed article and the brief. The engine never manufactures search
 // volume and never stuffs keywords.
 
+import { load } from "cheerio";
 import type {
   EditorialBrief,
   EngineInternalLink,
@@ -18,6 +19,34 @@ export function slugify(value: string, maxLength = 90): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, maxLength)
     .replace(/-+$/g, "");
+}
+
+/**
+ * Deterministic table of contents from the article's H2s (guides): each H2 gets a stable id and
+ * a `<nav data-block="toc">` goes after the summary box (or the first paragraph). Re-running replaces it.
+ */
+export function withTableOfContents(html: string, language: "es" | "en" = "es"): string {
+  const $ = load(html, null, false);
+  $('nav[data-block="toc"]').remove();
+  const headings = $("h2").filter((_index, el) => $(el).closest("aside, nav").length === 0);
+  if (headings.length < 3) return $.html();
+  const used = new Set<string>();
+  const items: string[] = [];
+  headings.each((index, el) => {
+    const node = $(el);
+    const text = node.text().replace(/\s+/g, " ").trim();
+    let id = slugify(text, 60) || `seccion-${index + 1}`;
+    for (let n = 2; used.has(id); n += 1) id = `${slugify(text, 60)}-${n}`;
+    used.add(id);
+    node.attr("id", id);
+    items.push(`<li><a href="#${id}">${$("<span>").text(text).html()}</a></li>`);
+  });
+  const nav = `<nav data-block="toc"><p><strong>${language === "es" ? "Índice" : "Contents"}</strong></p><ol>${items.join("")}</ol></nav>`;
+  const anchor = $('aside[data-block="summary"]').first();
+  if (anchor.length) anchor.after(nav);
+  else if ($("p").first().length) $("p").first().after(nav);
+  else $.root().prepend(nav);
+  return $.html();
 }
 
 export function stripHtml(value: string): string {
