@@ -355,3 +355,11 @@ test("planEvidenceToLedger carries the registry origin into ledger facts", async
   assert.deepEqual(facts[0].origin, { sourceId: "src-1", itemId: "item-1" });
   assert.equal(facts[1].origin, undefined);
 });
+
+test("postValidatePlanItems sizes guides from the guide target, not the model's guess", () => {
+  const guide = brief({ topic: "tv", workingTitle: "Guía para ver realities", contentType: "guide", recommendedWordCountMin: 350, recommendedWordCountMax: 600 });
+  const [byDefault] = postValidatePlanItems([guide], planInput, planningContext()).kept;
+  assert.deepEqual([byDefault.recommendedWordCountMin, byDefault.recommendedWordCountMax], [2001, 2599]);
+  const [bySite] = postValidatePlanItems([guide], { ...planInput, guideWords: 1500 }, planningContext()).kept;
+  assert.deepEqual([bySite.recommendedWordCountMin, bySite.recommendedWordCountMax], [1305, 1695]);
+});

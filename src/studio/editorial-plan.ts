@@ -20,6 +20,7 @@ import {
 import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
+import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
@@ -47,6 +48,8 @@ export type GenerateEditorialPlanInput = {
   allowWithoutIntelligence?: boolean;
   /** Deterministic publication slots; when set, publicationCount must equal slots.length. */
   slots?: PlanSlot[];
+  /** Guide length (site article_targets.words, else 2,300); guide/tutorial items are sized from it. */
+  guideWords?: number;
   slotRequest?: PlanSlotRequest;
   /** Extend an existing plan instead of creating one: only `slots` are generated, everything else is kept. */
   append?: PlanAppendMode;
@@ -203,7 +206,7 @@ function isNearDuplicateTitle(candidate: string, existing: string[]): boolean {
  */
 export function postValidatePlanItems(
   items: EditorialPlanBriefV2[],
-  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy" | "slots">,
+  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy" | "slots" | "guideWords">,
   context: EditorialPlanningContext,
 ): PostValidationResult {
   const kept: EditorialPlanBriefV2[] = [];
@@ -295,6 +298,12 @@ export function postValidatePlanItems(
     }
     wordMin = Math.max(200, Math.min(wordMin, wordMax));
     wordMax = Math.max(wordMin, Math.min(wordMax, formatTargets.max * 1.5));
+    // Guides use the guide template (production/plan-item.ts mapArticleType): its length wins over the model's guess.
+    if (item.contentType === "guide" || item.contentType === "tutorial") {
+      const words = input.guideWords ?? GUIDE_TARGETS.words;
+      wordMin = Math.round(words * 0.87);
+      wordMax = Math.round(words * 1.13);
+    }
 
     // 9. Duplicate target queries inside the same batch.
     const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : null;
@@ -496,8 +505,10 @@ ${SOURCE_DATA_RULES}`;
     const mergeBatch = mergePlanBatches;
     const avoidTitles = input.append?.avoidTitles ?? [];
     // Post-validation plus, when extending a plan, rejection of anything that repeats a proposal it already holds.
+    const planningSettings = input.siteId ? await prisma.sitePlanningSettings.findUnique({ where: { siteId: input.siteId }, select: { articleTargets: true } }) : null;
+    const guideWords = resolveArticleTargets(planningSettings?.articleTargets).words;
     const validate = (items: EditorialPlanBriefV2[], count: number): PostValidationResult => {
-      const batch = postValidatePlanItems(items, { ...input, publicationCount: count }, context);
+      const batch = postValidatePlanItems(items, { ...input, guideWords, publicationCount: count }, context);
       if (avoidTitles.length === 0) return batch;
       const avoidKeys = new Set(avoidTitles.map(normalizeSlug));
       const kept: EditorialPlanBriefV2[] = [];

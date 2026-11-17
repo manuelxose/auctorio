@@ -74,6 +74,7 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **Fechas en guías:** QA aceptaba solo los años del ledger y rechazaba guías por «2026» o una fecha de «actualizado el» inventada. En contenido no noticioso se admite el año actual; el prompt lo da y prohíbe fechas de actualización. Las noticias siguen igual.
 - **Entrega real (cierra M3b):** e2e `guiatv-seo-golden-path` 4/4 en local, pero el paso 4 pasa en dry-run (local publica en dry-run por defecto). Con solo el worker de publicación en vivo (`PUBLISH_DRY_RUN=false`, worker de automatización parado), GuíaTV creó el borrador `6afc4988ab6af65bec7d8c4c` (`/guias/realities-convivencia-tv-streaming-donde-ver`): contentType guide, 5 `faqItems`, sin índice duplicado y con la tarjeta CTA.
 - **Bug arreglado en esa entrega:** el worker reutilizaba el id `dryrun-…` de una entrega simulada y hacía `PUT /v2/blog/dryrun-…` (GuíaTV respondía 500). Ese id ya no cuenta como remoto, ni en la fila ni en `getLatestPublishedExternalId`; test en `worker-publishing` (6/6).
+- **Longitud de guías en el plan:** `postValidatePlanItems` fija los ítems guide/tutorial a ±13 % del objetivo de palabras del sitio (`article_targets.words`, 2.300 por defecto), sin importar lo que proponga el modelo. Test en `editorial-plan-v2`. `site-strategy` tiene un test de concurrencia que ya fallaba antes de este cambio.
 - **Pendiente:** los interruptores por sitio no tienen UI todavía (irán en Ajustes · Artículos, M5). El borrador de prueba sigue en GuíaTV como borrador. Su portada apunta a `localhost:4301` porque salió del entorno local.
 
 ### M5 · Nueva arquitectura de información
@@ -110,7 +111,7 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **M2:** los presets de prompt llegan al escritor como instrucciones; sus variables de plantilla ya no se rellenan. `worker-text` sigue vivo para el caso de uso de topics de `src/domain`.
 - **M3b:** al desplegar, los mensajes de cola sin publicación enlazada se descartan (normalmente despublicaciones o borradores de «publicar ahora»). Una despublicación web que falla del todo ya activa el circuit breaker del sitio.
 - **Entorno local:** el e2e de Autopilot depende del feed externo; la base local se limpia conservando tenant, usuario QA, sitios y datos del crawl de guiaprogramaciontv.com.
-- **M4:** los plan items `guide` heredan los `recommendedWordCount*` del generador de planes (350–600 en la prueba) y mandan sobre las ~2.300 de la plantilla. Con tan poco espacio el escritor suprime la tabla y el resumen, y el check «Estructura» lo marca. Decidir si el generador debe proponer ~2.300 para guías.
+- **M4:** los planes generados antes de este cambio conservan sus `recommendedWordCount*` cortos para guías (350–600 en la prueba). Con tan poco espacio el escritor suprime la tabla y el resumen; el check «Estructura» lo marca. Los planes nuevos ya salen con el rango de la guía.
 - **GuíaTV:** responde 500 (no 404) a un `PUT /v2/blog/:id` con id inválido.
 - **M4:** los plan items `guide` piden unas 2.300 palabras; los planes ya generados con `recommendedWordCount*` conservan su rango.
 - `npm run dev` aborta a veces al reiniciar: `taskkill` falla con un proceso hijo ya cerrado. Una segunda ejecución funciona.
