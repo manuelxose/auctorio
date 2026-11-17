@@ -20,6 +20,11 @@ Regla dura que se mantiene: **el motor nunca inventa volumen de búsqueda**
 (`seo-package.ts → searchVolumeDisclaimer`). Volumen y dificultad solo vienen de un proveedor real; si no hay
 proveedor, el campo es `null` y la UI muestra «—».
 
+Regla de pruebas: **todo test que gaste IA** (generar artículos o planes de prueba, comprobaciones en vivo de
+proveedores, «Fix with AI», subagentes o sesiones de test) usa como máximo `claude-sonnet-5-5` con esfuerzo
+medio (Haiku vale; Opus nunca). El modelo por defecto de Anthropic en la app es Opus 5.5: cambiar el sitio a
+Sonnet 5.5 antes de generar contenido de prueba.
+
 ---
 
 ## 1. Qué hace BLG (referencia exacta)
