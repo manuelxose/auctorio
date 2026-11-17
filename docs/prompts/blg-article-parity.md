@@ -173,6 +173,12 @@ Cada milestone: cambio mínimo completo, tests focales, `graphify update .` al f
    - **El modelo solo redacta el brief** (título, ángulo, outline, FAQ, tipo) de la keyword ya elegida; no elige keywords.
    - Límites de coste: tope de filas/llamadas por plan, caché por semilla y competidor (30 días), gasto en `aiSpendEvents`.
    - Sin credenciales DataForSEO → se mantiene el flujo actual (keywords del modelo) y la UI lo indica.
+   - **Dato real de M1 (2026-11-17)**: de 23 keywords inventadas por el modelo solo 6 existen en la base de
+     DataForSEO Labs (p. ej. «audiencias tv» 135.000/KD 18, «programación La 2 hoy» 12.100/KD 0); las frases
+     del modelo («deporte en TV abierto y de pago», «qué echan ahora») no tienen datos. Por eso las candidatas
+     deben salir de `keyword_ideas`/`ranked_keywords` (todas traen métricas). Para keywords añadidas a mano sin
+     datos en Labs, fallback opcional a `keywords_data/google_ads/search_volume/live` (solo volumen, rangos
+     como 10 o 50, igual que muestra BLG). Coste observado: ~0,012 USD por llamada de Labs aunque no haya datos.
 3. `contentType` por item: `explainer` | `listicle` (y los existentes); visible en la tarjeta.
 4. UI del calendario (`PlanPipelineViewComponent` / vista calendario de M5): contadores
    Published/Generated/Queued; tarjeta en cola con keyword, `Difficulty: N`, `Volume: N`, tipo;
