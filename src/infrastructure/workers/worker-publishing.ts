@@ -108,6 +108,10 @@ export async function processPublishingJob(data: Pick<PublishingJobData, "attemp
       result = externalId ? await publisher.updateDraft(context, externalId) : await publisher.publishDraft(context);
     } else {
       result = await publisher.publish(context, externalId);
+      // A publish order never ends as a remote draft: fail (and retry on the same post) instead of claiming it is live.
+      if (result.effectiveTargetStatus === "draft") {
+        throw Object.assign(new Error("destination_kept_draft: the site saved the article as a draft instead of publishing it"), { externalId: result.externalId ?? null });
+      }
     }
   } catch (error) {
     const remoteId = (error as { externalId?: unknown }).externalId;

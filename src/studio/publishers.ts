@@ -566,23 +566,23 @@ class GuiaTvPublisher implements PublisherAdapter {
     // Validate the approval identity before creating a remote draft, so a
     // missing credential cannot leave orphaned unpublished records in GuiaTV.
     const approvalHeaders = this.getApprovalHeaders(context.site);
-    const draft = externalId ? { externalId } : await this.publishDraft(context);
-    if (!draft.externalId) return draft;
+    // An existing post gets the current version first (GuíaTV keeps it as a draft until approved), then approval.
+    const draft = externalId ? await this.updateDraft(context, externalId) : await this.publishDraft(context);
+    if (!draft.externalId) throw new Error("guiatv_draft_without_id: the draft was not created, nothing to approve");
 
     const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-    const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(
-      `${siteBaseUrl}/v2/blog/${draft.externalId}/approve`,
-      {
-        method: "POST",
-        headers: approvalHeaders,
-        body: { notes: "Automatically approved after Auctorio maximum quality gates." },
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      },
-    ).catch((error: unknown) => {
-      // The remote draft exists: carry its id so the retry approves it instead of creating another.
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
-    });
+    // With the Auctorio review key GuíaTV publishes directly (its owner decision, ADR 0001); only its emergency stop and blocking findings refuse.
+    const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(`${siteBaseUrl}/v2/blog/${draft.externalId}/approve`, {
+      method: "POST",
+      headers: approvalHeaders,
+      body: { notes: "Approved by Auctorio after its quality gates." },
+      timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+      retries: 1,
+    })
+      .catch((error: unknown) => {
+        // The remote draft exists: carry its id so the retry approves it instead of creating another.
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
+      });
     return {
       externalId: draft.externalId,
       externalUrl: response.data?.post?.link || null,
@@ -1361,10 +1361,12 @@ class GenericRestPublisher implements PublisherAdapter {
         timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
         retries: 1,
       });
+      // WordPress-style APIs echo the stored status: "pending"/"draft" means the site did not publish it.
+      const stored = typeof response.status === "string" ? response.status : "publish";
       return {
         externalId,
         externalUrl: typeof response.link === "string" ? response.link : null,
-        effectiveTargetStatus: "publish",
+        effectiveTargetStatus: stored === "publish" || stored === "future" ? "publish" : "draft",
         responsePayload: response,
       };
     }

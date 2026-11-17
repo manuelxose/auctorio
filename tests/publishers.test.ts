@@ -301,7 +301,7 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
       assert.equal(req.headers["x-admin-key"], "guiatv-secret");
       assert.equal(req.headers["x-editorial-review-key"], "review-secret");
       assert.equal(req.headers["x-editorial-reviewer"], "auctorio-quality-gate");
-      assert.match(String(body.notes), /maximum quality gates/i);
+      assert.match(String(body.notes), /Auctorio/);
       res.statusCode = 200;
       res.setHeader("content-type", "application/json");
       res.end(
@@ -314,6 +314,15 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
           },
         }),
       );
+      return;
+    }
+
+    if (req.url === "/v2/blog/post-1" && req.method === "PUT") {
+      // The current version goes up before approval.
+      assert.equal((JSON.parse(bodyText) as Record<string, unknown>).status, "draft");
+      res.statusCode = 200;
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({ data: { post: { id: "post-1", link: "https://guiatv.example/editorial/proyecto-test" } } }));
       return;
     }
 
@@ -357,7 +366,7 @@ test("guiatv supports draft, publish and unpublish flows against the real contra
 
     const deleted = await publisher.unpublish(context, "post-1");
     assert.equal(deleted.externalId, "post-1");
-    assert.equal(server.requests.length, 3);
+    assert.equal(server.requests.length, 4);
   } finally {
     await server.close();
   }
@@ -900,6 +909,11 @@ test("guiatv approve failure keeps the created draft id so a retry approves inst
       res.end(JSON.stringify({ data: { post: { id: "post-7", link: "https://guiatv.example/editorial/proyecto-test" } } }));
       return;
     }
+    if (req.url === "/v2/blog/post-7" && req.method === "PUT") {
+      res.statusCode = 200;
+      res.end(JSON.stringify({ data: { post: { id: "post-7", link: "https://guiatv.example/editorial/proyecto-test" } } }));
+      return;
+    }
     if (req.url === "/v2/blog/post-7/approve" && req.method === "POST") {
       approveCalls += 1;
       // First approve fails (both in-call tries), the retry succeeds.
@@ -950,3 +964,4 @@ test("guiatv does not retry the non-idempotent draft creation", async () => {
     await server.close();
   }
 });
+

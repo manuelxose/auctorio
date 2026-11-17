@@ -198,3 +198,20 @@ test("processPublishingJob never updates a dry-run id: a real delivery after a s
   assert.deepEqual(updated, []);
   assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:draft:remote-1", "clear-published"]);
 });
+
+test("processPublishingJob fails a publish order the destination kept as a draft, keeping the remote id for the retry", async () => {
+  const calls: string[] = [];
+  await assert.rejects(
+    processPublishingJob(
+      JOB,
+      dependencies(buildPublication(), calls, {
+        publisher: {
+          publish: async () => ({ externalId: "remote-draft-7", effectiveTargetStatus: "draft", responsePayload: {} }),
+        },
+      }),
+    ),
+    /destination_kept_draft/,
+  );
+  assert.ok(calls.includes("record:remote-draft-7"));
+  assert.ok(!calls.includes("mark-published"));
+});
