@@ -237,6 +237,22 @@ checklist exija la tabla solo cuando hay comparación.
    todas listadas en «Fuentes».
 3. Recomendaciones: 3–5 posts del mismo sitio con mayor afinidad temática.
 
+**Estado M4 (2026-11-17, parcial — los enlaces pasan a ser requisito, no adorno)**: los artículos publicados de BLG
+llevan ≥10 internos y a menudo 25+ externos. Antes el redactor recibía como mucho 6 internos (`loadInternalLinks`
+limit 6) y los externos solo salían de `sourceEvidence` del plan (2–4 URLs), con objetivo 4. Ahora:
+- Objetivos: `externalLinks` por defecto 20 (máx. 40), `internalLinks` 15. El prompt exige «AT LEAST N» de cada uno.
+- Internos: el redactor recibe objetivo + 5 candidatos. `suggestInternalLinks` (tope 40) completa con las páginas
+  más superficiales del sitio (`fillWithHubs`) cuando no hay bastantes coincidencias de keyword.
+- Externos: `src/studio/serp-sources.ts` toma la SERP real de la keyword desde DataForSEO Labs `historical_serps`
+  (la última captura, hasta 100 orgánicos, ~0,0008 USD, caché 7 días, gasto `serp_sources`) y la convierte en
+  hechos del ledger (título + snippet, editor = dominio, URL real), sin el dominio propio ni los competidores
+  `accepted`. La SERP live de Google ya no sirve: envuelve la mayoría de URLs en `google.com/goto` tras una
+  comprobación anti‑bot. Solo se aplica a items keyword-first (`guide`).
+- QA: «Fuente creíble» exige `min(externalLinks, fuentes con URL del ledger)` (`externalSourceInventorySize` en
+  los metadatos del proyecto), no ≥1.
+Pendiente: leer las páginas fuente (ahora el redactor cita título + snippet, no el contenido), posts propios
+publicados como candidatos y Recomendaciones por afinidad, anchors sin repetir URL, y medir en BLG con sesión iniciada.
+
 ### M5 — CTAs y marca
 
 1. Ajustes por sitio: Link card (titular, frase, URL, texto botón), Contact card, Map card, Promo paragraph.

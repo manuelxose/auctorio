@@ -38,9 +38,9 @@ function anchorFromTitle(title: string): string {
 export async function suggestInternalLinks(
   tenantId: string,
   siteId: string,
-  options: { keyword?: string | null; topic?: string | null; query?: string | null; excludeUrl?: string | null; limit?: number } = {},
+  options: { keyword?: string | null; topic?: string | null; query?: string | null; excludeUrl?: string | null; limit?: number; fillWithHubs?: boolean } = {},
 ): Promise<InternalLinkSuggestion[]> {
-  const limit = Math.min(20, Math.max(1, options.limit ?? 5));
+  const limit = Math.min(40, Math.max(1, options.limit ?? 5));
   const queryTokens = tokenize(`${options.keyword ?? ""} ${options.topic ?? ""} ${options.query ?? ""}`);
   if (queryTokens.length === 0) {
     return [];
@@ -53,6 +53,7 @@ export async function suggestInternalLinks(
   });
 
   const suggestions: InternalLinkSuggestion[] = [];
+  const hubs: Array<InternalLinkSuggestion & { depth: number; words: number }> = [];
   for (const page of pages) {
     if (options.excludeUrl && page.url === options.excludeUrl) {
       continue;
@@ -64,6 +65,8 @@ export async function suggestInternalLinks(
     const urlHits = queryTokens.filter((token) => urlTokens.includes(token)).length;
     const keywordMatchScore = titleHits * 3 + urlHits * 2;
     if (keywordMatchScore === 0) {
+      // Guides need ≥10 internal links (BLG parity): top up with the site's shallowest pages (hubs, sections).
+      if (options.fillWithHubs) hubs.push({ url: page.url, title, anchor: anchorFromTitle(title), reason: "site hub page", score: 0, depth: urlDepth(page.url), words: page.wordCount ?? 0 });
       continue;
     }
 
@@ -94,5 +97,15 @@ export async function suggestInternalLinks(
     });
   }
 
-  return suggestions.sort((a, b) => b.score - a.score).slice(0, limit);
+  const ranked = suggestions.sort((a, b) => b.score - a.score).slice(0, limit);
+  const fill = hubs.sort((a, b) => a.depth - b.depth || b.words - a.words).slice(0, limit - ranked.length);
+  return [...ranked, ...fill.map(({ depth: _depth, words: _words, ...link }) => link)];
+}
+
+function urlDepth(url: string): number {
+  try {
+    return new URL(url).pathname.split("/").filter(Boolean).length;
+  } catch {
+    return 99;
+  }
 }

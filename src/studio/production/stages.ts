@@ -219,6 +219,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
       evidenceCount: input.ledgerFacts.length,
       cannibalizationRisk: overlap ? "high" : typeof record.cannibalizationRisk === "string" ? record.cannibalizationRisk : null,
       internalLinkInventorySize: input.internalLinks.length,
+      externalSourceInventorySize: externalSourceCount(input.ledgerFacts),
     },
   );
   return { editorial, version };
@@ -282,7 +283,9 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
   // Guide targets + inventory size: QA v2 re-runs rebuild the checklist from project metadata; publishers read the JSON-LD switch.
   const articleTargets = need(ctx.artifacts.brief, "brief").brief.articleTargets;
-  const guideMetadata = articleTargets ? { articleTargets, internalLinkInventorySize: input.internalLinks.length } : {};
+  const guideMetadata = articleTargets
+    ? { articleTargets, internalLinkInventorySize: input.internalLinks.length, externalSourceInventorySize: externalSourceCount(input.ledgerFacts) }
+    : {};
   const sourceOrigins = input.ledgerFacts.flatMap((fact) => (fact.origin ? [{ ...fact.origin, url: fact.sourceUrl }] : [])).slice(0, 40);
 
   if (!existing) {
@@ -443,4 +446,9 @@ export function getDefaultProductionStages(): ProductionStageRegistry {
 /** Test seam: replace stages (spies, fake image queue). Pass null to restore defaults. */
 export function setProductionStageOverrides(overrides: Partial<ProductionStageRegistry> | null): void {
   Object.assign(productionStages, defaultStages, overrides ?? {});
+}
+
+/** Distinct source URLs in the ledger: the most external links a guide can honestly carry. */
+function externalSourceCount(facts: Array<{ sourceUrl: string | null }>): number {
+  return new Set(facts.map((fact) => fact.sourceUrl).filter(Boolean)).size;
 }

@@ -69,6 +69,12 @@ test("internal linking engine only suggests real indexed inventory URLs", async 
       excludeUrl: "https://guiatv.example/ranking/mejores-series-netflix",
     });
     assert.ok(excluded.every((suggestion) => suggestion.url !== "https://guiatv.example/ranking/mejores-series-netflix"));
+
+    // Guides top up with unmatched pages, shallowest first, after every keyword match.
+    const filled = await suggestInternalLinks(tenant.id, site.id, { keyword: "series netflix", limit: 10, fillWithHubs: true });
+    assert.equal(filled.length, 3);
+    assert.equal(filled.at(-1)?.reason, "site hub page");
+    assert.equal(filled.at(-1)?.url, "https://guiatv.example/donde-ver/la-isla");
   } finally {
     await prisma.siteIndexedPage.deleteMany({ where: { tenantId: tenant.id } });
     await prisma.site.deleteMany({ where: { id: site.id } });

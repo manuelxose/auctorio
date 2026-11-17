@@ -50,30 +50,55 @@ export function normalizeKeyword(keyword: string): string {
 
 const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
-/** Parse a keyword_overview/live response. Throws when the API reports a failure. */
-export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; costUsd: number } {
+/** Every item of every task result, after DataForSEO's own status checks. */
+function resultItems(body: unknown): { raws: unknown[]; costUsd: number } {
   const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ items?: unknown[] | null }> | null }> };
   if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
-  const items: KeywordMetrics[] = [];
+  const raws: unknown[] = [];
   for (const task of root.tasks ?? []) {
     if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
-    for (const result of task.result ?? []) {
-      for (const raw of result.items ?? []) {
-        // ranked_keywords nests the keyword under keyword_data; overview/ideas items are flat.
-        const item = ((raw as { keyword_data?: unknown })?.keyword_data ?? raw) as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
-        if (typeof item.keyword !== "string") continue;
-        items.push({
-          keyword: normalizeKeyword(item.keyword),
-          volume: num(item.keyword_info?.search_volume),
-          difficulty: num(item.keyword_properties?.keyword_difficulty),
-          cpc: num(item.keyword_info?.cpc),
-          intent: typeof item.search_intent_info?.main_intent === "string" ? item.search_intent_info.main_intent : null,
-          source: "dataforseo",
-        });
-      }
-    }
+    for (const result of task.result ?? []) raws.push(...(result.items ?? []));
   }
-  return { items, costUsd: num(root.cost) ?? 0 };
+  return { raws, costUsd: num(root.cost) ?? 0 };
+}
+
+/** Parse a keyword_overview/live response. Throws when the API reports a failure. */
+export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; costUsd: number } {
+  const { raws, costUsd } = resultItems(body);
+  const items: KeywordMetrics[] = [];
+  for (const raw of raws) {
+    // ranked_keywords nests the keyword under keyword_data; overview/ideas items are flat.
+    const item = ((raw as { keyword_data?: unknown })?.keyword_data ?? raw) as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
+    if (typeof item.keyword !== "string") continue;
+    items.push({
+      keyword: normalizeKeyword(item.keyword),
+      volume: num(item.keyword_info?.search_volume),
+      difficulty: num(item.keyword_properties?.keyword_difficulty),
+      cpc: num(item.keyword_info?.cpc),
+      intent: typeof item.search_intent_info?.main_intent === "string" ? item.search_intent_info.main_intent : null,
+      source: "dataforseo",
+    });
+  }
+  return { items, costUsd };
+}
+
+export type SerpResult = { url: string; title: string; domain: string; description: string };
+
+/**
+ * Organic results (no ads, maps, videos) of the most recent stored SERP snapshot, in ranking order.
+ * Live Google SERPs now wrap most URLs in google.com/goto redirects behind a bot check; Labs snapshots keep the real URLs.
+ */
+export function parseSerpOrganic(body: unknown): { results: SerpResult[]; costUsd: number } {
+  const { raws, costUsd } = resultItems(body);
+  const snapshots = raws as Array<{ datetime?: string; items?: unknown[] | null }>;
+  const latest = snapshots.reduce<(typeof snapshots)[number] | null>((best, snap) => (!best || String(snap?.datetime ?? "") > String(best.datetime ?? "") ? snap : best), null);
+  const results: SerpResult[] = [];
+  for (const raw of (latest?.items ?? []) as Array<{ type?: string; url?: unknown; title?: unknown; domain?: unknown; description?: unknown }>) {
+    if (raw?.type !== "organic" || typeof raw.url !== "string" || typeof raw.title !== "string" || /google\.com\/goto/.test(raw.url)) continue;
+    const domain = typeof raw.domain === "string" ? raw.domain.replace(/^www\./, "") : "";
+    results.push({ url: raw.url, title: raw.title, domain, description: typeof raw.description === "string" ? raw.description : "" });
+  }
+  return { results, costUsd };
 }
 
 /** One Labs live task; every Labs keyword endpoint returns items in the keyword_overview shape. */
@@ -83,8 +108,17 @@ async function postLabsTask(
   location: DataForSeoLocation,
   fetchImpl: typeof fetch,
 ): Promise<{ items: KeywordMetrics[]; costUsd: number }> {
+  return parseKeywordOverview(await postLive(`${LABS}/${path}/live`, task, location, fetchImpl));
+}
+
+/** Google organic results for a keyword (latest Labs snapshot, up to 100): the real pages a guide can cite as sources. */
+export async function fetchSerpOrganic(keyword: string, location: DataForSeoLocation, fetchImpl: typeof fetch = fetch) {
+  return parseSerpOrganic(await postLive(`${LABS}/historical_serps/live`, { keyword }, location, fetchImpl));
+}
+
+async function postLive(url: string, task: Record<string, unknown>, location: DataForSeoLocation, fetchImpl: typeof fetch): Promise<unknown> {
   const auth = Buffer.from(`${getEnv("DATAFORSEO_LOGIN")}:${getEnv("DATAFORSEO_PASSWORD")}`).toString("base64");
-  const response = await fetchImpl(`${LABS}/${path}/live`, {
+  const response = await fetchImpl(url, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
     body: JSON.stringify([{ ...task, location_code: location.locationCode, language_code: location.languageCode }]),
@@ -93,7 +127,7 @@ async function postLabsTask(
   const body = await response.json().catch(() => null);
   // Errors carry DataForSEO's own reason (e.g. 40104 account not verified), not just the HTTP status.
   if (!response.ok) throw new Error(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim());
-  return parseKeywordOverview(body);
+  return body;
 }
 
 /** One live call per ≤700 keywords. Keywords without data are simply absent from the result. */

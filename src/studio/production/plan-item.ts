@@ -7,6 +7,7 @@ import { Prisma, type EditorialPlanItem } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { createProject } from "../repository";
 import { suggestInternalLinks } from "../internal-linking";
+import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
 import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveWritingSettings } from "../editorial-engine/structure";
@@ -186,8 +187,8 @@ async function loadSite(tenantId: string, siteId: string) {
   return site;
 }
 
-async function loadInternalLinks(tenantId: string, siteId: string, keyword: string, topic: string, planUrls: string[]): Promise<EngineInternalLink[]> {
-  const suggested = await suggestInternalLinks(tenantId, siteId, { keyword, topic, limit: 6 });
+async function loadInternalLinks(tenantId: string, siteId: string, keyword: string, topic: string, planUrls: string[], limit = 6): Promise<EngineInternalLink[]> {
+  const suggested = await suggestInternalLinks(tenantId, siteId, { keyword, topic, limit, fillWithHubs: limit > 6 });
   const links: EngineInternalLink[] = suggested.map((link) => ({ ...link }) as EngineInternalLink);
   const missing = planUrls.filter((url) => !links.some((link) => link.url === url));
   if (missing.length > 0) {
@@ -251,7 +252,26 @@ export async function preparePlanItemInput(
   const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
-  const evidence = planEvidenceToLedger(item.sourceEvidence);
+  const planEvidence = planEvidenceToLedger(item.sourceEvidence);
+  // Links are primary (BLG parity M4): enough internal candidates for the target, and the pages Google ranks
+  // for the keyword as citable external sources (own site and accepted competitors excluded).
+  const targets = resolveArticleTargets(planningSettings?.articleTargets, generation.articleTargets);
+  const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId: site.id, status: "accepted" }, select: { domain: true } });
+  const serpFacts = item.primaryKeyword && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide"
+    ? await serpSourceFacts({
+        tenantId,
+        siteId: site.id,
+        locale: site.locale,
+        keyword: item.primaryKeyword,
+        exclude: {
+          domains: [hostOf(site.baseUrl), ...competitors.map(({ domain }) => hostOf(`https://${domain.replace(/^https?:\/\//, "")}`))].filter((domain): domain is string => Boolean(domain)),
+          urls: planEvidence.facts.map((fact) => fact.sourceUrl).filter((url): url is string => Boolean(url)),
+        },
+        max: targets.externalLinks + 5, // a few spare so the writer picks the relevant ones
+      })
+    : [];
+  const facts = [...planEvidence.facts, ...serpFacts];
+  const evidence = { facts, groups: new Set(facts.map((fact) => fact.publisherGroup)).size };
   const entities: EngineEntity[] = stringList(item.relatedEntities).map((name, index) => ({
     id: `plan-entity-${index}`,
     domain: "editorial_plan",
@@ -276,7 +296,7 @@ export async function preparePlanItemInput(
     sourceTexts: evidence.facts.map((fact) => fact.statement),
     // Site writing settings: internal linking can be off, and URLs follow its www / trailing-slash choice.
     internalLinks: writing.internalLinks.enabled
-      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks))).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks), targets.internalLinks + 5)).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
       : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: typeof item.relevanceScore === "number" ? Math.max(0, Math.min(1, item.relevanceScore > 1 ? item.relevanceScore / 100 : item.relevanceScore)) : null,

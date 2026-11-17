@@ -35,6 +35,7 @@ export type QaVersionContext = {
   evidenceCount?: number;
   cannibalizationRisk?: string | null;
   internalLinkInventorySize?: number;
+  externalSourceInventorySize?: number;
 };
 
 const GENERIC_AI_PHRASES = [
@@ -304,6 +305,7 @@ export function runVersionQaV2(
     targets: metadata.articleTargets && typeof metadata.articleTargets === "object" ? (metadata.articleTargets as ArticleTargets) : null,
     cannibalizationRisk: context.cannibalizationRisk ?? null,
     internalLinkInventorySize: context.internalLinkInventorySize ?? storedInventory,
+    externalSourceInventorySize: context.externalSourceInventorySize ?? (typeof metadata.externalSourceInventorySize === "number" ? metadata.externalSourceInventorySize : null),
   });
 
   return { passed, score, checks, findings, checklist };

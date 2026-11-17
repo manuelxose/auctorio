@@ -15,6 +15,8 @@ export type ChecklistInput = {
   targets: ArticleTargets | null;
   cannibalizationRisk: string | null;
   internalLinkInventorySize: number | null;
+  /** Ledger facts with a source URL the writer could cite; caps the external-link target. */
+  externalSourceInventorySize?: number | null;
 };
 
 const fold = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -52,7 +54,9 @@ export function runQualityChecklist(input: ChecklistInput): ChecklistItem[] {
 
   // 4. Credible source: external links.
   const external = (html.match(/<a[^>]+href=["']https?:\/\//gi) ?? []).length;
-  add("credible_source", "Fuente creíble", external >= 1, `${external} enlace(s) a fuentes externas${targets ? `; objetivo ~${targets.externalLinks}` : ""}.`);
+  const inventory = input.externalSourceInventorySize ?? null;
+  const externalRequired = targets ? Math.max(1, inventory === null ? targets.externalLinks : Math.min(targets.externalLinks, inventory)) : 1;
+  add("credible_source", "Fuente creíble", external >= externalRequired, `${external} enlace(s) a fuentes externas; objetivo ${externalRequired}.`);
 
   // 5. Structure: H2s, and for guides the comparison table, FAQ and summary box.
   const h2 = (html.match(/<h2[^>]*>/gi) ?? []).length;

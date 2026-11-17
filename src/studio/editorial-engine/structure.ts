@@ -100,8 +100,9 @@ export type ArticleTargets = {
 
 export const GUIDE_TARGETS: ArticleTargets = {
   words: 2300,
+  // BLG guides carry ≥10 internal and often 25+ external links: links are primary, not decoration.
   internalLinks: 15,
-  externalLinks: 4,
+  externalLinks: 20,
   images: 5,
   faqCount: 5,
   sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true, linkCard: true, promo: true },
@@ -111,7 +112,7 @@ export const GUIDE_TARGETS: ArticleTargets = {
 const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections" | "summaryVariant">, [number, number]> = {
   words: [300, 6000],
   internalLinks: [0, 40],
-  externalLinks: [0, 20],
+  externalLinks: [0, 40],
   images: [0, 12],
   faqCount: [0, 12],
 };
@@ -558,7 +559,8 @@ export function renderStructureSpec(spec: StructureSpec, language: "es" | "en" =
   }
   if (targets) {
     lines.push(
-      `Targets: about ${targets.words} words; ${targets.internalLinks} internal links (only brief URLs, fewer if the brief has fewer); about ${targets.externalLinks} external source links; ${targets.sections.faq ? `${targets.faqCount} FAQ questions; ` : ""}every image needs a descriptive alt.`,
+      `Targets: about ${targets.words} words; ${targets.sections.faq ? `${targets.faqCount} FAQ questions; ` : ""}every image needs a descriptive alt.`,
+      `Links are mandatory, not optional: AT LEAST ${targets.internalLinks} internal links spread through the body with descriptive anchors (only brief URLs; fewer only if the brief has fewer), and AT LEAST ${targets.externalLinks} external links to distinct sources from the fact ledger (inline attributions plus the Sources list; fewer only if the ledger has fewer).`,
     );
   }
   if (language === "es") lines.push("All headings and body text must be written in Spanish.");

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { runQualityChecklist, type ChecklistInput } from "../src/studio/editorial-engine/quality-checklist";
 import { GUIDE_TARGETS, getStructureSpec, renderStructureSpec, resolveArticleTargets } from "../src/studio/editorial-engine/structure";
 import { mapArticleType, siteGuidance } from "../src/studio/production/plan-item";
+import { serpResultsToFacts } from "../src/studio/serp-sources";
+import { parseSerpOrganic } from "../src/infrastructure/seo/dataforseo";
 import { withTableOfContents } from "../src/studio/editorial-engine/seo-package";
 import { buildPublicationJsonLd, faqItemsFromHtml } from "../src/studio/editorial-engine/json-ld";
 import { sanitizeEditorialHtml } from "../src/studio/html-sanitizer";
@@ -43,6 +45,7 @@ function checklistInput(bodyHtml: string): ChecklistInput {
     targets: GUIDE_TARGETS,
     cannibalizationRisk: "none",
     internalLinkInventorySize: 30,
+    externalSourceInventorySize: 4,
   };
 }
 
@@ -107,6 +110,42 @@ test("M3: plan items with a primary keyword use the guide template; news and rev
   assert.deepEqual(siteGuidance({ name: "GuíaTV", baseUrl: "https://www.guiaprogramaciontv.com" }), [
     "Site name: GuíaTV — domain: guiaprogramaciontv.com — home URL (allowed link): https://www.guiaprogramaciontv.com",
   ]);
+});
+
+test("M4 links: external target capped by citable sources; prompt makes link minimums mandatory", () => {
+  const credible = (externalSourceInventorySize: number | null) =>
+    runQualityChecklist({ ...checklistInput(guideHtml()), externalSourceInventorySize }).find((item) => item.key === "credible_source")?.passed;
+  assert.equal(credible(4), true);
+  assert.equal(credible(25), false, "25 sources available but only 4 cited");
+  assert.equal(credible(null), false, "unknown inventory → full target of 20");
+  assert.equal(GUIDE_TARGETS.externalLinks, 20);
+  const prompt = renderStructureSpec(getStructureSpec("guide"), "es", [], GUIDE_TARGETS);
+  assert.match(prompt, /AT LEAST 15 internal links/);
+  assert.match(prompt, /AT LEAST 20 external links/);
+});
+
+test("M4 SERP sources: latest snapshot, organic only, own site + competitors + known URLs excluded, capped", () => {
+  const body = {
+    status_code: 20000,
+    cost: 0.006,
+    tasks: [{ status_code: 20000, result: [{ items: [{ datetime: "2025-01-01 00:00:00 +00:00", items: [{ type: "organic", url: "https://old.example/x", title: "Old", domain: "old.example" }] }, { datetime: "2026-09-02 04:55:15 +00:00", items: [
+      { type: "organic", url: "https://google.com/goto?url=X", title: "Wrapped", domain: "google.com" },
+      { type: "paid", url: "https://ads.example.com", title: "Ad", domain: "ads.example.com" },
+      { type: "organic", url: "https://www.xataka.com/tdt", title: "Canales TDT", domain: "www.xataka.com", description: "Lista de canales." },
+      { type: "organic", url: "https://guiaprogramaciontv.com/canales", title: "Own", domain: "guiaprogramaciontv.com" },
+      { type: "organic", url: "https://m.rival.es/tdt", title: "Rival", domain: "m.rival.es" },
+      { type: "organic", url: "https://www.ocu.org/tdt", title: "OCU TDT", domain: "www.ocu.org" },
+      { type: "organic", url: "https://www.boe.es/ley", title: "Ley 13/2022", domain: "www.boe.es" },
+    ] }] }] }],
+  };
+  const { results, costUsd } = parseSerpOrganic(body);
+  assert.equal(costUsd, 0.006);
+  assert.equal(results.length, 5);
+  const facts = serpResultsToFacts(results, { domains: ["guiaprogramaciontv.com", "rival.es"], urls: ["https://www.ocu.org/tdt"] }, 5);
+  assert.deepEqual(facts.map((fact) => fact.publisher), ["xataka.com", "boe.es"]);
+  assert.equal(facts[0].statement, "Canales TDT: Lista de canales.");
+  assert.equal(facts[0].sourceUrl, "https://www.xataka.com/tdt");
+  assert.equal(serpResultsToFacts(results, { domains: [], urls: [] }, 2).length, 2);
 });
 
 test("TOC: built from the H2s after the summary box, stable ids, idempotent, survives the sanitizer", () => {
