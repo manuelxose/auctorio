@@ -194,3 +194,12 @@ test("HTTP: /v2/overview?siteId scopes counts to the active site, not the tenant
     await prisma.tenant.deleteMany({ where: { id: t.id } });
   }
 });
+
+test("a site with stored publishing credentials shows as connected, without claiming a verification", async () => {
+  const { legacySiteToConnection } = await import("../src/studio/destination-readiness");
+  const connection = legacySiteToConnection({ id: "site-1", name: "Guia" });
+  assert.equal(connection.connectionState, "connected");
+  assert.equal(connection.lastVerifiedAt, null);
+  assert.equal(connection.checks.capabilitiesVerified, false);
+  assert.match(connection.reason, /not been checked/);
+});
