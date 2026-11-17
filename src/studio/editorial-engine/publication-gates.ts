@@ -10,19 +10,22 @@ import type {
   PublicationGateResult,
   PublicationGatesConfig,
 } from "./types";
+import { DEFAULT_AUTONOMOUS_GATE_CONFIG } from "../quality-gate";
 
+// One config for every gate: AutomationPolicy.autonomousQaThresholds (also read by quality-gate.ts).
 export const DEFAULT_PUBLICATION_GATES: PublicationGatesConfig = {
-  minQaScore: 75,
+  minQaScore: DEFAULT_AUTONOMOUS_GATE_CONFIG.overallQualityScore,
   allowUnsupportedClaims: false,
   allowCopyrightWarning: false,
   minSourceGroups: 1,
   minSiteMatch: 0.5,
-  requireHumanApproval: true,
+  // Non-autopilot modes already go to review through the policy chain; this is an explicit opt-in.
+  requireHumanApproval: false,
 };
 
 export type GatesInput = {
   qa: EditorialQaReport;
-  /** Raw config JSON from AutomationPolicy.qaGates. */
+  /** Raw AutomationPolicy.autonomousQaThresholds JSON. */
   configJson: Record<string, unknown> | null;
   policy: {
     autoGenerate: boolean;
@@ -43,9 +46,9 @@ export function resolveGatesConfig(configJson: Record<string, unknown> | null): 
   if (!configJson || typeof configJson !== "object") {
     return base;
   }
-  const autoPublish = (configJson.autoPublish ?? {}) as Record<string, unknown>;
+  const autoPublish = configJson;
   return {
-    minQaScore: typeof autoPublish.minQaScore === "number" ? autoPublish.minQaScore : base.minQaScore,
+    minQaScore: typeof autoPublish.overallQualityScore === "number" ? autoPublish.overallQualityScore : base.minQaScore,
     allowUnsupportedClaims:
       typeof autoPublish.allowUnsupportedClaims === "boolean" ? autoPublish.allowUnsupportedClaims : base.allowUnsupportedClaims,
     allowCopyrightWarning:

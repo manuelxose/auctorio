@@ -229,7 +229,7 @@ async function gates(ctx: StageContext): Promise<GatesArtifact> {
   const copyrightWarning = hasCopyrightWarningCues(input.memberTitles);
   const decision = evaluatePublicationGates({
     qa: qaArtifact.editorial,
-    configJson: asRecord(policy.qaGates),
+    configJson: asRecord(policy.autonomousQaThresholds),
     policy: { autoGenerate: policy.autoGenerate, autoApprove: policy.autoApprove, autoSchedule: policy.autoSchedule, autoPublish: policy.autoPublish },
     sourceGroups: summarizeProvenance(provenance).sourceGroups.size,
     siteFitScore: input.siteFitScore,

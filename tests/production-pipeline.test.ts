@@ -17,6 +17,7 @@ import {
 } from "../src/studio/production/pipeline";
 import { getDefaultProductionStages, setProductionStageOverrides } from "../src/studio/production/stages";
 import { listOperations } from "../src/studio/operations";
+import { listCalendarEvents } from "../src/studio/calendar";
 import { FakeWriter } from "./support/fake-editorial-writer";
 
 const prisma = getPrismaClient();
@@ -333,6 +334,55 @@ test("M2: a source-item project's stored facts reach the ledger, so its rewrite 
       done = await getProductionJob(f.tenantId, job.id);
     }
     assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M3: an autopilot plan item that passes the single gate schedules itself in its slot", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 2 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  await prisma.automationPolicy.create({
+    data: {
+      tenantId: f.tenantId, siteId: f.siteId, mode: "autopilot", enabled: true, autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true,
+      autonomousQaThresholds: { overallQualityScore: 0, minSourceGroups: 0, minSiteMatch: 0 },
+    },
+  });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const done = await getProductionJob(f.tenantId, job.id);
+    assert.equal(done!.status, "ready", done!.error ?? "");
+    const publication = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" }, include: { version: true } });
+    assert.equal(publication.status, "scheduled");
+    assert.equal(publication.scheduledFor?.toISOString(), slot.toISOString());
+    assert.equal(publication.version.status, "approved");
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M3: the calendar reports the derived lifecycle through an assisted run", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 2 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  const window = { from: new Date(Date.now() - 86_400_000), to: new Date(Date.now() + 5 * 86_400_000), siteId: f.siteId };
+  try {
+    const [planned] = await listCalendarEvents(f.tenantId, window);
+    assert.deepEqual([planned.kind, planned.lifecycle, planned.chip], ["plan_item", "planned", "queued"]);
+
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const review = await listCalendarEvents(f.tenantId, window);
+    assert.equal(review.length, 1, "the plan item is represented by its publication, not twice");
+    assert.deepEqual([review[0].kind, review[0].lifecycle, review[0].chip], ["publication", "needs_review", "review"]);
+
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const [scheduled] = await listCalendarEvents(f.tenantId, window);
+    assert.deepEqual([scheduled.lifecycle, scheduled.chip], ["scheduled", "queued"]);
   } finally {
     await cleanup(f.tenantId);
   }

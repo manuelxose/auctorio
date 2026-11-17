@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { PublicationChannel } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { buildAssetPublicUrl } from "./orchestration";
+import { articleChip, articleState } from "./article-lifecycle";
 
 const prisma = getPrismaClient();
 
@@ -69,9 +70,20 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
   const linkedItems = publications.length
     ? await prisma.editorialPlanItem.findMany({
         where: { tenantId, projectId: { in: [...new Set(publications.map((publication) => publication.projectId))] } },
-        select: { id: true, planId: true, projectId: true, channel: true },
+        select: { id: true, planId: true, projectId: true, channel: true, status: true },
       })
     : [];
+
+  // Latest production job per plan item feeds the derived lifecycle.
+  const planItemIds = [...new Set([...planItems.map((item) => item.id), ...linkedItems.map((item) => item.id)])];
+  const jobs = planItemIds.length
+    ? await prisma.productionJob.findMany({ where: { tenantId, planItemId: { in: planItemIds } }, orderBy: { createdAt: "asc" }, select: { planItemId: true, status: true } })
+    : [];
+  const jobByItem = new Map(jobs.map((job) => [job.planItemId, job]));
+  const lifecycle = (records: Parameters<typeof articleState>[0]) => {
+    const state = articleState(records);
+    return { lifecycle: state, chip: articleChip(state) };
+  };
 
   const publicationEvents = await Promise.all(
     publications.map(async (publication) => {
@@ -106,6 +118,7 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
         contentType: null as string | null,
         createdAt: publication.createdAt,
         updatedAt: publication.updatedAt,
+        ...lifecycle({ planItem: brief, job: brief ? jobByItem.get(brief.id) : null, publication }),
       };
     }),
   );
@@ -137,6 +150,7 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
       contentType: item.contentType,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
+      ...lifecycle({ planItem: item, job: jobByItem.get(item.id) }),
     }));
 
   return [...publicationEvents, ...planEvents].sort(

@@ -13,7 +13,8 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M0 · Estudio del flujo de referencia | — | Hecho: `BABYLOVEGROWTH-FLOW.md` |
 | M1 · Autopilot/Asistido desde el plan, publicación en su hueco | `feat/m1-plan-driven-autopilot` | Hecho (390b82a) |
 | M2 · Un solo sistema de generación | `feat/m2-single-generation` | Hecho (a47c29e) |
-| M3 · Una puerta, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | En curso |
+| M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho |
+| M3b · Publicar sin `PublicationJob` | — | Pendiente |
 | M4 · Plantilla tipo guía + JSON-LD | — | Pendiente |
 | M5 · Nueva arquitectura de información | — | Pendiente |
 | M6 · Limpieza final | — | Pendiente |
@@ -38,12 +39,21 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 
 ## Hitos pendientes
 
-### M3 · Una puerta, un tick, ciclo de vida
-- **Puerta:** `editorial-engine/publication-gates.ts` es el único evaluador. Los umbrales salen de `AutomationPolicy.autonomousQaThresholds` (90 por defecto). `quality-gate.ts` delega en él. El rango fijo 1200–2200 de `qa.ts` se borra; manda la longitud por tipo de artículo.
-- **Tick:** se quita el scheduler embebido en `worker-automation.ts`; queda solo `worker-scheduler.ts`.
-- **Ciclo de vida:** nueva `src/studio/article-lifecycle.ts` con `articleState(planItem, job, project, publication)` y el mapeo a los 4 chips. La usan `views.ts` y la API del calendario.
-- **Publicaciones legadas:** se deja de escribir en `PublicationJob`.
-- **Tests:** `tests/article-lifecycle.test.ts` (tabla de casos), `qa-v2`, `autopilot-mode`, `worker-publishing`.
+### M3 · Una configuración de puertas, un tick, ciclo de vida
+- **Puertas:** las dos puertas evalúan informes distintos (QA v2 de la versión y QA editorial del pipeline), así que siguen siendo dos funciones, pero con **una sola configuración**: `AutomationPolicy.autonomousQaThresholds`. El umbral de QA del pipeline sale de `overallQualityScore` (90 por defecto). `qaGates` deja de leerse.
+  - `requireHumanApproval` pasa a `false` por defecto: con `true`, Autopilot nunca auto-publicaba un plan item (bug de M1). Los modos no-Autopilot ya van a revisión por la cadena de política.
+  - El rango fijo 1200–2200 de `qa.ts` se borra: mandan los objetivos del plan y, si no hay, la banda por tipo de contenido (`wordBandForContentType`).
+- **Tick:** producción (`deploy-production.sh`) solo arranca `worker-automation`, cuyo bucle embebido es el scheduler. Por eso se queda ese, y `dev.ps1` deja de arrancar `worker:scheduler`, que duplicaba el tick en local.
+- **Ciclo de vida:** `src/studio/article-lifecycle.ts` con `articleState({ planItem, job, publication })` y `articleChip`. La API del calendario devuelve `lifecycle` y `chip` en cada evento. La vista de proyecto lo tomará en M3b, cuando deje de leer `PublicationJob`.
+- **Tests:** `tests/article-lifecycle.test.ts` (tabla de 17 casos), Autopilot programando en su hueco y el calendario durante una ejecución asistida.
+
+### M3b · Publicar sin `PublicationJob` (nuevo, separado de M3)
+`PublicationJob` no es un registro muerto: hoy es la unidad de ejecución de **toda** publicación web. La cola lleva su id, el worker lo lee y lo actualiza, y su `externalId` evita que un reintento cree un post duplicado en el sitio.
+- Reescribir `worker-publishing.ts` para trabajar sobre `Publication` + `PublicationAttempt`: payload de cola, reintentos, idempotencia y `getLatestPublishedExternalId`.
+- Migrar `enqueueWebsitePublication` (`publication.ts`), la ruta de publicar ahora (`routes.ts`), `projects.ts` y la vista de proyecto (`views.ts`, `repository.ts`).
+- Al desplegar, drenar o traducir los mensajes de cola que aún lleven ids de `PublicationJob`.
+- **Tests:** `worker-publishing`, e2e `autopilot-golden-path` y `calendar-publications`, más una publicación real en guiaprogramaciontv.com.
+- Requisito de M6 (borrar la tabla).
 
 ### M4 · Plantilla tipo guía + JSON-LD
 - **Estructura** (`editorial-engine/structure.ts`, spec `guide`): unas 2.300 palabras; intro de ~110; caja "En resumen" de 5 puntos; índice; 8–12 H2 con H3; tabla comparativa; "Cómo elegir"; FAQ de 5; "Fuentes"; **"Lecturas recomendadas"**; **tarjeta CTA hacia una página del sitio**; 15–20 enlaces internos; ~4 externos; 5 imágenes con alt.
@@ -78,7 +88,7 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **Tests:** specs del calendario y del setup; e2e nuevo `setup-wizard`; actualizar `calendar-publications`, `studio-shell-nav`, `sources-tabs`, `site-intelligence-coverage`.
 
 ### M6 · Limpieza final
-- Migración que borra `PublicationJob` y `PublicationStatus`. Es la única destructiva: solo con backup y tras confirmar 0 escrituras desde M3.
+- Migración que borra `PublicationJob` y `PublicationStatus`. Es la única destructiva: solo con backup y tras confirmar 0 escrituras desde M3b.
 - Se borran rutas y componentes muertos tras M5 y `grant-studio-admin.tmp.ts`.
 
 ### Fuera de alcance

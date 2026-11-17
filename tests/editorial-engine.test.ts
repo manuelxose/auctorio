@@ -564,14 +564,14 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
   const auto = evaluatePublicationGates({
     ...baseInput,
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: false } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2 },
   });
   assert.equal(auto.decision, "auto_publish");
 
   const review = evaluatePublicationGates({
     ...baseInput,
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: true } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2, requireHumanApproval: true },
   });
   assert.equal(review.decision, "review");
 
@@ -579,7 +579,7 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
     ...baseInput,
     qa: { ...goodQa, score: 40 },
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: false } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2 },
   });
   assert.equal(hold.decision, "hold", "quality gates must hold auto-publishing when approval is not required");
 
@@ -597,8 +597,11 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
   });
   assert.equal(policyOff.decision, "review");
 
-  assert.equal(resolveGatesConfig(null).minQaScore, 75);
-  assert.equal(resolveGatesConfig({ autoPublish: { minQaScore: 60 } }).minQaScore, 60);
+  // Defaults come from the single autonomous threshold config; autopilot needs no extra approval switch.
+  assert.equal(resolveGatesConfig(null).minQaScore, 90);
+  assert.equal(resolveGatesConfig(null).requireHumanApproval, false);
+  assert.equal(resolveGatesConfig({ overallQualityScore: 60 }).minQaScore, 60);
+  assert.equal(evaluatePublicationGates({ ...baseInput, policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true }, configJson: null }).decision, "auto_publish");
 });
 
 test("provenance: claims map back to ledger facts and single-source attribution is detected", () => {

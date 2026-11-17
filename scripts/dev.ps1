@@ -52,7 +52,7 @@ $processes = @()
 $env:TS_NODE_TRANSPILE_ONLY = 'true'
 try {
   # API plus every queue worker (connection verification, text, images, publishing, ...) so flows complete locally.
-  $services = @('api', 'worker:connection', 'worker:discovery', 'worker:text', 'worker:image', 'worker:scraping', 'worker:publishing', 'worker:scheduler', 'worker:automation', 'worker:social')
+  $services = @('api', 'worker:connection', 'worker:discovery', 'worker:text', 'worker:image', 'worker:scraping', 'worker:publishing', 'worker:automation', 'worker:social')
   foreach ($service in $services) {
     $script = 'scripts/start-' + $service.Replace(':', '-') + '.ts'
     $processes += Start-Process node -ArgumentList @('--env-file=.env', 'node_modules/ts-node/dist/bin.js', $script) -PassThru -NoNewWindow

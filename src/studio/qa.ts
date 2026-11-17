@@ -1,6 +1,7 @@
 import type { ContentVersion } from "@prisma/client";
 import type { QaCheck, QaReport } from "./types";
 import { INLINE_IMAGE_MIN } from "./inline-images";
+import { wordBandForContentType } from "./quality-gate";
 
 export type QaSeverity = "error" | "warning" | "info";
 export type QaGroup = "structural" | "seo" | "editorial" | "evidence" | "publishing";
@@ -160,11 +161,9 @@ export function runVersionQaV2(
   const faqCandidates = Array.isArray(metadata.faqCandidates) ? metadata.faqCandidates.length : 0;
   const outlineCount = Array.isArray(metadata.outline) ? metadata.outline.length : 0;
   const words = wordCount(bodyText);
-  const recommendedMin = context.recommendedWordCountMin ?? 1200;
-  const recommendedMax = context.recommendedWordCountMax ?? 2200;
-
-  const shortForm = contentType === "news" || contentType === "preview" || contentType === "match-report" || contentType === "match-preview";
-  const wordRangeTarget = shortForm ? { min: 500, max: 1500 } : { min: recommendedMin, max: recommendedMax };
+  // The plan's targets win; otherwise the content-type band the autonomous gate also uses.
+  const band = wordBandForContentType(contentType, intent);
+  const wordRangeTarget = { min: context.recommendedWordCountMin ?? band.min, max: context.recommendedWordCountMax ?? band.softMax };
 
   const findings: QaFinding[] = [];
   const add = (key: string, label: string, passed: boolean, severity: QaSeverity, message: string, group: QaGroup) => {
