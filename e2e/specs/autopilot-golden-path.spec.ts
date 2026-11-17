@@ -159,6 +159,8 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
         siteId,
         mode: "autopilot",
         autoRepair: true,
+        // The feed is external and decays with age: the test checks pipeline mechanics, not story quality.
+        minimumStoryScore: 0.3,
         maxRepairAttempts: 4,
         socialRequired: false,
         articlesPerDay: dailyCap,
