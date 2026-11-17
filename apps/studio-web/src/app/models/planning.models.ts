@@ -13,7 +13,7 @@ export type PlanItemGenerationSettings = {
 
 export type PlanKeywordsResult = {
   created: Array<{ id: string; keyword: string; scheduledFor: string }>;
-  dropped: Array<{ keyword: string; reason: 'duplicate' | 'already_planned' | 'off_topic' }>;
+  dropped: Array<{ keyword: string; reason: 'duplicate' | 'variant' | 'already_planned' | 'off_topic' }>;
   /** Kept but no free slot in the next 120 days. */
   unscheduled: string[];
 };
@@ -84,7 +84,20 @@ export type SitePlanningSettings = {
 };
 
 export type ArticleSectionKey = 'summary' | 'toc' | 'faq' | 'sources' | 'jsonLd' | 'furtherReading' | 'cta';
-export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>> };
+export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>>; writing?: WritingSettings };
+export type ArticleTargets = { words: number; internalLinks: number; externalLinks: number; images: number; faqCount: number; sections: Record<ArticleSectionKey, boolean> };
+
+/** Mirrors structure.ts WritingSettings ("Customize future articles"). */
+export type WritingSettings = {
+  instructions: string[];
+  length: 'dynamic' | 'short' | 'medium' | 'long';
+  authorPerspective: boolean;
+  citations: boolean;
+  mentionCompetitors: boolean;
+  summaryVariant: 'tldr' | 'key_takeaways';
+  internalLinks: { enabled: boolean; www: boolean; trailingSlash: boolean };
+  disclaimer: string;
+};
 
 export type PlanningInventory = {
   indexedPages: Array<{ url: string; title: string }>;

@@ -56,6 +56,7 @@ import {
   updatePlanPreset,
 } from "./planning-settings";
 import { MAX_PLAN_KEYWORDS, addPlanKeywords } from "./plan-keywords";
+import { dataForSeoConfigured } from "../infrastructure/seo/dataforseo";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
 import { getEnv } from "../shared/utils/env";
@@ -985,7 +986,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const site = query.siteId && isUuid(query.siteId)
       ? await prisma.site.findFirst({ where: { id: query.siteId, tenantId: context.tenantId }, select: { timezone: true } })
       : null;
-    return reply.send({ items: events, timeZone: site?.timezone ?? null });
+    // keywordMetrics=false tells the calendar why Volume/Difficulty show "—".
+    return reply.send({ items: events, timeZone: site?.timezone ?? null, keywordMetrics: dataForSeoConfigured() });
   });
 
   // ──────────────────────────────────────────────────────────── Social

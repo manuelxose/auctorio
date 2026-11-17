@@ -10,13 +10,15 @@ import { resolveArticleTargets } from "./editorial-engine/structure";
 import { computePlanSlots, localDateInZone } from "./plan-slots";
 import { getSitePlanningSettings } from "./planning-settings";
 import { computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
+import { isKeywordVariant } from "./keyword-candidates";
+import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
 
 const prisma = getPrismaClient();
 
 export const MAX_PLAN_KEYWORDS = 50;
 const LOOKAHEAD_DAYS = 120;
 
-export type KeywordScreen = { kept: string[]; dropped: Array<{ keyword: string; reason: "duplicate" | "already_planned" | "off_topic" }> };
+export type KeywordScreen = { kept: string[]; dropped: Array<{ keyword: string; reason: "duplicate" | "variant" | "already_planned" | "off_topic" }> };
 
 const normalize = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim();
 
@@ -44,7 +46,10 @@ export function screenKeywords(
       continue;
     }
     seen.add(key);
-    if (planned.some((other) => normalize(other) === key || titleTokenOverlap(keyword, other) >= 0.75)) {
+    if (kept.some((head) => isKeywordVariant(head, keyword))) {
+      // One article per topic: the variant becomes a secondary keyword of the first one.
+      dropped.push({ keyword, reason: "variant" });
+    } else if (planned.some((other) => normalize(other) === key || titleTokenOverlap(keyword, other) >= 0.75)) {
       dropped.push({ keyword, reason: "already_planned" });
     } else if (isOffTopic(keyword, profile)) {
       dropped.push({ keyword, reason: "off_topic" });
@@ -85,6 +90,7 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
   if (lastSlot > plan.dateTo) await prisma.editorialPlan.update({ where: { id: plan.id }, data: { dateTo: lastSlot } });
 
   const words = resolveArticleTargets(settings.articleTargets).words;
+  const variantsOf = (keyword: string) => screen.dropped.filter((entry) => entry.reason === "variant" && isKeywordVariant(keyword, entry.keyword)).map((entry) => entry.keyword);
   const created = await prisma.$transaction(
     placed.map((keyword, index) =>
       prisma.editorialPlanItem.create({
@@ -98,6 +104,7 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
           workingTitle: keyword.charAt(0).toUpperCase() + keyword.slice(1),
           topic: keyword,
           primaryKeyword: keyword,
+          secondaryKeywords: variantsOf(keyword).length ? variantsOf(keyword) : undefined,
           targetQuery: keyword,
           contentType: "guide",
           searchIntent: "informational",
@@ -113,6 +120,8 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
       }),
     ),
   );
+  // Measured volume + difficulty for the new items (no-op without DataForSEO; never blocks).
+  await enrichPlanItemsWithKeywordMetrics(tenantId, plan.id);
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_items.keywords_added", entityType: "site", entityId: siteId, metadata: { planId: plan.id, created: created.length, dropped: screen.dropped.length, unscheduled: unscheduled.length } });
   return { created: created.map((item) => ({ id: item.id, keyword: item.primaryKeyword ?? "", scheduledFor: item.scheduledFor! })), dropped: screen.dropped, unscheduled };
 }

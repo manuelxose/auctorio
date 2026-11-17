@@ -48,6 +48,9 @@ export class PlanningApiService {
   updateItem(itemId: string, payload: Record<string, unknown>): Observable<PlanItem> {
     return this.http.patch<PlanItem>(`${this.base}/editorial-plan-items/${itemId}`, payload);
   }
+  deleteItem(itemId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.base}/editorial-plan-items/${itemId}`);
+  }
   approveItem(itemId: string): Observable<PlanItem> {
     return this.http.post<PlanItem>(`${this.base}/editorial-plan-items/${itemId}/approve`, {});
   }

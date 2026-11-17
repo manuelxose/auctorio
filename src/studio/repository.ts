@@ -273,7 +273,7 @@ export async function listProjects(
     tenantId,
     ...(input.includeArchived ? {} : { deletedAt: null }),
     ...(input.siteId ? { siteId: input.siteId } : {}),
-    ...(input.status ? { status: input.status } : {}),
+    ...(input.status ? { status: Array.isArray(input.status) ? { in: input.status } : input.status } : {}),
     ...(input.goal ? { goal: input.goal } : {}),
     ...(input.origin ? { origin: input.origin } : {}),
     ...(input.search

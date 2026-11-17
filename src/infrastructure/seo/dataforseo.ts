@@ -14,7 +14,7 @@ export type KeywordMetrics = {
 
 export type DataForSeoLocation = { locationCode: number; languageCode: string };
 
-const ENDPOINT = "https://api.dataforseo.com/v3/dataforseo_labs/google/keyword_overview/live";
+const LABS = "https://api.dataforseo.com/v3/dataforseo_labs/google";
 const MAX_KEYWORDS_PER_TASK = 700;
 const TIMEOUT_MS = 30_000;
 
@@ -59,7 +59,8 @@ export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; 
     if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
     for (const result of task.result ?? []) {
       for (const raw of result.items ?? []) {
-        const item = raw as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
+        // ranked_keywords nests the keyword under keyword_data; overview/ideas items are flat.
+        const item = ((raw as { keyword_data?: unknown })?.keyword_data ?? raw) as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
         if (typeof item.keyword !== "string") continue;
         items.push({
           keyword: normalizeKeyword(item.keyword),
@@ -75,27 +76,47 @@ export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; 
   return { items, costUsd: num(root.cost) ?? 0 };
 }
 
+/** One Labs live task; every Labs keyword endpoint returns items in the keyword_overview shape. */
+async function postLabsTask(
+  path: string,
+  task: Record<string, unknown>,
+  location: DataForSeoLocation,
+  fetchImpl: typeof fetch,
+): Promise<{ items: KeywordMetrics[]; costUsd: number }> {
+  const auth = Buffer.from(`${getEnv("DATAFORSEO_LOGIN")}:${getEnv("DATAFORSEO_PASSWORD")}`).toString("base64");
+  const response = await fetchImpl(`${LABS}/${path}/live`, {
+    method: "POST",
+    headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
+    body: JSON.stringify([{ ...task, location_code: location.locationCode, language_code: location.languageCode }]),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  const body = await response.json().catch(() => null);
+  // Errors carry DataForSEO's own reason (e.g. 40104 account not verified), not just the HTTP status.
+  if (!response.ok) throw new Error(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim());
+  return parseKeywordOverview(body);
+}
+
 /** One live call per ≤700 keywords. Keywords without data are simply absent from the result. */
 export async function fetchKeywordOverview(
   keywords: string[],
   location: DataForSeoLocation,
   fetchImpl: typeof fetch = fetch,
 ): Promise<{ items: KeywordMetrics[]; costUsd: number }> {
-  const auth = Buffer.from(`${getEnv("DATAFORSEO_LOGIN")}:${getEnv("DATAFORSEO_PASSWORD")}`).toString("base64");
   const out = { items: [] as KeywordMetrics[], costUsd: 0 };
   for (let i = 0; i < keywords.length; i += MAX_KEYWORDS_PER_TASK) {
-    const response = await fetchImpl(ENDPOINT, {
-      method: "POST",
-      headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
-      body: JSON.stringify([{ keywords: keywords.slice(i, i + MAX_KEYWORDS_PER_TASK), location_code: location.locationCode, language_code: location.languageCode }]),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-    const body = await response.json().catch(() => null);
-    // Errors carry DataForSEO's own reason (e.g. 40104 account not verified), not just the HTTP status.
-    if (!response.ok) throw new Error(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim());
-    const parsed = parseKeywordOverview(body);
+    const parsed = await postLabsTask("keyword_overview", { keywords: keywords.slice(i, i + MAX_KEYWORDS_PER_TASK) }, location, fetchImpl);
     out.items.push(...parsed.items);
     out.costUsd += parsed.costUsd;
   }
   return out;
+}
+
+/** Real keyword candidates around a seed (keyword_ideas), highest volume first. */
+export function fetchKeywordIdeas(seed: string, location: DataForSeoLocation, limit: number, fetchImpl: typeof fetch = fetch) {
+  return postLabsTask("keyword_ideas", { keywords: [seed], limit, order_by: ["keyword_info.search_volume,desc"] }, location, fetchImpl);
+}
+
+/** Keywords a domain ranks for (ranked_keywords), highest volume first. */
+export function fetchRankedKeywords(domain: string, location: DataForSeoLocation, limit: number, fetchImpl: typeof fetch = fetch) {
+  return postLabsTask("ranked_keywords", { target: domain, limit, order_by: ["keyword_data.keyword_info.search_volume,desc"] }, location, fetchImpl);
 }

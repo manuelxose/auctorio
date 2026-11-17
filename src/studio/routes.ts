@@ -6,6 +6,7 @@ import { Queue } from "bullmq";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { resolveArticleTargets } from "./editorial-engine/structure";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
 import { getEnv, isProductionEnv } from "../shared/utils/env";
@@ -1018,8 +1019,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (query.siteId && !isUuid(query.siteId)) {
       return badRequest(reply, "invalid siteId");
     }
-    if (query.status && !isOneOf(query.status, PROJECT_STATUSES)) {
-      return badRequest(reply, `status must be one of: ${PROJECT_STATUSES.join(", ")}`);
+    // status=a,b filters by any of them (the Studio's grouped Review/Ready/Failed filters).
+    const statuses = query.status ? query.status.split(",").map((value) => value.trim()).filter(Boolean) : [];
+    if (statuses.some((value) => !isOneOf(value, PROJECT_STATUSES))) {
+      return badRequest(reply, `status must be one or more of: ${PROJECT_STATUSES.join(", ")}`);
     }
     if (query.goal && !isOneOf(query.goal, PROJECT_GOALS)) {
       return badRequest(reply, `goal must be one of: ${PROJECT_GOALS.join(", ")}`);
@@ -1030,7 +1033,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
 
     const projects = await listProjects(context.tenantId, {
       siteId: query.siteId,
-      status: query.status as ProjectStatus | undefined,
+      status: statuses.length > 1 ? (statuses as ProjectStatus[]) : (statuses[0] as ProjectStatus | undefined),
       goal: query.goal as ProjectGoal | undefined,
       page,
       pageSize,
@@ -1185,7 +1188,19 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return notFound(reply, "project not found");
     }
 
-    return reply.send(await toProjectDetail(project));
+    // Article data panel: measured demand of the plan keyword (never estimated) and the targets the article is held to.
+    const [planItem, planning] = await Promise.all([
+      prisma.editorialPlanItem.findFirst({ where: { tenantId: context.tenantId, projectId }, select: { searchVolume: true, keywordDifficulty: true, keywordMetricsSource: true } }),
+      prisma.sitePlanningSettings.findUnique({ where: { siteId: project.siteId }, select: { articleTargets: true } }),
+    ]);
+    const metadata = (project.metadata ?? {}) as Record<string, unknown>;
+    return reply.send({
+      ...(await toProjectDetail(project)),
+      keywordMetrics: planItem?.keywordMetricsSource
+        ? { searchVolume: planItem.searchVolume, keywordDifficulty: planItem.keywordDifficulty, source: planItem.keywordMetricsSource }
+        : null,
+      articleTargets: resolveArticleTargets(planning?.articleTargets, metadata.articleTargets),
+    });
   });
 
   fastify.post("/v2/projects/:id/generate", async (request, reply) => {

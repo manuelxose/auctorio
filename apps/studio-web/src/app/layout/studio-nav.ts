@@ -126,7 +126,8 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     end: true,
     items: [
       { label: 'Sites', path: '/studio/settings/sites', icon: 'globe', heading: 'Business & brand' },
-      { label: 'Mode & rhythm', path: '/studio/automation', icon: 'automation', heading: 'Articles' },
+      { label: 'Writing', path: '/studio/settings/writing', icon: 'edit', heading: 'Articles', hint: 'Instructions, length and blocks of every future article.' },
+      { label: 'Mode & rhythm', path: '/studio/automation', icon: 'automation' },
       { label: 'Connections', path: '/studio/connections', icon: 'connections', heading: 'Integrations' },
       { label: 'Web discovery', path: '/studio/settings/discovery', icon: 'sources' },
       { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },

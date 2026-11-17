@@ -105,7 +105,97 @@ const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections">, [number, 
   faqCount: [0, 12],
 };
 
-export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections">> & { sections?: Partial<ArticleSections> };
+export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings };
+
+// ────────────────────────────────────────────────────────────── Writing settings
+// "Customize future articles" (BLG parity M8): stored next to the targets in
+// site_planning_settings.article_targets.writing, applied by the writer prompt.
+
+export const LENGTH_MODES = { dynamic: null, short: 1400, medium: 2000, long: 2600 } as const;
+export type LengthMode = keyof typeof LENGTH_MODES;
+
+export type WritingSettings = {
+  /** Rules every article follows ("Never use the word leverage"); ≤30, ≤300 chars each. */
+  instructions: string[];
+  /** dynamic = length follows intent (guide target); otherwise a fixed band. */
+  length: LengthMode;
+  authorPerspective: boolean;
+  citations: boolean;
+  mentionCompetitors: boolean;
+  summaryVariant: "tldr" | "key_takeaways";
+  internalLinks: { enabled: boolean; www: boolean; trailingSlash: boolean };
+  /** Appended verbatim at the end of every article; ≤500 chars. */
+  disclaimer: string;
+};
+
+export const DEFAULT_WRITING: WritingSettings = {
+  instructions: [],
+  length: "dynamic",
+  authorPerspective: false,
+  citations: true,
+  mentionCompetitors: false,
+  summaryVariant: "tldr",
+  internalLinks: { enabled: true, www: false, trailingSlash: false },
+  disclaimer: "",
+};
+
+const cleanText = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
+
+/** Valid writing settings from untrusted JSON; unknown keys dropped, defaults fill the gaps. */
+export function readWritingSettings(value: unknown): WritingSettings {
+  const raw = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const links = raw.internalLinks && typeof raw.internalLinks === "object" ? (raw.internalLinks as Record<string, unknown>) : {};
+  const bool = (input: unknown, fallback: boolean) => (typeof input === "boolean" ? input : fallback);
+  return {
+    instructions: Array.isArray(raw.instructions) ? [...new Set(raw.instructions.map((rule) => cleanText(rule, 300)).filter(Boolean))].slice(0, 30) : [],
+    length: typeof raw.length === "string" && raw.length in LENGTH_MODES ? (raw.length as LengthMode) : DEFAULT_WRITING.length,
+    authorPerspective: bool(raw.authorPerspective, DEFAULT_WRITING.authorPerspective),
+    citations: bool(raw.citations, DEFAULT_WRITING.citations),
+    mentionCompetitors: bool(raw.mentionCompetitors, DEFAULT_WRITING.mentionCompetitors),
+    summaryVariant: raw.summaryVariant === "key_takeaways" ? "key_takeaways" : "tldr",
+    internalLinks: {
+      enabled: bool(links.enabled, true),
+      www: bool(links.www, false),
+      trailingSlash: bool(links.trailingSlash, false),
+    },
+    disclaimer: cleanText(raw.disclaimer, 500),
+  };
+}
+
+/** Applies the site's www / trailing-slash preference to one internal URL. */
+export function formatInternalUrl(url: string, links: WritingSettings["internalLinks"]): string {
+  try {
+    const parsed = new URL(url);
+    const bare = parsed.hostname.replace(/^www\./, "");
+    parsed.hostname = links.www ? `www.${bare}` : bare;
+    const isFile = /\.[a-z0-9]{2,5}$/i.test(parsed.pathname);
+    if (links.trailingSlash && !isFile && !parsed.pathname.endsWith("/")) parsed.pathname += "/";
+    if (!links.trailingSlash && parsed.pathname.length > 1) parsed.pathname = parsed.pathname.replace(/\/+$/, "");
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+/** Writer guidance lines for the site's writing settings (instructions, perspective, summary, disclaimer…). */
+export function renderWritingGuidance(writing: WritingSettings, language: "es" | "en" = "es"): string[] {
+  const lines: string[] = [];
+  if (writing.instructions.length) lines.push(`Site writing rules (always follow):\n${writing.instructions.map((rule) => `- ${rule}`).join("\n")}`);
+  lines.push(
+    writing.authorPerspective
+      ? "Write from the publication's own perspective (first person plural where natural), sharing practical experience."
+      : "Use an impersonal, precise register; no first person.",
+  );
+  if (writing.citations) lines.push("Attribute every figure, date and claim inline to its source («según X…») and link that source.");
+  lines.push(writing.mentionCompetitors ? "Competitors may be mentioned when it genuinely helps the reader." : "Do not mention or recommend competitors.");
+  lines.push(
+    writing.summaryVariant === "key_takeaways"
+      ? `Summary block: "${language === "es" ? "Puntos clave" : "Key takeaways"}" — one thesis sentence followed by a two-column table (Point / Detail).`
+      : `Summary block: "${language === "es" ? "En resumen" : "In short"}" — 3–5 self-contained bullet points.`,
+  );
+  if (writing.disclaimer) lines.push(`End the article with this disclaimer, verbatim, as the last paragraph: "${writing.disclaimer}"`);
+  return lines;
+}
 
 /** Valid keys of an override (site `article_targets` or plan item `generation.articleTargets`); anything else is dropped. */
 export function readArticleTargetsOverride(value: unknown): ArticleTargetsOverride {
@@ -120,15 +210,22 @@ export function readArticleTargetsOverride(value: unknown): ArticleTargetsOverri
   for (const key of Object.keys(GUIDE_TARGETS.sections) as Array<keyof ArticleSections>) {
     if (typeof sections[key] === "boolean") (out.sections ??= {})[key] = sections[key] as boolean;
   }
+  if (raw.writing !== undefined && raw.writing !== null) out.writing = readWritingSettings(raw.writing);
   return out;
 }
 
-/** Guide defaults, then each override in order (site first, article last). */
+/** Guide defaults, then each override in order (site first, article last). A fixed length mode sets the word target. */
 export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
   return overrides.reduce<ArticleTargets>((acc, value) => {
-    const override = readArticleTargetsOverride(value);
-    return { ...acc, ...override, sections: { ...acc.sections, ...override.sections } };
+    const { writing, ...override } = readArticleTargetsOverride(value);
+    const fixedWords = writing ? LENGTH_MODES[writing.length] : null;
+    return { ...acc, ...override, ...(fixedWords ? { words: fixedWords } : {}), sections: { ...acc.sections, ...override.sections } };
   }, { ...GUIDE_TARGETS, sections: { ...GUIDE_TARGETS.sections } });
+}
+
+/** The site's writing settings from its stored article_targets (defaults when unset). */
+export function resolveWritingSettings(siteArticleTargets: unknown): WritingSettings {
+  return readArticleTargetsOverride(siteArticleTargets).writing ?? DEFAULT_WRITING;
 }
 
 const SECTION_SWITCH: Partial<Record<StructureSection["kind"], keyof ArticleSections>> = {

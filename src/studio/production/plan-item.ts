@@ -9,7 +9,7 @@ import { createProject } from "../repository";
 import { suggestInternalLinks } from "../internal-linking";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
-import { resolveArticleTargets } from "../editorial-engine/structure";
+import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveWritingSettings } from "../editorial-engine/structure";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
 import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
@@ -241,6 +241,8 @@ export async function preparePlanItemInput(
   const site = await loadSite(tenantId, item.siteId);
   const generation = readGenerationSettings(item);
   const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
+  const writing = resolveWritingSettings(planningSettings?.articleTargets);
+  const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
   const evidence = planEvidenceToLedger(item.sourceEvidence);
@@ -257,7 +259,7 @@ export async function preparePlanItemInput(
     tenantId,
     siteId: site.id,
     site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
-    language: options.language ?? (generation.language === "en" ? "en" : "es"),
+    language,
     headline,
     summary: item.angle ?? item.rationale ?? null,
     entities,
@@ -266,7 +268,10 @@ export async function preparePlanItemInput(
     factContext: { clusterVerificationState: evidence.groups >= 2 ? "unverified" : "single_source", independentPublisherGroups: evidence.groups },
     memberTitles: evidence.facts.map((fact) => fact.statement),
     sourceTexts: evidence.facts.map((fact) => fact.statement),
-    internalLinks: await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks)),
+    // Site writing settings: internal linking can be off, and URLs follow its www / trailing-slash choice.
+    internalLinks: writing.internalLinks.enabled
+      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks))).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: typeof item.relevanceScore === "number" ? Math.max(0, Math.min(1, item.relevanceScore > 1 ? item.relevanceScore / 100 : item.relevanceScore)) : null,
     primaryEntityNames: [keyword],
@@ -278,7 +283,7 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: planGuidance(item),
+      guidance: [...planGuidance(item), ...renderWritingGuidance(writing, language)],
     },
     options,
   };

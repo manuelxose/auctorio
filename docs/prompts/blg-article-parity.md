@@ -185,6 +185,19 @@ Cada milestone: cambio mínimo completo, tests focales, `graphify update .` al f
    publicada con título final. Hover: **Cambiar tema**, **Añadir instrucciones** (guarda en
    `EditorialPlanItem.notes` y llega al prompt del redactor), **Eliminar**.
 
+**Estado M2 (2026-11-17, hecho)**: `src/studio/keyword-candidates.ts` (keyword_ideas por semilla — `mainTopics` +
+clusters, ≤5 — y ranked_keywords de ≤3 competidores `accepted`; caché 30 días por semilla/competidor; gasto
+`keyword_metrics`), filtro (guardarraíles duros + relevancia ≥30, canibalización `none|related-cluster`,
+sin volumen → fuera), puntuación determinista `keywordOpportunityScore` (ganabilidad cae pasado KD 30) y
+agrupación de variantes (`isKeywordVariant`: un modificador de diferencia). El generador reparte las keywords
+por llamada (`keywordAssignmentBlock`) y `applyMeasuredKeywords` descarta briefs con otra keyword y pone el
+score de la app; las métricas se guardan al crear el item. Sin credenciales → flujo anterior
+(`generatedOutput.keywordSource = "model"`) y el calendario lo indica. Add keywords agrupa variantes en
+`secondaryKeywords` y mide volumen/KD. Calendario: keyword · Difficulty (Easy…) · Volume («—»), tipo
+(ranking → Listicle), Cambiar tema y Eliminar. Pendiente/omitido: semillas de `ContentOpportunity`,
+fallback Google Ads para keywords manuales, ranked_keywords del propio dominio, KD alcanzable por sitio,
+auto-tipo explainer/listicle en Add keywords.
+
 ### M3 — Plantilla de artículo keyword-first (paridad de anatomía)
 
 En `structure.ts` (no crear otro sistema):
@@ -249,6 +262,19 @@ Una página de ajustes por sitio que agrupa, sin duplicar lo existente (`Article
 Visuales, CTAs, Negocio, Marca, Competidores, Calendario (días), Páginas guardadas (sitemap). Persistir en
 `SitePlanningSettings.articleTargets` (ampliando `readArticleTargetsOverride`) y en el perfil editorial.
 Override por artículo vía `generation.articleTargets` del plan item (ya soportado).
+
+**Estado M7 (panel) + M8 (escritura), 2026-11-17, parcial**: página del artículo rehecha (`content-workspace-page`):
+panel lateral con «Built for search» (checklist desplegable + Fix with AI), URL publicada, Article data (keyword,
+Searches/mo y Difficulty del plan item —`GET /projects/:id` devuelve `keywordMetrics` y `articleTargets`—, palabras,
+keywords presentes, imágenes, enlaces internos/externos con punto verde/ámbar vs objetivo), slug ≤60 y meta description
+con contador 140–160 y barra, portada reemplazable, exportar/copiar HTML y enlace «Customize future articles».
+Settings › Articles › **Writing** (`/studio/settings/writing`): instrucciones (≤30 reglas), longitud (dinámica |
+1200–1600 | 1700–2300 | 2400–2800 → `words`), interruptores (perspectiva de autor, TOC, recomendaciones, fuentes,
+citas, FAQ, CTA, competidores, JSON-LD, resumen TL;DR / Key takeaways), enlazado interno (activar, `www`, barra final)
+y descargo. Se guarda en `article_targets.writing` (`structure.ts readWritingSettings`) y llega al redactor por
+`renderWritingGuidance` + `formatInternalUrl` en `production/plan-item.ts` (solo items del plan). Pendiente: Visuals,
+CTAs, Business details, Branding (resto de M8), checks M7 nuevos, editor con toolbar completa, badge C2PA, export Markdown,
+aplicar los ajustes también a artículos manuales y de noticias.
 
 ### Fuera de alcance (por ahora)
 

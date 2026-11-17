@@ -280,6 +280,10 @@ export type ProjectVersionDetail = VersionSummary & {
 
 export type StudioProjectDetailView = StudioProjectSummary & {
   metadata: JsonRecord;
+  /** Measured demand of the plan keyword (GET /projects/:id); null when never measured. */
+  keywordMetrics?: { searchVolume: number | null; keywordDifficulty: number | null; source: string } | null;
+  /** Targets the article is held to (site settings + article override). */
+  articleTargets?: { words: number; internalLinks: number; externalLinks: number; images: number; faqCount: number } | null;
   origin: string;
   deletedAt: string | null;
   deletionReason: string | null;
@@ -1010,6 +1014,10 @@ export type CalendarEvent = {
   planItemId: string | null;
   priority: number | null;
   contentType: string | null;
+  /** Plan items only. Volume/difficulty are null unless a provider measured them (never estimated). */
+  primaryKeyword?: string | null;
+  searchVolume?: number | null;
+  keywordDifficulty?: number | null;
   channel: PublicationChannel;
   /** PublicationState for publications, EditorialPlanItem status for plan items. */
   status: string;

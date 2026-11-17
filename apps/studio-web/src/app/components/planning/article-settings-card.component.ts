@@ -1,26 +1,25 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { PlanningApiService, apiMessage } from '../../services/planning-api.service';
 import { ToastService } from '../../services/toast.service';
-import type { ArticleSectionKey, SitePlanningSettings } from '../../models/planning.models';
+import type { SitePlanningSettings } from '../../models/planning.models';
 import { WEEKDAYS } from './planning-utils';
 
-/** Settings · Articles (M5): publishing days as chips, guide sections as switches. Count and time stay under "More". */
+/** Settings · Articles (M5): publishing days as chips, sections link to Settings › Writing. Count and time stay under "More". */
 @Component({
   selector: 'app-article-settings-card',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, RouterLink],
   styles: [
     `
       .asc__days { display: flex; flex-wrap: wrap; gap: var(--au-s2); border: 0; padding: 0; margin: 0 0 var(--au-s3); }
-      .asc__days legend, .asc__sections legend { font-size: var(--au-fs-body-sm); font-weight: 600; margin-bottom: var(--au-s2); }
+      .asc__days legend { font-size: var(--au-fs-body-sm); font-weight: 600; margin-bottom: var(--au-s2); }
       .asc__day { min-width: 52px; min-height: 40px; border: 1px solid var(--au-border); border-radius: 999px; background: var(--au-surface); color: var(--au-text); font: inherit; cursor: pointer; }
       .asc__day[aria-pressed='true'] { background: var(--au-text); color: var(--au-surface-solid, #fff); border-color: var(--au-text); }
       .asc__day:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 2px; }
       @media (pointer: coarse) { .asc__day { min-height: 44px; } }
-      .asc__sections { border: 0; padding: 0; margin: var(--au-s4) 0 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--au-s2); }
-      .asc__sections legend { grid-column: 1 / -1; }
       .asc__more { margin-top: var(--au-s3); }
       .asc__more summary { cursor: pointer; font-size: var(--au-fs-body-sm); color: var(--au-muted); }
     `,
@@ -39,12 +38,7 @@ import { WEEKDAYS } from './planning-utils';
           }
         </fieldset>
 
-        <fieldset class="asc__sections">
-          <legend>Guide sections</legend>
-          @for (section of sectionOptions; track section.key) {
-            <label class="au-checkbox"><input type="checkbox" [checked]="isOn(section.key)" (change)="toggleSection(section.key)" /> {{ section.label }}</label>
-          }
-        </fieldset>
+        <p class="au-hint au-mb-0">Sections, length and writing rules live in <a class="au-link" routerLink="/studio/settings/writing">Settings › Writing</a>.</p>
 
         <details class="asc__more">
           <summary>More: articles per day and publish time</summary>
@@ -74,15 +68,6 @@ export class ArticleSettingsCardComponent implements OnInit {
   private readonly toast = inject(ToastService);
   @Input({ required: true }) siteId!: string;
   readonly weekdays = WEEKDAYS;
-  readonly sectionOptions: Array<{ key: ArticleSectionKey; label: string }> = [
-    { key: 'summary', label: '"In short" summary box' },
-    { key: 'toc', label: 'Table of contents' },
-    { key: 'faq', label: 'FAQ' },
-    { key: 'sources', label: 'Sources' },
-    { key: 'furtherReading', label: 'Further reading' },
-    { key: 'cta', label: 'Call-to-action card' },
-    { key: 'jsonLd', label: 'Structured data (JSON-LD)' },
-  ];
   settings: SitePlanningSettings | null = null;
   times = '';
   saving = false;
@@ -107,16 +92,6 @@ export class ArticleSettingsCardComponent implements OnInit {
   toggleDay(day: number): void {
     const days = this.settings!.weekdays;
     this.settings!.weekdays = days.includes(day) ? days.filter((entry) => entry !== day) : [...days, day].sort();
-  }
-
-  /** Every section is on unless the site switched it off. */
-  isOn(key: ArticleSectionKey): boolean {
-    return this.settings?.articleTargets?.sections?.[key] !== false;
-  }
-
-  toggleSection(key: ArticleSectionKey): void {
-    const sections = (this.settings!.articleTargets!.sections ??= {});
-    sections[key] = !this.isOn(key);
   }
 
   save(): void {

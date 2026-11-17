@@ -129,6 +129,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Admin', title: 'Admin' } },
       },
       {
+        path: 'settings/writing',
+        loadComponent: () => import('./pages/writing-settings-page.component').then((m) => m.WritingSettingsPageComponent),
+        data: { studioMeta: { section: 'Settings', title: 'Writing' } },
+      },
+      {
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
         canActivate: [studioRoleGuard],

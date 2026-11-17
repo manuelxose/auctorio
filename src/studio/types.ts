@@ -415,7 +415,8 @@ export type StudioSiteSummary = Pick<
 
 export type ListProjectsInput = PaginationQuery & {
   siteId?: string;
-  status?: ProjectStatus;
+  /** One status, or several (the Studio's Review/Ready/Failed filters group statuses). */
+  status?: ProjectStatus | ProjectStatus[];
   goal?: ProjectGoal;
   search?: string;
   includeArchived?: boolean;
