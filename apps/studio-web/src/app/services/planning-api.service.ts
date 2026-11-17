@@ -8,6 +8,7 @@ import type {
   PlanDetail,
   PlanGenerationAccepted,
   PlanItem,
+  PlanKeywordsResult,
   PlanPreset,
   PlanningInventory,
   SitePlanningSettings,
@@ -23,6 +24,10 @@ export class PlanningApiService {
 
   listPlans(siteId?: string): Observable<PaginatedResponse<PlanDetail>> {
     return this.http.get<PaginatedResponse<PlanDetail>>(`${this.base}/editorial-plans`, { params: { page: 1, pageSize: 100, ...(siteId ? { siteId } : {}) } });
+  }
+  /** Calendar "Add keywords": up to 50; the server drops duplicates and off-topic ones. */
+  addKeywords(siteId: string, keywords: string[]): Observable<PlanKeywordsResult> {
+    return this.http.post<PlanKeywordsResult>(`${this.base}/sites/${siteId}/plan-keywords`, { keywords });
   }
   getPlan(planId: string): Observable<PlanDetail> {
     return this.http.get<PlanDetail>(`${this.base}/editorial-plans/${planId}`);

@@ -19,11 +19,12 @@ export type SetupFacts = {
 export function setupSteps(f: SetupFacts): SetupStep[] {
   return [
     { id: 'website', required: true, done: f.websiteConnected, label: 'Connect your website', detail: f.websiteConnected ? 'Articles can be published to it' : 'Paste the address; Auctorio reads it and checks it with a test draft' },
-    { id: 'learn', required: true, done: f.siteAnalyzed, label: 'Learn about your site', detail: f.siteAnalyzed ? 'Topics, audience and tone are known' : 'Reads your pages to find topics, audience and tone' },
-    { id: 'plan', required: true, done: f.planReady, label: 'Plan the next 30 days', detail: f.planReady ? 'Topics are scheduled' : 'One topic per day, with keyword and the reason it was picked' },
+    // M5: only connecting the site is required; the rest can be skipped.
+    { id: 'learn', required: false, done: f.siteAnalyzed, label: 'Learn about your site', detail: f.siteAnalyzed ? 'Topics, audience and tone are known' : 'Reads your pages to find topics, audience and tone' },
+    { id: 'plan', required: false, done: f.planReady, label: 'Plan the next 30 days', detail: f.planReady ? 'Topics are scheduled' : 'One topic per day, with keyword and the reason it was picked' },
     {
       id: 'autopilot',
-      required: true,
+      required: false,
       done: f.autopilotMode !== null, // Manual is a valid choice even though enabled=false
       label: 'Choose how much runs on its own',
       detail: f.autopilotMode ? modeSummary(f.autopilotMode) : 'Write only, write and wait for your approval, or publish on its own',
@@ -39,12 +40,12 @@ export function modeSummary(mode: 'manual' | 'assisted' | 'autopilot'): string {
 }
 
 /** Overall line under the page title. */
-export function autopilotHeadline(steps: SetupStep[], state: { enabled: boolean; paused: boolean; pausedReason: string | null; mode: string | null }): { tone: 'ok' | 'warn' | 'idle'; text: string } {
-  const missing = steps.filter((step) => step.required && !step.done).length;
-  if (missing > 0) return { tone: 'idle', text: `${missing} setup step${missing === 1 ? '' : 's'} left before autopilot can run` };
+export function autopilotHeadline(steps: SetupStep[], state: { enabled: boolean; paused: boolean; pausedReason: string | null; mode: string | null; review?: number }): { tone: 'ok' | 'warn' | 'idle'; text: string } {
+  if (steps.some((step) => step.required && !step.done)) return { tone: 'idle', text: 'Connect your website to start' };
   if (state.paused) return { tone: 'warn', text: `Paused${state.pausedReason ? `: ${state.pausedReason}` : ''}` };
+  if (state.review) return { tone: 'warn', text: `${state.review} article${state.review === 1 ? '' : 's'} to review` };
   if (!state.enabled) return { tone: 'idle', text: 'Automation is off. Articles are written when you ask' };
-  if (state.mode === 'autopilot') return { tone: 'ok', text: 'Running on autopilot. Nothing needs you right now' };
+  if (state.mode === 'autopilot') return { tone: 'ok', text: 'Everything runs on its own. Nothing needs you right now' };
   return { tone: 'ok', text: 'Running. New articles wait for your approval' };
 }
 

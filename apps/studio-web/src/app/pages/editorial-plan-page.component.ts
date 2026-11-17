@@ -212,7 +212,7 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
     // ?new=1 (Overview "Plan the next 30 days") and ?pillar= open the generator; ?plan=&item= (Calendar) open an item.
     if (this.initialPillar || query.get('new')) this.showGenerator = true;
     this.pendingItemId = query.get('item');
-    this.route.queryParamMap.subscribe((params) => (this.view = sectionFor('/studio/editorial-plan', params.get('tab')) as View));
+    this.route.queryParamMap.subscribe((params) => (this.view = sectionFor('/studio/plan', params.get('tab')) as View));
     this.context.update({ area: 'plan', siteId: this.siteId || null });
     this.load(query.get('plan') ?? undefined);
   }

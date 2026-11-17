@@ -81,7 +81,7 @@ const STEP_LABELS: Record<OnboardingStepId, { title: string; text: string }> = {
           <app-icon name="play"></app-icon>
           Run onboarding
         </button>
-        <a class="au-btn au-btn--primary au-btn--sm" *ngIf="planReady" routerLink="/studio/editorial-plan" [queryParams]="{ siteId: siteId }">
+        <a class="au-btn au-btn--primary au-btn--sm" *ngIf="planReady" routerLink="/studio/calendar">
           <app-icon name="plan"></app-icon>
           Create the first editorial plan
         </a>

@@ -6,9 +6,11 @@ import { catchError, switchMap } from 'rxjs/operators';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
+import { IntelligenceApiService } from '../services/intelligence-api.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { OverviewWeekComponent, type WeekDay } from '../components/overview-week.component';
 import type { AutomationPolicy, EditorialPlan, EditorialPlanItem, OperationItem, SiteIntelligenceOverview, StudioOverview } from '../models/studio.models';
+import type { StrategyLayers } from '../models/intelligence.models';
 import { activityLabel, autopilotHeadline, humanError, difficultyLabel, modeSummary, planChip, sameDay, setupSteps, type PlanChip, type SetupStep } from '../utils/overview-model';
 
 type Mode = 'manual' | 'assisted' | 'autopilot';
@@ -32,6 +34,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
           <h1 class="au-page__title">{{ siteName() }}</h1>
           <p class="ov__status" [attr.data-tone]="headline().tone" role="status">
             <span class="ov__dot" aria-hidden="true"></span>{{ headline().text }}
+            @if (reviewCount() > 0) { <a class="au-link" routerLink="/studio/calendar" [queryParams]="{ chip: 'review' }">Review now</a> }
           </p>
         </div>
       </header>
@@ -102,7 +105,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
             }
 
             <ul class="ov__feed">
-              @for (op of dayOperations(); track op.id) {
+              @for (op of showAllOps() ? dayOperations() : dayOperations().slice(0, 8); track op.id) {
                 <li [class.is-failed]="label(op).failed">
                   <span class="ov__feed-icon"><app-icon [name]="label(op).icon"></app-icon></span>
                   <span class="ov__feed-text">{{ label(op).label }}@if (op.errorSummary && label(op).failed) {<span class="au-muted"> · {{ humanError(op.errorSummary) }}</span>}</span>
@@ -117,8 +120,11 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
                 </li>
               }
             </ul>
+            @if (dayOperations().length > 8) {
+              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="showAllOps.set(!showAllOps())" [attr.aria-expanded]="showAllOps()">{{ showAllOps() ? 'Show less' : 'Show all ' + dayOperations().length }}</button>
+            }
             @if (!featured() && dayOperations().length === 0) {
-              <p class="ov__empty">{{ dayOffset() > 0 ? 'Nothing planned for this day yet.' : 'Nothing ran on this day.' }} @if (!planReady()) { <a class="au-link" routerLink="/studio/editorial-plan" [queryParams]="{ new: 1 }">Plan the next 30 days</a> }</p>
+              <p class="ov__empty">{{ dayOffset() > 0 ? 'Nothing planned for this day yet.' : 'Nothing ran on this day.' }} @if (!planReady()) { <a class="au-link" routerLink="/studio/plan" [queryParams]="{ new: 1 }">Plan the next 30 days</a> }</p>
             }
           </section>
 
@@ -129,7 +135,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
                 <h2 id="ov-week" class="ov__title">Coming up</h2>
                 <p class="au-muted">{{ weekSummary() }}</p>
               </div>
-              <a class="au-btn au-btn--sm" routerLink="/studio/editorial-plan">Open plan<app-icon name="chevron-right"></app-icon></a>
+              <a class="au-btn au-btn--sm" routerLink="/studio/calendar">Open plan<app-icon name="chevron-right"></app-icon></a>
             </div>
             <app-overview-week [days]="week()" (pick)="openDay($event)"></app-overview-week>
           </section>
@@ -137,7 +143,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
           <section class="au-panel ov__card" aria-labelledby="ov-latest">
             <div class="ov__card-head">
               <div><h2 id="ov-latest" class="ov__title">Latest publications</h2><p class="au-muted">What went out, or tried to</p></div>
-              <a class="au-btn au-btn--sm" routerLink="/studio/publications">All publications<app-icon name="chevron-right"></app-icon></a>
+              <a class="au-btn au-btn--sm" routerLink="/studio/results">All publications<app-icon name="chevron-right"></app-icon></a>
             </div>
             <ul class="ov__feed">
               @for (pub of (overview()?.recentPublications ?? []).slice(0, 6); track pub.id) {
@@ -154,13 +160,15 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
           </section>
         </div>
         <div class="ov__side">
-          <!-- Setup checklist -->
+          <!-- Setup checklist: shown until every step is done or, once the site is connected, dismissed. -->
+          @if (!setupHidden()) {
           <section class="au-panel ov__card ov__setup" aria-labelledby="ov-setup">
             <div class="ov__card-head">
               <div>
-                <h2 id="ov-setup" class="ov__title">{{ requiredLeft() === 0 ? 'All set' : 'Get started' }}</h2>
-                <p class="au-muted">{{ requiredDone() }} of {{ requiredTotal() }} required steps done</p>
+                <h2 id="ov-setup" class="ov__title">{{ requiredLeft() === 0 ? 'Ready to go' : 'Get started' }}</h2>
+                <p class="au-muted">{{ requiredLeft() === 0 ? 'The optional steps improve the results. Skip any of them.' : 'Connect your website; everything else is optional.' }}</p>
               </div>
+              @if (requiredLeft() === 0) { <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="dismissSetup()">Hide</button> }
             </div>
             <div class="ov__progress" role="progressbar" [attr.aria-valuenow]="requiredDone()" aria-valuemin="0" [attr.aria-valuemax]="requiredTotal()" aria-label="Setup progress">
               <span [style.width.%]="(requiredDone() / requiredTotal()) * 100"></span>
@@ -187,7 +195,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
                     @switch (step.id) {
                       @case ('website') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/connections/wizard">Connect</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a> } }
                       @case ('learn') { <a class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading…' : step.done ? 'Review' : 'Analyze' }}</a> }
-                      @case ('plan') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/editorial-plan" [queryParams]="{ new: 1 }">{{ planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/editorial-plan">Open</a> } }
+                      @case ('plan') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/plan" [queryParams]="{ new: 1 }">{{ planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/calendar">Open</a> } }
                       @case ('autopilot') { <a class="au-btn au-btn--sm" routerLink="/studio/automation">Settings</a> }
                       @case ('instagram') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'instagram.com' }">Connect</a> } }
                       @case ('x') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'x.com' }">Connect</a> } }
@@ -198,6 +206,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
               </ul>
             }
           </section>
+          }
           <!-- What we learned -->
           <section class="au-panel ov__card" aria-labelledby="ov-learned">
             <div class="ov__card-head">
@@ -220,8 +229,17 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
                   @for (topic of p.mainTopics.slice(0, 12); track topic) { <li>{{ topic }}</li> }
                 </ul>
               }
+              @if (strategyApproved() === false) {
+                <div class="ov__confirm" role="group" aria-labelledby="ov-confirm">
+                  <p id="ov-confirm" class="au-mb-0"><strong>Is this right?</strong> Auctorio plans with it either way; confirming locks it in.</p>
+                  <div class="ov__actions">
+                    <button class="au-btn au-btn--sm au-btn--primary" type="button" [disabled]="confirming()" (click)="confirmProfile()">{{ confirming() ? 'Saving…' : 'Correct' }}</button>
+                    <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'profile' }">Update</a>
+                  </div>
+                </div>
+              }
               <div class="ov__actions">
-                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence">Not quite right, review it</a>
+                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence">{{ strategyApproved() ? 'Review it' : 'Not quite right, review it' }}</a>
                 <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</a>
               </div>
             } @else {
@@ -252,6 +270,7 @@ const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verif
       .ov__dot { width: 8px; height: 8px; border-radius: 4px; background: var(--au-faint); flex: 0 0 8px; }
       .ov__status[data-tone='ok'] .ov__dot { background: var(--au-success); box-shadow: 0 0 0 3px var(--au-success-soft); }
       .ov__status[data-tone='warn'] .ov__dot { background: var(--au-warning); box-shadow: 0 0 0 3px var(--au-warning-soft); }
+      .ov__confirm { display: grid; gap: var(--au-s2); padding: var(--au-s3); margin-top: var(--au-s3); border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface-2); }
       .ov__cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: var(--au-s5); align-items: start; }
       .ov__main, .ov__side { display: flex; flex-direction: column; gap: var(--au-s5); min-width: 0; }
       .ov__kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--au-s3); margin: 0; }
@@ -334,6 +353,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
+  private readonly intelligenceApi = inject(IntelligenceApiService);
 
   readonly today = new Date();
   readonly modes: Array<{ id: Mode; short: string }> = [
@@ -351,6 +371,12 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
   readonly planItems = signal<EditorialPlanItem[]>([]);
   readonly operations = signal<OperationItem[]>([]);
   readonly dayOffset = signal(0);
+  readonly showAllOps = signal(false);
+  /** Null until loaded; false when the detected profile was never confirmed. */
+  readonly strategy = signal<StrategyLayers | null>(null);
+  readonly strategyApproved = computed(() => (this.strategy() ? Boolean(this.strategy()!.approved) : null));
+  readonly confirming = signal(false);
+  private readonly dismissed = signal(false);
 
   private refresh: Subscription | null = null;
 
@@ -395,10 +421,12 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
   readonly requiredTotal = computed(() => this.steps().filter((s) => s.required).length);
   readonly requiredDone = computed(() => this.steps().filter((s) => s.required && s.done).length);
   readonly requiredLeft = computed(() => this.requiredTotal() - this.requiredDone());
+  readonly reviewCount = computed(() => this.overview()?.pipeline.review ?? 0);
+  readonly setupHidden = computed(() => this.steps().every((step) => step.done) || (this.requiredLeft() === 0 && this.dismissed()));
   readonly headline = computed(() => {
     const a = this.overview()?.automation;
     const p = this.policy();
-    return autopilotHeadline(this.steps(), { enabled: Boolean(p?.enabled ?? a?.enabled), paused: (p?.state ?? a?.state) === 'paused', pausedReason: p?.pausedReason ?? a?.pausedReason ?? null, mode: p?.mode ?? null });
+    return autopilotHeadline(this.steps(), { enabled: Boolean(p?.enabled ?? a?.enabled), paused: (p?.state ?? a?.state) === 'paused', pausedReason: p?.pausedReason ?? a?.pausedReason ?? null, mode: p?.mode ?? null, review: this.reviewCount() });
   });
 
   readonly day = computed(() => {
@@ -470,6 +498,8 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     this.api.getOverview(siteId).subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
     this.api.getAutomationPolicy(siteId).subscribe({ next: (p) => this.policy.set(p), error: () => undefined });
     if (siteId) this.api.getSiteIntelligence(siteId).subscribe({ next: (i) => this.intelligence.set(i), error: () => undefined });
+    if (siteId) this.intelligenceApi.getStrategy(siteId).subscribe({ next: (layers) => this.strategy.set(layers), error: () => undefined });
+    this.dismissed.set(typeof localStorage !== 'undefined' && localStorage.getItem(`au-setup-hidden:${siteId ?? 'all'}`) === '1');
     this.api.listOperations({ page: 1, pageSize: 100, siteId }).subscribe({ next: (r) => this.operations.set(r.items), error: () => undefined });
     this.api
       .listEditorialPlans(1, 10, this.appContext.activeSite()?.id)
@@ -485,6 +515,30 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
         next: (details) => this.planItems.set(details.flatMap((plan) => plan?.items ?? [])),
         error: () => undefined,
       });
+  }
+
+  dismissSetup(): void {
+    localStorage.setItem(`au-setup-hidden:${this.siteId() ?? 'all'}`, '1');
+    this.dismissed.set(true);
+  }
+
+  /** "Correct": the detected strategy becomes the approved one, unchanged. */
+  confirmProfile(): void {
+    const siteId = this.siteId();
+    const layers = this.strategy();
+    if (!siteId || !layers) return;
+    this.confirming.set(true);
+    this.intelligenceApi.saveStrategy(siteId, layers.effective, 'Confirmed from Home').subscribe({
+      next: (saved) => {
+        this.strategy.set(saved.layers);
+        this.confirming.set(false);
+        this.toast.success('Profile confirmed.');
+      },
+      error: (err) => {
+        this.confirming.set(false);
+        this.toast.error(err?.error?.error?.message || 'The profile could not be confirmed.');
+      },
+    });
   }
 
   stepsFor(required: boolean): SetupStep[] {
@@ -549,7 +603,7 @@ export class OverviewPageComponent implements OnInit, OnDestroy {
     const o = this.overview();
     if (!o) return [];
     const items: Array<{ title: string; detail: string; action: string; link: string }> = [];
-    if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/publications' });
+    if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/results' });
     for (const c of this.siteConnections()) {
       if (this.connectionState(c) === 'bad') items.push({ title: `${c.displayName} needs attention`, detail: 'Its credentials stopped working', action: 'Fix', link: '/studio/connections' });
       else if (c.platform === 'website' && c.enabled && (c.connectionState === 'not_verified' || c.connectionState === 'stale')) items.push({ title: `${c.displayName} is ${c.connectionState === 'stale' ? 'stale' : 'not verified'}`, detail: c.connectionState === 'stale' ? 'Last verification is over 30 days old' : 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });

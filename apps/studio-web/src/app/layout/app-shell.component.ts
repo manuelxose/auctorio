@@ -13,7 +13,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { GUIDED_STEPS, STUDIO_NAV, activeNavItem, canSeeNavItem, currentStep, nextStep, sectionFor, type GuidedStep, type StudioNavGroup } from './studio-nav';
+import { STUDIO_NAV, activeNavItem, canSeeNavItem, sectionFor, type StudioNavGroup } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
@@ -200,11 +200,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               [class.is-active]="area.id === activeArea().id"
               [attr.aria-current]="area.id === activeArea().id ? 'page' : null"
             >
-              @if (area.step) {
-                <span class="au-step-num" aria-hidden="true">{{ area.step }}</span>
-              } @else {
-                <app-icon [name]="area.icon"></app-icon>
-              }
+              <app-icon [name]="area.icon"></app-icon>
               <span>{{ area.label }}</span>
             </a>
           </li>
@@ -220,10 +216,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               <p class="au-sb__heading au-sb__heading--sub" *ngIf="item.heading && !first">{{ item.heading }}</p>
               <a class="au-sb__item" [routerLink]="item.path" routerLinkActive="is-active" ariaCurrentWhenActive="page" [attr.title]="item.hint || null">
                 <app-icon [name]="item.icon"></app-icon>
-                <span class="au-sb__label">
-                  @if (stepNumberOf(item.path); as number) { <span class="au-sb__step">{{ number }}</span> }
-                  {{ item.label }}
-                </span>
+                <span class="au-sb__label">{{ item.label }}</span>
               </a>
               @if (item.sections && activePath() === item.path) {
                 <ul class="au-sb__sub" [attr.aria-label]="item.label + ' sections'">
@@ -260,13 +253,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
 
       <main id="studio-main" class="au-main" tabindex="-1">
         <div class="au-content">
-          @if (step(); as current) {
-            <p class="au-stepbar">
-              <span class="au-stepbar__num">Step {{ current.number }} of {{ stepAreas }}</span>
-              <span class="au-stepbar__area">{{ current.group.label }}</span>
-              <span class="au-stepbar__hint">{{ current.item.hint }}</span>
-            </p>
-          }
           <!-- The icon rail hides the sidebar's section list, so it moves here. -->
           @if (collapsed() && !isPhone() && activeSections(); as sections) {
             <nav class="au-sectionbar" aria-label="Page sections">
@@ -278,15 +264,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           <!-- Re-created per site so pages reload their data instead of showing the previous site's. -->
           @for (siteKey of [activeSiteId]; track siteKey) {
             <router-outlet (activate)="revealActiveArea()"></router-outlet>
-          }
-          @if (next(); as following) {
-            <nav class="au-nextstep" aria-label="Next step">
-              <a class="au-nextstep__link" [routerLink]="following.item.path">
-                <span class="au-nextstep__label">Next step {{ following.number }} · {{ following.item.label }}</span>
-                <span class="au-nextstep__hint">{{ following.item.hint }}</span>
-                <app-icon name="chevron-right"></app-icon>
-              </a>
-            </nav>
           }
         </div>
       </main>
@@ -315,13 +292,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
   readonly copilot = inject(CopilotService);
 
   readonly areas = STUDIO_NAV.filter((area) => !area.hidden);
-  readonly stepAreas = this.areas.filter((area) => area.step).length;
-  /** Guided-process position of the current route; null outside the flow (settings, home). */
-  readonly step = signal<GuidedStep | null>(null);
-  readonly next = signal<GuidedStep | null>(null);
-  stepNumberOf(path: string): string | null {
-    return GUIDED_STEPS.find((step) => step.item.path === path)?.number ?? null;
-  }
 
   @ViewChild('navToggle') private navToggle?: ElementRef<HTMLButtonElement>;
   @ViewChild('copilotLauncher') private copilotLauncher?: ElementRef<HTMLButtonElement>;
@@ -421,8 +391,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
         if (match) this.activeArea.set(match.group);
         this.activePath.set(match?.item.path === url ? url : '');
         this.activeSection.set(match ? sectionFor(match.item.path, this.router.parseUrl(this.router.url).queryParamMap.get('tab')) : '');
-        this.step.set(currentStep(url));
-        this.next.set(nextStep(url));
       });
 
     void this.bootstrap();

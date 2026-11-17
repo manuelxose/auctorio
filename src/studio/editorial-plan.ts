@@ -1269,7 +1269,9 @@ export async function updateEditorialPlanItem(
       audience: input.audience === undefined ? undefined : input.audience?.trim() || null,
       suggestedSlug: input.suggestedSlug === undefined ? undefined : input.suggestedSlug?.trim() || null,
       sourceEvidence: input.sourceEvidence === undefined ? undefined : input.sourceEvidence?.length ? (input.sourceEvidence as unknown as Prisma.InputJsonArray) : Prisma.JsonNull,
-      metadata: input.generation === undefined ? undefined : ({ ...metadata, generation: input.generation ?? undefined } as Prisma.InputJsonObject),
+      metadata: input.generation === undefined
+        ? undefined
+        : ({ ...metadata, generation: input.generation === null ? undefined : { ...(metadata.generation && typeof metadata.generation === "object" ? metadata.generation : {}), ...input.generation } } as Prisma.InputJsonObject),
       title: input.title?.trim() || undefined,
       workingTitle: input.workingTitle === undefined ? undefined : input.workingTitle?.trim() || null,
       finalSuggestedTitle: input.finalSuggestedTitle === undefined ? undefined : input.finalSuggestedTitle?.trim() || null,
@@ -1368,6 +1370,8 @@ export type PlanItemGenerationSettings = {
   includeFaq?: boolean | null;
   includeImage?: boolean | null;
   instructions?: string | null;
+  /** A page the writer takes as a model, set from the calendar's instructions modal. */
+  referenceUrl?: string | null;
 };
 
 function jsonArray(value: unknown): unknown[] {
@@ -1388,6 +1392,7 @@ export function readGenerationSettings(metadata: unknown): PlanItemGenerationSet
   if (typeof record.includeFaq === "boolean") settings.includeFaq = record.includeFaq;
   if (typeof record.includeImage === "boolean") settings.includeImage = record.includeImage;
   if (typeof record.instructions === "string" && record.instructions.trim()) settings.instructions = record.instructions.trim();
+  if (typeof record.referenceUrl === "string" && record.referenceUrl.trim()) settings.referenceUrl = record.referenceUrl.trim();
   return settings;
 }
 
@@ -1451,6 +1456,7 @@ export function buildProjectInputFromPlanItem(item: BriefSourceItem, options: { 
     generation.includeImage !== undefined && generation.includeImage !== null ? `Imagen destacada: ${yesNo(generation.includeImage)}` : null,
     item.imageConcept && generation.includeImage !== false ? `Concepto de imagen: ${item.imageConcept}` : null,
     generation.instructions ? `Instrucciones adicionales: ${generation.instructions}` : null,
+    generation.referenceUrl ? `Pagina de referencia (tomala como modelo, no la copies): ${generation.referenceUrl}` : null,
     item.notes ? `Notas del editor: ${item.notes}` : null,
   ].filter((section): section is string => Boolean(section));
 

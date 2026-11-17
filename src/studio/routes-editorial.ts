@@ -55,6 +55,7 @@ import {
   type PlanningSettingsInput,
   updatePlanPreset,
 } from "./planning-settings";
+import { MAX_PLAN_KEYWORDS, addPlanKeywords } from "./plan-keywords";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
 import { getEnv } from "../shared/utils/env";
@@ -1833,6 +1834,21 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // Calendar "Add keywords": up to 50, duplicates and off-topic ones are dropped.
+  fastify.post("/v2/sites/:id/plan-keywords", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const { keywords } = parseBody<{ keywords?: unknown }>(request);
+    if (!Array.isArray(keywords) || keywords.length === 0 || keywords.length > MAX_PLAN_KEYWORDS || keywords.some((keyword) => typeof keyword !== "string" || keyword.length > 160)) {
+      return badRequest(reply, `keywords must be 1-${MAX_PLAN_KEYWORDS} strings of up to 160 characters`);
+    }
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { id: true } });
+    if (!site) return notFound(reply, "site not found");
+    return reply.send(await addPlanKeywords(context.tenantId, siteId, keywords as string[], context.userId));
+  });
+
   // Inventory the drawer may pick internal links / evidence from; PATCH re-validates every new URL server-side.
   fastify.get("/v2/sites/:id/planning-inventory", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
@@ -1868,6 +1884,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const wordMin = body.recommendedWordCountMin;
     const wordMax = body.recommendedWordCountMax;
     if (typeof wordMin === "number" && typeof wordMax === "number" && wordMin > wordMax) return badRequest(reply, "recommendedWordCountMin cannot exceed recommendedWordCountMax");
+    const referenceUrl = optionalText(generation?.referenceUrl, 500);
+    if (referenceUrl && !/^https?:\/\/[^\s]+$/i.test(referenceUrl)) return badRequest(reply, "referenceUrl must be an http(s) URL");
     const updated = await updateEditorialPlanItem(context.tenantId, itemId, {
       title: typeof body.title === "string" ? body.title : undefined,
       workingTitle: stringOrNull(body.workingTitle),
@@ -1885,7 +1903,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         ? undefined
         : generation === null
           ? null
-          : { tone: optionalText(generation.tone, 80), includeFaq: optionalBool(generation.includeFaq), includeImage: optionalBool(generation.includeImage), instructions: optionalText(generation.instructions, 2000) },
+          : {
+              // Only the keys sent change: the calendar modal sends instructions and referenceUrl, the drawer sends all.
+              ...("tone" in generation ? { tone: optionalText(generation.tone, 80) } : {}),
+              ...("includeFaq" in generation ? { includeFaq: optionalBool(generation.includeFaq) } : {}),
+              ...("includeImage" in generation ? { includeImage: optionalBool(generation.includeImage) } : {}),
+              ...("instructions" in generation ? { instructions: optionalText(generation.instructions, 2000) } : {}),
+              ...("referenceUrl" in generation ? { referenceUrl: referenceUrl ?? null } : {}),
+            },
       primaryKeyword: stringOrNull(body.primaryKeyword),
       seoTitle: stringOrNull(body.seoTitle),
       metaDescription: stringOrNull(body.metaDescription),

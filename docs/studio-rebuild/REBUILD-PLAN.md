@@ -16,7 +16,7 @@ Simple por defecto, Avanzado cuando haga falta. El usuario conecta el sitio; Auc
 | M3 · Una configuración de puertas, un tick, ciclo de vida | `feat/m3-one-gate-one-tick` | Hecho (e3d8b43) |
 | M3b · Publicar sin `PublicationJob` | `feat/m3b-publish-without-publication-job` | Hecho (f4d68a6, d5cefe3, 942134a, 30a4ad7); entrega real verificada en M4 |
 | M4 · Plantilla tipo guía + JSON-LD | `feat/m4-guide-template` | Hecho; borrador real entregado en guiaprogramaciontv.com |
-| M5 · Nueva arquitectura de información | — | Pendiente |
+| M5 · Nueva arquitectura de información | `feat/m5-information-architecture` | Hecho (sin commit) |
 | M6 · Limpieza final | — | Pendiente |
 
 Cada hito va en su propia rama, apilada sobre la anterior. Nada está publicado.
@@ -99,6 +99,22 @@ En la UI se muestran 4 chips, como en la referencia: **En cola · Redactando · 
 - **Diseño:** se mantienen "Ink & Vermilion", Inter y Source Serif 4. Reglas de la skill: progreso, Saltar/Atrás, revelación progresiva, labels visibles, feedback al enviar, objetivos de 44px, foco visible, `prefers-reduced-motion`, responsive a 375/768/1024/1440.
 - **Rutas antiguas** redirigen (`/studio/editorial-plan` → calendario; `/studio/editorial-engine` → calendario filtrado por Revisar).
 - **Tests:** specs del calendario y del setup; e2e nuevo `setup-wizard`; actualizar `calendar-publications`, `studio-shell-nav`, `sources-tabs`, `site-intelligence-coverage`.
+- **Hecho (parte 1, 2026-11-17):**
+  - **Navegación:** `STUDIO_NAV` es Home · Calendar · Articles · Results, con Advanced y Settings al final. Se quitó el flujo numerado (barra de paso y "Next step"). Advanced: Site intelligence, Competitors, Sources, Inbox, Plan backlog, Review queue, Media, Background jobs. Settings agrupa *Business & brand · Articles (Mode & rhythm) · Integrations*, y luego Workspace y System.
+  - **Rutas:** `/studio/plan` (antes editorial-plan: generador y drawer completo), `/studio/review-queue` (antes editorial-engine), `/studio/results` (antes publications). `/studio/editorial-plan` → calendario, `/studio/editorial-engine` → `calendar?chip=review`, `/studio/publications` → results (conserva `?id=`). Enlaces del servidor (notificaciones, copilot, onboarding, cobertura de clusters) apuntan ya a las rutas nuevas.
+  - **Calendario:** vista "30 days" por defecto, chips con contador (All · Queued · Drafting · Review · Published · Failed, filtran y aceptan `?chip=`), el chip del ciclo de vida en cada tarjeta y los cancelados fuera. El arrastre para reprogramar ya existía.
+  - **Añadir keywords:** `POST /v2/sites/:id/plan-keywords` (`plan-keywords.ts`), hasta 50. Descarta repetidas, ya planificadas o cubiertas (solapamiento de título ≥ 0,75) y fuera de tema (solo las guardas duras: léxico fuera de tema y exclusiones de la estrategia; el umbral blando tumbaba frases cortas). Cada una es un plan item `guide` **aprobado** (lo eligió el usuario) en el siguiente hueco libre según el ritmo del sitio, dentro de un plan "Your keywords".
+  - **Modal de instrucciones:** en un ítem en cola, guarda `generation.instructions` y `generation.referenceUrl` (http/https). Arreglos encontrados: el PATCH reemplazaba `metadata.generation` entero (borraba idioma, tipo y objetivos); ahora fusiona solo las claves enviadas. Y el pipeline justo a tiempo no pasaba ni las instrucciones ni las notas al escritor; ahora van en `planGuidance`.
+  - **Tests:** `plan-keywords` 1/1, `studio-nav.spec` 5/5, e2e nuevo `calendar-m5` 3/3 (capturas en `evidence/m5/`), `studio-shell-nav` 2/2; `planning-workspace`, `production-pipeline`, `site-onboarding` y `guide-template` en verde.
+- **Hecho (parte 2, 2026-11-17):**
+  - **Inicio:** la línea de estado dice "N articles to review" (con enlace a `calendar?chip=review`) o "Everything runs on its own"; el feed del día muestra 8 actividades y "Show all". La checklist ya existía; ahora solo "Connect your website" es obligatoria (`overview-model.ts`) y se puede ocultar una vez hecha (por sitio, en `localStorage`). "What Auctorio learned" pregunta "Is this right?": **Correct** guarda la estrategia efectiva como aprobada (`PUT /v2/sites/:id/strategy`), **Update** abre Site intelligence.
+  - **Configuración:** no hay asistente aparte; la checklist de Inicio es el setup, así que "solo conectar es obligatorio" vive ahí. El e2e `setup-wizard` del plan lo cubre `home-article-m5`.
+  - **Ajustes · Artículos:** la página `/studio/automation` es "Mode & rhythm". Nueva tarjeta `article-settings-card`: días de publicación como chips, interruptores de las secciones de la guía (M4) y, bajo "More", artículos por día y hora. Guarda en `planning-settings` (lo que usan el plan y "Add keywords"). `AutomationPolicy.articlesPerDay` (presupuesto diario del tick) sigue en los controles avanzados de la política.
+  - **Artículo:** abre en vista previa (portada, título, entradilla, cuerpo con Source Serif 4); las pestañas solo aparecen en el modo **Edit**. Panel lateral en orden: Quality (puntuación, avisos, 10 checks), Data (keyword, intención, tipo, palabras, imágenes, "Why this topic"), Slug, meta and cover, Approve and publish. "Fix with AI" aparece solo si falla un check o hay bloqueos.
+  - **Results:** cabecera "Results". El asistente de conexión ya no lista Webflow, Shopify, Wix, Ghost ni Framer (no tienen publisher).
+  - La sección "Advanced" de Sources pasa a "Technical settings" para no chocar con el área Advanced.
+  - **Tests:** `overview-model.spec` + `studio-nav.spec` 12/12; e2e `home-article-m5` 5/5, `calendar-m5` 3/3, `studio-shell-nav` 2/2, `calendar-publications` 1/1, `sources-tabs` 1/1, `studio-role-separation` 4/4, `site-intelligence-coverage` 1/1. Capturas en `evidence/m5/`.
+  - **Abierto:** el bundle inicial supera en ~4 kB su presupuesto de 500 kB (aviso de build).
 
 ### M6 · Limpieza final
 - Migración que borra `PublicationJob` y `PublicationStatus`. Es la única destructiva: solo con backup y tras confirmar 0 escrituras desde M3b.

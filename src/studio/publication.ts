@@ -744,7 +744,7 @@ export async function recoverStalledPublications(now: Date = new Date()): Promis
       message: `Publication ${row.id} got no worker result after ${minutes} min. Check the destination before retrying.`,
       entityType: "publication",
       entityId: row.id,
-      actionUrl: `/studio/publications?id=${row.id}`,
+      actionUrl: `/studio/results?id=${row.id}`,
       dedupeKey: `ops.publication.${row.id}.stalled`,
       dedupeWindowMs: 6 * 3_600_000,
     });

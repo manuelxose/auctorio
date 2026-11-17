@@ -1027,7 +1027,12 @@ export type CalendarEvent = {
   failureClass: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Derived lifecycle (src/studio/article-lifecycle.ts); null chip = canceled. */
+  lifecycle?: string;
+  chip?: ArticleChip | null;
 };
+
+export type ArticleChip = 'queued' | 'drafting' | 'review' | 'published' | 'failed';
 
 export type PublishingAccount = {
   id: string;

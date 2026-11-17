@@ -222,6 +222,11 @@ export function planGuidance(item: EditorialPlanItem): string[] {
   if (faq.length) lines.push(`FAQ candidates (only if genuinely useful):\n${faq.map((question) => `- ${question}`).join("\n")}`);
   if (item.cta) lines.push(`Call to action: ${item.cta}`);
   if (item.freshnessRequirement) lines.push(`Freshness requirement: ${item.freshnessRequirement}`);
+  // Set from the calendar's instructions modal (or the plan drawer).
+  const generation = readGenerationSettings(item);
+  if (typeof generation.instructions === "string" && generation.instructions) lines.push(`Editor instructions: ${generation.instructions}`);
+  if (typeof generation.referenceUrl === "string" && generation.referenceUrl) lines.push(`Reference page to take as a model (do not copy it): ${generation.referenceUrl}`);
+  if (item.notes) lines.push(`Editor notes: ${item.notes}`);
   return lines;
 }
 

@@ -8,6 +8,14 @@ export type PlanItemGenerationSettings = {
   includeFaq?: boolean | null;
   includeImage?: boolean | null;
   instructions?: string | null;
+  referenceUrl?: string | null;
+};
+
+export type PlanKeywordsResult = {
+  created: Array<{ id: string; keyword: string; scheduledFor: string }>;
+  dropped: Array<{ keyword: string; reason: 'duplicate' | 'already_planned' | 'off_topic' }>;
+  /** Kept but no free slot in the next 120 days. */
+  unscheduled: string[];
 };
 
 export type PlanOutlineEntry = { heading: string; subpoints?: string[] };
@@ -70,8 +78,13 @@ export type SitePlanningSettings = {
   publishTimes: string[];
   channels: PlanChannel[];
   defaultPresetId: string | null;
+  /** Site override of the guide template (src/studio/editorial-engine/structure.ts); null = defaults. */
+  articleTargets?: ArticleTargetsOverride | null;
   persisted: boolean;
 };
+
+export type ArticleSectionKey = 'summary' | 'toc' | 'faq' | 'sources' | 'jsonLd' | 'furtherReading' | 'cta';
+export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>> };
 
 export type PlanningInventory = {
   indexedPages: Array<{ url: string; title: string }>;

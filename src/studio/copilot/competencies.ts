@@ -168,7 +168,7 @@ export const COMPETENCIES: CompetencyDefinition[] = [
         include: { attempts: { orderBy: { attemptNumber: "desc" }, take: 3 } },
       });
       return {
-        sources: [{ label: "Publications", path: "/studio/publications" }],
+        sources: [{ label: "Publications", path: "/studio/results" }],
         facts: publications.length
           ? publications
               .map((p) =>

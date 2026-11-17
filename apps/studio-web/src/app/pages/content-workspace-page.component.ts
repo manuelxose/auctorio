@@ -55,14 +55,6 @@ function strOf(value: unknown): string {
             </span>
             <span class="au-badge au-badge--brand" *ngIf="project.origin === 'auto'" title="Created by automation">automatic</span>
           </div>
-          <div class="au-readiness">
-            <span class="au-readiness__item" [class.is-ready]="readiness.article">Article</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.media">Media</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.seo">SEO</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.x">X</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.instagram">Instagram</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.schedule">Schedule</span>
-          </div>
         </div>
         <div class="au-page__actions">
           <button class="au-btn au-btn--ghost" type="button" (click)="refresh()">
@@ -77,16 +69,10 @@ function strOf(value: unknown): string {
             <app-icon name="refresh"></app-icon>
             Retry image
           </button>
-          <button class="au-btn au-btn--secondary" type="button" *ngIf="canApprove" (click)="approve()">
-            <app-icon name="circle-check"></app-icon>
-            Approve
+          <button class="au-btn au-btn--secondary" type="button" *ngIf="project.latestVersion" (click)="editing = !editing" [attr.aria-pressed]="editing">
+            <app-icon [name]="editing ? 'eye' : 'edit'"></app-icon>
+            {{ editing ? 'Preview' : 'Edit' }}
           </button>
-          <button class="au-btn au-btn--primary" type="button" *ngIf="canSyncDraft" (click)="syncDraft()">Save to site as draft</button>
-          <button class="au-btn au-btn--primary" type="button" *ngIf="canPublish" (click)="publish()">
-            <app-icon name="publications"></app-icon>
-            {{ published ? 'Republish' : 'Publish' }}
-          </button>
-          <button class="au-btn au-btn--danger" type="button" *ngIf="canUnpublish" (click)="unpublish()">Unpublish</button>
         </div>
       </header>
 
@@ -127,6 +113,23 @@ function strOf(value: unknown): string {
 
       <div class="au-workspace">
         <div class="au-workspace__main">
+          @if (!editing) {
+            <article class="au-panel au-panel--padded au-article-preview" aria-label="Article preview">
+              @if (project.latestVersion; as version) {
+                @if (coverUrl) { <img class="au-article-preview__cover" [src]="coverUrl" alt="" /> }
+                <h2 class="au-article-preview__title">{{ version.title }}</h2>
+                @if (version.excerpt) { <p class="au-article-preview__excerpt">{{ version.excerpt }}</p> }
+                <!-- Angular sanitizes [innerHTML]; the body was already sanitized server-side (html-sanitizer.ts). -->
+                <div class="au-article-preview__body" [innerHTML]="version.bodyHtml"></div>
+              } @else {
+                <div class="au-empty">
+                  <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
+                  <p class="au-empty__title">Generating your article…</p>
+                  <p class="au-empty__text">The page refreshes automatically when the first version is ready.</p>
+                </div>
+              }
+            </article>
+          } @else {
           <nav class="au-tabs" aria-label="Content sections">
             <button
               *ngFor="let tab of tabs"
@@ -430,7 +433,7 @@ function strOf(value: unknown): string {
                   <app-icon name="calendar"></app-icon>
                   Schedule in Calendar
                 </a>
-                <a class="au-btn au-btn--secondary au-btn--sm" *ngIf="publications.length > 0" routerLink="/studio/publications" [queryParams]="{ projectId: projectId }">
+                <a class="au-btn au-btn--secondary au-btn--sm" *ngIf="publications.length > 0" routerLink="/studio/results" [queryParams]="{ projectId: projectId }">
                   <app-icon name="publications"></app-icon>
                   Manage in Publications
                 </a>
@@ -458,6 +461,7 @@ function strOf(value: unknown): string {
               <pre class="au-diff" *ngIf="selectedVersion">{{ selectedVersion.bodyHtml }}</pre>
             </section>
           </ng-container>
+          }
         </div>
 
         <aside class="au-workspace__rail">
@@ -489,6 +493,7 @@ function strOf(value: unknown): string {
               <p class="au-hint" *ngIf="project.reviewGate.blockerCount > 0">
                 {{ project.reviewGate.blockerCount }} issue{{ project.reviewGate.blockerCount === 1 ? '' : 's' }} must be fixed before publishing.
               </p>
+              <!-- Only when something fails. -->
               <button class="au-btn au-btn--secondary au-btn--block" type="button" *ngIf="canFixWithAi" (click)="fixWithAi()">
                 <app-icon name="sparkles"></app-icon>
                 Fix with AI
@@ -497,13 +502,46 @@ function strOf(value: unknown): string {
             <ng-template #noVersion><p class="au-hint">Quality checks run after generation.</p></ng-template>
           </section>
 
-          <section class="au-panel au-panel--padded" *ngIf="whyThisTopic">
-            <h2 class="au-panel__title au-mb-2">¿Por qué este tema?</h2>
-            <p class="au-hint">{{ whyThisTopic }}</p>
+          <section class="au-panel au-panel--padded" *ngIf="project.latestVersion">
+            <h2 class="au-panel__title au-mb-2">Data</h2>
+            <dl class="au-detail-grid">
+              <ng-container *ngIf="draftPrimaryKeyword"><dt>Keyword</dt><dd>{{ draftPrimaryKeyword }}</dd></ng-container>
+              <ng-container *ngIf="draftPrimaryIntent"><dt>Intent</dt><dd>{{ draftPrimaryIntent }}</dd></ng-container>
+              <ng-container *ngIf="draftContentType"><dt>Type</dt><dd>{{ draftContentType }}</dd></ng-container>
+              <dt>Words</dt><dd>{{ wordCount }}</dd>
+              <dt>Images</dt><dd>{{ inlineImageCount }}</dd>
+            </dl>
+            <details class="au-mt-2" *ngIf="whyThisTopic">
+              <summary>Why this topic</summary>
+              <p class="au-hint au-mt-1">{{ whyThisTopic }}</p>
+            </details>
+          </section>
+
+          <section class="au-panel au-panel--padded" *ngIf="project.latestVersion">
+            <h2 class="au-panel__title au-mb-2">Slug, meta and cover</h2>
+            <dl class="au-detail-grid">
+              <dt>Slug</dt><dd>{{ draftSlug || '—' }}</dd>
+              <dt>SEO title</dt><dd>{{ draftSeoTitle || '—' }}</dd>
+              <dt>Meta</dt><dd>{{ draftSeoDescription || '—' }}</dd>
+            </dl>
+            <img class="au-article-preview__thumb au-mt-2" *ngIf="coverUrl" [src]="coverUrl" alt="Cover image" />
+            <button class="au-btn au-btn--ghost au-btn--sm au-mt-2" type="button" (click)="editing = true; activeTab = 'seo'">Edit slug and meta</button>
           </section>
 
           <section class="au-panel au-panel--padded">
-            <h2 class="au-panel__title au-mb-2">Publishing</h2>
+            <h2 class="au-panel__title au-mb-2">Approve and publish</h2>
+            <div class="au-stack au-mb-2">
+              <button class="au-btn au-btn--secondary au-btn--block" type="button" *ngIf="canApprove" (click)="approve()">
+                <app-icon name="circle-check"></app-icon>
+                Approve
+              </button>
+              <button class="au-btn au-btn--secondary au-btn--block" type="button" *ngIf="canSyncDraft" (click)="syncDraft()">Save to site as draft</button>
+              <button class="au-btn au-btn--primary au-btn--block" type="button" *ngIf="canPublish" (click)="publish()">
+                <app-icon name="publications"></app-icon>
+                {{ published ? 'Republish' : 'Publish' }}
+              </button>
+              <button class="au-btn au-btn--danger au-btn--block" type="button" *ngIf="canUnpublish" (click)="unpublish()">Unpublish</button>
+            </div>
             <p class="au-hint">
               {{ project.site.name }} · {{ project.site.baseUrl || 'destination' }}
             </p>
@@ -540,6 +578,8 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   project: StudioProjectDetailView | null = null;
   activeTab: WorkspaceTab = 'content';
+  /** M5: the article opens as a preview; editing (the tabs) is a separate mode. */
+  editing = false;
   tabs: WorkspaceTab[] = ['content', 'media', 'seo', 'social', 'schedule', 'history'];
   error = '';
   notice = '';
@@ -562,20 +602,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   get publications(): ProjectPublication[] {
     const list = this.project?.publications ?? [];
     return list.filter((publication) => publication.status !== 'deleted') as ProjectPublication[];
-  }
-
-  get readiness(): { article: boolean; media: boolean; seo: boolean; x: boolean; instagram: boolean; schedule: boolean } {
-    const version = this.project?.latestVersion;
-    const xDone = this.social.some((piece) => piece.channel === 'x' && piece.generationStatus === 'done');
-    const igDone = this.social.some((piece) => piece.channel === 'instagram' && piece.generationStatus === 'done');
-    return {
-      article: Boolean(version?.bodyHtml),
-      media: Boolean(version?.hasAsset),
-      seo: Boolean(version?.seoTitle),
-      x: xDone,
-      instagram: igDone,
-      schedule: this.publications.some((publication) => ['scheduled', 'published'].includes(publication.status)),
-    };
   }
 
   draftTitle = '';
@@ -698,7 +724,15 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get canFixWithAi(): boolean {
-    return Boolean(this.project && this.project.reviewGate.blockerCount > 0 && this.project.versions.length > 0);
+    return Boolean(this.project && this.project.versions.length > 0 && (this.project.reviewGate.blockerCount > 0 || this.checklist.some((item) => !item.passed)));
+  }
+
+  get coverUrl(): string | null {
+    return this.project?.latestVersion?.assetVariants?.find((variant) => variant.publicUrl)?.publicUrl ?? null;
+  }
+
+  get wordCount(): number {
+    return this.draftBody.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
   }
 
   readonly INLINE_IMAGE_MIN = 3;

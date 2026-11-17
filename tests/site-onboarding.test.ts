@@ -128,7 +128,7 @@ test("ONB-01: activating a website creates one onboarding run whose steps run in
   assert.ok(strategy.suggested);
   assert.equal(strategy.approvedVersion, 0);
   const offer = await prisma.notification.findFirstOrThrow({ where: { tenantId: tenant.id, dedupeKey: `onboarding.${siteId}.first_plan` } });
-  assert.equal(offer.actionUrl, `/studio/editorial-plan?siteId=${siteId}`);
+  assert.equal(offer.actionUrl, `/studio/plan?siteId=${siteId}`);
   assert.equal(await prisma.editorialPlan.count({ where: { siteId } }), 0, "no plan is generated");
 
   const view = await server.inject({ method: "GET", url: `/v2/sites/${siteId}/onboarding` });

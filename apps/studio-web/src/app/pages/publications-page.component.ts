@@ -20,8 +20,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Publishing operations</p>
-          <h1 class="au-page__title">Publications</h1>
+          <h1 class="au-page__title">Results</h1>
           <p class="au-page__subtitle">Every publication of this site: publish now, retry, cancel, unpublish or delete. Dates are changed in Calendar.</p>
         </div>
         <div class="au-page__actions">
@@ -35,7 +34,7 @@ import type { PublicationChannel, PublicationState, StudioPublication, StudioSit
       <div class="au-banner au-banner--info" *ngIf="projectId">
         <app-icon name="filter"></app-icon>
         <span class="au-banner__text">Showing the publications of one article.</span>
-        <a class="au-banner__action" routerLink="/studio/publications">Show all</a>
+        <a class="au-banner__action" routerLink="/studio/results">Show all</a>
       </div>
 
       <div class="au-toolbar">

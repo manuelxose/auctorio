@@ -51,7 +51,7 @@ test('saved editorial plans render as one expandable table', async ({ browser })
   });
   expect(login.status()).toBe(200);
 
-  await page.goto(`${BASE}/studio/editorial-plan`, { waitUntil: 'networkidle' });
+  await page.goto(`${BASE}/studio/plan`, { waitUntil: 'networkidle' });
   await page.waitForTimeout(3_000);
 
   const rows = await page.locator('.au-plan-row').count();

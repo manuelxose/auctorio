@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { Component, ElementRef, OnDestroy, OnInit, ViewChild, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Observable, Subscription, timer } from 'rxjs';
@@ -10,10 +10,12 @@ import { ToastService } from '../services/toast.service';
 import { EditorialContextService } from '../services/editorial-context.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
-import type { CalendarEvent, PublicationChannel, StudioProjectSummary, PublishingAccount } from '../models/studio.models';
+import type { ArticleChip, CalendarEvent, PublicationChannel, StudioProjectSummary, PublishingAccount } from '../models/studio.models';
+import type { PlanKeywordsResult } from '../models/planning.models';
 import { localDate, localTime, zonedToUtc } from '../components/planning/planning-utils';
 
-type CalendarView = 'list' | 'day' | 'week' | 'month';
+type CalendarView = 'next30' | 'list' | 'day' | 'week' | 'month';
+type ChipFilter = 'all' | ArticleChip;
 
 @Component({
   selector: 'app-calendar-page',
@@ -23,14 +25,17 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Publishing timeline</p>
           <h1 class="au-page__title">Calendar</h1>
-          <p class="au-page__subtitle">When each piece goes out on {{ siteName }}. Schedule content, then drag a card or use Move to change its date. Briefs are decided in the plan; publishing, retries and cancellations live in Publications.</p>
+          <p class="au-page__subtitle">What goes out on {{ siteName }} and when. Add keywords, drag a card to move it, open a queued one to give the writer instructions.</p>
           <p class="au-hint au-mb-0">Times in {{ timeZone }}. <span class="au-calendar-legend au-calendar-legend--proposal">Dashed: proposal, not scheduled to publish</span> · <span class="au-calendar-legend">Solid: scheduled publication</span></p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--primary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
+          <button class="au-btn au-btn--primary" type="button" (click)="showKeywords = !showKeywords" [attr.aria-expanded]="showKeywords" aria-controls="keywords-form">
             <app-icon name="plus"></app-icon>
+            Add keywords
+          </button>
+          <button class="au-btn au-btn--secondary" type="button" (click)="showScheduleForm = !showScheduleForm" [attr.aria-expanded]="showScheduleForm" aria-controls="schedule-form">
+            <app-icon name="calendar"></app-icon>
             {{ showScheduleForm ? 'Hide form' : 'Schedule a publication' }}
           </button>
           <select class="au-select au-filter-select" [(ngModel)]="channelFilter" (ngModelChange)="load()" aria-label="Filter by channel">
@@ -41,6 +46,14 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           </select>
         </div>
       </header>
+
+      <div class="au-cal-chips" role="group" aria-label="Filter by state">
+        @for (chip of chipFilters; track chip.key) {
+          <button type="button" class="au-cal-chip" [attr.data-chip]="chip.key" [attr.aria-pressed]="chipFilter === chip.key" (click)="setChip(chip.key)">
+            {{ chip.label }} <span class="au-cal-chip__count">{{ chipCount(chip.key) }}</span>
+          </button>
+        }
+      </div>
 
       <div class="au-tabs">
         <button *ngFor="let view of views" class="au-tab" [class.is-active]="view.key === viewMode" type="button" (click)="setView(view.key)">
@@ -66,6 +79,33 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         <app-icon name="circle-check"></app-icon>
         <span class="au-banner__text">{{ notice }}</span>
       </div>
+
+      <section id="keywords-form" class="au-panel au-panel--padded au-mb-3" *ngIf="showKeywords">
+        <h2 class="au-panel__title">Add keywords</h2>
+        <p class="au-panel__subtitle au-mb-3">One per line, up to 50. Each becomes an article on the next free day; repeats and off-topic ones are skipped.</p>
+        <form (ngSubmit)="addKeywords()">
+          <label class="au-field">
+            <span class="au-field__label">Keywords</span>
+            <textarea class="au-input" name="keywords" rows="6" [(ngModel)]="keywordsText" required aria-describedby="keywords-count"></textarea>
+            <span class="au-hint" id="keywords-count">{{ keywordList.length }} / 50{{ keywordList.length > 50 ? ' (too many)' : '' }}</span>
+          </label>
+          <div class="au-form__actions au-mt-0">
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="addingKeywords || !keywordList.length || keywordList.length > 50">
+              {{ addingKeywords ? 'Adding…' : 'Add to calendar' }}
+            </button>
+          </div>
+        </form>
+        @if (keywordsResult; as result) {
+          <div class="au-mt-2" role="status">
+            <p class="au-mb-1">{{ result.created.length }} added{{ result.unscheduled.length ? ', ' + result.unscheduled.length + ' without a free day' : '' }}{{ result.dropped.length ? ', ' + result.dropped.length + ' skipped' : '' }}.</p>
+            @if (result.dropped.length) {
+              <ul class="au-hint au-mb-0">
+                @for (entry of result.dropped; track entry.keyword) { <li>{{ entry.keyword }}: {{ dropReason(entry.reason) }}</li> }
+              </ul>
+            }
+          </div>
+        }
+      </section>
 
       <section id="schedule-form" class="au-panel au-panel--padded au-mb-3" *ngIf="showScheduleForm">
         <h2 class="au-panel__title">Schedule a publication</h2>
@@ -111,7 +151,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
       <section class="au-panel au-panel--padded" *ngIf="viewMode === 'list'">
         <p class="au-hint au-mb-2" *ngIf="dragHint">Drag a card to move it. Drop to reschedule.</p>
         <app-empty-state
-          *ngIf="events.length === 0"
+          *ngIf="visibleEvents.length === 0"
           icon="calendar"
           title="Nothing scheduled yet"
           text="Add a publication above or schedule from the content workspace."
@@ -155,15 +195,15 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
       </section>
 
       <!-- Month -->
-      <section class="au-calendar-grid au-calendar-grid--month" *ngIf="viewMode === 'month'">
-        <div class="au-calendar-day" *ngFor="let day of monthDays" [style.grid-column-start]="day.dayNum === 1 ? ((day.date.getDay() + 6) % 7) + 1 : null"
+      <section class="au-calendar-grid au-calendar-grid--month" *ngIf="viewMode === 'month' || viewMode === 'next30'">
+        <div class="au-calendar-day" *ngFor="let day of monthDays; let first = first" [style.grid-column-start]="first ? ((day.date.getDay() + 6) % 7) + 1 : null"
           (dragover)="$event.preventDefault()" (drop)="onDropOnDay($event, day.date)">
           <span class="au-calendar-day__num" [class.is-today]="isToday(day.date)">{{ day.dayNum }}</span>
           <span class="au-calendar-day__count" *ngIf="day.events.length > 0">{{ day.events.length }} planned</span>
           <button type="button" class="au-calendar-chip" *ngFor="let event of day.events.slice(0, 3)"
             [class.is-proposal]="event.kind === 'plan_item'"
             [draggable]="canDrag(event)" (dragstart)="onDragStart($event, event)" (dragend)="onDragEnd($event)"
-            (click)="focusDay(day.date)" [title]="event.title" [attr.aria-label]="ariaLabel(event)">
+            [attr.data-chip]="event.chip" (click)="openEvent(event, day.date)" [title]="event.title" [attr.aria-label]="ariaLabel(event)">
             <i class="au-channel-dot" [class]="'au-channel-dot au-channel-dot--' + event.channel"></i>
             <span class="au-calendar-chip__text">{{ event.title }}</span>
           </button>
@@ -173,6 +213,28 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
         </div>
       </section>
     </section>
+
+    <dialog #instructionsDialog class="au-dialog au-cal-dialog" aria-labelledby="instructions-title" (close)="instructionsFor = null">
+      @if (instructionsFor; as item) {
+        <form (ngSubmit)="saveInstructions()">
+          <h2 class="au-dialog__title" id="instructions-title">Instructions for the writer</h2>
+          <p class="au-dialog__body">{{ item.title }}</p>
+          <label class="au-field">
+            <span class="au-field__label">Instructions</span>
+            <textarea class="au-input" name="instructions" rows="5" maxlength="2000" [(ngModel)]="instructions.text" placeholder="What to cover, what to avoid, the tone…"></textarea>
+          </label>
+          <label class="au-field">
+            <span class="au-field__label">Reference URL (optional)</span>
+            <input class="au-input" type="url" name="referenceUrl" maxlength="500" [(ngModel)]="instructions.url" placeholder="https://" aria-describedby="reference-hint" />
+            <span class="au-hint" id="reference-hint">A page to take as a model. It is not copied.</span>
+          </label>
+          <div class="au-dialog__actions">
+            <button class="au-btn au-btn--secondary" type="button" (click)="closeInstructions()">Cancel</button>
+            <button class="au-btn au-btn--primary" type="submit" [disabled]="instructions.saving">{{ instructions.saving ? 'Saving…' : 'Save' }}</button>
+          </div>
+        </form>
+      }
+    </dialog>
 
     <ng-template #cardTpl let-event>
       <div class="au-calendar-card__body">
@@ -184,7 +246,7 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <span class="au-calendar-card__meta">{{ event.destination }} · {{ event.projectTitle }}</span>
           <span class="au-inline au-mt-1">
             <span class="au-badge au-badge--neutral">{{ event.kind === 'plan_item' ? 'Proposal' : 'Publication' }}</span>
-            <span class="au-badge" [class]="statusClass(event.status)">{{ statusLabel(event) }}</span>
+            <span class="au-cal-chip au-cal-chip--sm" [attr.data-chip]="event.chip" *ngIf="event.chip">{{ chipLabel(event.chip) }}</span>
             <span class="au-badge au-badge--neutral" *ngIf="event.contentType">{{ event.contentType }}</span>
             <span class="au-badge au-badge--brand" *ngIf="event.automated">automatic</span>
           </span>
@@ -195,18 +257,22 @@ type CalendarView = 'list' | 'day' | 'week' | 'month';
           <button *ngIf="event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" [routerLink]="['/studio/content', event.projectId]">
             Open
           </button>
+          <button *ngIf="event.kind === 'plan_item' && event.chip === 'queued' && !event.projectId" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="openInstructions(event)">
+            <app-icon name="edit"></app-icon>
+            Instructions
+          </button>
           <button *ngIf="event.status !== 'published' && event.status !== 'canceled'" class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="startMove(event)" [attr.aria-expanded]="movingId === event.id" [attr.aria-label]="'Move ' + event.title">
             <app-icon name="calendar"></app-icon>
             Move
           </button>
           <!-- Single homes: briefs are decided in the plan, publication state in Publications. -->
-          <a *ngIf="event.kind === 'plan_item'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ plan: event.planId, item: event.id }">
+          <a *ngIf="event.kind === 'plan_item'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/plan" [queryParams]="{ plan: event.planId, item: event.id }">
             <app-icon name="plan"></app-icon>
-            {{ event.status === 'proposed' ? 'Review in plan' : 'Open in plan' }}
+            {{ event.status === 'proposed' ? 'Review brief' : 'Full brief' }}
           </a>
-          <a *ngIf="event.kind === 'publication'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/publications" [queryParams]="{ id: event.id }">
+          <a *ngIf="event.kind === 'publication'" class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/results" [queryParams]="{ id: event.id }">
             <app-icon name="publications"></app-icon>
-            {{ event.status === 'failed' ? 'Fix in Publications' : 'Manage' }}
+            {{ event.status === 'failed' ? 'Fix in Results' : 'Manage' }}
           </a>
         </div>
       </div>
@@ -233,12 +299,30 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   readonly siteName = this.appContext.activeSite()?.name ?? 'this site';
 
   views: Array<{ key: CalendarView; label: string }> = [
+    { key: 'next30', label: '30 days' },
     { key: 'list', label: 'List' },
     { key: 'day', label: 'Day' },
     { key: 'week', label: 'Week' },
     { key: 'month', label: 'Month' },
   ];
-  viewMode: CalendarView = 'week';
+  viewMode: CalendarView = 'next30';
+  readonly chipFilters: Array<{ key: ChipFilter; label: string }> = [
+    { key: 'all', label: 'All' },
+    { key: 'queued', label: 'Queued' },
+    { key: 'drafting', label: 'Drafting' },
+    { key: 'review', label: 'Review' },
+    { key: 'published', label: 'Published' },
+    { key: 'failed', label: 'Failed' },
+  ];
+  chipFilter: ChipFilter = 'all';
+  showKeywords = false;
+  keywordsText = '';
+  addingKeywords = false;
+  keywordsResult: PlanKeywordsResult | null = null;
+  instructionsFor: CalendarEvent | null = null;
+  instructions = { text: '', url: '', saving: false };
+  @ViewChild('instructionsDialog') private instructionsDialog?: ElementRef<HTMLDialogElement>;
+  private instructionsReturnFocus: HTMLElement | null = null;
   events: CalendarEvent[] = [];
   /** The site's IANA timezone (from the API); wall-clock inputs and labels use it, the API stores UTC. */
   timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -272,12 +356,18 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     if (this.viewMode === 'month') {
       return this.anchor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
     }
+    if (this.viewMode === 'next30') {
+      const last = new Date(this.anchor.getFullYear(), this.anchor.getMonth(), this.anchor.getDate() + 29);
+      return `${this.anchor.toLocaleDateString('en-US', options)} → ${last.toLocaleDateString('en-US', options)}`;
+    }
     return this.anchor.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
   ngOnInit(): void {
     this.context.update({ area: 'calendar' });
     // ?projectId= comes from an article's "Schedule in Calendar": open the form with it preselected.
+    const chip = this.route?.snapshot.queryParamMap.get('chip');
+    if (this.chipFilters.some((filter) => filter.key === chip)) this.chipFilter = chip as ChipFilter;
     const projectId = this.route?.snapshot.queryParamMap.get('projectId');
     if (projectId) {
       this.draft.projectId = projectId;
@@ -313,6 +403,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   private range(): { from: Date; to: Date } {
+    if (this.viewMode === 'next30') {
+      const start = new Date(this.anchor.getFullYear(), this.anchor.getMonth(), this.anchor.getDate());
+      return { from: start, to: new Date(start.getFullYear(), start.getMonth(), start.getDate() + 30) };
+    }
     if (this.viewMode === 'month') {
       const start = new Date(this.anchor.getFullYear(), this.anchor.getMonth(), 1);
       const end = new Date(this.anchor.getFullYear(), this.anchor.getMonth() + 1, 1);
@@ -358,7 +452,9 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
   }
 
   move(delta: number): void {
-    if (this.viewMode === 'month') {
+    if (this.viewMode === 'next30') {
+      this.anchor = new Date(this.anchor.getFullYear(), this.anchor.getMonth(), this.anchor.getDate() + delta * 30);
+    } else if (this.viewMode === 'month') {
       this.anchor = new Date(this.anchor.getFullYear(), this.anchor.getMonth() + delta, 1);
     } else if (this.viewMode === 'week') {
       this.anchor = new Date(this.anchor.getTime() + delta * 7 * 24 * 3_600_000);
@@ -370,7 +466,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   get groupedEvents(): Array<{ label: string; entries: Array<{ item: CalendarEvent }> }> {
     const byDate = new Map<string, CalendarEvent[]>();
-    for (const event of this.events) {
+    for (const event of this.visibleEvents) {
       const key = event.scheduledFor ? localDate(event.scheduledFor, this.timeZone) : 'unscheduled';
       byDate.set(key, [...(byDate.get(key) ?? []), event]);
     }
@@ -399,14 +495,10 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   get monthDays(): Array<{ date: Date; dayNum: number; events: CalendarEvent[] }> {
     const { from } = this.range();
-    const daysInMonth = new Date(from.getFullYear(), from.getMonth() + 1, 0).getDate();
-    return Array.from({ length: daysInMonth }, (_value, index) => {
-      const date = new Date(from.getFullYear(), from.getMonth(), index + 1);
-      return {
-        date,
-        dayNum: index + 1,
-        events: this.eventsOn(date),
-      };
+    const count = this.viewMode === 'next30' ? 30 : new Date(from.getFullYear(), from.getMonth() + 1, 0).getDate();
+    return Array.from({ length: count }, (_value, index) => {
+      const date = new Date(from.getFullYear(), from.getMonth(), from.getDate() + index);
+      return { date, dayNum: date.getDate(), events: this.eventsOn(date) };
     });
   }
 
@@ -417,7 +509,7 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   private eventsOn(date: Date): CalendarEvent[] {
     const key = this.dayKey(date);
-    return this.events.filter((event) => event.scheduledFor && localDate(event.scheduledFor, this.timeZone) === key);
+    return this.visibleEvents.filter((event) => event.scheduledFor && localDate(event.scheduledFor, this.timeZone) === key);
   }
 
   ariaLabel(event: CalendarEvent): string {
@@ -439,6 +531,94 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
     return ({ proposed: 'proposal', approved: 'approved brief', generating: 'writing draft', content_ready: 'draft ready', review_required: 'in review' } as Record<string, string>)[event.status] ?? event.status.replace(/_/g, ' ');
   }
 
+  /** Canceled items (null chip) stay off the calendar. */
+  get visibleEvents(): CalendarEvent[] {
+    return this.events.filter((event) => event.chip !== null && (this.chipFilter === 'all' || event.chip === this.chipFilter));
+  }
+
+  chipCount(chip: ChipFilter): number {
+    return this.events.filter((event) => event.chip !== null && (chip === 'all' || event.chip === chip)).length;
+  }
+
+  chipLabel(chip: ArticleChip): string {
+    return this.chipFilters.find((filter) => filter.key === chip)?.label ?? chip;
+  }
+
+  setChip(chip: ChipFilter): void {
+    this.chipFilter = this.chipFilter === chip ? 'all' : chip;
+  }
+
+  /** Month chips: a queued brief opens its instructions; anything else zooms into the day. */
+  openEvent(event: CalendarEvent, day: Date): void {
+    if (event.kind === 'plan_item' && event.chip === 'queued' && !event.projectId) this.openInstructions(event);
+    else this.focusDay(day);
+  }
+
+  get keywordList(): string[] {
+    return this.keywordsText.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  }
+
+  dropReason(reason: string): string {
+    return ({ duplicate: 'repeated in the list', already_planned: 'already planned or covered', off_topic: 'off-topic for this site' } as Record<string, string>)[reason] ?? reason;
+  }
+
+  addKeywords(): void {
+    const keywords = this.keywordList;
+    if (!this.siteId || !keywords.length || keywords.length > 50) return;
+    this.addingKeywords = true;
+    this.keywordsResult = null;
+    this.planning.addKeywords(this.siteId, keywords).subscribe({
+      next: (result) => {
+        this.addingKeywords = false;
+        this.keywordsResult = result;
+        if (result.created.length) {
+          this.keywordsText = '';
+          this.toast.success(`${result.created.length} article${result.created.length === 1 ? '' : 's'} added to the calendar.`);
+          this.load(true);
+        }
+      },
+      error: (err) => {
+        this.addingKeywords = false;
+        this.error = err?.error?.error?.message || 'The keywords could not be added.';
+      },
+    });
+  }
+
+  openInstructions(event: CalendarEvent): void {
+    this.instructionsReturnFocus = document.activeElement as HTMLElement | null;
+    this.instructionsFor = event;
+    this.instructions = { text: '', url: '', saving: false };
+    this.instructionsDialog?.nativeElement.showModal();
+    if (!event.planId) return;
+    this.planning.getPlan(event.planId).subscribe({
+      next: (plan) => {
+        const generation = plan.items?.find((item) => item.id === event.id)?.metadata?.generation;
+        if (this.instructionsFor?.id === event.id) this.instructions = { text: generation?.instructions ?? '', url: generation?.referenceUrl ?? '', saving: false };
+      },
+    });
+  }
+
+  closeInstructions(): void {
+    this.instructionsDialog?.nativeElement.close();
+    this.instructionsReturnFocus?.focus();
+  }
+
+  saveInstructions(): void {
+    const item = this.instructionsFor;
+    if (!item) return;
+    this.instructions.saving = true;
+    this.planning.updateItem(item.id, { generation: { instructions: this.instructions.text, referenceUrl: this.instructions.url } }).subscribe({
+      next: () => {
+        this.closeInstructions();
+        this.toast.success('Instructions saved.');
+      },
+      error: (err) => {
+        this.instructions.saving = false;
+        this.toast.error(err?.error?.error?.message || 'The instructions could not be saved.');
+      },
+    });
+  }
+
   focusDay(date: Date): void {
     this.anchor = date;
     this.viewMode = 'day';
@@ -451,26 +631,6 @@ export class CalendarPageComponent implements OnInit, OnDestroy {
 
   timeLabel(value: string | null): string {
     return value ? localTime(value, this.timeZone) : '—';
-  }
-
-  statusClass(status: string): string {
-    switch (status) {
-      case 'published':
-      case 'approved':
-      case 'content_ready':
-        return 'au-badge--success';
-      case 'proposed':
-      case 'generating':
-      case 'review_required':
-        return 'au-badge--brand';
-      case 'failed':
-        return 'au-badge--danger';
-      case 'scheduled':
-      case 'queued':
-        return 'au-badge--warning';
-      default:
-        return 'au-badge--neutral';
-    }
   }
 
   // ── Drag & drop rescheduling with optimistic UI ──

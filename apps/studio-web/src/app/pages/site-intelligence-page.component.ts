@@ -237,7 +237,7 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
               <label>Weight <input class="au-input" type="number" min="0" max="10" step="0.1" [(ngModel)]="p.weight" style="width: 80px" [disabled]="!p.included" /></label>
               <span class="au-muted" *ngIf="p.included">≈ {{ share(p) }}% of the plan</span>
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="investigate(p)" [disabled]="!p.clusterSlug" [title]="p.clusterSlug ? 'See which of your pages cover it and which subtopics are missing' : 'Not linked to a group of your pages'">Show my pages</button>
-              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: p.name }">Generate proposals</a>
+              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/plan" [queryParams]="{ pillar: p.name }">Generate proposals</a>
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="removePillar(i)">Remove</button>
             </div>
             <div *ngIf="coverage && coverageFor === p.clusterSlug" class="au-meta">
@@ -278,7 +278,7 @@ const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }
                 <td>{{ o.subtopic }}</td>
                 <td>{{ o.reason }}</td>
                 <td>{{ o.confidence }}</td>
-                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/editorial-plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
+                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
               </tr>
             </tbody>
           </table>
