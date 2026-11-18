@@ -25,6 +25,10 @@ proveedores, «Fix with AI», subagentes o sesiones de test) usa como máximo `c
 medio (Haiku vale; Opus nunca). El modelo por defecto de Anthropic en la app es Opus 5.5: cambiar el sitio a
 Sonnet 5.5 antes de generar contenido de prueba.
 
+Estado de datos (2026-11-18): en la BD local se borraron todos los artículos, planes e items de GuíaTV,
+generados antes de M3/M4 (el sitio y sus ajustes siguen). Studio ya tiene **Delete** en el plan
+(`/studio/plan`) y en cada sitio (Settings › Sites) para limpiar entre pruebas.
+
 ---
 
 ## 1. Qué hace BLG (referencia exacta)
