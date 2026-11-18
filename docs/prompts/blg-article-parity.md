@@ -421,7 +421,7 @@ milestones, y se guía por lo que digan en ese momento.
   mínimo completo (ponytail full) y `graphify update .` al terminar. **No hay paso de revisión independiente.**
 - Reutilizar lo que ya existe (sección 0) y no duplicar modelos.
 - Tests focales: `npm run build`, luego `node --test dist/tests/<archivo>.test.js`, y `git checkout -- dist` al final.
-- **Todo trabajo de test o aceptación usa como máximo `claude-sonnet-5-5` con esfuerzo medio (Haiku vale; Opus nunca)**, tanto el modelo del propio chat de Claude que hace las pruebas (sesión, subagente o sesión lateral: cambiarla a Sonnet 5.5 medio antes de empezar) como la IA que gasta la app. El modelo
+- **Opus 5.5 solo coordina y aprueba.** Todas las ejecuciones de tests (build, `node --test`, Playwright, bucles de aceptación) y toda lectura de código (graphify, grep, leer fuentes) se delegan en subagentes con modelos más baratos: `sonnet` con esfuerzo medio (o `haiku` para búsquedas simples), siempre. La IA que gasta la app en pruebas también usa como máximo `claude-sonnet-5-5` medio (Haiku vale; Opus nunca).
   por defecto de la app es Opus 5.5: cambiarlo en el sitio antes de generar contenido de prueba. Lo mismo vale para
   cualquier subagente o sesión de test.
 - Sitio de pruebas: guiaprogramaciontv.com, con la BD local desechable (clon limpio de prod). Reutilizar su token,
