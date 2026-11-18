@@ -16,6 +16,7 @@ const ALLOWED_TAGS = new Set([
   "em",
   "i",
   "u",
+  "s",
   "blockquote",
   "ul",
   "ol",
@@ -40,8 +41,8 @@ const ALLOWED_TAGS = new Set([
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   a: ["href", "title", "rel", "target", "style"],
   // TOC anchors (withTableOfContents).
-  h2: ["id"],
-  h3: ["id"],
+  h2: ["id", "style"],
+  h3: ["id", "style"],
   img: ["src", "alt", "width", "height", "loading"],
   table: [],
   thead: [],
@@ -50,12 +51,12 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   tr: [],
   th: ["scope"],
   td: [],
-  // Brand CTA cards (brand.ts applyBrandCards): presentational inline style only, filtered by cleanStyle.
+  // Brand CTA cards (brand.ts applyBrandCards) and editor alignment: presentational inline style only, filtered by cleanStyle.
   aside: ["style"],
   p: ["style"],
 };
 
-const STYLE_PROPERTIES = new Set(["color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight"]);
+const STYLE_PROPERTIES = new Set(["text-align", "color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight"]);
 
 /** Keeps only whitelisted declarations with plain values (no url(), expression(), var(), quotes or escapes). */
 export function cleanStyle(value: string): string {

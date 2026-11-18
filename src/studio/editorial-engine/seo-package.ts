@@ -11,14 +11,17 @@ import type {
 } from "./types";
 
 export function slugify(value: string, maxLength = 90): string {
-  return value
+  const slug = value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, maxLength)
-    .replace(/-+$/g, "");
+    .replace(/^-+|-+$/g, "");
+  if (slug.length <= maxLength) return slug;
+  // Cut at a word boundary, never mid-word ("\u2026-final-de-ma"); a single long word is cut as is.
+  const cut = slug.slice(0, maxLength + 1);
+  const boundary = cut.lastIndexOf("-");
+  return (boundary > 0 ? cut.slice(0, boundary) : slug.slice(0, maxLength)).replace(/-+$/g, "");
 }
 
 /**
@@ -154,7 +157,8 @@ export function buildSeoPackage(input: SeoInput): SeoPackage {
   const h1 = (article.h1 || article.title).trim();
   const seoTitle = buildSeoTitle(article, brief);
   const metaDescription = buildMetaDescription(article, brief);
-  const slug = slugify(article.title || h1 || primaryKeyword || "articulo");
+  // Guides: short, stable slug from the keyword ("canales-de-television-gratis"); news keep the headline (keywords repeat across them).
+  const slug = slugify((brief.articleTargets && primaryKeyword) || article.title || h1 || primaryKeyword || "articulo", 60);
 
   const entityCoverage = brief.entities.map((entity) => {
     const occurrences = countOccurrences(bodyText, entity.name);

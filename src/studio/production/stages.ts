@@ -19,6 +19,7 @@ import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer
 import { getArticleWriter } from "../editorial-engine/writer-provider";
 import { buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
 import { applyBrandCards } from "../editorial-engine/brand";
+import { insertYoutube } from "../editorial-engine/visuals";
 import { buildProvenance, summarizeProvenance } from "../editorial-engine/provenance";
 import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
@@ -170,6 +171,8 @@ async function seo(ctx: StageContext): Promise<SeoPackage> {
   const brief = need(ctx.artifacts.brief, "brief").brief;
   const article = need(ctx.artifacts.write, "write").parsed;
   const brand = ctx.input.plan?.brand;
+  const video = ctx.input.plan?.youtube;
+  if (brief.articleTargets && video) article.bodyHtml = insertYoutube(article.bodyHtml, video);
   if (brief.articleTargets && brand) article.bodyHtml = applyBrandCards(article.bodyHtml, brand, brief.articleTargets.sections, ctx.input.language, ctx.input.plan?.disclaimer);
   if (brief.articleTargets?.sections.toc) article.bodyHtml = withTableOfContents(article.bodyHtml, ctx.input.language);
   return buildSeoPackage({
@@ -214,6 +217,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         primaryKeyword: briefArtifact.brief.primaryKeyword,
         outline: record.outline ?? [],
         secondaryKeywords: briefArtifact.brief.secondaryKeywords,
+        siteUrl: input.site.baseUrl ?? null,
         ...(briefArtifact.brief.articleTargets ? { articleTargets: briefArtifact.brief.articleTargets } : {}),
       },
       siteType: input.site.type,
@@ -314,6 +318,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
           ...guideMetadata,
+          siteUrl: input.site.baseUrl ?? null,
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
       },
@@ -332,6 +337,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
           ...guideMetadata,
+          siteUrl: input.site.baseUrl ?? null,
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),
         } as Prisma.InputJsonValue,

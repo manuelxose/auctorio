@@ -7,6 +7,7 @@ import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AuRichEditorComponent } from '../components/ui/au-rich-editor.component';
+import { htmlToMarkdown } from '../utils/html-to-markdown';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import type {
   InternalLinkSuggestion,
@@ -87,6 +88,7 @@ function hostOf(url: string): string {
               @if (imageNeedsRetry) { <button class="au-menu__item" type="button" (click)="moreMenu.hide(); retryImage()"><app-icon name="refresh"></app-icon>Retry image</button> }
               @if (project.latestVersion) {
                 <button class="au-menu__item" type="button" (click)="moreMenu.hide(); exportHtml()"><app-icon name="arrow-down"></app-icon>Export HTML</button>
+                <button class="au-menu__item" type="button" (click)="moreMenu.hide(); exportMarkdown()"><app-icon name="arrow-down"></app-icon>Export Markdown</button>
                 <button class="au-menu__item" type="button" (click)="moreMenu.hide(); copyHtml()"><app-icon name="copy"></app-icon>Copy HTML</button>
               }
               <a class="au-menu__item" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }" (click)="moreMenu.hide()"><app-icon name="calendar"></app-icon>Schedule in Calendar</a>
@@ -153,7 +155,8 @@ function hostOf(url: string): string {
                     </div>
                     <div class="art-actions">
                       <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save' }}</button>
-                      <button class="au-btn au-btn--ghost" type="button" (click)="patchDrafts(project); editing = false">Discard</button>
+                      <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save(); editing = false">Save &amp; close</button>
+          <button class="au-btn au-btn--ghost" type="button" (click)="patchDrafts(project); editing = false">Discard</button>
                       <span class="sp-muted">{{ bodyDirty ? 'Unsaved changes, autosaved every few minutes' : '' }}</span>
                     </div>
                   }
@@ -367,6 +370,7 @@ function hostOf(url: string): string {
             <section class="art-box">
               <h2 class="art-label">Cover image</h2>
               @if (coverUrl) { <img class="art-cover" [src]="coverUrl" alt="Cover image" /> } @else { <p class="sp-muted art-tight">No cover yet</p> }
+              @if (coverUrl && project.latestVersion?.image?.metadataStripped) { <p class="art-badge" title="EXIF, XMP and C2PA metadata were removed before storing the image"><app-icon name="check"></app-icon>No AI watermark metadata</p> }
               <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="generateAsset()"><app-icon name="refresh"></app-icon>{{ coverUrl ? 'Replace cover' : 'Generate cover' }}</button>
             </section>
 
@@ -503,6 +507,18 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     const link = document.createElement('a');
     link.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
     link.download = `${this.draftSlug || 'article'}.html`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  /** Markdown file of the current draft (title as H1, then the body). */
+  exportMarkdown(): void {
+    const title = this.draftTitle || this.project?.title || 'Article';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([`# ${title}
+
+${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
+    link.download = `${this.draftSlug || 'article'}.md`;
     link.click();
     URL.revokeObjectURL(link.href);
   }

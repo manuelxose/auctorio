@@ -60,6 +60,14 @@ export function screenKeywords(
   return { kept, dropped };
 }
 
+/** BLG calendar type: list/ranking keywords become listicles, everything else an explainer (both use the guide template). */
+export function keywordContentType(keyword: string): { contentType: "listicle" | "explainer"; intent: "informational" | "commercial-investigation" } {
+  const folded = keyword.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const listicle = /^(top\s*\d+|\d+\s|los\s+\d+|las\s+\d+|mejores\b|best\b)|\b(ranking|mejores|top\s*\d+|alternativas|alternatives)\b/.test(folded);
+  const commercial = /\b(mejor(es)?|precio|precios|comprar|barato|oferta|vs|comparativa|best|price|cheap|buy)\b/.test(folded);
+  return { contentType: listicle ? "listicle" : "explainer", intent: commercial ? "commercial-investigation" : "informational" };
+}
+
 /** Turns up to 50 keywords into approved plan items in the site's next free publishing slots. */
 export async function addPlanKeywords(tenantId: string, siteId: string, keywords: string[], userId?: string | null) {
   const context = await buildEditorialPlanningContext(tenantId, siteId);
@@ -106,9 +114,9 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
           primaryKeyword: keyword,
           secondaryKeywords: variantsOf(keyword).length ? variantsOf(keyword) : undefined,
           targetQuery: keyword,
-          contentType: "guide",
-          searchIntent: "informational",
-          primaryIntent: "informational",
+          contentType: keywordContentType(keyword).contentType,
+          searchIntent: keywordContentType(keyword).intent,
+          primaryIntent: keywordContentType(keyword).intent,
           recommendedWordCountMin: Math.round(words * 0.87),
           recommendedWordCountMax: Math.round(words * 1.13),
           rationale: "You added this keyword to the calendar.",

@@ -22,6 +22,8 @@ export type ExtractedPage = {
   publishedAt: string | null;
   modifiedAt: string | null;
   author: string | null;
+  /** og:site_name: the outlet's own name, used as a source's publisher. */
+  siteName?: string | null;
   categories: string[];
   tags: string[];
   images: string[];
@@ -290,6 +292,7 @@ export function extractPageFromHtml(baseUrl: string, pageUrl: string, html: stri
     publishedAt: dates.published,
     modifiedAt: dates.modified,
     author: readMeta($, "author") ?? readMetaProperty($, "article:author"),
+    siteName: readMetaProperty($, "og:site_name") ?? null,
     categories: [],
     tags: [],
     images: images.slice(0, 20),

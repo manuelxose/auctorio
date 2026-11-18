@@ -10,7 +10,8 @@ import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
 import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
-import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveWritingSettings } from "../editorial-engine/structure";
+import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings } from "../editorial-engine/structure";
+import { youtubeVideoFor } from "../youtube-videos";
 import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
@@ -285,6 +286,10 @@ export async function preparePlanItemInput(
         max: targets.externalLinks + 5, // a few spare so the writer picks the relevant ones
       })
     : [];
+  const isGuide = Boolean(item.primaryKeyword) && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide";
+  const youtube = isGuide
+    ? await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword: item.primaryKeyword!, youtube: resolveVisualSettings(planningSettings?.articleTargets).youtube })
+    : null;
   const facts = [...planEvidence.facts, ...serpFacts];
   const evidence = { facts, groups: new Set(facts.map((fact) => fact.publisherGroup)).size };
   const entities: EngineEntity[] = stringList(item.relatedEntities).map((name, index) => ({
@@ -299,7 +304,7 @@ export async function preparePlanItemInput(
     kind: "plan_item",
     tenantId,
     siteId: site.id,
-    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
+    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig, baseUrl: site.baseUrl },
     language,
     headline,
     summary: item.angle ?? item.rationale ?? null,
@@ -327,6 +332,7 @@ export async function preparePlanItemInput(
       guidance: [...planGuidance(item), ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language)],
       brand,
       disclaimer: writing.disclaimer,
+      youtube,
     },
     options,
   };
@@ -339,12 +345,19 @@ export async function prepareManualInput(
 ): Promise<PreparedInput> {
   const site = await loadSite(tenantId, request.siteId);
   const evidence = request.projectId ? await projectFactLedger(tenantId, request.projectId) : { facts: [], groups: 0 };
+  // Manual articles follow the same site writing, linking and brand settings as planned ones (M4/M5).
+  const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
+  const writing = resolveWritingSettings(planningSettings?.articleTargets);
+  const targets = resolveArticleTargets(planningSettings?.articleTargets);
+  const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
+  const brand = resolveBrand(resolveBrandSettings(planningSettings?.articleTargets), site, profile);
+  const language = options.language === "en" ? "en" : "es";
   return {
     kind: "manual",
     tenantId,
     siteId: site.id,
-    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
-    language: options.language === "en" ? "en" : "es",
+    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig, baseUrl: site.baseUrl },
+    language,
     headline: request.title,
     summary: request.brief.slice(0, 500),
     entities: [],
@@ -353,13 +366,15 @@ export async function prepareManualInput(
     factContext: { clusterVerificationState: evidence.groups >= 2 ? "unverified" : "single_source", independentPublisherGroups: evidence.groups },
     memberTitles: evidence.facts.map((fact) => fact.statement),
     sourceTexts: [request.brief, ...evidence.facts.map((fact) => fact.statement)],
-    internalLinks: await loadInternalLinks(tenantId, site.id, request.title, request.title, []),
+    internalLinks: writing.internalLinks.enabled
+      ? (await loadInternalLinks(tenantId, site.id, request.title, request.title, [], targets.internalLinks + 5, { excludeProjectId: request.projectId ?? null })).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: null,
     primaryEntityNames: [request.title],
     ownProjectId: request.projectId ?? null,
     cluster: null,
-    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`] },
+    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`, ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language, { summary: false })] },
     options,
   };
 }

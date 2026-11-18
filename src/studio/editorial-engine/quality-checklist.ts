@@ -17,6 +17,8 @@ export type ChecklistInput = {
   internalLinkInventorySize: number | null;
   /** Ledger facts with a source URL the writer could cite; caps the external-link target. */
   externalSourceInventorySize?: number | null;
+  /** The site's home URL: absolute links on its host count as internal. */
+  siteUrl?: string | null;
 };
 
 const fold = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
@@ -25,6 +27,36 @@ const words = (value: string) => value.split(/\s+/).filter(Boolean).length;
 
 const STAT = /\d+(?:[.,]\d+)?\s?(?:%|por ciento|percent|millones|millions|mil\b|€|\$|euros|dólares|dollars|horas|hours|minutos|minutes|días|days|gb|mb)/i;
 const FAQ_HEADING = /<h2[^>]*>[^<]*(preguntas frecuentes|faq|frequently asked)/i;
+/** Keywords/headings that compare options: only these guides must carry a table (M3). */
+const COMPARISON = /\b(mejor(es)?|vs\.?|versus|compar\w*|precios?|tarifas?|diferencias?|alternativas?|opciones|plataformas|top \d+|ranking|best|cheapest|prices?|alternatives?|options)\b/i;
+
+const hostOf = (url: string) => {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+};
+
+/** Internal = relative or on the site's own host (the writer emits absolute own URLs); external = any other http(s) link. */
+export function countLinks(html: string, siteUrl: string | null | undefined): { internal: number; external: number } {
+  const own = siteUrl ? hostOf(siteUrl) : "";
+  let internal = 0;
+  let external = 0;
+  for (const [, href] of html.matchAll(/<a[^>]+href=["']([^"']*)["']/gi)) {
+    if (/^https?:\/\//i.test(href)) {
+      if (own && hostOf(href) === own) internal += 1;
+      else external += 1;
+    } else if (!/^(mailto:|tel:|#)/i.test(href)) internal += 1;
+  }
+  return { internal, external };
+}
+
+/** Whether a guide compares options (keyword or any H2), so a comparison table is expected. */
+export function comparesOptions(keyword: string | null, html: string): boolean {
+  const headings = [...html.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/gi)].map((match) => text(match[1]));
+  return [keyword ?? "", ...headings].some((value) => COMPARISON.test(fold(value)));
+}
 
 export function runQualityChecklist(input: ChecklistInput): ChecklistItem[] {
   const html = input.bodyHtml;
@@ -53,7 +85,7 @@ export function runQualityChecklist(input: ChecklistInput): ChecklistItem[] {
   add("semantic_keywords", "Keywords semánticas", semanticOk, semantic.length === 0 ? "El plan no define keywords semánticas." : `${covered}/${semantic.length} keywords semánticas presentes.`);
 
   // 4. Credible source: external links.
-  const external = (html.match(/<a[^>]+href=["']https?:\/\//gi) ?? []).length;
+  const { internal, external } = countLinks(html, input.siteUrl);
   const inventory = input.externalSourceInventorySize ?? null;
   const externalRequired = targets ? Math.max(1, inventory === null ? targets.externalLinks : Math.min(targets.externalLinks, inventory)) : 1;
   add("credible_source", "Fuente creíble", external >= externalRequired, `${external} enlace(s) a fuentes externas; objetivo ${externalRequired}.`);
@@ -63,14 +95,14 @@ export function runQualityChecklist(input: ChecklistInput): ChecklistItem[] {
   const missing: string[] = [];
   if (h2 < 3) missing.push(`al menos 3 H2 (hay ${h2})`);
   if (targets) {
-    if (!/<table[\s>]/i.test(html)) missing.push("tabla comparativa");
+    if (!/<table[\s>]/i.test(html) && comparesOptions(input.primaryKeyword, html)) missing.push("tabla comparativa");
+    if (sections?.linkCard && !/<aside[^>]*data-block=["']link_card["']/i.test(html)) missing.push("link card");
     if (sections?.faq && !FAQ_HEADING.test(html)) missing.push("sección de preguntas frecuentes");
     if (sections?.summary && !/<aside[^>]*data-block=["']summary["']/i.test(html)) missing.push("caja «En resumen»");
   }
-  add("structure", "Estructura", missing.length === 0, missing.length === 0 ? `${h2} secciones H2${targets ? ", tabla y FAQ" : ""}.` : `Falta: ${missing.join(", ")}.`);
+  add("structure", "Estructura", missing.length === 0, missing.length === 0 ? `${h2} secciones H2${targets ? ", bloques de la guía completos" : ""}.` : `Falta: ${missing.join(", ")}.`);
 
   // 6. Internal links (TOC anchors don't count): the target, capped by what the site inventory offers.
-  const internal = (html.match(/<a[^>]+href=["'](?!https?:\/\/|mailto:|tel:|#)/gi) ?? []).length;
   const wanted = targets ? targets.internalLinks : 2;
   const required = input.internalLinkInventorySize === null ? wanted : Math.min(wanted, input.internalLinkInventorySize);
   add("internal_links", "Enlaces internos", internal >= required, `${internal} enlace(s) interno(s); objetivo ${required}.`);

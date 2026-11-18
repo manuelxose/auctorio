@@ -489,6 +489,8 @@ model ContentImage {
   error                 String?       @db.Text
   dedupeHash            String?       @map("dedupe_hash")
   promptPresetVersionId String?       @map("prompt_preset_version_id") @db.Uuid
+  /// EXIF/XMP/C2PA removed before storing (M6 «No AI watermark metadata»).
+  metadataStripped      Boolean       @default(false) @map("metadata_stripped")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 
@@ -2990,6 +2992,10 @@ model AiProviderSetting {
   tenantId        String   @unique @map("tenant_id") @db.Uuid
   provider        String
   model           String
+  /// Per-use model overrides: { plans|articles|repair|social|copilot: { provider, model } }.
+  uses            Json?
+  /// Tried when the chosen model fails (before any other configured provider).
+  fallback        Json?
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")

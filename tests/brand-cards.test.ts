@@ -82,7 +82,8 @@ test("M5 contact and map cards: placeholders filled, otherwise contact last (bef
 test("M5 sanitizer: inline style keeps only plain presentational declarations", () => {
   assert.equal(cleanStyle("color:#fff;background-image:url(x);background-color:red;width:expression(alert(1))"), "color:#fff;background-color:red");
   assert.equal(sanitizeEditorialHtml('<p style="background:url(javascript:x)">a</p>'), "<p>a</p>");
-  assert.equal(sanitizeEditorialHtml('<h2 style="color:red">a</h2>'), "<h2>a</h2>", "style only on card elements");
+  assert.equal(sanitizeEditorialHtml('<li style="color:red">a</li>'), "<li>a</li>", "style only on cards, paragraphs and headings");
+  assert.equal(sanitizeEditorialHtml('<h2 style="text-align:center">a</h2>'), '<h2 style="text-align:center">a</h2>', "editor alignment");
 });
 
 test("M5 writer: brand facts in guidance; map/contact sections only when switched on", () => {

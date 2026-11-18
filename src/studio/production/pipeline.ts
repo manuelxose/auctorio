@@ -188,7 +188,8 @@ async function syncPlanItem(job: ProductionJob, outcome: "generating" | "needs_r
 
 // ────────────────────────────────────────────────────────────── Start
 
-type StartOptions = { userId?: string | null; wait?: boolean; now?: Date };
+/** rerun: an editor asked to rewrite a finished plan item (Regenerate), so its finished job does not answer for it. */
+type StartOptions = { userId?: string | null; wait?: boolean; now?: Date; rerun?: boolean };
 
 function manualKey(request: { siteId: string; title: string; brief: string }): string {
   return crypto.createHash("sha256").update(`${request.siteId}\u0000${request.title.trim()}\u0000${request.brief.trim()}`).digest("hex").slice(0, 40);
@@ -237,7 +238,7 @@ export async function startProduction(
     if (existing.status === "failed" || existing.status === "cancelled" || isStale(existing)) {
       return { job: await retryProductionJob(tenantId, existing.id, options), created: false };
     }
-    if (request.kind === "plan_item") {
+    if (request.kind === "plan_item" && !options.rerun) {
       // A plan item produces one piece; a finished job is the answer.
       return { job: toProductionJobView(existing), created: false };
     }
@@ -558,6 +559,16 @@ export async function startProductionForProject(
 ): Promise<ProductionJobView> {
   const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId } });
   if (!project) throw new ProductionError("project_not_found", undefined, 404);
+  const language: "en" | "es" = project.primaryLanguage === "en" ? "en" : "es";
+  // A keyword guide from the plan regenerates through its plan item (guide template, SERP sources, brand cards), not as a manual piece.
+  const planItemId = (project.metadata as { editorialPlanItemId?: unknown } | null)?.editorialPlanItemId;
+  if (typeof planItemId === "string" && !options.brief?.trim()) {
+    const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId, channel: "website" }, select: { id: true } });
+    if (item) {
+      const request = { kind: "plan_item" as const, planItemId: item.id, language, feedback: options.feedback ?? null, presetVersionId: options.presetVersionId ?? null };
+      return (await startProduction(tenantId, request, { userId: options.userId ?? null, rerun: true })).job;
+    }
+  }
   const { job } = await startProduction(
     tenantId,
     {
@@ -566,7 +577,7 @@ export async function startProductionForProject(
       siteId: project.siteId,
       title: project.title,
       brief: options.brief?.trim() || project.brief?.trim() || project.title,
-      language: project.primaryLanguage === "en" ? "en" : "es",
+      language,
       feedback: options.feedback ?? null,
       presetVersionId: options.presetVersionId ?? null,
     },

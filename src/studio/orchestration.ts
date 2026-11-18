@@ -6,7 +6,9 @@ import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
 import { attachImageToVersion, createQueuedImage, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
-import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
+import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineAlt, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
+import { resolveVisualSettings } from "./editorial-engine/structure";
+import { INFOGRAPHIC_PROMPT_PREFIX, infographicSection } from "./editorial-engine/visuals";
 import { createOperation } from "./operations";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
@@ -215,10 +217,57 @@ export async function requestImageGenerationForVersion(
       goal: version.project.goal,
       site_name: version.project.site?.name ?? undefined,
       promptPresetVersionId: promptPresetVersionId ?? undefined,
+      ...(await visualImageOptions(version.project.siteId, "cover")),
     },
   });
 
   return contentImage.id;
+}
+
+/** Site visuals settings for one image job: its style and the site's image instructions (M6). */
+async function visualImageOptions(siteId: string, role: "cover" | "body"): Promise<Record<string, string>> {
+  const settings = await prisma.sitePlanningSettings.findUnique({ where: { siteId }, select: { articleTargets: true } });
+  const visuals = resolveVisualSettings(settings?.articleTargets);
+  return { image_style: role === "cover" ? visuals.coverStyle : visuals.bodyStyle, image_instructions: visuals.imageInstructions };
+}
+
+/**
+ * «Use only my media library» (M6): fills the missing inline slots with finished images of the same site, best
+ * word overlap between their prompt and the section first, never one already in the body. Returns the slots filled.
+ */
+async function fillSlotsFromLibrary(
+  tenantId: string,
+  version: { id: string; bodyHtml: string | null; title: string | null; project: { siteId: string; title: string; metadata: unknown } },
+  slots: number[],
+): Promise<number> {
+  const library = await prisma.contentImage.findMany({
+    where: { tenantId, status: "done", storagePath: { not: null }, topic: { projects: { some: { siteId: version.project.siteId } } } },
+    include: { assetVariants: true },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  let body = version.bodyHtml ?? "";
+  const headings = h2Headings(body);
+  const keyword = readString(version.project.metadata, "primaryKeyword");
+  const words = (value: string) => new Set(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\W+/).filter((word) => word.length > 3));
+  let filled = 0;
+  for (const slot of slots) {
+    const section = headings[headingIndexForSlot(slot, headings.length)] ?? version.title ?? version.project.title;
+    const wanted = words(`${section} ${keyword ?? ""}`);
+    const ranked = library
+      .filter((image) => !body.includes(image.id))
+      .map((image) => ({ image, score: [...words(image.prompt ?? "")].filter((word) => wanted.has(word)).length }))
+      .sort((a, b) => b.score - a.score);
+    const pick = ranked[0]?.image;
+    if (!pick) break;
+    const variant = pick.assetVariants.find((item) => item.kind === "hero") ?? pick.assetVariants.find((item) => item.kind === "original");
+    const src = await buildAssetPublicUrl(variant?.storagePath ?? pick.storagePath);
+    if (!src) continue;
+    body = insertInlineFigure(body, inlineFigureHtml(src, inlineAlt(section, keyword), slot, pick.id), slot);
+    filled++;
+  }
+  if (filled > 0) await prisma.contentVersion.update({ where: { id: version.id }, data: { bodyHtml: body } });
+  return filled;
 }
 
 export async function syncTextResultToStudio(tenantId: string, contentTextId: string) {
@@ -288,10 +337,22 @@ export async function requestInlineImagesForVersion(tenantId: string, versionId:
   const mode = textId ? "contextual" : "independent";
   const projectMetadata = asRecord(version.project.metadata);
   const ids: string[] = [];
+  const style = await visualImageOptions(version.project.siteId, "body");
+  if (style.image_style === "media_library") {
+    const free = Array.from({ length: INLINE_IMAGE_MIN * 2 }, (_, slot) => slot).filter((slot) => !taken.has(slot)).slice(0, Math.max(0, missing));
+    await fillSlotsFromLibrary(tenantId, version, free);
+    return ids;
+  }
+  const settings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: version.project.siteId }, select: { articleTargets: true } });
+  // One infographic per article, only for a section with steps or a comparison, and only if none is in the body yet.
+  const infographic = resolveVisualSettings(settings?.articleTargets).infographic && !/data-auctorio-infographic/.test(body) ? infographicSection(body) : null;
+  let infographicQueued = false;
   for (let slot = 0; missing > 0 && slot < INLINE_IMAGE_MIN * 2; slot++) {
     if (taken.has(slot)) continue;
     missing--;
     const section = headings[headingIndexForSlot(slot, headings.length)] ?? version.title ?? version.project.title;
+    const asInfographic = Boolean(infographic) && !infographicQueued && headingIndexForSlot(slot, headings.length) === infographic!.index;
+    if (asInfographic) infographicQueued = true;
     const image = await prisma.contentImage.create({
       data: { tenantId, topicId, textId, status: "queued", dedupeHash: inlineImageHash(versionId, slot, crypto.randomUUID()) },
     });
@@ -320,8 +381,10 @@ export async function requestInlineImagesForVersion(tenantId: string, versionId:
         site_id: version.project.siteId,
         goal: version.project.goal,
         site_name: version.project.site?.name ?? undefined,
-        image_role: "inline",
+        image_role: asInfographic ? "infographic" : "inline",
         section,
+        ...style,
+        ...(asInfographic ? { section_text: infographic!.text, language: version.project.primaryLanguage === "en" ? "en" : "es" } : {}),
       },
     });
     ids.push(image.id);
@@ -361,8 +424,9 @@ export async function syncInlineImageToVersion(tenantId: string, contentImageId:
   }
   const body = version.bodyHtml ?? "";
   const headings = h2Headings(body);
-  const alt = headings[headingIndexForSlot(ref.slot, headings.length)] ?? version.title ?? "";
-  const next = insertInlineFigure(body, inlineFigureHtml(src, alt, ref.slot, image.id), ref.slot);
+  const alt = inlineAlt(headings[headingIndexForSlot(ref.slot, headings.length)] ?? version.title ?? "", readString(version.project.metadata, "primaryKeyword"));
+  const infographic = image.prompt?.startsWith(INFOGRAPHIC_PROMPT_PREFIX) ?? false;
+  const next = insertInlineFigure(body, inlineFigureHtml(src, alt, ref.slot, image.id, infographic), ref.slot);
   if (next === body) {
     return;
   }

@@ -10,6 +10,7 @@ import { suggestInternalLinks } from "../internal-linking";
 import { getClassifiedStory, type ClassificationInput } from "./classifier";
 import { resolveSiteValueBlocks, type SiteValueConfig } from "./site-value";
 import { buildStoryBrief } from "./brief-builder";
+import { formatInternalUrl, renderWritingGuidance, resolveWritingSettings } from "./structure";
 import type { FactSafetyReport } from "./fact-safety";
 import type { DuplicateCheckResult } from "./duplicate-check";
 import type { ArticleType, EngineEnrichment, EngineEntity, FactLicense, LedgerFact, SearchIntent } from "./types";
@@ -215,7 +216,13 @@ export async function prepareClusterInput(
     .filter((entity) => ["movie", "tv_series", "creative_work"].includes(entity.type))
     .map((entity) => entity.name);
   const keywordForLinks = primaryEntityNames[0] ?? entities[0]?.name ?? headline;
-  const internalLinks = await suggestInternalLinks(tenantId, siteId, { keyword: keywordForLinks, topic: headline, limit: 6 });
+  // News follows the site's writing rules and internal-linking choices too (M4/M8).
+  const planning = await prisma.sitePlanningSettings.findUnique({ where: { siteId }, select: { articleTargets: true } });
+  const writing = resolveWritingSettings(planning?.articleTargets);
+  const language = options.language === "en" ? "en" : "es";
+  const internalLinks = writing.internalLinks.enabled
+    ? (await suggestInternalLinks(tenantId, siteId, { keyword: keywordForLinks, topic: headline, limit: 6 })).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+    : [];
   const indexedPages = await prisma.siteIndexedPage.findMany({
     where: { tenantId, siteId, crawlState: { in: ["extracted", "stale"] } },
     select: { title: true },
@@ -226,10 +233,11 @@ export async function prepareClusterInput(
     kind: "cluster",
     tenantId,
     siteId,
-    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
-    language: options.language === "en" ? "en" : "es",
+    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig, baseUrl: site.baseUrl },
+    language,
     headline,
     summary,
+    siteGuidance: renderWritingGuidance(writing, language, { summary: false }),
     entities,
     enrichments,
     ledgerFacts,
@@ -376,5 +384,5 @@ export async function buildClusterBrief(
     updateDelta = await computeUpdateDelta(tenantId, duplicate.targetProjectId, factSafety.licenses);
   }
 
-  return { brief, siteValueBlocks, previousArticle, updateDelta, guidance: [] };
+  return { brief, siteValueBlocks, previousArticle, updateDelta, guidance: input.siteGuidance ?? [] };
 }

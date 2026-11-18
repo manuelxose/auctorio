@@ -72,6 +72,7 @@ export async function toVersionSummary(version: ProjectVersionRecord, project: P
           id: version.contentImage.id,
           status: version.contentImage.status,
           error: version.contentImage.error,
+          metadataStripped: version.contentImage.metadataStripped,
         }
       : null,
     ...readPromptFields(version),

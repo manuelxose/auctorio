@@ -387,3 +387,27 @@ test("M3: the calendar reports the derived lifecycle through an assisted run", a
     await cleanup(f.tenantId);
   }
 });
+
+// Acceptance 2026-11-18: Regenerate on a plan guide ran as a manual piece (news headings, no sources, no link card).
+test("Regenerate on a project from a plan item reruns the plan item (guide template), as a new version of the same project", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  try {
+    const first = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const projectId = first.job.projectId!;
+    assert.ok(projectId);
+    const rerun = await startProductionForProject(f.tenantId, projectId, { feedback: "Más concreto" });
+    assert.equal(rerun.kind, "plan_item");
+    assert.notEqual(rerun.id, first.job.id);
+    // Wait for the rerun to finish: it writes version 2 of the same project.
+    for (let i = 0; i < 100 && !["needs_review", "ready", "failed"].includes((await getProductionJob(f.tenantId, rerun.id))!.status); i++) await new Promise((r) => setTimeout(r, 100));
+    const done = await getProductionJob(f.tenantId, rerun.id);
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+    assert.equal(done!.projectId, projectId);
+    assert.equal(await prisma.contentVersion.count({ where: { tenantId: f.tenantId, projectId } }), 2);
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: f.tenantId } }), 1);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});

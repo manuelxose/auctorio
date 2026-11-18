@@ -57,7 +57,7 @@ export type PreparedInput = {
   kind: ProductionKind;
   tenantId: string;
   siteId: string;
-  site: { id: string; name: string; type: string; locale: string; siteValueConfig: unknown };
+  site: { id: string; name: string; type: string; locale: string; siteValueConfig: unknown; baseUrl?: string | null };
   language: "es" | "en";
   headline: string;
   summary: string | null;
@@ -86,6 +86,8 @@ export type PreparedInput = {
     ageHours: number;
   } | null;
   /** Plan item / manual specifics. */
+  /** News/cluster articles: the site's writing rules (plan and manual items carry theirs in plan.guidance). */
+  siteGuidance?: string[];
   plan: {
     planItemId: string | null;
     planId: string | null;
@@ -94,6 +96,8 @@ export type PreparedInput = {
     guidance: string[];
     /** Guides: brand + CTA settings the app renders into the cards (M5). */
     brand?: import("../editorial-engine/brand").ResolvedBrand;
+    /** Guides: the one YouTube video the seo stage places in the body (M6). */
+    youtube?: import("../editorial-engine/visuals").YoutubeVideo | null;
     disclaimer?: string;
   } | null;
   options: ProductionRequestOptions;

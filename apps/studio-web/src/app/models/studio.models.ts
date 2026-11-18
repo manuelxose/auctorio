@@ -173,6 +173,8 @@ export type VersionSummary = {
     id: string;
     status: string;
     error: string | null;
+    /** EXIF/XMP/C2PA removed before storing (M6). */
+    metadataStripped?: boolean;
   } | null;
   promptPresetVersionId: string | null;
   promptVersionLabel: string | null;

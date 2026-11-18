@@ -26,8 +26,18 @@ const MAX_SEEDS = 5;
 const MAX_COMPETITORS = 3;
 const ROWS_PER_CALL = 100;
 const MIN_RELEVANCE = 30;
-// shortcut: one reachable difficulty for every site (no domain-authority data yet); derive it per site once we measure authority.
+/** Default reachable difficulty when the site's own ranking keywords are unknown. */
 export const REACHABLE_DIFFICULTY = 30;
+
+/**
+ * Difficulty the site can reach: the 75th percentile of the difficulty of keywords it already ranks for,
+ * clamped to 20–60; the default when fewer than 10 are known.
+ */
+export function reachableDifficultyFor(ownKeywords: KeywordMetrics[]): number {
+  const values = ownKeywords.map((item) => item.difficulty).filter((value): value is number => typeof value === "number").sort((a, b) => a - b);
+  if (values.length < 10) return REACHABLE_DIFFICULTY;
+  return Math.max(20, Math.min(60, values[Math.floor(values.length * 0.75)]));
+}
 
 export type KeywordCandidate = KeywordMetrics & { score: number; variants: string[] };
 
@@ -64,14 +74,17 @@ export function rankKeywordCandidates(
   metrics: KeywordMetrics[],
   context: Pick<EditorialPlanningContext, "profile" | "site" | "searchTargets" | "existingPlanQueries" | "existingPlanTitles" | "indexedUrlInventory">,
   limit: number,
+  own: { keywords: string[]; reachableDifficulty: number } = { keywords: [], reachableDifficulty: REACHABLE_DIFFICULTY },
 ): KeywordCandidate[] {
+  // The site already ranks with a page for these: another article would cannibalize it.
+  const ranking = new Set(own.keywords.map((keyword) => tokens(normalizeKeyword(keyword)).join(" ")));
   const profile = context.profile ?? syntheticProfileForSiteType(context.site.type);
   const seen = new Set<string>();
   const scored: KeywordCandidate[] = [];
   for (const metric of metrics) {
     const keyword = normalizeKeyword(metric.keyword);
     const key = tokens(keyword).join(" "); // accent/stopword-insensitive: "programacion" = "programación"
-    if (!keyword || seen.has(key) || !metric.volume) continue;
+    if (!keyword || seen.has(key) || !metric.volume || ranking.has(key)) continue;
     seen.add(key);
     const brief = { topic: keyword, primaryKeyword: keyword, targetQuery: keyword, topicCluster: null, contentType: "guide", primaryIntent: "informational" } as never;
     const relevance = computeSiteRelevanceScore(brief, profile, keyword);
@@ -85,7 +98,7 @@ export function rankKeywordCandidates(
       plannedTitles: context.existingPlanTitles,
     });
     if (cannibalization.risk !== "none" && cannibalization.risk !== "related-cluster") continue;
-    const score = keywordOpportunityScore({ volume: metric.volume, difficulty: metric.difficulty, relevance: relevance.score, intent: metric.intent });
+    const score = keywordOpportunityScore({ volume: metric.volume, difficulty: metric.difficulty, relevance: relevance.score, intent: metric.intent }, own.reachableDifficulty);
     if (score > 0) scored.push({ ...metric, keyword, score, variants: [] });
   }
   scored.sort((a, b) => b.score - a.score || (b.volume ?? 0) - (a.volume ?? 0));
@@ -115,9 +128,9 @@ async function cachedCall(
   return items;
 }
 
-/** Seeds: the site's own topics (profile + sitemap clusters). */
-export function keywordSeeds(context: Pick<EditorialPlanningContext, "profile" | "clusters">): string[] {
-  const raw = [...(context.profile?.mainTopics ?? []), ...context.clusters.map((cluster) => cluster.name)];
+/** Seeds: open content-gap opportunities first (topics competitors cover and the site does not), then the site's own topics. */
+export function keywordSeeds(context: Pick<EditorialPlanningContext, "profile" | "clusters">, opportunityTopics: string[] = []): string[] {
+  const raw = [...opportunityTopics.slice(0, 2), ...(context.profile?.mainTopics ?? []), ...context.clusters.map((cluster) => cluster.name)];
   const out: string[] = [];
   for (const seed of raw.map(normalizeKeyword)) if (seed && !out.includes(seed)) out.push(seed);
   return out.slice(0, MAX_SEEDS);
@@ -139,8 +152,25 @@ export async function collectKeywordCandidates(
   if (!location) return [];
   const market = `${location.locationCode}|${location.languageCode}`;
   const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId, status: "accepted" }, select: { domain: true }, orderBy: { overlapScore: "desc" }, take: MAX_COMPETITORS });
+  const opportunities = await prisma.contentOpportunity.findMany({ where: { tenantId, siteId, status: "open" }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 5 });
+  // The site's own ranking keywords (1 cached call): skip what it already ranks for and set its reachable difficulty.
+  const ownDomain = (() => {
+    try {
+      return context.site.baseUrl ? new URL(context.site.baseUrl).hostname.replace(/^www\./, "") : null;
+    } catch {
+      return null;
+    }
+  })();
+  let ownKeywords: KeywordMetrics[] = [];
+  if (ownDomain) {
+    try {
+      ownKeywords = await cachedCall(tenantId, siteId, "ranked_keywords", `${market}|${ownDomain}`, () => fetchers.ranked(ownDomain, location, ROWS_PER_CALL));
+    } catch (error) {
+      structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
+    }
+  }
   const calls = [
-    ...keywordSeeds(context).map((seed) => () => cachedCall(tenantId, siteId, "keyword_ideas", `${market}|${seed}`, () => fetchers.ideas(seed, location, ROWS_PER_CALL))),
+    ...keywordSeeds(context, opportunities.map((entry) => entry.topic)).map((seed) => () => cachedCall(tenantId, siteId, "keyword_ideas", `${market}|${seed}`, () => fetchers.ideas(seed, location, ROWS_PER_CALL))),
     ...competitors.map(({ domain }) => () => cachedCall(tenantId, siteId, "ranked_keywords", `${market}|${domain}`, () => fetchers.ranked(domain, location, ROWS_PER_CALL))),
   ];
   const metrics: KeywordMetrics[] = [];
@@ -151,7 +181,8 @@ export async function collectKeywordCandidates(
       structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
     }
   }
-  const ranked = rankKeywordCandidates(metrics, context, limit);
-  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length, rows: metrics.length, candidates: ranked.length });
+  const reachableDifficulty = reachableDifficultyFor(ownKeywords);
+  const ranked = rankKeywordCandidates(metrics, context, limit, { keywords: ownKeywords.map((item) => item.keyword), reachableDifficulty });
+  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain ? 1 : 0), rows: metrics.length, candidates: ranked.length, reachableDifficulty });
   return ranked;
 }

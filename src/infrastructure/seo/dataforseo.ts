@@ -154,3 +154,41 @@ export function fetchKeywordIdeas(seed: string, location: DataForSeoLocation, li
 export function fetchRankedKeywords(domain: string, location: DataForSeoLocation, limit: number, fetchImpl: typeof fetch = fetch) {
   return postLabsTask("ranked_keywords", { target: domain, limit, order_by: ["keyword_data.keyword_info.search_volume,desc"] }, location, fetchImpl);
 }
+
+export type YoutubeResult = { id: string; title: string; channel: string; channelUrl: string };
+
+/** Video results of a YouTube organic SERP, in ranking order (M6 «one YouTube video per article»). */
+export function parseYoutubeOrganic(body: unknown): { videos: YoutubeResult[]; costUsd: number } {
+  const { raws, costUsd } = resultItems(body);
+  const videos: YoutubeResult[] = [];
+  for (const raw of raws as Array<{ type?: string; video_id?: unknown; title?: unknown; channel_name?: unknown; channel_url?: unknown }>) {
+    if (raw?.type !== "youtube_video" || typeof raw.video_id !== "string" || !/^[\w-]{11}$/.test(raw.video_id) || typeof raw.title !== "string") continue;
+    videos.push({ id: raw.video_id, title: raw.title, channel: typeof raw.channel_name === "string" ? raw.channel_name : "", channelUrl: typeof raw.channel_url === "string" ? raw.channel_url : "" });
+  }
+  return { videos, costUsd };
+}
+
+export async function fetchYoutubeOrganic(keyword: string, location: DataForSeoLocation, fetchImpl: typeof fetch = fetch) {
+  return parseYoutubeOrganic(await postLive("https://api.dataforseo.com/v3/serp/youtube/organic/live/advanced", { keyword, depth: 20 }, location, fetchImpl));
+}
+
+/**
+ * Google Ads search volume (keywords_data) for keywords Labs has no data for (M2 fallback). Volume only, in the
+ * bucketed values Google Ads reports (10, 50, 140…); keywords Google returns no volume for are absent.
+ */
+export function parseGoogleAdsVolume(body: unknown): { items: Array<{ keyword: string; volume: number }>; costUsd: number } {
+  const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ keyword?: unknown; search_volume?: unknown }> | null }> };
+  if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
+  const items: Array<{ keyword: string; volume: number }> = [];
+  for (const task of root.tasks ?? []) {
+    if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
+    for (const row of task.result ?? []) {
+      if (typeof row.keyword === "string" && typeof row.search_volume === "number") items.push({ keyword: normalizeKeyword(row.keyword), volume: row.search_volume });
+    }
+  }
+  return { items, costUsd: num(root.cost) ?? 0 };
+}
+
+export async function fetchGoogleAdsVolume(keywords: string[], location: DataForSeoLocation, fetchImpl: typeof fetch = fetch) {
+  return parseGoogleAdsVolume(await postLive("https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live", { keywords: keywords.slice(0, 1000) }, location, fetchImpl));
+}

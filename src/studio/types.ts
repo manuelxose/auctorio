@@ -494,6 +494,7 @@ export type VersionSummary = Pick<
     id: string;
     status: string;
     error: string | null;
+    metadataStripped?: boolean;
   } | null;
   promptPresetVersionId: string | null;
   promptVersionLabel: string | null;

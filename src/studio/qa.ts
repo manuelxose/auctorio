@@ -2,7 +2,7 @@ import type { ContentVersion } from "@prisma/client";
 import type { QaCheck, QaReport } from "./types";
 import { INLINE_IMAGE_MIN } from "./inline-images";
 import { wordBandForContentType } from "./quality-gate";
-import { runQualityChecklist, type ChecklistItem } from "./editorial-engine/quality-checklist";
+import { countLinks, runQualityChecklist, type ChecklistItem } from "./editorial-engine/quality-checklist";
 import type { ArticleTargets } from "./editorial-engine/structure";
 
 export type QaSeverity = "error" | "warning" | "info";
@@ -91,14 +91,6 @@ function hasMalformedHtml(html: string): boolean {
   const pOpens = (html.match(/<p[^>]*>/gi) ?? []).length;
   const pCloses = (html.match(/<\/p>/gi) ?? []).length;
   return pOpens !== pCloses;
-}
-
-function countInternalLinks(html: string): number {
-  return (html.match(/<a[^>]+href=["'](?!https?:\/\/|mailto:|tel:|#)/gi) ?? []).length;
-}
-
-function countExternalLinks(html: string): number {
-  return (html.match(/<a[^>]+href=["']https?:\/\//gi) ?? []).length;
 }
 
 function countImages(html: string): number {
@@ -220,9 +212,9 @@ export function runVersionQaV2(
     const headingsBlob = [...body.matchAll(/<h[23][^>]*>(.*?)<\/h[23]>/gi)].map((match) => match[1]).join(" ");
     add("keyword_in_headings", "Keyword in headings", containsKeyword(stripHtml(headingsBlob), primaryKeyword), "warning", `Incluye la keyword "${primaryKeyword}" en algún H2/H3.`, "seo");
   }
-  const internalLinks = countInternalLinks(body);
+  const siteUrl = typeof metadata.siteUrl === "string" ? metadata.siteUrl : null;
+  const { internal: internalLinks, external: externalLinks } = countLinks(body, siteUrl);
   add("internal_links", "Internal links", internalLinks >= 2, "warning", `Añade al menos 2 enlaces internos reales del inventario del sitio (actual: ${internalLinks}).`, "seo");
-  const externalLinks = countExternalLinks(body);
   add("evidence_links", "External evidence links", externalLinks >= 1 || !(intent === "news" || intent === "commercial-investigation"), intent === "news" || intent === "commercial-investigation" ? "warning" : "info", "El contenido de actualidad o comparación debe citar fuentes externas verificables.", "seo");
   const imageCount = countImages(body);
   // Checked once the hero exists: inline images are queued with it and land in the body as they finish.
@@ -306,6 +298,7 @@ export function runVersionQaV2(
     cannibalizationRisk: context.cannibalizationRisk ?? null,
     internalLinkInventorySize: context.internalLinkInventorySize ?? storedInventory,
     externalSourceInventorySize: context.externalSourceInventorySize ?? (typeof metadata.externalSourceInventorySize === "number" ? metadata.externalSourceInventorySize : null),
+    siteUrl,
   });
 
   return { passed, score, checks, findings, checklist };

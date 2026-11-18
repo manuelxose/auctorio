@@ -26,6 +26,7 @@ const faq = Array.from({ length: 5 }, (_, i) => `<h3>¿Pregunta ${i + 1}?</h3><p
 function guideHtml({ table = true, faqSection = true } = {}): string {
   return [
     "<p>Para ver el fútbol en directo hoy necesitas una de estas plataformas de streaming: aquí tienes cuáles emiten cada competición, cuánto cuestan y cómo elegir la que mejor encaja contigo.</p>",
+    '<aside data-block="link_card"><p><strong>GuíaTV</strong></p><p><a href="https://guiaprogramaciontv.com">Visitar</a></p></aside>',
     '<aside data-block="summary"><p><strong>En resumen</strong></p><ul><li>a</li><li>b</li><li>c</li><li>d</li><li>e</li></ul></aside>',
     sections,
     table ? "<table><thead><tr><th>Plataforma</th><th>Precio</th></tr></thead><tbody><tr><td>A</td><td>10 €</td></tr></tbody></table>" : "",
@@ -60,9 +61,13 @@ test("guide checklist: the reference fixture passes all 10 checks", () => {
   assert.deepEqual(items.filter((item) => !item.passed), []);
 });
 
-test("guide checklist: no comparison table or no FAQ fails the structure check", () => {
-  assert.deepEqual(failing(guideHtml({ table: false })), ["structure"]);
+test("guide checklist: a comparison without a table, no FAQ or no link card fails the structure check", () => {
+  const comparing = (html: string) => runQualityChecklist({ ...checklistInput(html), primaryKeyword: "mejores plataformas para ver fútbol" }).filter((item) => !item.passed).map((item) => item.key);
+  assert.deepEqual(comparing(guideHtml({ table: false })), ["answer_first", "structure"]);
+  assert.deepEqual(failing(guideHtml({ table: false })), [], "no comparison → no table required");
   assert.deepEqual(failing(guideHtml({ faqSection: false })), ["structure"]);
+  assert.deepEqual(failing(guideHtml().replace(/<aside data-block="link_card">[\s\S]*?<\/aside>/, "")), ["structure"]);
+  assert.deepEqual(runQualityChecklist({ ...checklistInput(guideHtml().replace(/<aside data-block="link_card">[\s\S]*?<\/aside>/, "")), targets: resolveArticleTargets({ sections: { linkCard: false } }) }).filter((item) => !item.passed), []);
 });
 
 test("guide checklist: plagiarism flags duplicates, not sibling topics", () => {

@@ -6,7 +6,7 @@ import { AppContextService } from '../services/app-context.service';
 import { PlanningApiService, apiMessage } from '../services/planning-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
-import type { ArticleSectionKey, ArticleTargetsOverride, BrandSettings, WritingSettings } from '../models/planning.models';
+import type { ArticleSectionKey, ArticleTargetsOverride, BrandSettings, ImageStyle, VisualSettings, WritingSettings } from '../models/planning.models';
 
 const DEFAULT_WRITING: WritingSettings = {
   instructions: [],
@@ -34,6 +34,14 @@ const DEFAULT_BRAND: BrandSettings = {
   promo: '',
 };
 
+const DEFAULT_VISUALS: VisualSettings = {
+  imageInstructions: '',
+  coverStyle: 'realistic',
+  bodyStyle: 'realistic',
+  infographic: false,
+  youtube: { enabled: false, channelOnly: false, channelUrl: '' },
+};
+
 type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boolean) => void };
 
 /** Settings · Writing: how every future article of the active site is written (stored in article_targets.writing). */
@@ -50,6 +58,8 @@ type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boole
           <p class="sp-head__sub">How every future article for {{ siteName }} is written. Articles already written keep their text</p>
         </div>
         <div class="sp-head__actions">
+          <a class="au-btn au-btn--ghost" routerLink="/studio/competitors">Competitors</a>
+          <a class="au-btn au-btn--ghost" routerLink="/studio/settings/sites">Saved pages</a>
           <a class="au-btn au-btn--secondary" routerLink="/studio/automation"><app-icon name="calendar"></app-icon>Publishing days</a>
         </div>
       </header>
@@ -142,6 +152,39 @@ type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boole
               </li>
             }
           </ul>
+        </section>
+
+        <section class="ws-card" aria-labelledby="ws-visuals">
+          <h2 class="ws-card__title" id="ws-visuals">Visuals</h2>
+          <p class="ws-card__sub">Images, infographic and video. Every image is stored without EXIF or C2PA metadata</p>
+          <label class="au-field ws-promo">
+            <span>Image instructions</span>
+            <textarea class="au-input" rows="2" maxlength="500" [(ngModel)]="visuals.imageInstructions" (ngModelChange)="dirty = true" placeholder="e.g. No people, warm natural light, Spanish homes"></textarea>
+          </label>
+          <div class="ws-fields">
+            <label class="au-field"><span>Cover style</span>
+              <select class="au-input" name="v-cover" [(ngModel)]="visuals.coverStyle" (ngModelChange)="dirty = true">
+                @for (style of imageStyles; track style.key) { <option [value]="style.key">{{ style.label }}</option> }
+              </select>
+            </label>
+            <label class="au-field"><span>Body images</span>
+              <select class="au-input" name="v-body" [(ngModel)]="visuals.bodyStyle" (ngModelChange)="dirty = true">
+                @for (style of imageStyles; track style.key) { <option [value]="style.key">{{ style.label }}</option> }
+                <option value="media_library">Only my media library</option>
+              </select>
+            </label>
+          </div>
+          <ul class="ws-switches ws-promo">
+            @for (toggle of visualToggles; track toggle.label) {
+              <li class="ws-switch">
+                <span><span class="ws-switch__label">{{ toggle.label }}</span><span class="ws-switch__hint">{{ toggle.hint }}</span></span>
+                <input type="checkbox" role="switch" class="ws-toggle" [checked]="toggle.get()" (change)="toggle.set(!toggle.get()); dirty = true" [attr.aria-label]="toggle.label" [disabled]="toggle.label === 'Only videos from my channel' && !visuals.youtube.enabled" />
+              </li>
+            }
+          </ul>
+          @if (visuals.youtube.channelOnly) {
+            <label class="au-field ws-promo"><span>Your YouTube channel URL</span><input class="au-input" name="v-channel" type="url" maxlength="200" [(ngModel)]="visuals.youtube.channelUrl" (ngModelChange)="dirty = true" placeholder="https://www.youtube.com/@yourchannel" /></label>
+          }
         </section>
 
         <section class="ws-card" aria-labelledby="ws-cta">
@@ -297,6 +340,18 @@ export class WritingSettingsPageComponent implements OnInit {
 
   writing: WritingSettings | null = null;
   brand: BrandSettings = structuredClone(DEFAULT_BRAND);
+  visuals: VisualSettings = structuredClone(DEFAULT_VISUALS);
+  readonly imageStyles: Array<{ key: ImageStyle; label: string }> = [
+    { key: 'realistic', label: 'Realistic photo' },
+    { key: 'illustration', label: 'Illustration' },
+    { key: 'editorial', label: 'Editorial' },
+    { key: 'minimal', label: 'Minimal' },
+  ];
+  readonly visualToggles: Toggle[] = [
+    { label: 'Infographic', hint: 'One per article, from the section with steps, figures or a comparison', get: () => this.visuals.infographic, set: (on) => (this.visuals.infographic = on) },
+    { label: 'YouTube video', hint: 'One related video per article, as a linked thumbnail', get: () => this.visuals.youtube.enabled, set: (on) => (this.visuals.youtube.enabled = on) },
+    { label: 'Only videos from my channel', hint: 'Skip the video when your channel has none for the keyword', get: () => this.visuals.youtube.channelOnly, set: (on) => (this.visuals.youtube.channelOnly = on) },
+  ];
   private targets: ArticleTargetsOverride = {};
   newRule = '';
   dirty = false;
@@ -364,6 +419,8 @@ export class WritingSettingsPageComponent implements OnInit {
           mapCard: { ...DEFAULT_BRAND.mapCard, ...b?.mapCard },
         };
         this.audienceText = this.brand.audience.join('\n');
+        const v = this.targets.visuals;
+        this.visuals = { ...structuredClone(DEFAULT_VISUALS), ...v, youtube: { ...DEFAULT_VISUALS.youtube, ...v?.youtube } };
         this.citiesText = this.brand.location.cities.join(', ');
         this.dirty = false;
       },
@@ -424,7 +481,7 @@ export class WritingSettingsPageComponent implements OnInit {
     if (!this.writing) return;
     this.saving = true;
     // article_targets is replaced as a whole: send the targets and sections back with the writing block.
-    this.api.putPlanningSettings(this.siteId, { articleTargets: { ...this.targets, writing: this.writing, brand: this.brand } }).subscribe({
+    this.api.putPlanningSettings(this.siteId, { articleTargets: { ...this.targets, writing: this.writing, brand: this.brand, visuals: this.visuals } }).subscribe({
       next: (settings) => {
         this.saving = false;
         this.dirty = false;

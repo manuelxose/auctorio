@@ -84,7 +84,17 @@ export type SitePlanningSettings = {
 };
 
 export type ArticleSectionKey = 'summary' | 'toc' | 'faq' | 'sources' | 'jsonLd' | 'furtherReading' | 'cta' | 'linkCard' | 'promo' | 'contactCard' | 'mapCard';
-export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>>; writing?: WritingSettings; brand?: BrandSettings };
+export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>>; writing?: WritingSettings; brand?: BrandSettings; visuals?: VisualSettings };
+
+/** Mirrors visuals.ts VisualSettings. */
+export type ImageStyle = 'realistic' | 'illustration' | 'editorial' | 'minimal';
+export type VisualSettings = {
+  imageInstructions: string;
+  coverStyle: ImageStyle;
+  bodyStyle: ImageStyle | 'media_library';
+  infographic: boolean;
+  youtube: { enabled: boolean; channelOnly: boolean; channelUrl: string };
+};
 
 /** Mirrors brand.ts BrandSettings (CTAs, business details, branding). */
 export type BrandSettings = {

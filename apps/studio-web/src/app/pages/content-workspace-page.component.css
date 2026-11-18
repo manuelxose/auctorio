@@ -79,6 +79,7 @@
 .art-bar i { display: block; height: 100%; background: var(--au-warning); }
 .art-bar i.art-ok { background: var(--au-success); }
 .art-cover { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 8px; }
+.art-badge { display: inline-flex; align-items: center; gap: 6px; margin: 8px 0 0; padding: 2px 8px; border-radius: 999px; background: var(--au-surface-2); color: var(--au-text-2); font-size: 12px; }
 .art-why summary { cursor: pointer; }
 .art-why p { margin: 4px 0 0; font-size: 13px; }
 

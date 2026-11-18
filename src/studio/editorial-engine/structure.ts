@@ -5,6 +5,7 @@
 // single SEO mold.
 
 import { readBrandSettings, type BrandSettings } from "./brand";
+import { DEFAULT_VISUALS, readVisualSettings, type VisualSettings } from "./visuals";
 import type { ArticleType } from "./types";
 
 export type StructureSection = {
@@ -124,7 +125,7 @@ const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections" | "summaryV
   faqCount: [0, 12],
 };
 
-export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "summaryVariant">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings; brand?: BrandSettings };
+export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "summaryVariant">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings; brand?: BrandSettings; visuals?: VisualSettings };
 
 // ────────────────────────────────────────────────────────────── Writing settings
 // "Customize future articles" (BLG parity M8): stored next to the targets in
@@ -196,8 +197,8 @@ export function formatInternalUrl(url: string, links: WritingSettings["internalL
   }
 }
 
-/** Writer guidance lines for the site's writing settings (instructions, perspective, summary, disclaimer…). */
-export function renderWritingGuidance(writing: WritingSettings, language: "es" | "en" = "es"): string[] {
+/** Writer guidance lines for the site's writing settings (instructions, perspective, summary, disclaimer…). News templates have no summary box: `summary: false`. */
+export function renderWritingGuidance(writing: WritingSettings, language: "es" | "en" = "es", options: { summary?: boolean } = {}): string[] {
   const lines: string[] = [];
   if (writing.instructions.length) lines.push(`Site writing rules (always follow):\n${writing.instructions.map((rule) => `- ${rule}`).join("\n")}`);
   lines.push(
@@ -207,7 +208,7 @@ export function renderWritingGuidance(writing: WritingSettings, language: "es" |
   );
   if (writing.citations) lines.push("Attribute every figure, date and claim inline to its source («según X…») and link that source.");
   lines.push(writing.mentionCompetitors ? "Competitors may be mentioned when it genuinely helps the reader." : "Do not mention or recommend competitors.");
-  lines.push(
+  if (options.summary !== false) lines.push(
     writing.summaryVariant === "key_takeaways"
       ? `Summary block: "${language === "es" ? "Puntos clave" : "Key takeaways"}" — one thesis sentence followed by a two-column table (Point / Detail).`
       : `Summary block: "${language === "es" ? "En resumen" : "In short"}" — 3–5 self-contained bullet points.`,
@@ -231,13 +232,14 @@ export function readArticleTargetsOverride(value: unknown): ArticleTargetsOverri
   }
   if (raw.writing !== undefined && raw.writing !== null) out.writing = readWritingSettings(raw.writing);
   if (raw.brand !== undefined && raw.brand !== null) out.brand = readBrandSettings(raw.brand);
+  if (raw.visuals !== undefined && raw.visuals !== null) out.visuals = readVisualSettings(raw.visuals);
   return out;
 }
 
 /** Guide defaults, then each override in order (site first, article last). A fixed length mode sets the word target. */
 export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
   return overrides.reduce<ArticleTargets>((acc, value) => {
-    const { writing, brand: _brand, ...override } = readArticleTargetsOverride(value);
+    const { writing, brand: _brand, visuals: _visuals, ...override } = readArticleTargetsOverride(value);
     const fixedWords = writing ? LENGTH_MODES[writing.length] : null;
     return {
       ...acc,
@@ -251,6 +253,11 @@ export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
 /** The site's writing settings from its stored article_targets (defaults when unset). */
 export function resolveWritingSettings(siteArticleTargets: unknown): WritingSettings {
   return readArticleTargetsOverride(siteArticleTargets).writing ?? DEFAULT_WRITING;
+}
+
+/** The site's visuals settings (image styles, media library, infographic, YouTube); defaults when unset. */
+export function resolveVisualSettings(siteArticleTargets: unknown): VisualSettings {
+  return readArticleTargetsOverride(siteArticleTargets).visuals ?? DEFAULT_VISUALS;
 }
 
 /** The site's brand and CTA settings from its stored article_targets (empty when unset). */

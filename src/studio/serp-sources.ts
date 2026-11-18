@@ -15,7 +15,8 @@ const RESOURCE = "serp_organic";
 const TTL_MS = 7 * 24 * 60 * 60 * 1000; // Labs snapshots refresh every few weeks
 
 type Fetcher = typeof fetchSerpOrganic;
-type PageReader = (url: string) => Promise<string | null>;
+/** Page text plus the outlet's own name (og:site_name), when the page declares one. */
+type PageReader = (url: string) => Promise<{ content: string; siteName: string | null } | string | null>;
 
 const fold = (value: string) => value.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
 
@@ -34,14 +35,15 @@ export function pickSourceExcerpt(content: string, keyword: string, maxChars = 3
   return best.sort((a, b) => a.index - b.index).map((entry) => entry.sentence).join(" ").slice(0, maxChars);
 }
 
-/** Main text of a public HTML page (SSRF-guarded); null for PDFs, errors and thin pages. */
-async function readPageText(url: string): Promise<string | null> {
+/** Main text and outlet name of a public HTML page (SSRF-guarded); null for PDFs, errors and thin pages. */
+async function readPageText(url: string): Promise<{ content: string; siteName: string | null } | null> {
   try {
     const parsed = new URL(url);
     await validateScrapeUrl(parsed);
     const { body, contentType } = await fetchUrl(parsed, { accept: "text/html" });
     if (!/html/i.test(contentType)) return null;
-    return extractPageFromHtml(parsed.origin, url, body)?.content ?? null;
+    const page = extractPageFromHtml(parsed.origin, url, body);
+    return page ? { content: page.content, siteName: page.siteName ?? null } : null;
   } catch {
     return null;
   }
@@ -54,17 +56,30 @@ async function withPageExcerpts(tenantId: string, facts: LedgerFact[], keyword: 
       const url = fact.sourceUrl!;
       const key = `${keyword}|${url}`;
       const cached = await lookupProviderCache(tenantId, PROVIDER, "source_page", key);
-      let excerpt = cached.hit ? (cached.negative ? "" : String(cached.payload ?? "")) : null;
-      if (excerpt === null) {
-        const text = await readPage(url);
-        excerpt = text ? pickSourceExcerpt(text, keyword) : "";
-        await storeProviderCache(tenantId, PROVIDER, "source_page", key, excerpt, { ttlMs: TTL_MS, negative: !excerpt });
+      // Older cache entries hold the bare excerpt string.
+      const stored = cached.hit && !cached.negative ? cached.payload : null;
+      let page: { excerpt: string; publisher: string | null } | null = cached.hit
+        ? typeof stored === "string" || !stored ? { excerpt: String(stored ?? ""), publisher: null } : (stored as { excerpt: string; publisher: string | null })
+        : null;
+      if (!page) {
+        const read = await readPage(url);
+        const content = typeof read === "string" ? read : read?.content ?? "";
+        page = { excerpt: content ? pickSourceExcerpt(content, keyword) : "", publisher: typeof read === "object" && read ? cleanPublisher(read.siteName) : null };
+        await storeProviderCache(tenantId, PROVIDER, "source_page", key, page, { ttlMs: TTL_MS, negative: !page.excerpt && !page.publisher });
       }
-      if (!excerpt) return fact;
+      // The outlet's real name («Xataka») instead of its domain for «Título, Editor».
+      const named = page.publisher ? { ...fact, publisher: page.publisher } : fact;
+      if (!page.excerpt) return named;
       const title = fact.statement.split(": ")[0];
-      return { ...fact, statement: `${title}: ${excerpt}`.slice(0, 400) };
+      return { ...named, statement: `${title}: ${page.excerpt}`.slice(0, 400) };
     }),
   );
+}
+
+/** og:site_name as a publisher label: trimmed, short, not a URL. */
+export function cleanPublisher(value: string | null | undefined): string | null {
+  const name = value?.replace(/\s+/g, " ").trim() ?? "";
+  return name && name.length <= 60 && !/^https?:|\//i.test(name) ? name : null;
 }
 
 /** Ranked results to ledger facts, minus excluded domains (own site, competitors) and URLs already in the ledger. */

@@ -9,6 +9,7 @@
 // ledger) are errors and hard-fail publication.
 
 import { detectVerbatimOverlap } from "./fact-safety";
+import { countLinks } from "./quality-checklist";
 import { getStructureSpec, localizedHeading, sectionEnabled } from "./structure";
 import { stripHtml, wordCount } from "./seo-package";
 import { titleSimilarity } from "../editorial";
@@ -439,7 +440,8 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   add("seo_quality", "structured_data", "Structured data recommendation", seo.structuredDataRecommendation.length > 0, "info", seo.structuredDataRecommendation);
 
   // ── Internal linking ────────────────────────────────────────────────────
-  const internalLinksUsed = [...article.bodyHtml.matchAll(/href=["']((?!https?:\/\/|mailto:|tel:|#)[^"']+)["']/gi)].length;
+  // Inventory URLs are the site's own: absolute links on that host are internal too (the writer emits absolute URLs).
+  const internalLinksUsed = countLinks(article.bodyHtml, brief.internalLinkOpportunities.find((link) => /^https?:/i.test(link.url))?.url).internal;
   const requiredInternal = brief.articleType === "evergreen_explainer" || brief.articleType === "list_ranking" || brief.articleType === "what_to_watch" || brief.articleType === "review_info" ? 2 : 1;
   const inventoryEmpty = brief.internalLinkOpportunities.length === 0;
   add(
