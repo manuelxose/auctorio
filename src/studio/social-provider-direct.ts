@@ -12,7 +12,8 @@ import type {
   SocialSessionRequest,
   SocialSessionResult,
 } from "./social-provider";
-import { validateInstagramPayload, validateXPayload } from "./social-provider";
+import { validateFacebookPayload, validateInstagramPayload, validateXPayload } from "./social-provider";
+import { getSocialPublisher } from "./social-publishers";
 
 // Direct OAuth integration (Bring Your Own App).
 // - X: OAuth 2.0 Authorization Code with PKCE against api.x.com (scopes
@@ -31,7 +32,7 @@ const X_SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"].j
 
 const META_GRAPH_BASE = "https://graph.facebook.com/v21.0";
 const META_DIALOG_URL = "https://www.facebook.com/v21.0/dialog/oauth";
-const META_SCOPES = "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,business_management";
+const META_SCOPES = "instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_posts,business_management";
 
 type XTokenSet = {
   accessToken: string;
@@ -86,7 +87,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
       return { providerUrl: url.toString(), providerLinkToken: null };
     }
     if (!this.metaConfigured()) {
-      throw new Error("instagram_oauth_not_configured (META_APP_ID and META_APP_SECRET are required)");
+      throw new Error("meta_oauth_not_configured (META_APP_ID and META_APP_SECRET are required)");
     }
     const url = new URL(META_DIALOG_URL);
     url.searchParams.set("client_id", getEnv("META_APP_ID", ""));
@@ -103,7 +104,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     if (input.platform === "x") {
       return this.exchangeX(input);
     }
-    return this.exchangeInstagram(input);
+    return this.exchangeMeta(input, input.platform === "facebook" ? "facebook" : "instagram");
   }
 
   private async exchangeX(input: SocialExchangeInput): Promise<SocialExchangeResult> {
@@ -180,7 +181,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     };
   }
 
-  private async exchangeInstagram(input: SocialExchangeInput): Promise<SocialExchangeResult> {
+  private async exchangeMeta(input: SocialExchangeInput, platform: "instagram" | "facebook"): Promise<SocialExchangeResult> {
     const code = input.query.code?.trim();
     if (!code) {
       throw new Error("instagram_oauth_missing_code");
@@ -223,6 +224,27 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     let igUsername: string | null = null;
     if (business && igUserId) {
       igUsername = await this.metaIgUsername(igUserId, business.accessToken);
+    }
+
+    if (platform === "facebook") {
+      // Prefer the Page linked to IG so both channels point at the same brand.
+      const page = business ?? pages[0];
+      if (!page) throw new Error("facebook_no_pages");
+      const fbCapabilities = { canPublish: true, canPostMedia: true, canPostStories: false, canPostCarousel: true, canPostThreads: false };
+      return {
+        profile: {
+          providerProfileId: page.id,
+          providerAccountId: parsed.user_id ?? null,
+          platform: "facebook",
+          username: null,
+          displayName: page.name,
+          avatarUrl: null,
+          capabilities: fbCapabilities,
+          metadata: { provider: "direct", pageId: page.id, igUserId: page.instagramBusinessAccountId },
+        },
+        credentials: { provider: "direct", platform: "facebook", accessToken: page.accessToken, userToken, pageId: page.id, expiresAt },
+        metadata: { provider: "direct", oauth: "meta_graph", canPublish: true, connectedAt: new Date().toISOString() },
+      };
     }
 
     const capabilities = {
@@ -418,7 +440,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
   // ── Publishing
 
   validateContent(payload: SocialPublishInput, platform: SocialPlatform): { valid: boolean; errors: string[] } {
-    const errors = platform === "x" ? validateXPayload(payload) : validateInstagramPayload(payload);
+    const errors = platform === "x" ? validateXPayload(payload) : platform === "facebook" ? validateFacebookPayload(payload) : validateInstagramPayload(payload);
     return { valid: errors.length === 0, errors };
   }
 
@@ -426,7 +448,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     if (account.platform === "x") {
       return this.publishX(payload, credentials);
     }
-    return this.publishInstagram(payload, credentials, account);
+    return this.publishMeta(account.platform === "facebook" ? "facebook" : "instagram", payload, credentials, account);
   }
 
   private async publishX(payload: SocialPublishInput, credentials: Record<string, unknown>): Promise<SocialPublishResult> {
@@ -534,77 +556,20 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     return mediaId;
   }
 
-  private async publishInstagram(payload: SocialPublishInput, credentials: Record<string, unknown>, account: { providerProfileId: string | null; providerAccountId: string | null }): Promise<SocialPublishResult> {
+  // Meta publishing lives in the shared adapters (carousel containers, FB multi-photo); the worker already gated dry-run.
+  private async publishMeta(platform: "instagram" | "facebook", payload: SocialPublishInput, credentials: Record<string, unknown>, account: { providerProfileId: string | null; providerAccountId: string | null }): Promise<SocialPublishResult> {
     const accessToken = String(credentials.accessToken ?? "");
-    const igUserId = account.providerProfileId ?? String(credentials.igUserId ?? "");
-    if (!accessToken || !igUserId) {
-      throw new Error("instagram_oauth_missing_token_or_ig_user");
+    const igUserId = platform === "instagram" ? account.providerProfileId ?? String(credentials.igUserId ?? "") : "";
+    const pageId = String(credentials.pageId ?? (platform === "facebook" ? account.providerProfileId ?? "" : ""));
+    if (!accessToken || (platform === "instagram" ? !igUserId : !pageId)) {
+      throw new Error(`${platform}_oauth_missing_token_or_account`);
     }
-    const mediaType = payload.mediaType === "story" ? "STORIES" : payload.mediaType === "carousel" ? "CAROUSEL" : "IMAGE";
-    let creationId: string;
-    if (mediaType === "CAROUSEL") {
-      if (payload.mediaUrls.length < 2) {
-        throw new Error("instagram_carousel_requires_multiple_images");
-      }
-      const response = await fetchWithTimeout(
-        `${META_GRAPH_BASE}/${encodeURIComponent(igUserId)}/media?access_token=${encodeURIComponent(accessToken)}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: { media_type: "CAROUSEL", children: payload.mediaUrls, caption: payload.text },
-          timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-          retries: 1,
-        },
-      );
-      const body = await response.text();
-      if (!response.ok) {
-        throw new Error(`instagram_create_failed status=${response.status} body=${body.slice(0, 300)}`);
-      }
-      creationId = String((JSON.parse(body) as { id: string }).id);
-    } else {
-      if (mediaType !== "STORIES" && payload.mediaUrls.length === 0) {
-        throw new Error("instagram_requires_image");
-      }
-      const response = await fetchWithTimeout(
-        `${META_GRAPH_BASE}/${encodeURIComponent(igUserId)}/media?access_token=${encodeURIComponent(accessToken)}`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: { media_type: mediaType, image_url: payload.mediaUrls[0], caption: mediaType === "STORIES" ? undefined : payload.text },
-          timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-          retries: 1,
-        },
-      );
-      const body = await response.text();
-      if (!response.ok) {
-        throw new Error(`instagram_create_failed status=${response.status} body=${body.slice(0, 300)}`);
-      }
-      creationId = String((JSON.parse(body) as { id: string }).id);
-    }
-
-    const publishResponse = await fetchWithTimeout(
-      `${META_GRAPH_BASE}/${encodeURIComponent(igUserId)}/media_publish?access_token=${encodeURIComponent(accessToken)}`,
-      {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: { creation_id: creationId },
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      },
+    const result = await getSocialPublisher(platform).publish(
+      { text: payload.text, imageUrls: payload.mediaUrls, mediaType: payload.mediaType, thread: payload.thread },
+      { accessToken, igUserId, pageId },
     );
-    const publishBody = await publishResponse.text();
-    if (!publishResponse.ok) {
-      throw new Error(`instagram_publish_failed status=${publishResponse.status} body=${publishBody.slice(0, 300)}`);
-    }
-    const mediaId = String((JSON.parse(publishBody) as { id: string }).id);
-    return {
-      externalId: mediaId,
-      externalUrl: `https://www.instagram.com/p/${mediaId}`,
-      responsePayload: { provider: "direct", mediaId, creationId },
-      dryRun: false,
-    };
+    return { ...result, responsePayload: { provider: "direct", ...(result.responsePayload ?? {}) } };
   }
-
   async deletePublication(externalId: string, credentials: Record<string, unknown>, account: { providerProfileId: string | null; providerAccountId: string | null; platform: string }): Promise<SocialPublishResult> {
     if (account.platform === "x") {
       const token = String(credentials.accessToken ?? "");

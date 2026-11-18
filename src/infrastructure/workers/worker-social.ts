@@ -34,6 +34,11 @@ type SocialUnpublishJobData = {
 
 type SocialJobData = SocialGenerateJobData | SocialPublishJobData | SocialUnpublishJobData;
 
+function slideImageUrls(metadata: unknown): string[] {
+  const slides = (metadata as { slides?: Array<{ imageUrl?: unknown }> } | null)?.slides;
+  return Array.isArray(slides) ? slides.map((slide) => slide.imageUrl).filter((url): url is string => typeof url === "string" && url.length > 0) : [];
+}
+
 async function buildPublishInput(publication: Awaited<ReturnType<typeof loadPublication>>): Promise<SocialPublishInput> {
   const imageUrl = await socialAssetUrlForVersion(publication.versionId, publication.tenantId);
   const thread = await prisma.socialContent.findMany({
@@ -42,6 +47,10 @@ async function buildPublishInput(publication: Awaited<ReturnType<typeof loadPubl
   });
 
   const text = publication.socialContent?.body ?? "";
+  const slideUrls = slideImageUrls(publication.socialContent?.metadata);
+  if (slideUrls.length > 0 && publication.account.platform !== "x") {
+    return { text, mediaUrls: slideUrls, mediaType: slideUrls.length > 1 ? "carousel" : "photo" };
+  }
   const mediaType =
     publication.account.platform === "x"
       ? publication.socialContent?.contentType === "x_thread" && thread.length > 0
@@ -69,14 +78,14 @@ type LoadedPublication = {
   externalId: string | null;
   account: {
     id: string;
-    platform: "x" | "instagram" | "website";
+    platform: "x" | "instagram" | "facebook" | "website";
     credentialsRef: string | null;
     provider: string;
     providerProfileId: string | null;
     providerAccountId: string | null;
     credentialsCiphertext: string | null;
   };
-  socialContent: { body: string; contentType: string } | null;
+  socialContent: { body: string; contentType: string; metadata: unknown } | null;
 };
 
 async function loadPublication(publicationId: string): Promise<LoadedPublication> {
@@ -106,7 +115,7 @@ async function processPublish(data: SocialPublishJobData) {
       result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
     } else {
       const payload = await buildPublishInput(publication);
-      const validation = provider.validateContent(payload, account.platform as "x" | "instagram");
+      const validation = provider.validateContent(payload, account.platform as "x" | "instagram" | "facebook");
       if (!validation.valid) {
         throw new Error(`platform_content_invalid: ${validation.errors.join("; ")}`);
       }
@@ -115,7 +124,7 @@ async function processPublish(data: SocialPublishJobData) {
   } else {
     const credentials = readSocialCredentials(account.credentialsRef);
     const dryRun = dryRunGate(Boolean(credentials));
-    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     const payload = await buildPublishInput(publication);
     if (dryRun.enabled || !credentials) {
       result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
@@ -168,7 +177,7 @@ async function processUnpublish(data: SocialUnpublishJobData) {
   } else {
     const credentials = readSocialCredentials(account.credentialsRef);
     const dryRun = dryRunGate(Boolean(credentials));
-    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     if (!publisher.capabilities.delete && !publisher.capabilities.unpublish) {
       throw new Error(`${account.platform}_unpublish_not_supported`);
     }

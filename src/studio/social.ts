@@ -5,6 +5,8 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { writeAudit } from "./audit";
 import { buildAssetPublicUrl } from "./orchestration";
+import { getSiteSocialSettings } from "./social-settings";
+import { renderSlideImages, type SlideText } from "./social-slides";
 
 const prisma = getPrismaClient();
 
@@ -27,6 +29,7 @@ export type GeneratedSocialPiece = {
   title: string | null;
   hashtags: string[];
   mentions: string[];
+  slides?: SlideText[];
 };
 
 // ────────────────────────────────────────────────────────────── Validation
@@ -73,7 +76,23 @@ type SocialPromptContext = {
   siteName: string;
   language: string;
   articleUrl: string | null;
+  category?: string;
+  brandVoice?: string;
 };
+
+const CATEGORY_HINTS: Record<string, string> = {
+  educational: "Educational: teach one clear, practical idea from the article step by step.",
+  philosophical: "Philosophical: a reflective angle that makes the reader rethink the topic.",
+  myths: "Myths vs facts: bust common misconceptions the article clears up.",
+  storytelling: "Storytelling: tell it as a short story with a beginning, tension and payoff.",
+};
+
+/** Deterministic pick so regenerations of one article keep the same angle. */
+export function pickSocialCategory(categories: string[], seed: string): string {
+  if (categories.length === 0) return "educational";
+  const hash = crypto.createHash("sha1").update(seed).digest().readUInt32BE(0);
+  return categories[hash % categories.length];
+}
 
 export function buildSocialPrompt(
   channel: SocialChannel,
@@ -81,6 +100,16 @@ export function buildSocialPrompt(
   context: SocialPromptContext,
 ): { systemPrompt: string; userPrompt: string } {
   const locale = context.language === "en" ? "English" : "Spanish";
+  const voice = context.brandVoice ? `\nBrand voice and tone to respect: ${context.brandVoice}` : "";
+  const slidesShape = `{"caption": string, "hashtags": string[], "slides": [{"headline": string, "body": string}]}`;
+  const slidesTask = [
+    `Article title: ${context.title}`,
+    `Article excerpt: ${context.excerpt}`,
+    `Article: ${context.bodyPlain.slice(0, 2400)}`,
+    ``,
+    `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
+    `Write a carousel of 4-7 slides. Slide 1 is a scroll-stopping headline (max 60 characters) with a short body. Middle slides: headline max 50 characters, body max 180 characters. Do NOT add a closing brand slide; it is added automatically.`,
+  ];
   const systemPrompts: Record<string, string> = {
     x: `You are a social media editor for ${context.siteName}. You write original, conversational X/Twitter copy in ${locale}.
 Rules:
@@ -93,8 +122,15 @@ Rules:
 - Never invent facts, numbers or quotes that are not present in the article.
 - Hook first, useful body, optional CTA, 4-8 hashtags.
 - Return ONLY valid JSON with the shape {"caption": string, "hashtags": string[]}.
-- The caption must not exceed 2200 characters.`,
+- The caption must not exceed 2200 characters.
+- For carousels return ONLY valid JSON with the shape ${slidesShape}.${voice}`,
+    facebook: `You are a social media editor for ${context.siteName}. You write Facebook Page posts in ${locale}.
+Rules:
+- Never invent facts, numbers or quotes that are not present in the article.
+- Conversational hook, 2-4 short paragraphs, a question to spark comments, 0-3 hashtags.
+- Return ONLY valid JSON with the shape ${slidesShape}.${voice}`,
   };
+  systemPrompts.x += voice;
 
   const userPrompts: Record<string, string> = {
     x_post: [
@@ -119,6 +155,8 @@ Rules:
       ``,
       `Write an Instagram caption with a hook, a useful summary and a question as CTA. Include 5-7 hashtags inside the JSON hashtags array.`,
     ].join("\n"),
+    instagram_carousel: [...slidesTask, `Caption: hook, useful summary, a question as CTA; 5-7 hashtags in the hashtags array.`].join("\n"),
+    facebook_post: [...slidesTask, `Caption: the Facebook post text (max 1500 characters).`].join("\n"),
     instagram_story: [
       `Article title: ${context.title}`,
       ``,
@@ -206,6 +244,16 @@ export function parseGeneratedSocial(
   }
 
   const caption = typeof parsed?.caption === "string" ? parsed.caption.trim() : output.trim();
+  const slides =
+    contentType === "instagram_carousel" || contentType === "facebook_post"
+      ? (Array.isArray(parsed?.slides) ? parsed.slides : [])
+          .map((raw) => {
+            const slide = (raw ?? {}) as Record<string, unknown>;
+            return { headline: String(slide.headline ?? "").trim(), body: String(slide.body ?? "").trim() };
+          })
+          .filter((slide) => slide.headline)
+          .slice(0, 9)
+      : undefined;
   return caption
     ? [
         {
@@ -215,6 +263,7 @@ export function parseGeneratedSocial(
           title: null,
           hashtags: Array.isArray(parsed?.hashtags) ? parsed.hashtags.map(String) : extractHashtags(caption),
           mentions: [],
+          ...(slides ? { slides } : {}),
         },
       ]
     : [];
@@ -244,8 +293,11 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
       }
     }
     if (channel === "instagram") {
-      requested.push({ channel: "instagram", contentType: "instagram_caption" });
+      requested.push({ channel: "instagram", contentType: "instagram_carousel" });
       requested.push({ channel: "instagram", contentType: "instagram_story" });
+    }
+    if (channel === "facebook") {
+      requested.push({ channel: "facebook", contentType: "facebook_post" });
     }
   }
 
@@ -419,13 +471,23 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
     return { generated: 0 };
   }
 
+  const site = version.project.site;
+  const settings = await getSiteSocialSettings(data.tenantId, site.id);
+  const intelligence = await prisma.siteIntelligenceProfile.findFirst({ where: { siteId: site.id }, select: { editorialTone: true } });
+  const brandVoice = [site.brandVoice ? JSON.stringify(site.brandVoice).slice(0, 600) : "", intelligence?.editorialTone ?? ""].filter(Boolean).join(" | ");
+  const cover = await prisma.contentVersion.findFirst({
+    where: { id: version.id },
+    select: { contentImage: { select: { storagePath: true } } },
+  });
   const context: SocialPromptContext = {
+    category: pickSocialCategory(settings.categories, version.id),
+    brandVoice: brandVoice || undefined,
     title: version.title || version.project.title,
     excerpt: version.excerpt || "",
     bodyPlain: toPlainText(version.bodyHtml).slice(0, 4000),
     siteName: version.project.site.name,
     language: version.project.primaryLanguage,
-    articleUrl: null,
+    articleUrl: site.baseUrl ?? null,
   };
 
   const provider = getTextProvider("social");
@@ -443,7 +505,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
         prompt: prompt.userPrompt,
         systemPrompt: prompt.systemPrompt,
         temperature: 0.7,
-        maxTokens: 600,
+        maxTokens: social.contentType === "instagram_carousel" || social.contentType === "facebook_post" ? 1800 : 600,
       });
 
       const pieces = parseGeneratedSocial(social.channel, social.contentType, result.output);
@@ -456,6 +518,29 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
         throw new Error(`social_validation_failed: ${validation.errors.join("; ")}`);
       }
 
+      let slides: Array<SlideText & { imageUrl: string | null; storagePath: string }> | undefined;
+      if (piece.slides) {
+        if (piece.slides.length < 1) throw new Error("social_slides_missing");
+        // Closing slide is ours, not the model's: brand + article link.
+        const all = [...piece.slides, { headline: site.name, body: context.articleUrl ?? "" }];
+        const rendered = await renderSlideImages({
+          tenantId: data.tenantId,
+          socialContentId: social.id,
+          slides: all,
+          style: {
+            fontFamily: settings.fontFamily,
+            highlightStyle: settings.highlightStyle,
+            imageStyle: settings.imageStyle,
+            showBrandMark: settings.showBrandMark,
+            brandName: site.name,
+            accent: brandAccent(site.brandVoice),
+          },
+          backgroundStoragePath: cover?.contentImage?.storagePath ?? null,
+        });
+        slides = all.map((slide, index) => ({ ...slide, ...rendered[index] }));
+      }
+      // approve/manual leave a draft waiting for a human; auto approves straight away.
+      const editorialStatus = settings.workflow === "auto" ? "approved" : social.editorialStatus === "rejected" ? "draft" : social.editorialStatus;
       await prisma.socialContent.update({
         where: { id: social.id },
         data: {
@@ -464,11 +549,15 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
           mentions: piece.mentions.length ? (piece.mentions as Prisma.InputJsonValue) : Prisma.JsonNull,
           characterCount: piece.body.length,
           generationStatus: "done",
-          editorialStatus: social.editorialStatus === "rejected" ? "draft" : social.editorialStatus,
+          editorialStatus,
+          mediaAssetIds: slides ? (slides.map((slide) => slide.storagePath) as Prisma.InputJsonValue) : Prisma.JsonNull,
           metadata: {
             provider: result.provider,
             model: result.model,
             generatedAt: new Date().toISOString(),
+            category: context.category,
+            workflow: settings.workflow,
+            ...(slides ? { slides } : {}),
           } as Prisma.InputJsonObject,
         },
       });
@@ -494,6 +583,12 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
   });
 
   return { generated };
+}
+
+function brandAccent(brandVoice: unknown): string {
+  const value = (brandVoice as { primaryColor?: unknown; accentColor?: unknown } | null) ?? {};
+  const color = String(value.accentColor ?? value.primaryColor ?? "");
+  return /^#[0-9a-f]{3,8}$/i.test(color) ? color : "#f5b301";
 }
 
 export async function socialAssetUrlForVersion(

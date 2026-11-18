@@ -131,7 +131,7 @@ const PUBLICATION_STATES = [
 ] as const;
 const ACCOUNT_PLATFORMS = ["website", "x", "instagram"] as const;
 const ACCOUNT_STATUSES = ["pending", "active", "error", "disabled"] as const;
-const SOCIAL_CHANNELS = ["x", "instagram"] as const;
+const SOCIAL_CHANNELS = ["x", "instagram", "facebook"] as const;
 const SOCIAL_EDITORIAL_STATUSES = ["draft", "approved", "rejected"] as const;
 
 function parseIsoDate(value: unknown): Date | null {
@@ -1009,7 +1009,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
     const social = await listSocialContent(context.tenantId, {
       projectId,
-      channel: channel as "x" | "instagram" | undefined,
+      channel: channel as (typeof SOCIAL_CHANNELS)[number] | undefined,
     });
     return reply.send({ items: social });
   });
@@ -1028,11 +1028,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       threadLength?: number;
       versionId?: string;
     }>(request);
-    const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is "x" | "instagram" =>
+    const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is (typeof SOCIAL_CHANNELS)[number] =>
       isOneOf(channel, SOCIAL_CHANNELS),
     );
     if (channels.length === 0) {
-      return badRequest(reply, "channels must include x and/or instagram");
+      return badRequest(reply, "channels must include x, instagram and/or facebook");
     }
 
     const project = await prisma.contentProject.findFirst({
@@ -1329,7 +1329,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return reply.send({ ok: false, message: "credentials_not_resolved" });
     }
     const { getSocialPublisher } = await import("./social-publishers");
-    const publisher = getSocialPublisher(account.platform as "x" | "instagram"); // facebook adapter lands in M2
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     const result = await publisher.validateCredentials(credentials);
     await prisma.publishingAccount.update({
       where: { id: account.id },
