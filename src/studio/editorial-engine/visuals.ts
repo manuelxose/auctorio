@@ -51,9 +51,12 @@ const STYLE_PROMPTS: Record<ImageStyle, string> = {
   minimal: "Minimal composition with plenty of negative space, no text, no logos.",
 };
 
-/** Prompt suffix for one image: its style plus the site's own instructions. */
-export function imageStylePrompt(style: ImageStyle | "media_library" | null | undefined, instructions: string): string {
-  return [style && style !== "media_library" ? STYLE_PROMPTS[style] : "", instructions ? `Site image instructions: ${instructions}` : ""].filter(Boolean).join("\n");
+/** Prompt suffix for one image: its style, the site's own instructions and its brand palette. */
+export function imageStylePrompt(style: ImageStyle | "media_library" | null | undefined, instructions: string, brandColors = ""): string {
+  const palette = /^#[0-9a-f]{6}(, #[0-9a-f]{6})*$/i.test(brandColors)
+    ? `Brand palette: ${brandColors}. Use these colours as the dominant accents (lighting, props, clothing, set details), naturally, so the image matches the site.`
+    : "";
+  return [style && style !== "media_library" ? STYLE_PROMPTS[style] : "", instructions ? `Site image instructions: ${instructions}` : "", palette].filter(Boolean).join("\n");
 }
 
 export const INFOGRAPHIC_PROMPT_PREFIX = "Editorial infographic";

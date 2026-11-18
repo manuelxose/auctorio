@@ -43,7 +43,8 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   // TOC anchors (withTableOfContents).
   h2: ["id", "style"],
   h3: ["id", "style"],
-  img: ["src", "alt", "width", "height", "loading"],
+  img: ["src", "alt", "width", "height", "loading", "style"],
+  strong: ["style"],
   table: [],
   thead: [],
   tbody: [],
@@ -56,7 +57,7 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   p: ["style"],
 };
 
-const STYLE_PROPERTIES = new Set(["text-align", "color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight"]);
+const STYLE_PROPERTIES = new Set(["text-align", "color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight", "border-top", "font-size", "line-height", "letter-spacing", "text-transform", "width", "overflow"]);
 
 /** Keeps only whitelisted declarations with plain values (no url(), expression(), var(), quotes or escapes). */
 export function cleanStyle(value: string): string {

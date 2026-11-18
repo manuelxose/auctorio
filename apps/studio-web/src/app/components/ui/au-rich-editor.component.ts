@@ -1,20 +1,22 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, DestroyRef, ElementRef, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, PLATFORM_ID, ViewChild, inject } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { AppIconComponent } from './app-icon.component';
 
 // Mirrors src/studio/html-sanitizer.ts: summary/TOC/brand cards are <aside>/<nav> blocks and must survive an edit.
 const ALLOWED_TAGS = new Set(['P', 'H2', 'H3', 'H4', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'A', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'IMG', 'BR', 'FIGURE', 'FIGCAPTION', 'ASIDE', 'NAV']);
 const ALLOWED_ATTRS: Record<string, string[]> = {
   A: ['href', 'title', 'rel', 'target', 'style'],
-  IMG: ['src', 'alt', 'width', 'height', 'loading'],
+  IMG: ['src', 'alt', 'width', 'height', 'loading', 'style'],
+  STRONG: ['style'],
   H2: ['id', 'style'],
   H3: ['id', 'style'],
   TH: ['scope'],
   ASIDE: ['style'],
   P: ['style'],
 };
-const STYLE_PROPERTIES = new Set(['text-align', 'color', 'background-color', 'border', 'border-left', 'border-color', 'border-radius', 'padding', 'margin', 'display', 'text-decoration', 'font-weight']);
+const STYLE_PROPERTIES = new Set(['text-align', 'color', 'background-color', 'border', 'border-left', 'border-color', 'border-radius', 'padding', 'margin', 'display', 'text-decoration', 'font-weight', 'border-top', 'font-size', 'line-height', 'letter-spacing', 'text-transform', 'width', 'overflow']);
 
 function cleanStyle(value: string): string {
   return value
@@ -123,7 +125,7 @@ function isPlatformBrowserSafe(): boolean {
         role="textbox"
         aria-multiline="true"
         aria-label="Article content editor"
-        [innerHTML]="safeHtml"
+        [innerHTML]="trustedHtml"
         (input)="onInput()"
         (paste)="onPaste($event)"
         (keydown.control.z)="exec('undo')"
@@ -147,6 +149,9 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
   @Output() autosave = new EventEmitter<string>();
   private readonly platformId = inject(PLATFORM_ID);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly domSanitizer = inject(DomSanitizer);
+  /** safeHtml went through sanitizeHtml (allowlist + cleanStyle); trusting it keeps the cards' style and data-block, which Angular would strip. Set only from writeValue so typing never re-renders the surface. */
+  trustedHtml: SafeHtml = '';
 
   value = '';
   safeHtml = '';
@@ -188,6 +193,7 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
     if (this.safeHtml === next) return;
     this.value = next;
     this.safeHtml = next;
+    this.trustedHtml = this.domSanitizer.bypassSecurityTrustHtml(next);
     this.refreshStats();
   }
 

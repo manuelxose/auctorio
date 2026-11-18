@@ -67,6 +67,17 @@ export function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
 }
 
+/** Words of the article itself, as BLG's panel counts them: without TOC, cards, summary box, Sources and Recommended reads. */
+export function bodyWordCount(html: string): number {
+  const $ = load(html, null, false);
+  $("nav, aside").remove();
+  $("h2").filter((_, el) => /^(fuentes|sources|lecturas recomendadas|recommended read|recomendaciones)/i.test($(el).text().trim())).each((_, el) => {
+    $(el).nextUntil("h2").remove();
+    $(el).remove();
+  });
+  return wordCount(stripHtml($.html()));
+}
+
 function truncateWords(value: string, maxWords: number): string {
   const words = value.split(/\s+/).filter(Boolean);
   return words.length <= maxWords ? value : `${words.slice(0, maxWords).join(" ")}…`;

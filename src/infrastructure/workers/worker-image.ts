@@ -135,9 +135,9 @@ export async function runImageWorker() {
       const section = (role === "inline" || role === "infographic") && typeof data.options?.section === "string" ? data.options.section : null;
       // Site visuals settings (M6): style per role and the site's own image instructions.
       const style = IMAGE_STYLES.includes(data.options?.image_style as ImageStyle) ? (data.options?.image_style as ImageStyle) : null;
-      const styleLine = imageStylePrompt(style, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "");
+      const styleLine = imageStylePrompt(style, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "", typeof data.options?.brand_colors === "string" ? data.options.brand_colors : "");
       let usedPrompt = role === "infographic" && section && typeof data.options?.section_text === "string"
-        ? [infographicPrompt(section, data.options.section_text, data.options?.language === "en" ? "en" : "es"), imageStylePrompt(null, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "")].filter(Boolean).join("\n")
+        ? [infographicPrompt(section, data.options.section_text, data.options?.language === "en" ? "en" : "es"), imageStylePrompt(null, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "", typeof data.options?.brand_colors === "string" ? data.options.brand_colors : "")].filter(Boolean).join("\n")
         : [
             section
               ? `${prompt.userPrompt.replace(/^.*hero image.*$/gim, "").trim()}\nCreate an in-article editorial image that illustrates the section "${section}". Its own composition, distinct from the hero. No text, logos or watermarks in the image.`

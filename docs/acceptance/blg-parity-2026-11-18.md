@@ -52,6 +52,35 @@ pero con el mismo criterio que el panel de BLG (sin TOC, link card, Fuentes ni R
 longitud varía entre ejecuciones del mismo modelo (v1: 2.341 con el mismo prompt) y el JSON llegó completo (no es tope de
 tokens). No se maquilla: queda como pendiente un paso de «ampliar» cuando el cuerpo no llegue al mínimo.
 
+### Segunda ronda (v4, tras la revisión del usuario)
+El usuario vio en Studio: enlaces sin aspecto de enlace (vista previa y editor), «(own post)» en Lecturas recomendadas, una
+tarjeta CTA que no se parecía a la de BLG y ni tarjetas ni imágenes con los colores de la marca.
+
+| # | Fallo | Causa | Arreglo | Test |
+|---|---|---|---|---|
+| 5 | Enlaces del cuerpo con el color del texto y sin subrayado | el CSS del componente está encapsulado y no alcanza al HTML de `[innerHTML]` | `::ng-deep` en la vista previa; enlaces en color de marca, subrayados y en seminegrita (vista previa y editor) | navegador: `rgb(79,70,229)`, `underline`, 600 |
+| 6 | Tarjeta sin estilo en la vista previa; el editor le quitaba `style` y `data-block` (al guardar se perdía) | el sanitizer de Angular en `[innerHTML]` elimina `style` y `data-*` | el HTML ya saneado (servidor / `sanitizeHtml` del editor) se marca como confiable; el editor solo lo hace en `writeValue` | navegador: la tarjeta conserva `style` en vista previa y editor |
+| 7 | «(own post)» en el artículo | la marca del brief se copiaba | la instrucción dice que no se escribe y se elimina al guardar | v4: 0 apariciones |
+| 8 | Tarjeta básica (borde + botón) y con un color de prueba (`#e4572e`) | diseño mínimo de M5; sin colores del sitio | tarjeta estilo BLG solo con estilos en línea (cabecera oscura con píldora de marca, logo y dominio, titular de 22 px, barra de acento, botón «Visitar →», halo del color de marca) que pasa los saneadores de publicación; `brand-colors.ts` crawlea portada + CSS (color saturado más usado, `theme-color` oscuro, icono) con caché de 30 días, y rellena lo vacío de Branding | `tests/brand-palette-expand.test.ts`, `tests/brand-cards.test.ts` |
+| 9 | Imágenes sin los colores de marca | el prompt no llevaba paleta | `brand_colors` en las opciones de cada imagen → «Brand palette: #1ed760, #121212…» en el prompt | idem; las 3 imágenes de v4 lo llevan |
+| 10 | Longitud variable (v3: 1.493) | variación del modelo | paso «ampliar»: si el cuerpo (sin TOC, tarjetas, Fuentes ni Recomendaciones) queda por debajo del 85 % del mínimo, una segunda pasada pide la misma envoltura con más detalle y se queda la versión más larga | `tests/production-pipeline.test.ts` |
+
+| 11 | Atribuciones en el texto sin enlace («Según television.digital.gob.es…», «TDTChannels»): v4 tenía 0 enlaces externos en el cuerpo, los 23 solo en Fuentes | el redactor nombra la fuente pero no la enlaza | `linkInlineAttributions`: la primera mención sin enlazar del editor o dominio de cada fuente del ledger se enlaza a su URL, una vez por URL, fuera de tarjetas, TOC, FAQ y listas finales (sobre el HTML de v4: 19 enlaces en el texto) | `tests/brand-palette-expand.test.ts` |
+| 12 | «Según facebook.com», «según youtube.com» como fuentes | la SERP incluía redes sociales | redes sociales y YouTube no son fuentes citables (el vídeo ya va como bloque propio) | idem |
+
+En la BD local se vació el `primaryColor` de prueba de GuíaTV (`#e4572e`) para que se aplique la paleta crawleada
+(`#1ed760` / `#121212`, logo `assets/logo.svg`).
+
+**v4** (Regenerate): 10/10 checks, QA 100, **2.000 palabras de cuerpo**, 14 H2, tabla, resumen, TOC, 26 internos (22 URLs),
+23 externos todos en Fuentes, 5 FAQ, link card estilo BLG en verde/negro de la marca, 5 recomendaciones sin «(own post)»,
+3 imágenes de cuerpo con alt y sin metadatos, slug `canales-de-television-gratis`. El paso «ampliar» se disparó con
+2.000/2.001 y su salida no cupo en 8.000 tokens, así que se conservó el borrador; por eso el umbral pasa a ser el 85 %.
+
+**v5** (Regenerate tras #11–#12): 10/10 checks, QA 100, 1.857 palabras de cuerpo (≥1.700; por encima del 85 % del mínimo,
+sin pasada «ampliar»), **19 enlaces externos en el texto + 20 en Fuentes** (como BLG, cada fuente ~2 veces; 1 página de
+Tivify enlazada en el texto con otra URL que la de Fuentes), 0 redes sociales, tarjeta en el verde de la marca, sin «(own post)»,
+5 FAQ, 5 recomendaciones, 3 imágenes de cuerpo, slug `canales-de-television-gratis`.
+
 ## Calendario y métricas
 | Criterio | Resultado |
 |---|---|

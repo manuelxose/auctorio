@@ -489,7 +489,7 @@ export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
       },
       { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a self-contained 2–4 sentence answer.", required: true },
       { kind: "sources", heading: "Sources", instruction: "Bulleted list «Título, Editor», each linked to its URL (only URLs from the fact ledger).", required: true },
-      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of 3–5 of the brief's internal links marked «(own post)», with descriptive anchors; when none is marked, the most related brief URLs not linked in the body.", required: true },
+      { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of 3–5 of the brief's internal links marked «(own post)» (that marker is a hint for you: never write it), with descriptive anchors; when none is marked, the most related brief URLs not linked in the body.", required: true },
       { kind: "contact_card", heading: null, instruction: "Last block (before the disclaimer, if any): exactly <aside data-block=\"contact_card\"></aside>; the app fills in the site's contact card.", required: false },
     ],
     allowsConclusion: false,

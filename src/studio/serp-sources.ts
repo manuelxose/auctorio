@@ -82,9 +82,12 @@ export function cleanPublisher(value: string | null | undefined): string | null 
   return name && name.length <= 60 && !/^https?:|\//i.test(name) ? name : null;
 }
 
-/** Ranked results to ledger facts, minus excluded domains (own site, competitors) and URLs already in the ledger. */
+/** Social networks and video hosts are not citable sources (a «Según facebook.com» reads as no source); the video block covers YouTube. */
+const NOT_CITABLE = ["facebook.com", "instagram.com", "twitter.com", "x.com", "tiktok.com", "pinterest.com", "pinterest.es", "linkedin.com", "youtube.com", "youtu.be", "threads.net"];
+
+/** Ranked results to ledger facts, minus excluded domains (own site, competitors, social/video) and URLs already in the ledger. */
 export function serpResultsToFacts(results: SerpResult[], exclude: { domains: string[]; urls: string[] }, max: number): LedgerFact[] {
-  const blocked = (domain: string) => exclude.domains.some((entry) => domain === entry || domain.endsWith(`.${entry}`));
+  const blocked = (domain: string) => [...exclude.domains, ...NOT_CITABLE].some((entry) => domain === entry || domain.endsWith(`.${entry}`));
   const seen = new Set(exclude.urls);
   const facts: LedgerFact[] = [];
   for (const result of results) {

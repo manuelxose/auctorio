@@ -17,7 +17,8 @@ import { buildFactSafetyReport, hasCopyrightWarningCues, type FactSafetyReport }
 import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editorial-engine/duplicate-check";
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
 import { getArticleWriter } from "../editorial-engine/writer-provider";
-import { buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
+import { bodyWordCount, buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
+import { linkInlineAttributions } from "../editorial-engine/inline-citations";
 import { applyBrandCards } from "../editorial-engine/brand";
 import { insertYoutube } from "../editorial-engine/visuals";
 import { buildProvenance, summarizeProvenance } from "../editorial-engine/provenance";
@@ -121,6 +122,17 @@ ${text.slice(0, 4000)}`);
   return out;
 }
 
+/** Second pass for a guide that came back short: same envelope and blocks, longer body sections. */
+export function expandPrompt(userPrompt: string, previousOutput: string, words: number, minimum: number): string {
+  return `${userPrompt}
+
+Your previous answer (below) has only ${words} words in the article body (without TOC, cards, Sources and Recommended reading); the minimum is ${minimum}.
+Return the same JSON envelope, keeping every block, heading, link, card placeholder and source, and expand the body sections with more concrete detail grounded in the fact ledger (steps, examples, figures, comparisons) until the body has at least ${minimum} words. No conclusion section, no filler.
+
+Previous answer:
+${previousOutput.slice(0, 60_000)}`;
+}
+
 async function write(ctx: StageContext): Promise<WriteArtifact> {
   const briefArtifact = need(ctx.artifacts.brief, "brief");
   const factSafety = need(ctx.artifacts.evidence, "evidence");
@@ -155,10 +167,33 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
       language: ctx.input.language,
     });
     await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
-    const parsed = parseWriterOutput(result.output);
+    let parsed = parseWriterOutput(result.output);
     if (parsed) {
+      // Guides: one bounded "expand" pass when the body falls clearly short (below QA's 85 % tolerance; models vary run to run).
+      const minimum = briefArtifact.brief.articleTargets ? briefArtifact.brief.targetLengthRange.min : 0;
+      const words = bodyWordCount(parsed.bodyHtml);
+      if (words < minimum * 0.85) {
+        const expanded = await getArticleWriter()
+          .generate({
+            prompt: expandPrompt(writerPrompt.userPrompt, result.output, words, minimum),
+            systemPrompt: writerPrompt.systemPrompt,
+            maxTokens: 8000,
+            language: ctx.input.language,
+          })
+          .catch(() => null);
+        const longer = expanded ? parseWriterOutput(expanded.output) : null;
+        const longerWords = longer ? bodyWordCount(longer.bodyHtml) : 0;
+        structuredEvent("production.writer_expanded", { jobId: ctx.jobId, words, minimum, expandedWords: longerWords });
+        if (longer && longerWords > words) {
+          parsed = longer;
+          await updateGeneration(ctx, { articleOutput: expanded!.output.slice(0, 300_000) });
+        }
+      }
       // Editorial HTML is allowlist-sanitized before anything is stored.
-      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
+      // The brief marks own posts «(own post)» for the writer; a copied marker never reaches the article.
+      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml).replace(/\s*\((?:own post|post propio)\)/gi, "");
+      // Named-but-unlinked sources («Según television.digital.gob.es…») get their link inline, not only in «Fuentes».
+      parsed.bodyHtml = linkInlineAttributions(parsed.bodyHtml, ctx.input.ledgerFacts);
       return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
     }
     structuredEvent("production.writer_output_invalid", { jobId: ctx.jobId, attempt: attempt + 1, maxTokens: attempts[attempt], outputChars: result.output.length }, "warn");

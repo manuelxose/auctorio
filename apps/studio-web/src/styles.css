@@ -3496,6 +3496,7 @@ tr.is-selected {
 .au-rich-editor__surface h2 { margin: 1.2em 0 0.5em; font-size: 1.35em; }
 .au-rich-editor__surface h3 { margin: 1em 0 0.4em; font-size: 1.15em; }
 .au-rich-editor__surface p { margin: 0.6em 0; }
+.au-rich-editor__surface a { color: var(--au-brand); text-decoration: underline; text-underline-offset: 2px; font-weight: 600; }
 .au-rich-editor__surface blockquote { margin: 0.8em 0; padding: 0.4em var(--au-s2); border-left: 3px solid var(--au-brand); color: var(--au-muted); }
 .au-rich-editor__surface table { width: 100%; border-collapse: collapse; margin: 0.8em 0; }
 .au-rich-editor__surface th, .au-rich-editor__surface td { border: 1px solid var(--au-border); padding: var(--au-s1) var(--au-s2); }

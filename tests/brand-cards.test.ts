@@ -46,17 +46,18 @@ test("M5 link card: app-rendered with brand colours, writer wording kept unless 
   const brand = resolveBrand(readBrandSettings({ primaryColor: "#ffcc00", logoUrl: "https://cdn.example.com/logo.png" }), site);
   const html = sanitizeEditorialHtml(applyBrandCards(writerBody, brand, allOn, "es"));
   assert.equal((html.match(/data-block="link_card"/g) ?? []).length, 1);
-  assert.match(html, /<aside data-block="link_card" style="[^"]*border-left:4px solid #ffcc00/);
-  assert.match(html, /<strong>Encuentra qué se emite ahora<\/strong>/);
-  assert.match(html, /<a href="https:\/\/guiaprogramaciontv\.com" style="[^"]*background-color:#ffcc00;color:#111111[^"]*" rel="noopener noreferrer">Visitar<\/a>/);
+  assert.match(html, /<aside data-block="link_card" style="[^"]*border:10px solid #fff6d1/);
+  assert.match(html, /border-top:5px solid #ffcc00/);
+  assert.match(html, /font-size:22px[^"]*">Encuentra qué se emite ahora<\/p>/);
+  assert.match(html, /<a href="https:\/\/guiaprogramaciontv\.com" style="[^"]*background-color:#ffcc00;color:#111111[^"]*" rel="noopener noreferrer">Visitar →<\/a>/);
   assert.match(html, /<img src="https:\/\/cdn\.example\.com\/logo\.png" alt="GuíaTV"/);
   assert.ok(!html.includes("contact_card") && !html.includes("map_card"), "no data → no contact/map card");
   assert.ok(!/<script|onclick/i.test(html));
 
   const configured = resolveBrand(readBrandSettings({ linkCard: { headline: "Mira la parrilla", text: "Gratis.", url: "https://guiaprogramaciontv.com/hoy", buttonText: "Ver hoy" } }), site);
   const out = applyBrandCards(writerBody, configured, allOn, "es");
-  assert.match(out, /<strong>Mira la parrilla<\/strong>/);
-  assert.match(out, /href="https:\/\/guiaprogramaciontv\.com\/hoy"[^>]*>Ver hoy</);
+  assert.match(out, /font-size:22px[^"]*">Mira la parrilla<\/p>/);
+  assert.match(out, /href="https:\/\/guiaprogramaciontv\.com\/hoy"[^>]*>Ver hoy →</);
   assert.equal(readableOn("#1f2937"), "#ffffff");
 
   // Switched off: the writer's block is removed too.
@@ -116,6 +117,7 @@ test("M5 publisher: the rendered link card reaches the GuíaTV payload with its 
     version: { title: "t", excerpt: "x", bodyHtml: sanitizeEditorialHtml(body), seoTitle: "t", seoDescription: "d", publishedAt: null, updatedAt: new Date("2026-11-18") },
   } as unknown as PublisherContext;
   const content = String(buildGuiaTvPayload(context, null, "draft").content);
-  assert.match(content, /<aside data-block="link_card" style="[^"]*#0055aa/);
+  assert.match(content, /<aside data-block="link_card" style="[^"]*border:10px solid #/);
+  assert.match(content, /border-top:5px solid #0055aa/);
   assert.match(content, /background-color:#0055aa;color:#ffffff/);
 });

@@ -7,7 +7,8 @@ import { getPublicBaseUrl } from "../shared/utils/env";
 import { attachImageToVersion, createQueuedImage, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
 import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineAlt, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
-import { resolveVisualSettings } from "./editorial-engine/structure";
+import { resolveBrandSettings, resolveVisualSettings } from "./editorial-engine/structure";
+import { crawlBrand, withCrawledBrand } from "./brand-colors";
 import { INFOGRAPHIC_PROMPT_PREFIX, infographicSection } from "./editorial-engine/visuals";
 import { createOperation } from "./operations";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
@@ -228,7 +229,11 @@ export async function requestImageGenerationForVersion(
 async function visualImageOptions(siteId: string, role: "cover" | "body"): Promise<Record<string, string>> {
   const settings = await prisma.sitePlanningSettings.findUnique({ where: { siteId }, select: { articleTargets: true } });
   const visuals = resolveVisualSettings(settings?.articleTargets);
-  return { image_style: role === "cover" ? visuals.coverStyle : visuals.bodyStyle, image_instructions: visuals.imageInstructions };
+  // Brand palette (Settings › Branding, else crawled from the site) so images match the cards and the site.
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { tenantId: true, baseUrl: true } });
+  const brand = withCrawledBrand(resolveBrandSettings(settings?.articleTargets), site ? await crawlBrand(site.tenantId, site.baseUrl) : null);
+  const palette = [brand.primaryColor, brand.secondaryColor].filter(Boolean).join(", ");
+  return { image_style: role === "cover" ? visuals.coverStyle : visuals.bodyStyle, image_instructions: visuals.imageInstructions, ...(palette ? { brand_colors: palette } : {}) };
 }
 
 /**

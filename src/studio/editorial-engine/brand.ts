@@ -153,17 +153,33 @@ export function readableOn(color: string): string {
 
 type CardContent = { kind: "link_card" | "contact_card" | "map_card"; title: string; lines: string[]; button?: { href: string; label: string } };
 
+/** The colour mixed toward white (amount 0–1): the card's soft halo. */
+export function tint(color: string, amount: number): string {
+  return `#${[1, 3, 5].map((i) => Math.round(parseInt(color.slice(i, i + 2), 16) + (255 - parseInt(color.slice(i, i + 2), 16)) * amount).toString(16).padStart(2, "0")).join("")}`;
+}
+
+const isDark = (color: string) => readableOn(color) === "#ffffff";
+
+/**
+ * BLG-style CTA card in inline styles only (no JS, no classes, so every publisher renders it the same): a dark
+ * header with the brand pill and domain, a white body with the headline, a brand-colour accent bar, the sentence
+ * and the button, inside a soft halo of the brand colour. Stacked, so it also reads on mobile.
+ */
 function renderCard(brand: ResolvedBrand, card: CardContent): string {
-  const primary = brand.primaryColor || "#1f2937";
-  const border = brand.secondaryColor || "#d1d5db";
-  const logo = brand.logoUrl ? `<img src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.siteName)}" width="32" height="32" loading="lazy"> ` : "";
-  const site = `<p style="margin:0"><strong>${escapeHtml(brand.siteName)}</strong>${brand.domain ? ` · ${escapeHtml(brand.domain)}` : ""}</p>`;
-  const title = card.title ? `<p style="margin:8px 0 0"><strong>${escapeHtml(card.title)}</strong></p>` : "";
-  const body = card.lines.map((line) => `<p style="margin:4px 0 0">${line}</p>`).join("");
+  const primary = brand.primaryColor || "#2563eb";
+  const dark = brand.secondaryColor && isDark(brand.secondaryColor) ? brand.secondaryColor : isDark(primary) ? primary : "#111827";
+  const logo = brand.logoUrl ? `<img src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.siteName)}" width="28" height="28" loading="lazy" style="display:inline-block;margin:0 10px 0 0;border-radius:6px"> ` : "";
+  const header =
+    `<p style="margin:0;padding:20px 24px ${brand.domain ? "6px" : "20px"};background-color:${dark};color:#ffffff;line-height:1.6">${logo}` +
+    `<strong style="display:inline-block;padding:4px 14px;border-radius:999px;background-color:#ffffff;color:${dark};font-size:13px;letter-spacing:1px;text-transform:uppercase">${escapeHtml(brand.siteName)}</strong></p>` +
+    (brand.domain ? `<p style="margin:0;padding:0 24px 20px;background-color:${dark};color:#d1d5db;font-size:13px">${escapeHtml(brand.domain)}</p>` : "");
+  const title = card.title ? `<p style="margin:0;padding:24px 24px 0;color:#111827;font-size:22px;font-weight:700;line-height:1.3">${escapeHtml(card.title)}</p>` : "";
+  const accent = `<p style="margin:12px 24px 0;width:56px;border-top:5px solid ${primary};border-radius:4px"></p>`;
+  const body = card.lines.map((line) => `<p style="margin:12px 24px 0;color:#4b5563;line-height:1.6">${line}</p>`).join("");
   const button = card.button
-    ? `<p style="margin:12px 0 0"><a href="${escapeHtml(card.button.href)}" style="display:inline-block;padding:8px 16px;border-radius:6px;background-color:${primary};color:${readableOn(primary)};text-decoration:none;font-weight:600">${escapeHtml(card.button.label)}</a></p>`
+    ? `<p style="margin:20px 24px 0"><a href="${escapeHtml(card.button.href)}" style="display:inline-block;padding:12px 24px;border-radius:10px;background-color:${primary};color:${readableOn(primary)};font-weight:700;text-decoration:none">${escapeHtml(card.button.label)} →</a></p>`
     : "";
-  return `<aside data-block="${card.kind}" style="margin:24px 0;padding:16px 20px;border:1px solid ${border};border-left:4px solid ${primary};border-radius:8px">${logo ? `<p style="margin:0 0 8px">${logo}</p>` : ""}${site}${title}${body}${button}</aside>`;
+  return `<aside data-block="${card.kind}" style="margin:32px 0;padding:0 0 24px;border:10px solid ${tint(primary, 0.82)};border-radius:24px;background-color:#ffffff;overflow:hidden">${header}${title}${accent}${body}${button}</aside>`;
 }
 
 const visitLabel = (language: "es" | "en") => (language === "es" ? "Visitar" : "Visit");

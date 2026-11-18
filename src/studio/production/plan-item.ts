@@ -12,7 +12,8 @@ import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
 import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings } from "../editorial-engine/structure";
 import { youtubeVideoFor } from "../youtube-videos";
-import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
+import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
+import { crawlBrand, withCrawledBrand } from "../brand-colors";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
 import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
@@ -264,7 +265,7 @@ export async function preparePlanItemInput(
   const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
   const writing = resolveWritingSettings(planningSettings?.articleTargets);
   const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
-  const brand = resolveBrand(resolveBrandSettings(planningSettings?.articleTargets), site, profile);
+  const brand = resolveBrand(withCrawledBrand(resolveBrandSettings(planningSettings?.articleTargets), await crawlBrand(tenantId, site.baseUrl)), site, profile);
   const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
@@ -350,7 +351,7 @@ export async function prepareManualInput(
   const writing = resolveWritingSettings(planningSettings?.articleTargets);
   const targets = resolveArticleTargets(planningSettings?.articleTargets);
   const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
-  const brand = resolveBrand(resolveBrandSettings(planningSettings?.articleTargets), site, profile);
+  const brand = resolveBrand(withCrawledBrand(resolveBrandSettings(planningSettings?.articleTargets), await crawlBrand(tenantId, site.baseUrl)), site, profile);
   const language = options.language === "en" ? "en" : "es";
   return {
     kind: "manual",

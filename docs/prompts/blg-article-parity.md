@@ -396,9 +396,11 @@ portada + 3 imágenes con alt y sin metadatos, JSON-LD válido, title de 55 y sl
 Add keywords, Cambiar tema, Añadir instrucciones y Eliminar funcionan; ningún volumen sin `keywordMetricsSource`. Arreglados:
 fallback de IA + modelo por uso en Settings › AI (la cuenta Anthropic no tenía saldo; DeepSeek escribió), recuento de internos
 con URLs absolutas del propio dominio, slug ≤60 desde la keyword cortando por palabra, y Regenerate de una guía del plan que
-salía con plantilla de noticia. BLG medido con sesión (3 artículos, 10/10, 13–24 internos, 27–32 externos = 11–13 URLs,
-~2.000–2.200 palabras). Pendiente: longitud — v3 se quedó en ~1.500 palabras de cuerpo (v1: 2.341) con el mismo prompt; falta
-un paso «ampliar» cuando el cuerpo no llega al mínimo. La aceptación con Sonnet escribiendo queda pendiente de saldo.
+salía con plantilla de noticia. Segunda ronda (v4): enlaces visibles en vista previa y editor, tarjetas que conservan su
+estilo (Angular quitaba `style`/`data-block`), sin «(own post)», link card estilo BLG, paleta y logo crawleados del sitio
+(`brand-colors.ts`) en tarjetas e imágenes, y paso «ampliar» para guías cortas; v4 = 10/10 con 2.000 palabras. Tercera ronda (v5): las fuentes nombradas en el texto se
+enlazan (`inline-citations.ts`; 19 externos en el cuerpo + 20 en Fuentes) y redes sociales/YouTube ya no son fuentes citables. BLG medido con sesión (3 artículos, 10/10, 13–24 internos, 27–32 externos = 11–13 URLs,
+~2.000–2.200 palabras). Pendiente: la aceptación con Sonnet escribiendo (sin saldo en la cuenta Anthropic).
 
 ## 5. Decisiones
 

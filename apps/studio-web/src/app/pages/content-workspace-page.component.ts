@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, DestroyRef, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
@@ -124,8 +125,8 @@ function hostOf(url: string): string {
                 @if (coverUrl) { <img class="art-canvas__cover" [src]="coverUrl" alt="" /> }
                 <h2 class="art-canvas__title">{{ version.title }}</h2>
                 @if (version.excerpt) { <p class="art-canvas__excerpt">{{ version.excerpt }}</p> }
-                <!-- Angular sanitizes [innerHTML]; the body was already sanitized server-side (html-sanitizer.ts). -->
-                <div class="art-canvas__body" [innerHTML]="version.bodyHtml"></div>
+                <!-- Already allowlist-sanitized server-side (html-sanitizer.ts); Angular's own pass would strip the cards' style/data-block. -->
+                <div class="art-canvas__body" [innerHTML]="trusted(version.bodyHtml)"></div>
               } @else {
                 <div class="au-empty">
                   <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
@@ -392,6 +393,15 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly domSanitizer = inject(DomSanitizer);
+  private trustedCache: { html: string; safe: SafeHtml } | null = null;
+
+  /** The stored body (server-sanitized) as trusted HTML, cached so change detection does not re-render it. */
+  trusted(html: string | null | undefined): SafeHtml {
+    const value = html ?? '';
+    if (this.trustedCache?.html !== value) this.trustedCache = { html: value, safe: this.domSanitizer.bypassSecurityTrustHtml(value) };
+    return this.trustedCache.safe;
+  }
 
   project: StudioProjectDetailView | null = null;
   activeTab: WorkspaceTab = 'content';

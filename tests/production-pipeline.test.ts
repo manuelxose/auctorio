@@ -411,3 +411,30 @@ test("Regenerate on a project from a plan item reruns the plan item (guide templ
     await cleanup(f.tenantId);
   }
 });
+
+// Acceptance 2026-11-18: the same prompt gave a 2,341-word guide and then a 1,493-word one; a short guide gets one "expand" pass.
+test("a guide that comes back well under the minimum gets one expand pass, and the longer draft is kept", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  const prompts: string[] = [];
+  setArticleWriterFactory(() => ({
+    generate: async (input) => {
+      prompts.push(input.prompt);
+      const base = await new FakeWriter().generate(input);
+      if (!input.prompt.includes("Previous answer:")) return base;
+      const parsed = JSON.parse(base.output) as { bodyHtml: string };
+      parsed.bodyHtml += `<h2>Más detalle</h2><p>${"palabra ".repeat(2500)}</p>`;
+      return { ...base, output: JSON.stringify(parsed) };
+    },
+  }));
+  try {
+    const run = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    assert.ok(["needs_review", "ready"].includes(run.job.status), `${run.job.status} ${run.job.error}`);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /has only \d+ words in the article body/);
+    const version = await prisma.contentVersion.findFirstOrThrow({ where: { tenantId: f.tenantId, projectId: run.job.projectId! } });
+    assert.match(version.bodyHtml ?? "", /Más detalle/);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
