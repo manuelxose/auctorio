@@ -3,7 +3,7 @@ import type { PublishingAccount } from "@prisma/client";
 
 // ────────────────────────────────────────────────────────────── Domain types
 
-export type SocialPlatform = "x" | "instagram";
+export type SocialPlatform = "x" | "instagram" | "facebook";
 
 export type SocialConnectionState =
   | "not_connected"
@@ -142,6 +142,8 @@ export function isSocialIntegrationConfigured(name: string): boolean {
 
 export const X_POST_LIMIT = 280;
 export const INSTAGRAM_CAPTION_LIMIT = 2200;
+export const INSTAGRAM_CAROUSEL_MAX = 10;
+export const FACEBOOK_POST_LIMIT = 63206;
 export const INSTAGRAM_IMAGE_RATIOS = [
   { width: 1080, height: 1350, label: "4:5 portrait (feed)" },
   { width: 1080, height: 1080, label: "1:1 square (feed)" },
@@ -175,8 +177,22 @@ export function validateInstagramPayload(payload: SocialPublishInput): string[] 
   if (payload.mediaType === "carousel" && payload.mediaUrls.length < 2) {
     errors.push("instagram_carousel_requires_multiple_images");
   }
+  if (payload.mediaType === "carousel" && payload.mediaUrls.length > INSTAGRAM_CAROUSEL_MAX) {
+    errors.push(`instagram_carousel_supports_max_${INSTAGRAM_CAROUSEL_MAX}_images`);
+  }
   if (payload.mediaType !== "story" && payload.mediaUrls.length === 0) {
     errors.push("instagram_feed_requires_image");
+  }
+  return errors;
+}
+
+export function validateFacebookPayload(payload: SocialPublishInput): string[] {
+  const errors: string[] = [];
+  if (!payload.text.trim() && payload.mediaUrls.length === 0) {
+    errors.push("facebook_post_requires_text_or_image");
+  }
+  if (payload.text.length > FACEBOOK_POST_LIMIT) {
+    errors.push(`facebook_post_exceeds_${FACEBOOK_POST_LIMIT}_characters`);
   }
   return errors;
 }

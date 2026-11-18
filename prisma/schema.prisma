@@ -209,6 +209,7 @@ enum StoryClusterStatus {
 enum SocialChannel {
   x
   instagram
+  facebook
 }
 
 enum SocialContentType {
@@ -217,6 +218,8 @@ enum SocialContentType {
   instagram_caption
   instagram_story
   social_post
+  instagram_carousel
+  facebook_post
 }
 
 enum SocialGenerationStatus {
@@ -236,6 +239,7 @@ enum PublishingAccountPlatform {
   website
   x
   instagram
+  facebook
 }
 
 enum PublishingAccountStatus {
@@ -341,6 +345,7 @@ model Tenant {
   sourcePackImports              SourcePackImport[]
   enrichmentProviders            EnrichmentProvider[]
   socialContents                 SocialContent[]
+  siteSocialSettings             SiteSocialSettings[]
   publishingAccounts             PublishingAccount[]
   publications                   Publication[]
   publicationAttempts            PublicationAttempt[]
@@ -595,6 +600,7 @@ model Site {
   timezone               String                   @default("Europe/Madrid")
   editorialPlanPresets   EditorialPlanPreset[]
   planningSettings       SitePlanningSettings?
+  socialSettings         SiteSocialSettings?
   // onboarding + strategy (agent B)
   onboardingRun          SiteOnboardingRun?
   editorialStrategy      SiteEditorialStrategy?
@@ -2054,6 +2060,30 @@ model EditorialPlanPreset {
 }
 
 /// Per-site planning defaults that prefill the plan generator.
+model SiteSocialSettings {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  workflow       String   @default("approve")
+  postDays       Int[]    @default([1, 3, 5]) @map("post_days")
+  postTime       String   @default("10:00") @map("post_time")
+  timezone       String   @default("UTC")
+  categories     String[] @default(["educational", "myths", "storytelling"])
+  imageStyle     String   @default("photo") @map("image_style")
+  fontFamily     String   @default("sans") @map("font_family")
+  highlightStyle String   @default("marker") @map("highlight_style")
+  useLogo        Boolean  @default(false) @map("use_logo")
+  showBrandMark  Boolean  @default(true) @map("show_brand_mark")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@map("site_social_settings")
+}
+
 model SitePlanningSettings {
   id              String   @id @default(uuid()) @db.Uuid
   tenantId        String   @map("tenant_id") @db.Uuid

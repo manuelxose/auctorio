@@ -433,7 +433,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
       })
     : [];
   if (accounts.length !== requestedAccountIds.length) throw new Error("editorial_plan_invalid_account");
-  if (accounts.some((account) => !input.channels.includes(account.platform))) {
+  if (accounts.some((account) => !(input.channels as string[]).includes(account.platform))) {
     throw new Error("editorial_plan_account_channel_mismatch");
   }
 

@@ -1,6 +1,6 @@
 import type { EditorialPlan, EditorialPlanItem } from './studio.models';
 
-export type PlanChannel = 'website' | 'x' | 'instagram';
+export type PlanChannel = 'website' | 'x' | 'instagram' | 'facebook';
 
 /** Generation settings stored in item.metadata.generation and passed to the writer brief. */
 export type PlanItemGenerationSettings = {

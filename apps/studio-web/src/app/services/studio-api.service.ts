@@ -731,7 +731,7 @@ export class StudioApiService {
 
   // ─── Editorial platform: social ───────────────────────────────────────
 
-  listSocial(projectId: string, channel?: 'x' | 'instagram'): Observable<{ items: StudioSocialContent[] }> {
+  listSocial(projectId: string, channel?: 'x' | 'instagram' | 'facebook'): Observable<{ items: StudioSocialContent[] }> {
     let params = new HttpParams();
     if (channel) {
       params = params.set('channel', channel);
@@ -739,7 +739,7 @@ export class StudioApiService {
     return this.http.get<{ items: StudioSocialContent[] }>(`${this.apiBase}/backend/v2/projects/${projectId}/social`, { params });
   }
 
-  generateSocial(projectId: string, payload: { channels: Array<'x' | 'instagram'>; threadLength?: number; versionId?: string }): Observable<{ job_id: string }> {
+  generateSocial(projectId: string, payload: { channels: Array<'x' | 'instagram' | 'facebook'>; threadLength?: number; versionId?: string }): Observable<{ job_id: string }> {
     return this.http.post<{ job_id: string }>(`${this.apiBase}/backend/v2/projects/${projectId}/social/generate`, payload);
   }
 
@@ -767,7 +767,7 @@ export class StudioApiService {
   }
 
   createPublishingAccount(payload: {
-    platform: 'website' | 'x' | 'instagram';
+    platform: 'website' | 'x' | 'instagram' | 'facebook';
     displayName: string;
     credentialsRef?: string;
     externalAccountId?: string;
@@ -798,7 +798,7 @@ export class StudioApiService {
     return this.http.get<SocialSetupInfo>(`${this.apiBase}/backend/v2/social-connections/setup`);
   }
 
-  startSocialConnectionSession(platform: 'x' | 'instagram'): Observable<SocialConnectionSession> {
+  startSocialConnectionSession(platform: 'x' | 'instagram' | 'facebook'): Observable<SocialConnectionSession> {
     return this.http.post<SocialConnectionSession>(`${this.apiBase}/backend/v2/social-connections/session`, { platform });
   }
 

@@ -23,7 +23,7 @@ import { articlePipeline, type PipelineStep } from '../utils/article-pipeline';
 type WorkspaceTab = 'content' | 'media' | 'seo' | 'social' | 'schedule' | 'history';
 type ProjectPublication = {
   id: string;
-  channel: 'website' | 'x' | 'instagram';
+  channel: 'website' | 'x' | 'instagram' | 'facebook';
   status: string;
   scheduledFor: string | null;
   publishedAt: string | null;

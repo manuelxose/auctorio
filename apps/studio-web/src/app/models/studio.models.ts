@@ -917,7 +917,7 @@ export type StudioEditorialProfile = {
   articleStats: { articleCount: number; avgTitleTokens: number } | null;
 };
 
-export type SocialChannel = 'x' | 'instagram';
+export type SocialChannel = 'x' | 'instagram' | 'facebook';
 export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post';
 
 export type StudioSocialContent = {
@@ -940,7 +940,7 @@ export type StudioSocialContent = {
   updatedAt: string;
 };
 
-export type PublicationChannel = 'website' | 'x' | 'instagram';
+export type PublicationChannel = 'website' | 'x' | 'instagram' | 'facebook';
 export type PublicationState =
   | 'draft'
   | 'ready'
@@ -1046,7 +1046,7 @@ export type ArticleChip = 'queued' | 'drafting' | 'review' | 'published' | 'fail
 
 export type PublishingAccount = {
   id: string;
-  platform: 'website' | 'x' | 'instagram';
+  platform: 'website' | 'x' | 'instagram' | 'facebook';
   displayName: string;
   externalAccountId: string | null;
   enabled: boolean;
@@ -1071,7 +1071,7 @@ export type SocialConnectionState =
 
 export type SocialConnection = {
   id: string;
-  platform: 'x' | 'instagram' | 'website';
+  platform: 'x' | 'instagram' | 'facebook' | 'website';
   provider: string;
   displayName: string;
   externalAccountId: string | null;
@@ -1172,7 +1172,7 @@ export type EditorialPlanItem = {
   pillarPage: string | null;
   angle: string | null;
   editorialObjective: string | null;
-  channel: 'website' | 'x' | 'instagram';
+  channel: 'website' | 'x' | 'instagram' | 'facebook';
   scheduledFor: string | null;
   primaryKeyword: string | null;
   secondaryKeywords: unknown;
@@ -1432,7 +1432,7 @@ export type StudioOverview = {
   sources: { total: number; enabled: number; degraded: number; failing: number };
   connections: Array<{
     id: string;
-    platform: 'website' | 'x' | 'instagram';
+    platform: 'website' | 'x' | 'instagram' | 'facebook';
     displayName: string;
     enabled: boolean;
     status: string;
@@ -1562,7 +1562,7 @@ export type CostControlsView = {
 
 // ── Magic Installer, Activity Center and Notification models ───────────
 
-export type ConnectorKind = 'website' | 'x' | 'instagram';
+export type ConnectorKind = 'website' | 'x' | 'instagram' | 'facebook';
 
 export type ConnectorAuthMethodView = {
   id: string;

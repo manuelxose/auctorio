@@ -196,7 +196,7 @@ export class PlanGeneratorComponent implements OnInit {
   articlesPerDay = 1;
   times = '';
   days: number[] = [0, 1, 2, 3, 4, 5, 6];
-  channels: Record<PlanChannel, boolean> = { website: true, x: false, instagram: false };
+  channels: Record<PlanChannel, boolean> = { website: true, x: false, instagram: false, facebook: false };
   strategyMode = 'balanced';
   primaryIntent = '';
   campaignName = '';
@@ -256,7 +256,7 @@ export class PlanGeneratorComponent implements OnInit {
     this.articlesPerDay = settings.articlesPerDay;
     this.days = [...settings.weekdays];
     this.times = settings.publishTimes.join(', ');
-    this.channels = { website: settings.channels.includes('website'), x: settings.channels.includes('x'), instagram: settings.channels.includes('instagram') };
+    this.channels = { website: settings.channels.includes('website'), x: settings.channels.includes('x'), instagram: settings.channels.includes('instagram'), facebook: settings.channels.includes('facebook') };
     const today = localDate(new Date(), this.timezone);
     this.dateFrom = addDays(today, 1);
     this.dateTo = addDays(today, 7);
@@ -302,7 +302,7 @@ export class PlanGeneratorComponent implements OnInit {
     if (p.articlesPerDay) this.articlesPerDay = p.articlesPerDay;
     if (p.weekdays?.length) this.days = [...p.weekdays];
     if (p.publishTimes) this.times = p.publishTimes.join(', ');
-    if (p.channels?.length) this.channels = { website: p.channels.includes('website'), x: p.channels.includes('x'), instagram: p.channels.includes('instagram') };
+    if (p.channels?.length) this.channels = { website: p.channels.includes('website'), x: p.channels.includes('x'), instagram: p.channels.includes('instagram'), facebook: p.channels.includes('facebook') };
     this.strategyMode = p.strategyMode ?? 'balanced';
     this.primaryIntent = p.primaryIntent ?? '';
     this.contentFormats = [...(p.contentFormats ?? [])];

@@ -32,6 +32,7 @@ import {
 import { listStoryClusters, setClusterStatus } from "./editorial";
 import { getSourceHealth } from "./source-health";
 import { createProjectFromSourceItem } from "./planner";
+import { getSiteSocialSettings, putSiteSocialSettings, type SiteSocialSettingsInput } from "./social-settings";
 import {
   createPublication,
   deletePublication,
@@ -1328,7 +1329,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return reply.send({ ok: false, message: "credentials_not_resolved" });
     }
     const { getSocialPublisher } = await import("./social-publishers");
-    const publisher = getSocialPublisher(account.platform);
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram"); // facebook adapter lands in M2
     const result = await publisher.validateCredentials(credentials);
     await prisma.publishingAccount.update({
       where: { id: account.id },
@@ -1803,6 +1804,31 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const deleted = await deletePlanPreset(context.tenantId, presetId, context.userId);
     if (!deleted) return notFound(reply, "preset not found");
     return reply.send(deleted);
+  });
+
+  fastify.get("/v2/sites/:id/social-settings", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    try {
+      return reply.send(await getSiteSocialSettings(context.tenantId, siteId));
+    } catch {
+      return notFound(reply, "site not found");
+    }
+  });
+
+  fastify.put("/v2/sites/:id/social-settings", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    try {
+      return reply.send(await putSiteSocialSettings(context.tenantId, siteId, parseBody<SiteSocialSettingsInput>(request)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message === "site_not_found" ? notFound(reply, message) : badRequest(reply, message);
+    }
   });
 
   fastify.get("/v2/sites/:id/planning-settings", async (request, reply) => {

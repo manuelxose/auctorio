@@ -20,7 +20,7 @@ type TabId = 'all' | 'websites' | 'social' | 'attention';
 
 type ConnectionRow = {
   id: string;
-  kind: 'website' | 'x' | 'instagram';
+  kind: 'website' | 'x' | 'instagram' | 'facebook';
   provider: string;
   displayName: string;
   state: string;
