@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { fetchWithTimeout } from "../shared/utils/http";
 import { getBooleanEnv, getEnv, getNumberEnv, isProductionEnv } from "../shared/utils/env";
+import { validateXPayload, type SocialPublishInput } from "./social-provider";
 
 // ────────────────────────────────────────────────────────────── Capabilities
 
@@ -164,31 +165,68 @@ function buildOAuthHeader(
     .join(", ")}`;
 }
 
-async function xCreateTweet(text: string, credentials: XCredentials): Promise<{ id: string }> {
-  const url = "https://api.twitter.com/2/tweets";
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: buildOAuthHeader("POST", url, credentials),
-    },
-    body: { text },
-    timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-    retries: 1,
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`x_publish_failed status=${response.status} body=${body.slice(0, 300)}`);
+export const X_POSTS_URL = "https://api.x.com/2/tweets";
+
+export async function publishXPosts(
+  payload: SocialPublishInput,
+  authorization: (method: "POST" | "DELETE", url: string) => string,
+  uploadImage: (url: string) => Promise<string>,
+): Promise<SocialPublishResult> {
+  const errors = validateXPayload(payload);
+  if (errors.length) throw new Error(errors.join(", "));
+
+  const mediaIds = [];
+  for (const url of payload.mediaUrls) mediaIds.push(await uploadImage(url));
+
+  const posts = payload.thread?.length ? payload.thread : [{ body: payload.text }];
+  const tweetIds: string[] = [];
+  try {
+    for (const { body } of posts) {
+      const previous = tweetIds.at(-1);
+      const response = await fetchWithTimeout(X_POSTS_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: authorization("POST", X_POSTS_URL) },
+        body: {
+          text: body,
+          ...(previous ? { reply: { in_reply_to_tweet_id: previous } } : {}),
+          ...(!previous && mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
+        },
+        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+        retries: 0,
+      }).catch((error) => {
+        throw new Error("x_post_delivery_uncertain", { cause: error });
+      });
+      if (!response.ok) {
+        const code = response.status >= 500 ? "x_post_delivery_uncertain" : "x_publish_failed";
+        const responseBody = await response.text().catch(() => "");
+        throw new Error(`${code} status=${response.status} body=${responseBody.slice(0, 300)}`);
+      }
+      const parsed = await response.json().catch(() => null) as { data?: { id?: string } } | null;
+      if (!parsed?.data?.id) throw new Error("x_post_delivery_uncertain: missing post ID");
+      tweetIds.push(parsed.data.id);
+    }
+  } catch (error) {
+    const remaining = [];
+    for (const id of tweetIds.reverse()) {
+      const url = `${X_POSTS_URL}/${encodeURIComponent(id)}`;
+      const response = await fetchWithTimeout(url, {
+        method: "DELETE",
+        headers: { authorization: authorization("DELETE", url) },
+        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+        retries: 0,
+      }).catch(() => null);
+      if (!response?.ok && response?.status !== 404) remaining.push(id);
+    }
+    if (remaining.length) throw new Error(`x_thread_cleanup_failed ids=${remaining.join(",")} cause=${String(error)}`);
+    throw error;
   }
-  const parsed = JSON.parse(body) as { data?: { id?: string } };
-  if (!parsed.data?.id) {
-    throw new Error("x_publish_missing_id");
-  }
-  return { id: parsed.data.id };
+
+  const tweetId = tweetIds[0];
+  return { externalId: tweetId, externalUrl: `https://x.com/i/status/${tweetId}`, responsePayload: { tweetId, tweetIds }, dryRun: false };
 }
 
 async function xDeleteTweet(externalId: string, credentials: XCredentials): Promise<void> {
-  const url = `https://api.twitter.com/2/tweets/${externalId}`;
+  const url = `${X_POSTS_URL}/${encodeURIComponent(externalId)}`;
   const response = await fetchWithTimeout(url, {
     method: "DELETE",
     headers: {
@@ -197,7 +235,7 @@ async function xDeleteTweet(externalId: string, credentials: XCredentials): Prom
     timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
     retries: 1,
   });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 404) {
     const body = await response.text();
     throw new Error(`x_delete_failed status=${response.status} body=${body.slice(0, 300)}`);
   }
@@ -315,55 +353,11 @@ class XPublisherAdapterImpl implements SocialPublisherAdapter {
       return dryRunResult("x", `${payload.text}|${payload.imageUrls.join(",")}`);
     }
 
-    let mediaId: string | null = null;
-    if (payload.mediaType === "photo" && payload.imageUrls.length > 0) {
-      mediaId = await xUploadMedia(payload.imageUrls[0], resolved);
-    }
-
-    const posts = payload.thread && payload.thread.length > 0
-      ? payload.thread.map((entry) => entry.body)
-      : [payload.text];
-
-    let lastId: string | null = null;
-    for (const body of posts) {
-      if (!body.trim()) {
-        continue;
-      }
-      const tweetUrl = "https://api.twitter.com/2/tweets";
-      const tweetPayload: Record<string, unknown> = { text: body };
-      if (mediaId) {
-        tweetPayload.media = { media_ids: [mediaId] };
-      }
-      const response = await fetchWithTimeout(tweetUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: buildOAuthHeader("POST", tweetUrl, resolved),
-        },
-        body: tweetPayload,
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      });
-      const responseBody = await response.text();
-      if (!response.ok) {
-        throw new Error(`x_publish_failed status=${response.status} body=${responseBody.slice(0, 300)}`);
-      }
-      const parsed = JSON.parse(responseBody) as { data?: { id?: string; text?: string } };
-      if (parsed.data?.id) {
-        lastId = parsed.data.id;
-      }
-    }
-
-    if (!lastId) {
-      throw new Error("x_publish_missing_id");
-    }
-
-    return {
-      externalId: lastId,
-      externalUrl: `https://x.com/i/status/${lastId}`,
-      responsePayload: { tweetId: lastId },
-      dryRun: false,
-    };
+    return publishXPosts(
+      { text: payload.text, mediaUrls: payload.imageUrls, mediaType: payload.mediaType, thread: payload.thread },
+      (method, url) => buildOAuthHeader(method, url, resolved),
+      (url) => xUploadMedia(url, resolved),
+    );
   }
 
   async update(_externalId: string, _payload: SocialPublishPayload, _credentials: Record<string, unknown>): Promise<SocialPublishResult> {

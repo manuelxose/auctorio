@@ -13,11 +13,11 @@ import type {
   SocialSessionResult,
 } from "./social-provider";
 import { validateFacebookPayload, validateInstagramPayload, validateXPayload } from "./social-provider";
-import { getSocialPublisher } from "./social-publishers";
+import { getSocialPublisher, publishXPosts } from "./social-publishers";
 
 // Direct OAuth integration (Bring Your Own App).
 // - X: OAuth 2.0 Authorization Code with PKCE against api.x.com (scopes
-//   tweet.read tweet.write users.read offline.access). Requires an X
+//   tweet.read tweet.write media.write users.read offline.access). Requires an X
 //   developer app (X_CLIENT_ID / X_CLIENT_SECRET). Tokens are refreshed
 //   with the offline.access refresh token and encrypted at rest.
 // - Instagram: Meta Graph OAuth (META_APP_ID / META_APP_SECRET) with
@@ -27,8 +27,7 @@ import { getSocialPublisher } from "./social-publishers";
 const X_AUTHORIZE_URL = "https://x.com/i/oauth2/authorize";
 const X_TOKEN_URL = "https://api.x.com/2/oauth2/token";
 const X_API_BASE = "https://api.x.com/2";
-const X_MEDIA_UPLOAD_URL = "https://upload.x.com/2/media/upload";
-const X_SCOPES = ["tweet.read", "tweet.write", "users.read", "offline.access"].join(" ");
+const X_SCOPES = ["tweet.read", "tweet.write", "media.write", "users.read", "offline.access"].join(" ");
 
 const META_GRAPH_BASE = "https://graph.facebook.com/v21.0";
 const META_DIALOG_URL = "https://www.facebook.com/v21.0/dialog/oauth";
@@ -456,40 +455,8 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
     if (!token) {
       throw new Error("x_oauth_missing_access_token");
     }
-    let mediaId: string | null = null;
-    if (payload.mediaUrls.length > 0 && (payload.mediaType === "photo" || payload.mediaType === "carousel")) {
-      mediaId = await this.xUploadMedia(payload.mediaUrls[0], token);
-    }
-    const posts = payload.thread && payload.thread.length > 0 ? payload.thread.map((entry) => entry.body) : [payload.text];
-    let lastId: string | null = null;
-    for (const body of posts) {
-      if (!body.trim()) {
-        continue;
-      }
-      const tweetPayload: Record<string, unknown> = { text: body };
-      if (mediaId) {
-        tweetPayload.media = { media_ids: [mediaId] };
-      }
-      const response = await fetchWithTimeout(`${X_API_BASE}/tweets`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-        body: tweetPayload,
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      });
-      const responseBody = await response.text();
-      if (!response.ok) {
-        throw new Error(`x_publish_failed status=${response.status} body=${responseBody.slice(0, 300)}`);
-      }
-      const parsed = JSON.parse(responseBody) as { data?: { id?: string } };
-      if (parsed.data?.id) {
-        lastId = parsed.data.id;
-      }
-    }
-    if (!lastId) {
-      throw new Error("x_publish_missing_id");
-    }
-    return { externalId: lastId, externalUrl: `https://x.com/i/status/${lastId}`, responsePayload: { provider: "direct", tweetId: lastId }, dryRun: false };
+    const result = await publishXPosts(payload, () => `Bearer ${token}`, (url) => this.xUploadMedia(url, token));
+    return { ...result, responsePayload: { provider: "direct", ...result.responsePayload } };
   }
 
   private async xUploadMedia(imageUrl: string, token: string): Promise<string> {
@@ -501,59 +468,21 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
       throw new Error(`x_media_download_failed status=${imageResponse.status}`);
     }
     const buffer = Buffer.from(await imageResponse.arrayBuffer());
-
-    const initForm = new FormData();
-    initForm.append("command", "INIT");
-    initForm.append("total_bytes", String(buffer.length));
-    initForm.append("media_type", "image/png");
-    initForm.append("media_category", "tweet_image");
-    const initResponse = await fetchWithTimeout(X_MEDIA_UPLOAD_URL, {
+    if (buffer.length > 5 * 1024 * 1024) throw new Error("x_media_image_exceeds_5mb");
+    const response = await fetchWithTimeout(`${X_API_BASE}/media/upload`, {
       method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-      body: initForm,
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: { media: buffer.toString("base64"), media_category: "tweet_image" },
       timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-      retries: 1,
+      retries: 0,
     });
-    const initBody = await initResponse.text();
-    if (!initResponse.ok) {
-      throw new Error(`x_media_init_failed status=${initResponse.status} body=${initBody.slice(0, 200)}`);
+    const responseBody = await response.text();
+    if (!response.ok) {
+      throw new Error(`x_media_upload_failed status=${response.status} body=${responseBody.slice(0, 200)}`);
     }
-    const init = JSON.parse(initBody) as { data?: { media_id_string?: string }; media_id_string?: string };
-    const mediaId = init.data?.media_id_string ?? init.media_id_string;
-    if (!mediaId) {
-      throw new Error("x_media_init_missing_media_id");
-    }
-
-    const appendForm = new FormData();
-    appendForm.append("command", "APPEND");
-    appendForm.append("media_id", mediaId);
-    appendForm.append("segment_index", "0");
-    appendForm.append("media", new Blob([buffer]));
-    const appendResponse = await fetchWithTimeout(X_MEDIA_UPLOAD_URL, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-      body: appendForm,
-      timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 60_000),
-      retries: 1,
-    });
-    if (!appendResponse.ok) {
-      throw new Error(`x_media_append_failed status=${appendResponse.status}`);
-    }
-
-    const finalizeForm = new FormData();
-    finalizeForm.append("command", "FINALIZE");
-    finalizeForm.append("media_id", mediaId);
-    const finalizeResponse = await fetchWithTimeout(X_MEDIA_UPLOAD_URL, {
-      method: "POST",
-      headers: { authorization: `Bearer ${token}` },
-      body: finalizeForm,
-      timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-      retries: 1,
-    });
-    if (!finalizeResponse.ok) {
-      throw new Error(`x_media_finalize_failed status=${finalizeResponse.status}`);
-    }
-    return mediaId;
+    const parsed = JSON.parse(responseBody) as { data?: { id?: string } };
+    if (!parsed.data?.id) throw new Error("x_media_upload_missing_id");
+    return parsed.data.id;
   }
 
   // Meta publishing lives in the shared adapters (carousel containers, FB multi-photo); the worker already gated dry-run.
@@ -579,7 +508,7 @@ export class DirectSocialProvider implements SocialIntegrationProvider {
         timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
         retries: 1,
       });
-      if (!response.ok) {
+      if (!response.ok && response.status !== 404) {
         const body = await response.text();
         throw new Error(`x_delete_failed status=${response.status} body=${body.slice(0, 300)}`);
       }

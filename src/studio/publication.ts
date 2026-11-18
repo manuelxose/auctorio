@@ -88,6 +88,7 @@ const PERMANENT_PATTERNS = [
   /validation/i,
   /invalid.*(api.?key|token|secret)/i,
   /already exists/i,
+  /x_(?:thread_cleanup_failed|post_delivery_uncertain)/,
 ];
 
 export function classifyPublicationError(message: string): FailureClass {
@@ -228,7 +229,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       : new Date(input.scheduledFor)
     : null;
 
-  const idempotencyKey = [
+  const idempotencyKey = input.socialContentId ? `publication:social:${input.socialContentId}` : [
     "publication",
     input.projectId,
     input.versionId,
@@ -240,7 +241,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
   const existing = await prisma.publication.findFirst({
     where: {
       tenantId: input.tenantId,
-      idempotencyKey,
+      ...(input.socialContentId ? { socialContentId: input.socialContentId } : { idempotencyKey }),
     },
   });
   if (existing) {
@@ -274,6 +275,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
 
   const publication = await prisma.publication.create({
     data: {
+      id: input.socialContentId ?? undefined,
       tenantId: input.tenantId,
       projectId: input.projectId,
       versionId: input.versionId,
@@ -288,6 +290,14 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       idempotencyKey,
       metadata: Prisma.JsonNull,
     },
+  }).catch(async (error: unknown) => {
+    if (input.socialContentId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await prisma.publication.findFirst({
+        where: { tenantId: input.tenantId, socialContentId: input.socialContentId },
+      });
+      if (existing) return existing;
+    }
+    throw error;
   });
 
   await writeAudit({

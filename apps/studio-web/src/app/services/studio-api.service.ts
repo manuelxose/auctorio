@@ -754,8 +754,8 @@ export class StudioApiService {
     return this.http.patch<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${socialId}`, payload);
   }
 
-  listSiteSocial(siteId: string): Observable<{ items: SiteSocialPost[] }> {
-    return this.http.get<{ items: SiteSocialPost[] }>(`${this.apiBase}/backend/v2/sites/${siteId}/social`);
+  listSiteSocial(siteId: string, channel: SiteSocialPost['channel']): Observable<{ items: SiteSocialPost[] }> {
+    return this.http.get<{ items: SiteSocialPost[] }>(`${this.apiBase}/backend/v2/sites/${siteId}/social`, { params: { channel } });
   }
 
   getSocialSettings(siteId: string): Observable<SiteSocialSettings> {

@@ -14,7 +14,12 @@ test('instagram & facebook: save settings, approve a draft, see it scheduled', a
   expect((await context.request.post('/studio/api/auth/login/password', { data: { email: EMAIL, password: PASSWORD } })).status()).toBe(200);
   const page = await context.newPage();
   await page.goto('/studio/settings/social', { waitUntil: 'networkidle' });
-  await expect(page.getByRole('heading', { name: 'Instagram & Facebook', level: 1 })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Social', level: 1 })).toBeVisible();
+  const channel = page.getByLabel('Canal', { exact: true });
+  const xPosts = page.waitForResponse((r) => new URL(r.url()).searchParams.get('channel') === 'x');
+  await channel.selectOption('x');
+  expect((await xPosts).status()).toBe(200);
+  await channel.selectOption('instagram');
 
   await page.getByRole('radio', { name: /Aprobar antes/ }).click();
   await page.getByLabel('Hora', { exact: true }).selectOption('18:30');

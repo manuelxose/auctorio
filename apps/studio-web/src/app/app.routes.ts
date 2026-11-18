@@ -87,7 +87,7 @@ export const routes: Routes = [
       {
         path: 'settings/social',
         loadComponent: () => import('./pages/social-page.component').then((m) => m.SocialPageComponent),
-        data: { studioMeta: { section: 'Settings', title: 'Instagram & Facebook' } },
+        data: { studioMeta: { section: 'Settings', title: 'Social' } },
       },
       {
         path: 'connections',

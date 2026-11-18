@@ -46,11 +46,19 @@ export function socialPostState(post: Pick<SiteSocialPost, 'generationStatus' | 
   imports: [DatePipe, FormsModule, SocialSetupGuideComponent],
   template: `
     <header class="au-page__header">
-      <h1 class="au-page__title">Instagram &amp; Facebook</h1>
-      <p class="au-page__subtitle">Carruseles creados a partir de tus artículos. Los cambios solo afectan a los posts nuevos.</p>
+      <h1 class="au-page__title">Social</h1>
+      <p class="au-page__subtitle">Publicaciones de tus artículos en Instagram, Facebook y X.</p>
     </header>
 
-    <app-social-setup-guide platform="instagram" />
+    <label class="au-field">
+      <span>Canal</span>
+      <select class="au-input" [ngModel]="channel()" (ngModelChange)="selectChannel($event)">
+        <option value="instagram">Instagram</option>
+        <option value="facebook">Facebook</option>
+        <option value="x">X</option>
+      </select>
+    </label>
+    <app-social-setup-guide [platform]="channel()" />
 
     @if (settings(); as s) {
       <section class="au-panel" aria-labelledby="soc-workflow">
@@ -133,15 +141,22 @@ export function socialPostState(post: Pick<SiteSocialPost, 'generationStatus' | 
               }
             </div>
           }
+          @if (post.channel === 'x' && imageUrl(post); as cover) {
+            <div class="soc-slides"><img [src]="cover" alt="Portada del artículo" width="120" height="120" /></div>
+          }
           @if (post.editorialStatus === 'draft' && post.generationStatus === 'done') {
-            <label class="au-field"><span>Texto</span><textarea class="au-input" rows="4" [(ngModel)]="post.body" [name]="'body-' + post.id"></textarea></label>
+            <label class="au-field">
+              <span>Texto</span>
+              @if (post.contentType === 'x_thread') { <small>Separa los posts del hilo con una línea en blanco.</small> }
+              <textarea class="au-input" rows="4" [(ngModel)]="post.body" [name]="'body-' + post.id"></textarea>
+            </label>
             <div class="soc-actions">
               <button type="button" class="au-btn au-btn--primary" (click)="approve(post)">Aprobar</button>
               <button type="button" class="au-btn au-btn--secondary" (click)="regenerate(post)">Regenerar</button>
               <button type="button" class="au-btn au-btn--ghost" (click)="reject(post)">Rechazar</button>
             </div>
           } @else {
-            <p>{{ post.body }}</p>
+            <p class="soc-post__body">{{ post.body }}</p>
           }
         </article>
       } @empty {
@@ -156,6 +171,7 @@ export function socialPostState(post: Pick<SiteSocialPost, 'generationStatus' | 
     .soc-post { border-top: 1px solid var(--au-border, #e5e5e5); padding: 12px 0; display: grid; gap: 8px; }
     .soc-slides { display: flex; gap: 8px; overflow-x: auto; }
     .soc-slides img { border-radius: 6px; object-fit: cover; }
+    .soc-post__body { white-space: pre-wrap; overflow-wrap: anywhere; }
     .soc-actions { display: flex; gap: 8px; }
     .soc-preview { display: flex; gap: 12px; }
     .soc-slide { position: relative; width: 160px; height: 200px; margin: 0; padding: 14px; border-radius: 8px; background: #1f2937; color: #fff; display: flex; align-items: center; font-family: system-ui, sans-serif; }
@@ -181,6 +197,7 @@ export class SocialPageComponent implements OnInit {
   readonly categories = CATEGORIES;
   readonly settings = signal<SiteSocialSettings | null>(null);
   readonly posts = signal<SiteSocialPost[]>([]);
+  readonly channel = signal<SiteSocialPost['channel']>('instagram');
   readonly loading = signal(true);
   readonly saving = signal(false);
   private readonly siteId = computed(() => this.appContext.activeSite()?.id ?? null);
@@ -197,6 +214,16 @@ export class SocialPageComponent implements OnInit {
   slides(post: SiteSocialPost): Slide[] {
     const slides = (post.metadata as { slides?: Slide[] } | null)?.slides;
     return Array.isArray(slides) ? slides : [];
+  }
+
+  imageUrl(post: SiteSocialPost): string | undefined {
+    return (post.metadata as { imageUrl?: string } | null)?.imageUrl;
+  }
+
+  selectChannel(channel: SiteSocialPost['channel']): void {
+    this.channel.set(channel);
+    this.posts.set([]);
+    this.loadPosts();
   }
 
   toggleDay(day: number): void {
@@ -228,7 +255,7 @@ export class SocialPageComponent implements OnInit {
         else this.toast.success('Post aprobado.');
         this.loadPosts();
       },
-      error: () => this.toast.error('No se pudo aprobar el post.'),
+      error: (err) => this.toast.error(err?.error?.message ?? 'No se pudo aprobar el post.'),
     });
   }
 
@@ -246,9 +273,19 @@ export class SocialPageComponent implements OnInit {
   private loadPosts(): void {
     const siteId = this.siteId();
     if (!siteId) return;
-    this.api.listSiteSocial(siteId).subscribe({
-      next: ({ items }) => { this.posts.set(items); this.loading.set(false); },
-      error: () => { this.loading.set(false); this.toast.error('No se pudieron cargar los posts.'); },
+    const channel = this.channel();
+    this.loading.set(true);
+    this.api.listSiteSocial(siteId, channel).subscribe({
+      next: ({ items }) => {
+        if (this.channel() !== channel) return;
+        this.posts.set(items);
+        this.loading.set(false);
+      },
+      error: () => {
+        if (this.channel() !== channel) return;
+        this.loading.set(false);
+        this.toast.error('No se pudieron cargar los posts.');
+      },
     });
   }
 }

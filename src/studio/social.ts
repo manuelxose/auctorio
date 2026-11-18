@@ -7,10 +7,11 @@ import { writeAudit } from "./audit";
 import { buildAssetPublicUrl } from "./orchestration";
 import { getSiteSocialSettings, nextSocialSlot } from "./social-settings";
 import { renderSlideImages, type SlideText } from "./social-slides";
+import { formatXThread, X_POST_LIMIT, xArticleText, xWeightedLength } from "./social-x";
 
 const prisma = getPrismaClient();
 
-export const X_POST_LIMIT = 280;
+export { X_POST_LIMIT } from "./social-x";
 export const X_THREAD_POST_LIMIT = 280;
 export const INSTAGRAM_CAPTION_LIMIT = 2200;
 
@@ -44,8 +45,8 @@ export function validateSocialPiece(piece: GeneratedSocialPiece): { valid: boole
   if (!piece.body.trim()) {
     errors.push("empty body");
   }
-  if (piece.channel === "x" && piece.body.length > X_POST_LIMIT) {
-    errors.push(`x post exceeds ${X_POST_LIMIT} characters (${piece.body.length})`);
+  if (piece.contentType === "x_post" && xWeightedLength(piece.body) > X_POST_LIMIT) {
+    errors.push(`x post exceeds ${X_POST_LIMIT} characters (${xWeightedLength(piece.body)})`);
   }
   if (piece.channel === "instagram" && piece.body.length > INSTAGRAM_CAPTION_LIMIT) {
     errors.push(`instagram caption exceeds ${INSTAGRAM_CAPTION_LIMIT} characters`);
@@ -78,6 +79,7 @@ type SocialPromptContext = {
   articleUrl: string | null;
   category?: string;
   brandVoice?: string;
+  threadLength?: number;
 };
 
 const CATEGORY_HINTS: Record<string, string> = {
@@ -115,8 +117,8 @@ export function buildSocialPrompt(
 Rules:
 - Never invent facts, numbers or quotes that are not present in the article.
 - Short, immediate, natural language. Use a hook.
-- Return ONLY valid JSON with the shape {"post": string, "hashtags": string[]}.
-- The post must not exceed 280 characters including the URL placeholder [URL].`,
+- Include at most one relevant hashtag in the copy.
+- Output only the JSON shape requested below. Do not write URLs or post numbering.`,
     instagram: `You are a social media editor for ${context.siteName}. You write engaging Instagram captions in ${locale}.
 Rules:
 - Never invent facts, numbers or quotes that are not present in the article.
@@ -137,16 +139,17 @@ Rules:
       `Article title: ${context.title}`,
       `Article excerpt: ${context.excerpt}`,
       `Article summary: ${context.bodyPlain.slice(0, 900)}`,
+      `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
       ``,
-      `Write a single X post that promotes this article. End with "[URL]".`,
+      `Write one X post under 250 characters to leave room for the article link. Return {"post": string, "hashtags": string[]}.`,
     ].join("\n"),
     x_thread: [
       `Article title: ${context.title}`,
       `Article: ${context.bodyPlain.slice(0, 1600)}`,
+      `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
       ``,
-      `Write a thread of 3 posts. Each post must be under 280 characters, be self-contained but ordered, and never invent facts.`,
-      `Return ONLY valid JSON with the shape {"posts": [{"body": string}, {"body": string}, {"body": string}], "hashtags": string[]}.`,
-      `The last post ends with "[URL]".`,
+      `Write a thread of ${context.threadLength ?? 3} posts under 240 characters each. Open with a concrete hook. Develop one idea per post in order and end with a reason to read the article.`,
+      `Return {"posts": [{"body": string}], "hashtags": string[]}.`,
     ].join("\n"),
     instagram_caption: [
       `Article title: ${context.title}`,
@@ -207,7 +210,8 @@ export function parseGeneratedSocial(
       const hashtags = Array.isArray(parsed?.hashtags) ? parsed.hashtags.map(String) : [];
       return posts
         .map((raw, index): GeneratedSocialPiece | null => {
-          const body = typeof raw === "object" && raw !== null ? String((raw as Record<string, unknown>).body ?? "").trim() : String(raw).trim();
+          const value = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).body : raw;
+          const body = typeof value === "string" ? value.trim() : "";
           return body
             ? {
                 channel: "x",
@@ -276,21 +280,18 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     where: { id: input.versionId, tenantId },
     include: { project: { include: { site: true } } },
   });
-  if (!version) {
+  if (!version || version.projectId !== input.projectId) {
     throw new Error("version_not_found");
   }
 
-  const requested: Array<{ channel: SocialChannel; contentType: SocialContentType; threadPosition?: number }> = [];
-  for (const channel of input.channels) {
+  const threadLength = input.threadLength ?? 1;
+  if (!Number.isInteger(threadLength) || threadLength < 1 || threadLength > 10) {
+    throw new Error("invalid_x_thread_length");
+  }
+  const requested: Array<{ channel: SocialChannel; contentType: SocialContentType }> = [];
+  for (const channel of new Set(input.channels)) {
     if (channel === "x") {
-      const threadLength = Math.max(1, Math.min(10, input.threadLength ?? 0));
-      if (threadLength <= 1) {
-        requested.push({ channel: "x", contentType: "x_post" });
-      } else {
-        for (let index = 0; index < threadLength; index += 1) {
-          requested.push({ channel: "x", contentType: "x_thread", threadPosition: index });
-        }
-      }
+      requested.push({ channel, contentType: threadLength === 1 ? "x_post" : "x_thread" });
     }
     if (channel === "instagram") {
       requested.push({ channel: "instagram", contentType: "instagram_carousel" });
@@ -305,8 +306,10 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     throw new Error("no_channels_requested");
   }
 
+  const socialContentIds = requested.map(() => crypto.randomUUID());
   const created = await prisma.socialContent.createMany({
-    data: requested.map((piece) => ({
+    data: requested.map((piece, index) => ({
+      id: socialContentIds[index],
       tenantId,
       projectId: version.projectId,
       versionId: version.id,
@@ -318,8 +321,7 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
       mediaAssetIds: Prisma.JsonNull,
       generationStatus: "queued",
       editorialStatus: "draft",
-      threadPosition: piece.threadPosition ?? null,
-      metadata: Prisma.JsonNull,
+      metadata: piece.contentType === "x_thread" ? { threadLength } : Prisma.JsonNull,
     })),
   });
 
@@ -347,10 +349,11 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     operationId: operation.id,
     projectId: version.projectId,
     versionId: version.id,
-    threadLength: input.threadLength ?? 1,
+    threadLength,
+    socialContentIds,
   });
 
-  return { jobId, socialContentIds: [] };
+  return { jobId, socialContentIds };
 }
 
 export async function regenerateSocial(tenantId: string, socialContentId: string): Promise<{ jobId: string } | null> {
@@ -402,6 +405,19 @@ export async function updateSocialContent(
     return null;
   }
 
+  if (social.channel === "x" && (input.body !== undefined || input.editorialStatus === "approved")) {
+    const body = (input.body ?? social.body).trim();
+    if (input.editorialStatus === "approved" && social.generationStatus !== "done") {
+      throw new Error("Espera a que termine la generación para aprobar el post.");
+    }
+    if (!body) throw new Error("El texto de X no puede estar vacío.");
+    if (social.contentType === "x_thread" && social.threadPosition === null) {
+      if (formatXThread(body).length < 2) throw new Error("Separa al menos dos posts con una línea en blanco.");
+    } else if (xWeightedLength(body) > X_POST_LIMIT) {
+      throw new Error("El texto del post de X supera el límite de 280 caracteres.");
+    }
+  }
+
   const updated = await prisma.socialContent.update({
     where: { id: social.id },
     data: {
@@ -409,7 +425,7 @@ export async function updateSocialContent(
       hashtags: input.hashtags === undefined ? undefined : input.hashtags.length ? (input.hashtags as Prisma.InputJsonValue) : Prisma.JsonNull,
       editorialStatus: input.editorialStatus,
       mediaAssetIds: input.mediaAssetIds === undefined ? undefined : input.mediaAssetIds.length ? (input.mediaAssetIds as Prisma.InputJsonValue) : Prisma.JsonNull,
-      characterCount: input.body ? input.body.trim().length : undefined,
+      characterCount: input.body === undefined ? undefined : social.channel === "x" ? xWeightedLength(input.body.trim()) : input.body.trim().length,
     },
   });
 
@@ -431,7 +447,7 @@ export async function updateSocialContent(
  */
 export async function scheduleApprovedSocial(tenantId: string, socialContentId: string, now: Date = new Date()) {
   const social = await prisma.socialContent.findFirst({
-    where: { id: socialContentId, tenantId, editorialStatus: "approved", threadPosition: 0 },
+    where: { id: socialContentId, tenantId, editorialStatus: "approved", generationStatus: "done", OR: [{ threadPosition: null }, { threadPosition: 0 }] },
     include: { project: { select: { siteId: true } } },
   });
   if (!social) return null;
@@ -460,7 +476,7 @@ export async function scheduleApprovedSocial(tenantId: string, socialContentId: 
 
 export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel) {
   const items = await prisma.socialContent.findMany({
-    where: { tenantId, project: { siteId }, threadPosition: 0, ...(channel ? { channel } : {}) },
+    where: { tenantId, project: { siteId }, OR: [{ threadPosition: null }, { threadPosition: 0 }], ...(channel ? { channel } : {}) },
     include: {
       project: { select: { title: true } },
       publications: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, scheduledFor: true } },
@@ -491,6 +507,7 @@ export type SocialGenerationJobData = {
   projectId: string;
   versionId: string;
   threadLength?: number;
+  socialContentIds?: string[];
   regenerateIds?: string[];
 };
 
@@ -509,7 +526,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
       versionId: version.id,
       ...(data.regenerateIds && data.regenerateIds.length > 0
         ? { id: { in: data.regenerateIds } }
-        : { generationStatus: "queued" }),
+        : { generationStatus: "queued", ...(data.socialContentIds ? { id: { in: data.socialContentIds } } : {}) }),
     },
     orderBy: [{ channel: "asc" }, { createdAt: "asc" }],
   });
@@ -538,6 +555,12 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
   };
 
   const provider = getTextProvider("social");
+  const [articleUrl, xImageUrl] = pending.some((social) => social.channel === "x")
+    ? await Promise.all([
+        findPublishedArticleUrl(data.tenantId, version.projectId),
+        socialAssetUrlForVersion(version.id, data.tenantId),
+      ])
+    : [null, null];
   let generated = 0;
 
   for (const social of pending) {
@@ -546,19 +569,29 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
       data: { generationStatus: "processing" },
     });
 
+    const savedLength = (social.metadata as { threadLength?: number } | null)?.threadLength;
+    const threadLength = data.threadLength ?? savedLength ?? 3;
     try {
-      const prompt = buildSocialPrompt(social.channel, social.contentType, context);
+      const prompt = buildSocialPrompt(social.channel, social.contentType, { ...context, threadLength });
       const result = await provider.generate({
         prompt: prompt.userPrompt,
         systemPrompt: prompt.systemPrompt,
         temperature: 0.7,
-        maxTokens: social.contentType === "instagram_carousel" || social.contentType === "facebook_post" ? 1800 : 600,
+        maxTokens: social.contentType === "instagram_carousel" || social.contentType === "facebook_post" || social.contentType === "x_thread" ? 1800 : 600,
       });
 
       const pieces = parseGeneratedSocial(social.channel, social.contentType, result.output);
-      const piece = pieces[0];
+      const piece = pieces[social.threadPosition ?? 0];
       if (!piece) {
         throw new Error("social_parse_failed");
+      }
+      if (piece.contentType === "x_thread" && social.threadPosition === null) {
+        if (pieces.length < 2) throw new Error("x_thread_requires_two_posts");
+        piece.body = xArticleText(pieces.map(({ body }) => body).join("\n\n"), articleUrl);
+        piece.hashtags = pieces.at(-1)?.hashtags ?? [];
+        formatXThread(piece.body);
+      } else if (piece.contentType === "x_post") {
+        piece.body = xArticleText(piece.body, articleUrl);
       }
       const validation = validateSocialPiece(piece);
       if (!validation.valid) {
@@ -594,7 +627,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
           body: piece.body,
           hashtags: piece.hashtags.length ? (piece.hashtags as Prisma.InputJsonValue) : Prisma.JsonNull,
           mentions: piece.mentions.length ? (piece.mentions as Prisma.InputJsonValue) : Prisma.JsonNull,
-          characterCount: piece.body.length,
+          characterCount: piece.channel === "x" ? xWeightedLength(piece.body) : piece.body.length,
           generationStatus: "done",
           editorialStatus,
           mediaAssetIds: slides ? (slides.map((slide) => slide.storagePath) as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -604,6 +637,8 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
             generatedAt: new Date().toISOString(),
             category: context.category,
             workflow: settings.workflow,
+            ...(piece.contentType === "x_thread" ? { threadLength } : {}),
+            ...(piece.channel === "x" && xImageUrl ? { imageUrl: xImageUrl } : {}),
             ...(slides ? { slides } : {}),
           } as Prisma.InputJsonObject,
         },
@@ -615,7 +650,10 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
         where: { id: social.id },
         data: {
           generationStatus: "failed",
-          metadata: { error: error instanceof Error ? error.message : String(error) } as Prisma.InputJsonObject,
+          metadata: {
+            error: error instanceof Error ? error.message : String(error),
+            ...(social.contentType === "x_thread" ? { threadLength } : {}),
+          },
         },
       });
     }
@@ -637,6 +675,15 @@ function brandAccent(brandVoice: unknown): string {
   const value = (brandVoice as { primaryColor?: unknown; accentColor?: unknown } | null) ?? {};
   const color = String(value.accentColor ?? value.primaryColor ?? "");
   return /^#[0-9a-f]{3,8}$/i.test(color) ? color : "#f5b301";
+}
+
+export async function findPublishedArticleUrl(tenantId: string, projectId: string): Promise<string | null> {
+  const article = await prisma.publication.findFirst({
+    where: { tenantId, projectId, channel: "website", status: "published", externalUrl: { not: null } },
+    orderBy: { publishedAt: "desc" },
+    select: { externalUrl: true },
+  });
+  return article?.externalUrl ?? null;
 }
 
 export async function socialAssetUrlForVersion(

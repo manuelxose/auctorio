@@ -1030,6 +1030,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       threadLength?: number;
       versionId?: string;
     }>(request);
+    if (body.channels !== undefined && !Array.isArray(body.channels)) {
+      return badRequest(reply, "channels must be an array");
+    }
     const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is (typeof SOCIAL_CHANNELS)[number] =>
       isOneOf(channel, SOCIAL_CHANNELS),
     );
@@ -1080,12 +1083,18 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (body.editorialStatus && !isOneOf(body.editorialStatus, SOCIAL_EDITORIAL_STATUSES)) {
       return badRequest(reply, `editorialStatus must be one of: ${SOCIAL_EDITORIAL_STATUSES.join(", ")}`);
     }
-    const social = await updateSocialContent(context.tenantId, socialId, {
-      body: body.body,
-      hashtags: body.hashtags,
-      editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
-      mediaAssetIds: body.mediaAssetIds,
-    });
+    if (body.body !== undefined && typeof body.body !== "string") return badRequest(reply, "invalid social body");
+    let social;
+    try {
+      social = await updateSocialContent(context.tenantId, socialId, {
+        body: body.body,
+        hashtags: body.hashtags,
+        editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
+        mediaAssetIds: body.mediaAssetIds,
+      });
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
     if (!social) {
       return notFound(reply, "social content not found");
     }

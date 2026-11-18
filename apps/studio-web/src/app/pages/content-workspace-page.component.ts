@@ -241,9 +241,10 @@ function hostOf(url: string): string {
               @case ('social') {
                 <section class="art-card">
                   <div class="art-actions art-actions--top">
-                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X post</label>
+                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X</label>
                     <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
-                    <select class="au-select art-select" [(ngModel)]="socialThreadLength" aria-label="X thread length">
+                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.facebook" /> Facebook</label>
+                    <select class="au-select art-select" [(ngModel)]="socialThreadLength" [disabled]="!socialChannels.x" aria-label="X thread length">
                       <option [ngValue]="1">Single post</option><option [ngValue]="2">2 posts</option><option [ngValue]="3">3 posts</option><option [ngValue]="5">5 posts</option>
                     </select>
                     <button class="au-btn au-btn--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()"><app-icon name="sparkles"></app-icon>{{ socialGenerating ? 'Writing…' : 'Write social posts' }}</button>
@@ -253,7 +254,9 @@ function hostOf(url: string): string {
                       <header class="art-social__head">
                         <span>{{ piece.channel }} · {{ piece.contentType }}@if (piece.threadPosition !== null) { · post {{ piece.threadPosition + 1 }} }</span>
                         <span class="sp-status" [attr.data-tone]="piece.editorialStatus === 'approved' ? 'success' : piece.editorialStatus === 'rejected' ? 'danger' : 'warning'"><i class="sp-dot" aria-hidden="true"></i>{{ piece.editorialStatus }}</span>
-                        <span class="sp-num" [class.art-over]="isOverLimit(piece)">{{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}</span>
+                        @if (piece.contentType !== 'x_thread' || piece.threadPosition !== null) {
+                          <span class="sp-num" [class.art-over]="isOverLimit(piece)">{{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}</span>
+                        }
                       </header>
                       <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)" [attr.aria-label]="piece.channel + ' post'"></textarea>
                       <footer class="art-actions">
@@ -417,7 +420,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Social tab state.
-  socialChannels = { x: true, instagram: true };
+  socialChannels = { x: true, instagram: true, facebook: false };
   socialThreadLength = 1;
   socialGenerating = false;
   socialDrafts: Record<string, string> = {};
@@ -1013,6 +1016,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
     const channels = [
       ...(this.socialChannels.x ? (['x'] as const) : []),
       ...(this.socialChannels.instagram ? (['instagram'] as const) : []),
+      ...(this.socialChannels.facebook ? (['facebook'] as const) : []),
     ];
     if (channels.length === 0) {
       this.error = 'Select at least one channel.';
@@ -1062,7 +1066,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
   }
 
   approveSocial(piece: StudioSocialContent): void {
-    this.api.updateSocial(piece.id, { editorialStatus: 'approved' }).subscribe({
+    this.api.updateSocial(piece.id, { body: this.socialDrafts[piece.id], editorialStatus: 'approved' }).subscribe({
       next: () => this.load(),
       error: (err) => {
         this.error = this.describe(err);
@@ -1076,7 +1080,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
   }
 
   limitFor(piece: StudioSocialContent): number {
-    return piece.channel === 'x' ? 280 : 2200;
+    return piece.channel === 'x' ? 280 : piece.channel === 'facebook' ? 63206 : 2200;
   }
 
   // ── Schedule tab actions ──

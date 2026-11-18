@@ -1,5 +1,6 @@
 import { getEnv } from "../shared/utils/env";
 import type { PublishingAccount } from "@prisma/client";
+import { X_POST_LIMIT, xWeightedLength } from "./social-x";
 
 // ────────────────────────────────────────────────────────────── Domain types
 
@@ -140,7 +141,7 @@ export function isSocialIntegrationConfigured(name: string): boolean {
 
 // ────────────────────────────────────────────────────────────── Content validation (platform rules)
 
-export const X_POST_LIMIT = 280;
+export { X_POST_LIMIT } from "./social-x";
 export const INSTAGRAM_CAPTION_LIMIT = 2200;
 export const INSTAGRAM_CAROUSEL_MAX = 10;
 export const FACEBOOK_POST_LIMIT = 63206;
@@ -155,11 +156,11 @@ export function validateXPayload(payload: SocialPublishInput): string[] {
   const bodies = payload.thread && payload.thread.length > 0
     ? payload.thread.map((entry) => entry.body)
     : [payload.text];
-  if (bodies.length === 0 || bodies.every((body) => !body.trim())) {
+  if (bodies.some((body) => !body.trim())) {
     errors.push("x_post_requires_text");
   }
   for (const [index, body] of bodies.entries()) {
-    if (body.length > X_POST_LIMIT) {
+    if (xWeightedLength(body) > X_POST_LIMIT) {
       errors.push(`x_post_${index + 1}_exceeds_${X_POST_LIMIT}_characters`);
     }
   }
