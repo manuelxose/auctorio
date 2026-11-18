@@ -277,6 +277,23 @@ Pendiente (fuera de M4): medir en BLG con sesión iniciada; editor «Título, Ed
    posicionamiento ≤500, audiencia, ubicación, ofertas con precio/URL ≤20, blog path).
 2. Render: link card como bloque HTML semántico publicable (sin JS), estilado con colores de marca.
 
+**Estado M5 (2026-11-18, hecho)**: ajustes en `article_targets.brand` (sin migración; `src/studio/editorial-engine/brand.ts`
+`readBrandSettings` valida: URLs http(s), colores `#rrggbb`, posicionamiento ≤500, audiencia, ubicación país + ciudades,
+ofertas nombre/precio/URL ≤20, blog path, link card titular/frase/URL/botón, contact card titular/frase/email/teléfono/URL/botón,
+map card titular/dirección/URL, qué debe decir el promo, logo y colores primario/secundario). `resolveBrand` rellena
+posicionamiento y audiencia vacíos con `SiteIntelligenceProfile.brandSummary`/`detectedAudience`. El redactor recibe
+todo por `siteGuidance` → `renderBrandGuidance` (las URLs de ofertas son enlaces permitidos). Tarjetas: la app las renderiza
+en la etapa `seo` (`applyBrandCards`, solo guías): la link card sustituye el `<aside data-block="link_card">` del redactor
+(usa su titular/frase si el sitio no configuró los suyos), con logo, borde y botón en el color primario y texto del botón
+blanco/negro según contraste; map y contact card son placeholders `<aside data-block="map_card|contact_card"></aside>`
+del redactor (si faltan: contacto al final antes del descargo y mapa antes), y solo existen si hay dirección o
+email/teléfono/URL (`sections.mapCard/contactCard` se apagan sin datos). `html-sanitizer.ts` admite `style` en
+`aside`/`p`/`a` filtrado por `cleanStyle` (propiedades de presentación, valores sin `url()`/paréntesis/comillas), así que
+la tarjeta llega igual a WordPress/GuíaTV/REST. Settings › Writing: tarjetas «Calls to action» (toggles link card, map card,
+contact card, promo + campos), «Business details» y «Branding». Test: `tests/brand-cards.test.ts`. Pendiente: extraer
+ofertas del sitio automáticamente, URL de ejemplo de estilo de escritura, el editor del Studio (`AuRichEditorComponent`)
+puede perder el `style` de la tarjeta al editar, check M7 «link card/promo presentes», aplicar a artículos manuales y de noticias.
+
 ### M6 — Imágenes y medios
 
 1. Portada realista sin texto + 2 de cuerpo, alt descriptivo con keyword natural; eliminar metadatos

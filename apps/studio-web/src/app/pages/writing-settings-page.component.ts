@@ -6,7 +6,7 @@ import { AppContextService } from '../services/app-context.service';
 import { PlanningApiService, apiMessage } from '../services/planning-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
-import type { ArticleSectionKey, ArticleTargetsOverride, WritingSettings } from '../models/planning.models';
+import type { ArticleSectionKey, ArticleTargetsOverride, BrandSettings, WritingSettings } from '../models/planning.models';
 
 const DEFAULT_WRITING: WritingSettings = {
   instructions: [],
@@ -17,6 +17,21 @@ const DEFAULT_WRITING: WritingSettings = {
   summaryVariant: 'tldr',
   internalLinks: { enabled: true, www: false, trailingSlash: false },
   disclaimer: '',
+};
+
+const DEFAULT_BRAND: BrandSettings = {
+  logoUrl: '',
+  primaryColor: '',
+  secondaryColor: '',
+  positioning: '',
+  audience: [],
+  location: { country: '', cities: [] },
+  offers: [],
+  blogPath: '',
+  linkCard: { headline: '', text: '', url: '', buttonText: '' },
+  contactCard: { headline: '', text: '', email: '', phone: '', url: '', buttonText: '' },
+  mapCard: { headline: '', address: '', url: '' },
+  promo: '',
 };
 
 type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boolean) => void };
@@ -129,6 +144,77 @@ type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boole
           </ul>
         </section>
 
+        <section class="ws-card" aria-labelledby="ws-cta">
+          <h2 class="ws-card__title" id="ws-cta">Calls to action</h2>
+          <p class="ws-card__sub">Cards rendered in your brand colours. Empty fields fall back to your site name, home page and what the writer drafts</p>
+          <ul class="ws-switches">
+            @for (toggle of ctaToggles; track toggle.label) {
+              <li class="ws-switch">
+                <span><span class="ws-switch__label">{{ toggle.label }}</span><span class="ws-switch__hint">{{ toggle.hint }}</span></span>
+                <input type="checkbox" role="switch" class="ws-toggle" [checked]="toggle.get()" (change)="toggle.set(!toggle.get()); dirty = true" [attr.aria-label]="toggle.label" />
+              </li>
+            }
+          </ul>
+          <fieldset class="ws-fields" (input)="dirty = true">
+            <legend>Link card</legend>
+            <label class="au-field"><span>Headline</span><input class="au-input" name="lc-headline" maxlength="80" [(ngModel)]="brand.linkCard.headline" placeholder="e.g. Find out what is on now" /></label>
+            <label class="au-field"><span>Sentence</span><input class="au-input" name="lc-text" maxlength="200" [(ngModel)]="brand.linkCard.text" /></label>
+            <label class="au-field"><span>Button URL</span><input class="au-input" name="lc-url" type="url" maxlength="500" [(ngModel)]="brand.linkCard.url" placeholder="Home page" /></label>
+            <label class="au-field"><span>Button text</span><input class="au-input" name="lc-button" maxlength="30" [(ngModel)]="brand.linkCard.buttonText" placeholder="Visitar" /></label>
+          </fieldset>
+          <fieldset class="ws-fields" (input)="dirty = true">
+            <legend>Contact card</legend>
+            <label class="au-field"><span>Headline</span><input class="au-input" name="cc-headline" maxlength="80" [(ngModel)]="brand.contactCard.headline" /></label>
+            <label class="au-field"><span>Sentence</span><input class="au-input" name="cc-text" maxlength="200" [(ngModel)]="brand.contactCard.text" /></label>
+            <label class="au-field"><span>Email</span><input class="au-input" name="cc-email" type="email" maxlength="200" [(ngModel)]="brand.contactCard.email" /></label>
+            <label class="au-field"><span>Phone</span><input class="au-input" name="cc-phone" type="tel" maxlength="30" [(ngModel)]="brand.contactCard.phone" /></label>
+            <label class="au-field"><span>Button URL</span><input class="au-input" name="cc-url" type="url" maxlength="500" [(ngModel)]="brand.contactCard.url" /></label>
+            <label class="au-field"><span>Button text</span><input class="au-input" name="cc-button" maxlength="30" [(ngModel)]="brand.contactCard.buttonText" placeholder="Contactar" /></label>
+          </fieldset>
+          <fieldset class="ws-fields" (input)="dirty = true">
+            <legend>Map card</legend>
+            <label class="au-field"><span>Headline</span><input class="au-input" name="mc-headline" maxlength="80" [(ngModel)]="brand.mapCard.headline" /></label>
+            <label class="au-field"><span>Address</span><input class="au-input" name="mc-address" maxlength="200" [(ngModel)]="brand.mapCard.address" /></label>
+            <label class="au-field"><span>Map URL</span><input class="au-input" name="mc-url" type="url" maxlength="500" [(ngModel)]="brand.mapCard.url" placeholder="Google Maps search of the address" /></label>
+          </fieldset>
+          <label class="au-field au-mb-0 ws-promo">
+            <span>Promo paragraph: what it should say</span>
+            <textarea class="au-input" rows="2" maxlength="500" [(ngModel)]="brand.promo" (ngModelChange)="dirty = true" placeholder="e.g. Our guide is free and shows every channel schedule on one page"></textarea>
+          </label>
+        </section>
+
+        <section class="ws-card" aria-labelledby="ws-business">
+          <h2 class="ws-card__title" id="ws-business">Business details</h2>
+          <p class="ws-card__sub">What the writer knows about your business. Positioning and audience default to what we detected on your site</p>
+          <div class="ws-fields" (input)="dirty = true">
+            <label class="au-field ws-wide"><span>Positioning</span><textarea class="au-input" rows="3" maxlength="500" [(ngModel)]="brand.positioning"></textarea><span class="au-hint">{{ brand.positioning.length }} / 500</span></label>
+            <label class="au-field ws-wide"><span>Target audience (one per line)</span><textarea class="au-input" rows="2" [ngModel]="audienceText" (ngModelChange)="brand.audience = lines($event, 10)"></textarea></label>
+            <label class="au-field"><span>Country</span><input class="au-input" name="b-country" maxlength="80" [(ngModel)]="brand.location.country" /></label>
+            <label class="au-field"><span>Cities (comma separated)</span><input class="au-input" name="b-cities" [ngModel]="citiesText" (ngModelChange)="brand.location.cities = commas($event)" /></label>
+            <label class="au-field"><span>Blog path</span><input class="au-input" name="b-blog" maxlength="100" [(ngModel)]="brand.blogPath" placeholder="/blog" /></label>
+          </div>
+          <h3 class="ws-sub">What you sell ({{ brand.offers.length }} / 20)</h3>
+          @for (offer of brand.offers; track $index; let i = $index) {
+            <div class="ws-offer" (input)="dirty = true">
+              <input class="au-input" [name]="'o-name-' + i" maxlength="120" [(ngModel)]="offer.name" placeholder="Offer" aria-label="Offer name" />
+              <input class="au-input" [name]="'o-price-' + i" maxlength="40" [(ngModel)]="offer.price" placeholder="Price" aria-label="Offer price" />
+              <input class="au-input" [name]="'o-url-' + i" type="url" maxlength="500" [(ngModel)]="offer.url" placeholder="https://" aria-label="Offer URL" />
+              <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" (click)="removeOffer(i)" [attr.aria-label]="'Remove offer ' + (i + 1)"><app-icon name="close"></app-icon></button>
+            </div>
+          }
+          <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="addOffer()" [disabled]="brand.offers.length >= 20">Add offer</button>
+        </section>
+
+        <section class="ws-card" aria-labelledby="ws-branding">
+          <h2 class="ws-card__title" id="ws-branding">Branding</h2>
+          <p class="ws-card__sub">Logo and colours of the cards. Colours as #rrggbb</p>
+          <div class="ws-fields" (input)="dirty = true">
+            <label class="au-field ws-wide"><span>Logo URL</span><input class="au-input" name="br-logo" type="url" maxlength="500" [(ngModel)]="brand.logoUrl" placeholder="https://…/logo.png" /></label>
+            <label class="au-field"><span>Primary colour</span><span class="ws-color"><i [style.background]="brand.primaryColor || 'transparent'"></i><input class="au-input" name="br-primary" maxlength="7" pattern="#[0-9a-fA-F]{6}" [(ngModel)]="brand.primaryColor" placeholder="#1f2937" /></span></label>
+            <label class="au-field"><span>Secondary colour</span><span class="ws-color"><i [style.background]="brand.secondaryColor || 'transparent'"></i><input class="au-input" name="br-secondary" maxlength="7" pattern="#[0-9a-fA-F]{6}" [(ngModel)]="brand.secondaryColor" placeholder="#d1d5db" /></span></label>
+          </div>
+        </section>
+
         <section class="ws-card" aria-labelledby="ws-disclaimer">
           <h2 class="ws-card__title" id="ws-disclaimer">Article disclaimer</h2>
           <p class="ws-card__sub">Optional text added at the very end of every article</p>
@@ -190,6 +276,15 @@ type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boole
     .ws-save { position: sticky; bottom: 16px; display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding: 10px 12px; border: 1px solid var(--sp-line); border-radius: var(--sp-r); background: var(--sp-cell); }
     .ws-save span { margin-right: auto; }
     .ws-save.is-dirty { border-color: var(--au-brand-strong); }
+    .ws-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 16px 0 0; padding: 0; border: 0; min-width: 0; }
+    .ws-fields legend { grid-column: 1 / -1; padding: 0; margin-bottom: 4px; font-size: 14px; font-weight: 500; }
+    .ws-fields .au-field { margin: 0; }
+    .ws-wide { grid-column: 1 / -1; }
+    .ws-promo { display: block; margin-top: 16px; }
+    .ws-sub { margin: 20px 0 8px; font-size: 14px; font-weight: 500; }
+    .ws-offer { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 2fr) auto; gap: 8px; margin-bottom: 8px; }
+    .ws-color { display: flex; align-items: center; gap: 8px; }
+    .ws-color i { flex: none; width: 24px; height: 24px; border: 1px solid var(--sp-line); border-radius: 6px; }
     @media (prefers-reduced-motion: reduce) { .ws-toggle, .ws-toggle::after { transition: none; } }
   `],
 })
@@ -201,6 +296,7 @@ export class WritingSettingsPageComponent implements OnInit {
   readonly siteName = this.appContext.activeSite()?.name ?? 'this site';
 
   writing: WritingSettings | null = null;
+  brand: BrandSettings = structuredClone(DEFAULT_BRAND);
   private targets: ArticleTargetsOverride = {};
   newRule = '';
   dirty = false;
@@ -227,10 +323,16 @@ export class WritingSettingsPageComponent implements OnInit {
     { label: 'Sources section', hint: 'Every external source listed as "Title, Publisher"', get: () => this.sectionOn('sources'), set: (on) => this.setSection('sources', on) },
     { label: 'Citations', hint: 'Each figure and claim attributed inline to its source', get: () => this.writing!.citations, set: (on) => (this.writing!.citations = on) },
     { label: 'FAQ', hint: 'Questions and short self-contained answers', get: () => this.sectionOn('faq'), set: (on) => this.setSection('faq', on) },
-    { label: 'Call-to-action card', hint: 'A card that sends readers to your site', get: () => this.sectionOn('cta'), set: (on) => this.setSection('cta', on) },
+    { label: 'Call-to-action card', hint: 'A closing card that sends readers to your site (non-guide articles)', get: () => this.sectionOn('cta'), set: (on) => this.setSection('cta', on) },
     { label: 'Mention competitors when relevant', hint: 'Off by default: competitors are never recommended', get: () => this.writing!.mentionCompetitors, set: (on) => (this.writing!.mentionCompetitors = on) },
     { label: 'Schema markup (JSON-LD)', hint: 'Article, FAQ and breadcrumb data for search engines', get: () => this.sectionOn('jsonLd'), set: (on) => this.setSection('jsonLd', on) },
     { label: 'Summary', hint: 'A short summary right after the introduction', get: () => this.sectionOn('summary'), set: (on) => this.setSection('summary', on) },
+  ];
+  readonly ctaToggles: Toggle[] = [
+    { label: 'Link card', hint: 'Your site, a headline and a button, right after the introduction', get: () => this.sectionOn('linkCard'), set: (on) => this.setSection('linkCard', on) },
+    { label: 'Map card', hint: 'Your address with directions, in the body (needs an address)', get: () => this.sectionOn('mapCard'), set: (on) => this.setSection('mapCard', on) },
+    { label: 'Contact card', hint: 'How to reach you, at the end (needs an email, phone or URL)', get: () => this.sectionOn('contactCard'), set: (on) => this.setSection('contactCard', on) },
+    { label: 'Promo paragraph', hint: 'A section on what your site offers, before the FAQ', get: () => this.sectionOn('promo'), set: (on) => this.setSection('promo', on) },
   ];
   readonly linkToggles: Toggle[] = [
     { label: 'Internal links', hint: 'Link to real pages of your sitemap', get: () => this.writing!.internalLinks.enabled, set: (on) => (this.writing!.internalLinks.enabled = on) },
@@ -252,6 +354,17 @@ export class WritingSettingsPageComponent implements OnInit {
         this.targets = structuredClone(settings.articleTargets ?? {});
         const stored = this.targets.writing;
         this.writing = { ...DEFAULT_WRITING, ...stored, instructions: [...(stored?.instructions ?? [])], internalLinks: { ...DEFAULT_WRITING.internalLinks, ...stored?.internalLinks } };
+        const b = this.targets.brand;
+        this.brand = {
+          ...structuredClone(DEFAULT_BRAND),
+          ...b,
+          location: { ...DEFAULT_BRAND.location, ...b?.location },
+          linkCard: { ...DEFAULT_BRAND.linkCard, ...b?.linkCard },
+          contactCard: { ...DEFAULT_BRAND.contactCard, ...b?.contactCard },
+          mapCard: { ...DEFAULT_BRAND.mapCard, ...b?.mapCard },
+        };
+        this.audienceText = this.brand.audience.join('\n');
+        this.citiesText = this.brand.location.cities.join(', ');
         this.dirty = false;
       },
       error: (err) => (this.message = apiMessage(err, 'Writing settings could not be loaded.')),
@@ -280,11 +393,38 @@ export class WritingSettingsPageComponent implements OnInit {
     this.dirty = true;
   }
 
+  audienceText = '';
+
+  lines(value: string, max: number): string[] {
+    this.audienceText = value;
+    this.dirty = true;
+    return value.split('\n').map((line) => line.trim()).filter(Boolean).slice(0, max);
+  }
+
+  citiesText = '';
+
+  commas(value: string): string[] {
+    this.citiesText = value;
+    this.dirty = true;
+    return value.split(',').map((city) => city.trim()).filter(Boolean).slice(0, 10);
+  }
+
+  addOffer(): void {
+    if (this.brand.offers.length >= 20) return;
+    this.brand.offers = [...this.brand.offers, { name: '', price: '', url: '' }];
+    this.dirty = true;
+  }
+
+  removeOffer(index: number): void {
+    this.brand.offers = this.brand.offers.filter((_offer, i) => i !== index);
+    this.dirty = true;
+  }
+
   save(): void {
     if (!this.writing) return;
     this.saving = true;
     // article_targets is replaced as a whole: send the targets and sections back with the writing block.
-    this.api.putPlanningSettings(this.siteId, { articleTargets: { ...this.targets, writing: this.writing } }).subscribe({
+    this.api.putPlanningSettings(this.siteId, { articleTargets: { ...this.targets, writing: this.writing, brand: this.brand } }).subscribe({
       next: (settings) => {
         this.saving = false;
         this.dirty = false;

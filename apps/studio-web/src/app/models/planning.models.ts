@@ -83,8 +83,24 @@ export type SitePlanningSettings = {
   persisted: boolean;
 };
 
-export type ArticleSectionKey = 'summary' | 'toc' | 'faq' | 'sources' | 'jsonLd' | 'furtherReading' | 'cta';
-export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>>; writing?: WritingSettings };
+export type ArticleSectionKey = 'summary' | 'toc' | 'faq' | 'sources' | 'jsonLd' | 'furtherReading' | 'cta' | 'linkCard' | 'promo' | 'contactCard' | 'mapCard';
+export type ArticleTargetsOverride = { words?: number; internalLinks?: number; externalLinks?: number; images?: number; faqCount?: number; sections?: Partial<Record<ArticleSectionKey, boolean>>; writing?: WritingSettings; brand?: BrandSettings };
+
+/** Mirrors brand.ts BrandSettings (CTAs, business details, branding). */
+export type BrandSettings = {
+  logoUrl: string;
+  primaryColor: string;
+  secondaryColor: string;
+  positioning: string;
+  audience: string[];
+  location: { country: string; cities: string[] };
+  offers: Array<{ name: string; price: string; url: string }>;
+  blogPath: string;
+  linkCard: { headline: string; text: string; url: string; buttonText: string };
+  contactCard: { headline: string; text: string; email: string; phone: string; url: string; buttonText: string };
+  mapCard: { headline: string; address: string; url: string };
+  promo: string;
+};
 export type ArticleTargets = { words: number; internalLinks: number; externalLinks: number; images: number; faqCount: number; sections: Record<ArticleSectionKey, boolean> };
 
 /** Mirrors structure.ts WritingSettings ("Customize future articles"). */

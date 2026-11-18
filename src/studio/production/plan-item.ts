@@ -10,7 +10,8 @@ import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
 import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
-import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveWritingSettings } from "../editorial-engine/structure";
+import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveWritingSettings } from "../editorial-engine/structure";
+import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
 import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
@@ -244,10 +245,9 @@ export function planGuidance(item: EditorialPlanItem): string[] {
   return lines;
 }
 
-/** Brand data for the guide's link card and promo block. */
-export function siteGuidance(site: { name: string; baseUrl: string | null }): string[] {
-  const domain = hostOf(site.baseUrl);
-  return [domain ? `Site name: ${site.name} — domain: ${domain} — home URL (allowed link): ${site.baseUrl}` : `Site name: ${site.name}`];
+/** Brand data for the guide's intro, link card and promo block (business details and CTA wording when configured). */
+export function siteGuidance(site: { name: string; baseUrl: string | null }, brand: ResolvedBrand = resolveBrand(readBrandSettings(null), site)): string[] {
+  return renderBrandGuidance(brand);
 }
 
 export async function preparePlanItemInput(
@@ -262,6 +262,8 @@ export async function preparePlanItemInput(
   const generation = readGenerationSettings(item);
   const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
   const writing = resolveWritingSettings(planningSettings?.articleTargets);
+  const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
+  const brand = resolveBrand(resolveBrandSettings(planningSettings?.articleTargets), site, profile);
   const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
@@ -322,7 +324,9 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: [...planGuidance(item), ...siteGuidance(site), ...renderWritingGuidance(writing, language)],
+      guidance: [...planGuidance(item), ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language)],
+      brand,
+      disclaimer: writing.disclaimer,
     },
     options,
   };
@@ -411,6 +415,12 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
   });
   // Guides: site override, then the article's own (generation.articleTargets).
   const articleTargets = articleType === "guide" ? resolveArticleTargets(input.siteArticleTargets, plan.generation.articleTargets) : undefined;
+  // Contact and map cards exist only when the site filled in their data.
+  const brand = input.plan?.brand;
+  if (articleTargets && brand) {
+    articleTargets.sections.contactCard &&= hasContactCard(brand);
+    articleTargets.sections.mapCard &&= hasMapCard(brand);
+  }
   const typeLength = articleTargets ? { min: Math.round(articleTargets.words * 0.87), max: Math.round(articleTargets.words * 1.13) } : LENGTH_BY_TYPE[articleType];
   const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || typeLength.min;
   const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, typeLength.max);

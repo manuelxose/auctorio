@@ -38,7 +38,7 @@ const ALLOWED_TAGS = new Set([
 ]);
 
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
-  a: ["href", "title", "rel", "target"],
+  a: ["href", "title", "rel", "target", "style"],
   // TOC anchors (withTableOfContents).
   h2: ["id"],
   h3: ["id"],
@@ -50,7 +50,22 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   tr: [],
   th: ["scope"],
   td: [],
+  // Brand CTA cards (brand.ts applyBrandCards): presentational inline style only, filtered by cleanStyle.
+  aside: ["style"],
+  p: ["style"],
 };
+
+const STYLE_PROPERTIES = new Set(["color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight"]);
+
+/** Keeps only whitelisted declarations with plain values (no url(), expression(), var(), quotes or escapes). */
+export function cleanStyle(value: string): string {
+  return value
+    .split(";")
+    .map((declaration) => declaration.split(":"))
+    .filter((parts) => parts.length === 2 && STYLE_PROPERTIES.has(parts[0].trim().toLowerCase()) && /^[#a-z0-9 .%-]+$/i.test(parts[1].trim()))
+    .map(([property, val]) => `${property.trim().toLowerCase()}:${val.trim()}`)
+    .join(";");
+}
 
 /**
  * Scheme check for href/src values. Normalizes embedded control characters
@@ -101,6 +116,13 @@ export function sanitizeEditorialHtml(html: string | null | undefined): string {
         if (!allowedAttrs.includes(name) && !name.startsWith("data-")) {
           node.removeAttr(attribute);
         }
+      }
+
+      const style = node.attr("style");
+      if (style !== undefined) {
+        const clean = cleanStyle(style);
+        if (clean) node.attr("style", clean);
+        else node.removeAttr("style");
       }
 
       if (tagName === "a") {

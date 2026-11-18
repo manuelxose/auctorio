@@ -18,6 +18,7 @@ import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editoria
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
 import { getArticleWriter } from "../editorial-engine/writer-provider";
 import { buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
+import { applyBrandCards } from "../editorial-engine/brand";
 import { buildProvenance, summarizeProvenance } from "../editorial-engine/provenance";
 import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
@@ -168,6 +169,8 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
 async function seo(ctx: StageContext): Promise<SeoPackage> {
   const brief = need(ctx.artifacts.brief, "brief").brief;
   const article = need(ctx.artifacts.write, "write").parsed;
+  const brand = ctx.input.plan?.brand;
+  if (brief.articleTargets && brand) article.bodyHtml = applyBrandCards(article.bodyHtml, brand, brief.articleTargets.sections, ctx.input.language, ctx.input.plan?.disclaimer);
   if (brief.articleTargets?.sections.toc) article.bodyHtml = withTableOfContents(article.bodyHtml, ctx.input.language);
   return buildSeoPackage({
     brief,

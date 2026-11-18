@@ -92,6 +92,9 @@ export type PreparedInput = {
     record: Record<string, unknown>;
     generation: Record<string, unknown>;
     guidance: string[];
+    /** Guides: brand + CTA settings the app renders into the cards (M5). */
+    brand?: import("../editorial-engine/brand").ResolvedBrand;
+    disclaimer?: string;
   } | null;
   options: ProductionRequestOptions;
 };

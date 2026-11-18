@@ -4,6 +4,7 @@
 // prompt embeds exactly one template; articles are never forced into a
 // single SEO mold.
 
+import { readBrandSettings, type BrandSettings } from "./brand";
 import type { ArticleType } from "./types";
 
 export type StructureSection = {
@@ -24,6 +25,8 @@ export type StructureSection = {
     | "cta"
     | "link_card"
     | "promo"
+    | "map_card"
+    | "contact_card"
     | "key_takeaways";
   heading: string | null; // null → no heading (lead/body)
   instruction: string;
@@ -85,6 +88,10 @@ export type ArticleSections = {
   linkCard: boolean;
   /** Brand paragraph under its own H2 before the FAQ. */
   promo: boolean;
+  /** Contact card at the end (only when the site has contact data). */
+  contactCard: boolean;
+  /** Map card in the body (only when the site has an address). */
+  mapCard: boolean;
 };
 
 export type ArticleTargets = {
@@ -105,7 +112,7 @@ export const GUIDE_TARGETS: ArticleTargets = {
   externalLinks: 20,
   images: 5,
   faqCount: 5,
-  sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true, linkCard: true, promo: true },
+  sections: { summary: true, toc: true, faq: true, sources: true, jsonLd: true, furtherReading: true, cta: true, linkCard: true, promo: true, contactCard: true, mapCard: true },
   summaryVariant: "tldr",
 };
 
@@ -117,7 +124,7 @@ const TARGET_LIMITS: Record<Exclude<keyof ArticleTargets, "sections" | "summaryV
   faqCount: [0, 12],
 };
 
-export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "summaryVariant">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings };
+export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "summaryVariant">> & { sections?: Partial<ArticleSections>; writing?: WritingSettings; brand?: BrandSettings };
 
 // ────────────────────────────────────────────────────────────── Writing settings
 // "Customize future articles" (BLG parity M8): stored next to the targets in
@@ -223,13 +230,14 @@ export function readArticleTargetsOverride(value: unknown): ArticleTargetsOverri
     if (typeof sections[key] === "boolean") (out.sections ??= {})[key] = sections[key] as boolean;
   }
   if (raw.writing !== undefined && raw.writing !== null) out.writing = readWritingSettings(raw.writing);
+  if (raw.brand !== undefined && raw.brand !== null) out.brand = readBrandSettings(raw.brand);
   return out;
 }
 
 /** Guide defaults, then each override in order (site first, article last). A fixed length mode sets the word target. */
 export function resolveArticleTargets(...overrides: unknown[]): ArticleTargets {
   return overrides.reduce<ArticleTargets>((acc, value) => {
-    const { writing, ...override } = readArticleTargetsOverride(value);
+    const { writing, brand: _brand, ...override } = readArticleTargetsOverride(value);
     const fixedWords = writing ? LENGTH_MODES[writing.length] : null;
     return {
       ...acc,
@@ -245,6 +253,11 @@ export function resolveWritingSettings(siteArticleTargets: unknown): WritingSett
   return readArticleTargetsOverride(siteArticleTargets).writing ?? DEFAULT_WRITING;
 }
 
+/** The site's brand and CTA settings from its stored article_targets (empty when unset). */
+export function resolveBrandSettings(siteArticleTargets: unknown): BrandSettings {
+  return readArticleTargetsOverride(siteArticleTargets).brand ?? readBrandSettings(null);
+}
+
 const SECTION_SWITCH: Partial<Record<StructureSection["kind"], keyof ArticleSections>> = {
   summary: "summary",
   toc: "toc",
@@ -254,6 +267,8 @@ const SECTION_SWITCH: Partial<Record<StructureSection["kind"], keyof ArticleSect
   cta: "cta",
   link_card: "linkCard",
   promo: "promo",
+  map_card: "mapCard",
+  contact_card: "contactCard",
   key_takeaways: "summary",
 };
 
@@ -459,9 +474,16 @@ export const STRUCTURE_SPECS: Record<ArticleType, StructureSpec> = {
           "Right before the FAQ, an H2 of its own named after what the site offers for this need (not «Conclusión»): one paragraph on how the site helps, with 2 links to its most relevant internal URLs from the brief.",
         required: true,
       },
+      {
+        kind: "map_card",
+        heading: null,
+        instruction: "Where the business location matters to the reader (otherwise right before the promo H2), write exactly <aside data-block=\"map_card\"></aside>: the app fills in the site's map card.",
+        required: false,
+      },
       { kind: "faq", heading: "Frequently asked questions", instruction: "H2 followed by one H3 per question (the question itself) and a self-contained 2–4 sentence answer.", required: true },
       { kind: "sources", heading: "Sources", instruction: "Bulleted list «Título, Editor», each linked to its URL (only URLs from the fact ledger).", required: true },
       { kind: "further_reading", heading: "Recommended reading", instruction: "Bulleted list of 3–5 of the brief's internal links marked «(own post)», with descriptive anchors; when none is marked, the most related brief URLs not linked in the body.", required: true },
+      { kind: "contact_card", heading: null, instruction: "Last block (before the disclaimer, if any): exactly <aside data-block=\"contact_card\"></aside>; the app fills in the site's contact card.", required: false },
     ],
     allowsConclusion: false,
     allowsFaq: true,
