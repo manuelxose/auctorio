@@ -290,9 +290,9 @@ del redactor (si faltan: contacto al final antes del descargo y mapa antes), y s
 email/teléfono/URL (`sections.mapCard/contactCard` se apagan sin datos). `html-sanitizer.ts` admite `style` en
 `aside`/`p`/`a` filtrado por `cleanStyle` (propiedades de presentación, valores sin `url()`/paréntesis/comillas), así que
 la tarjeta llega igual a WordPress/GuíaTV/REST. Settings › Writing: tarjetas «Calls to action» (toggles link card, map card,
-contact card, promo + campos), «Business details» y «Branding». Test: `tests/brand-cards.test.ts`. Pendiente: extraer
-ofertas del sitio automáticamente, URL de ejemplo de estilo de escritura, el editor del Studio (`AuRichEditorComponent`)
-puede perder el `style` de la tarjeta al editar, check M7 «link card/promo presentes», aplicar a artículos manuales y de noticias.
+contact card, promo + campos), «Business details» y «Branding». Test: `tests/brand-cards.test.ts`. Después (cierre del plan):
+el editor conserva tarjetas/TOC/resumen, el check «Estructura» exige la link card cuando está activa y los artículos manuales
+reciben marca + escritura + enlazado. Pendiente: extraer ofertas del sitio automáticamente y la URL de ejemplo de estilo de escritura.
 
 ### M6 — Imágenes y medios
 
@@ -300,6 +300,20 @@ puede perder el `style` de la tarjeta al editar, check M7 «link card/promo pres
    EXIF/C2PA antes de publicar y mostrar badge.
 2. Infografía opcional (1/artículo) de la sección con pasos/cifras/comparación.
 3. Opción «usar solo mi biblioteca de medios». Embed de YouTube opcional (1/artículo).
+
+**Estado M6 (2026-11-18, hecho)**: `stripImageMetadata` (`infrastructure/storage/image-processing.ts`) re-codifica cada imagen
+generada sin EXIF/XMP/IPTC/C2PA (aplica antes la orientación EXIF; formatos desconocidos intactos) antes de guardarla;
+`content_image.metadata_stripped` (migración `20261118120000`) alimenta el badge «No AI watermark metadata» de la portada.
+Alt de cuerpo = encabezado de la sección + keyword si no la contiene (`inlineAlt`). Ajustes **Visuals** en
+`article_targets.visuals` (`editorial-engine/visuals.ts`): instrucciones de imagen, estilo de portada y de cuerpo
+(realista | ilustración | editorial | minimal | «solo mi biblioteca»), infografía y YouTube; Settings › Writing tiene la tarjeta.
+El worker añade estilo + instrucciones al prompt. «Solo mi biblioteca» rellena los huecos de cuerpo con imágenes ya
+generadas del sitio (más palabras en común con la sección primero, nunca repetidas) sin generar nada. Infografía: 1 por
+artículo, solo si una sección tiene `<ol>` o `<table>`; ese hueco se genera con un prompt de infografía de sus pasos/filas
+(`data-auctorio-infographic`). YouTube: el primer vídeo de la SERP de YouTube de DataForSEO para la keyword (opcionalmente
+solo del canal del sitio; caché 7 días, gasto `youtube_video`), insertado antes del 2.º H2 como `<figure data-block="youtube">`
+con miniatura enlazada (sin iframe ni JS: pasa el sanitizer y los publishers). Recuento de imágenes sin cambios (portada +
+`INLINE_IMAGE_MIN` = 3 de cuerpo; objetivo `images` 5). Test: `tests/visuals.test.ts`.
 
 ### M7 — QA «Built for AI Search» y panel del artículo
 
@@ -339,6 +353,23 @@ y descargo. Se guarda en `article_targets.writing` (`structure.ts readWritingSet
 CTAs, Business details, Branding (resto de M8), checks M7 nuevos, editor con toolbar completa, badge C2PA, export Markdown,
 aplicar los ajustes también a artículos manuales y de noticias.
 
+**Estado M7 + M8 (2026-11-18, cerrado)**: editor (`AuRichEditorComponent`) con U/S, separador, imagen (URL + alt), YouTube
+(miniatura enlazada), alineación (`text-align` inline, que ambos sanitizers conservan) y «Save & close»; su sanitizer ya no
+borra `aside`/`nav` (link card, resumen, TOC). Sin H1 en el cuerpo: el H1 es el título. Export Markdown (`utils/html-to-markdown.ts`)
+junto a Export HTML. Checklist: la tabla solo se exige si la keyword o algún H2 compara opciones (`comparesOptions`) y la
+link card cuando el switch está activo. Los rangos de meta tags siguen en 35–70 / 110–165 (coinciden con el redactor,
+`seo-package` y QA; endurecerlos a 35–60 / 140–160 haría fallar artículos que el redactor genera bien). Settings › Writing
+agrupa Writing, Visuals, CTAs, Business details y Branding, con accesos a Competitors, Saved pages y Publishing days. Las
+noticias (clusters) y los artículos manuales reciben las reglas de escritura del sitio y el formato de enlaces internos
+(sin la caja de resumen, que su plantilla no tiene).
+
+**Sobras de M2–M4 (2026-11-18)**: Add keywords asigna `listicle`/`explainer` e intención comercial/informativa
+(`keywordContentType`). Keywords sin datos en Labs: volumen de Google Ads (`keywords_data/google_ads/search_volume`, solo
+volumen, fuente `dataforseo_google_ads`, caché 30 días). Candidatas: semillas de `ContentOpportunity` abiertas, se descartan
+las keywords por las que el propio dominio ya posiciona (`ranked_keywords` del sitio) y la dificultad alcanzable es el p75 de
+la KD de esas keywords (20–60; 30 si se conocen <10). Fuentes: el editor de «Título, Editor» es el `og:site_name` de la
+página leída cuando existe (si no, el dominio). Pendiente real: medir BLG con sesión iniciada.
+
 ### Fuera de alcance (por ahora)
 
 Improvements automáticas de artículos >90 días, catálogo de productos, Reddit/Quora/Meta, backlinks,
@@ -358,7 +389,77 @@ programas de referidos.
 - Tests focales verdes (structure, qa/quality-checklist, plan keywords, provider con fake) y
   `graphify update .` ejecutado.
 
+**Estado aceptación (2026-11-18, hecha — evidencia en `docs/acceptance/blg-parity-2026-11-18.md`)**: artículo «canales de
+televisión gratis» generado desde el plan en local (proyecto `52eb13b6…`): v3 cumple 10/10 checks, resumen, TOC, 9 H2
+subconsulta, tabla, 28 internos reales del sitemap, 25 externos todos en Fuentes, 5 FAQ, link card, promo, 5 recomendaciones,
+portada + 3 imágenes con alt y sin metadatos, JSON-LD válido, title de 55 y slug `canales-de-television-gratis`. Calendario,
+Add keywords, Cambiar tema, Añadir instrucciones y Eliminar funcionan; ningún volumen sin `keywordMetricsSource`. Arreglados:
+fallback de IA + modelo por uso en Settings › AI (la cuenta Anthropic no tenía saldo; DeepSeek escribió), recuento de internos
+con URLs absolutas del propio dominio, slug ≤60 desde la keyword cortando por palabra, y Regenerate de una guía del plan que
+salía con plantilla de noticia. BLG medido con sesión (3 artículos, 10/10, 13–24 internos, 27–32 externos = 11–13 URLs,
+~2.000–2.200 palabras). Pendiente: longitud — v3 se quedó en ~1.500 palabras de cuerpo (v1: 2.341) con el mismo prompt; falta
+un paso «ampliar» cuando el cuerpo no llega al mínimo. La aceptación con Sonnet escribiendo queda pendiente de saldo.
+
 ## 5. Decisiones
 
 - Proveedor de métricas de keyword: **DataForSEO** (2026-11-17). Requiere cuenta y credenciales API
   del usuario en `.env` antes de probar M1 con datos reales.
+
+---
+
+## 6. Instrucciones para el agente (una sesión por milestone)
+
+Cada milestone se hace en una sesión nueva, con contexto `fresh`, sin worktree (`use_worktree: false`) y en la rama
+`feat/m6-final-cleanup`. La sesión relee este doc entero antes de empezar, porque las notas «Estado» cambian entre
+milestones, y se guía por lo que digan en ese momento.
+
+### 6.1 Normas (todas las sesiones)
+
+- Seguir el `CLAUDE.md` del proyecto: graphify primero (`graphify query` antes de grep o de leer código), el cambio
+  mínimo completo (ponytail full) y `graphify update .` al terminar. **No hay paso de revisión independiente.**
+- Reutilizar lo que ya existe (sección 0) y no duplicar modelos.
+- Tests focales: `npm run build`, luego `node --test dist/tests/<archivo>.test.js`, y `git checkout -- dist` al final.
+- **Todo test que gaste IA usa como máximo `claude-sonnet-5-5` con esfuerzo medio (Haiku vale; Opus nunca).** El modelo
+  por defecto de la app es Opus 5.5: cambiarlo en el sitio antes de generar contenido de prueba. Lo mismo vale para
+  cualquier subagente o sesión de test.
+- Sitio de pruebas: guiaprogramaciontv.com, con la BD local desechable (clon limpio de prod). Reutilizar su token,
+  nunca crear uno nuevo. Para limpiar entre pruebas: Delete en `/studio/plan` y en Settings › Sites.
+- Dev: `npm run dev` (Studio 4420, API 4301). Si el primer arranque falla por `taskkill`, repetirlo. Un puerto ocupado
+  nunca bloquea: reiniciar el proceso viejo.
+- Claves de IA y de DataForSEO: en el `.env` (gitignored). Nunca se commitean.
+- **Nunca inventar volumen de búsqueda ni dificultad.** Sin proveedor el valor es `null` y la UI muestra «—».
+- Terminado = milestone implementado, tests focales en verde, nota «Estado Mx (fecha, hecho)» en la sección 3 de este
+  doc, graphify actualizado y un commit en `feat/m6-final-cleanup` que termine con
+  `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Responder en español.
+
+### 6.2 Plantilla del brief
+
+> **Background**: Auctorio es una plataforma editorial con IA: backend Fastify + Prisma en `src/` y Studio en Angular en
+> `apps/studio-web`. El usuario quiere que los artículos y el plan de contenido estén a la par con BabyLoveGrowth (BLG),
+> siguiendo `docs/prompts/blg-article-parity.md`, un milestone por sesión, y cada sesión relee el plan por si se
+> actualizó. Hechos: <milestones cerrados, una línea cada uno>. Quedan: <pendientes>.
+>
+> **Task**: Implementa el milestone **<Mx — título>** de `docs/prompts/blg-article-parity.md`. Lee primero el doc entero:
+> las secciones <1.x relevantes>, 3·<Mx> y todas las notas «Estado». Punto de partida: <últimos commits y los ficheros
+> o símbolos donde empieza el trabajo>. <Mx> consiste en: <lista numerada del milestone>.
+>
+> **Reglas**: las de 6.1.
+>
+> **Terminado**: lo de 6.1.
+
+### 6.3 Siguiente sesión — Aceptación (sección 4) y medición de BLG
+
+M1–M8 están cerrados (ver notas «Estado»). Queda:
+
+1. **Aceptación de punta a punta** en local con guiaprogramaciontv.com y el sitio en Sonnet 5.5 (esfuerzo medio):
+   generar un artículo para «canales de televisión gratis» desde el plan y comprobar uno por uno los criterios de la
+   sección 4 (palabras, resumen, TOC, H2, tabla, internos reales del sitemap, externos en «Fuentes», FAQ, link card,
+   promo, recomendaciones, imágenes con alt y sin metadatos, JSON-LD, title, slug, 10/10 checks). Comprobar también el
+   calendario (keyword, Difficulty, Volume o «—», tipo; Add keywords deduplica y programa; Cambiar tema / Añadir
+   instrucciones / Eliminar) y que ningún volumen aparece sin `keywordMetricsSource`.
+2. Arreglar en el código compartido lo que falle (causa raíz, no el artículo), con su test focal.
+3. **Medir BLG con sesión iniciada** (Playwright, la sesión de la cuenta BLG del usuario; si pide login, se lo pide al
+   usuario, nunca se teclea la contraseña): recuento real de enlaces internos/externos, palabras, imágenes y checks de
+   2–3 artículos publicados, y comparar con el nuestro.
+4. Dejar la evidencia en `docs/acceptance/blg-parity-<fecha>.md` (tabla criterio → resultado, capturas si ayudan) y una
+   nota «Estado aceptación» en este doc. Commit como en 6.1.

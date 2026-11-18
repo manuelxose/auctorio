@@ -122,6 +122,7 @@ export async function chooseTool(message: string, ctx: AssistantContext, provide
     if (!providerOverride && !modelConfigured()) throw new Error("no language model configured");
     const result = await generateStructured({
       schemaName: "copilot_tool_choice",
+      use: "copilot",
       schema: choiceSchema,
       systemPrompt: TOOL_SYSTEM,
       prompt: [wrapUntrustedContent("studio-context", contextFacts(ctx)), wrapUntrustedContent("user-request", clampUntrustedContent(neutralizeInlineControlCharacters(message), 4000))].join("\n\n"),

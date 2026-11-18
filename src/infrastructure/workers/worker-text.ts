@@ -48,7 +48,7 @@ export async function runTextWorker() {
     async (job) => withAiTenant((job.data as TextJobData).tenantId, async () => {
       const data = job.data as TextJobData;
       // Resolved per job: each workspace may have chosen a different provider (Settings → AI).
-      const provider = getTextProvider();
+      const provider = getTextProvider("articles");
       await markJobProcessing(data.jobId);
       await prisma.contentText.update({
         where: { id: data.contentTextId },

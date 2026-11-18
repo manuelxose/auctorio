@@ -428,7 +428,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
     articleUrl: null,
   };
 
-  const provider = getTextProvider();
+  const provider = getTextProvider("social");
   let generated = 0;
 
   for (const social of pending) {

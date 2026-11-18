@@ -188,7 +188,7 @@ export async function planDiscovery(
   if (!context) {
     return null;
   }
-  const provider = getTextProvider();
+  const provider = getTextProvider("plans");
   const prompt = buildPlanPrompt(context);
   const result = await provider.generate({
     prompt: prompt.userPrompt,

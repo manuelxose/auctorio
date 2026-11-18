@@ -553,6 +553,7 @@ ${SOURCE_DATA_RULES}`;
       const result = await generateStructured({
         schemaName: EDITORIAL_PLAN_SCHEMA_NAME,
         schema: editorialPlanSchemaV2,
+        use: "plans",
         prompt: buildPromptV2(input, context, countOverride) + keywordAssignmentBlock(keywords, count) + (extraFeedback ?? ""),
         systemPrompt,
         temperature: 0.5,

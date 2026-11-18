@@ -5,8 +5,10 @@ import { AppIconComponent } from './ui/app-icon.component';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 
 type ProviderView = { id: string; label: string; description: string; keyEnv: string; configured: boolean; models: string[]; defaultModel: string | null; freeModel: boolean };
-type ProviderGroup = { selection: { provider: string; model: string } | null; environmentDefault: { provider: string; model: string | null }; providers: ProviderView[] };
-type ProvidersResponse = ProviderGroup & { tasks: { task: string; label: string; uses: string[] }[]; image: ProviderGroup };
+type Choice = { provider: string; model: string };
+type Selection = Choice & { uses?: Record<string, Choice>; fallback?: Choice | null };
+type ProviderGroup = { selection: Selection | null; environmentDefault: { provider: string; model: string | null }; providers: ProviderView[] };
+type ProvidersResponse = ProviderGroup & { tasks: { task: string; label: string; uses: string[] }[]; uses?: { key: string; label: string }[]; image: ProviderGroup };
 type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: number; sample?: string; error?: string };
 
 /** Settings → AI: which provider and model write (task="text") or draw (task="image") for this workspace. Keys live in the server env only. */
@@ -81,6 +83,31 @@ type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: n
           @if (t.ok) { Answered in {{ (t.latencyMs / 1000).toFixed(1) }} s by {{ t.model }}: “{{ t.sample }}” } @else { Test failed after {{ (t.latencyMs / 1000).toFixed(1) }} s: {{ t.error }} }
         </p>
       }
+      @if (task() === 'text' && current(); as c) {
+        <div class="aip__uses">
+          <h4 class="aip__title">Model per use</h4>
+          <p class="aip__sub">Each use can run on its own model. If a model fails (no credit, outage, timeout), the fallback runs, then any other provider with a key on the server.</p>
+          @for (u of data()?.uses ?? []; track u.key) {
+            <label class="au-field aip__row">
+              <span class="au-field__label">{{ u.label }}</span>
+              <select class="au-input au-select" [(ngModel)]="useChoice[u.key]" [name]="'use-' + u.key" [disabled]="!canEdit()">
+                <option value="">Same as above ({{ labelOf(c.provider) }} · {{ c.model }})</option>
+                @for (o of options(); track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+              </select>
+            </label>
+          }
+          <label class="au-field aip__row">
+            <span class="au-field__label">Fallback</span>
+            <select class="au-input au-select" [(ngModel)]="fallbackChoice" name="fallback" [disabled]="!canEdit()">
+              <option value="">Automatic (any other provider with a key)</option>
+              @for (o of options(); track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+            </select>
+          </label>
+          <div class="aip__actions">
+            <button class="au-btn au-btn--primary" type="button" (click)="saveUses()" [disabled]="!canEdit() || saving()">{{ saving() ? 'Saving…' : 'Save per-use models' }}</button>
+          </div>
+        </div>
+      }
       @if (!canEdit()) { <p class="aip__sub">Only workspace admins can change the model.</p> }
     </section>
   `,
@@ -107,6 +134,9 @@ type TestResult = { ok: boolean; provider?: string; model?: string; latencyMs: n
       .aip__actions { display: flex; gap: var(--au-s2); flex-wrap: wrap; }
       .aip__test { padding: var(--au-s3); border-radius: 10px; background: var(--au-success-soft); color: var(--au-text); font-size: var(--au-fs-body-sm); }
       .aip__test.is-bad { background: var(--au-danger-soft); }
+      .aip__uses { display: flex; flex-direction: column; gap: var(--au-s3); padding-top: var(--au-s4); border-top: 1px solid var(--au-border); }
+      .aip__row { display: grid; grid-template-columns: minmax(140px, 200px) minmax(0, 1fr); align-items: center; gap: var(--au-s3); margin: 0; }
+      @media (max-width: 600px) { .aip__row { grid-template-columns: 1fr; } }
     `,
   ],
 })
@@ -126,7 +156,15 @@ export class AiProviderSettingsComponent implements OnInit {
   readonly testing = signal(false);
   readonly error = signal<string | null>(null);
   readonly testResult = signal<TestResult | null>(null);
+  /** Every model of a provider with a key, as "provider|model" options. */
+  readonly options = computed(() =>
+    (this.data()?.providers ?? [])
+      .filter((p) => p.configured)
+      .flatMap((p) => (p.models.length ? p.models : p.defaultModel ? [p.defaultModel] : []).map((m) => ({ value: `${p.id}|${m}`, label: `${p.label} · ${m}` }))),
+  );
   model = '';
+  useChoice: Record<string, string> = {};
+  fallbackChoice = '';
 
   ngOnInit(): void {
     this.http.get<ProvidersResponse>(`${this.base}/providers`).subscribe({
@@ -137,6 +175,7 @@ export class AiProviderSettingsComponent implements OnInit {
         const fallback = group.providers.find((p) => p.configured);
         this.provider.set(chosen?.provider ?? fallback?.id ?? null);
         this.model = chosen?.model ?? fallback?.defaultModel ?? fallback?.models[0] ?? '';
+        this.readUses(response.selection);
       },
       error: (e: HttpErrorResponse) => this.error.set(this.describe(e)),
     });
@@ -171,6 +210,32 @@ export class AiProviderSettingsComponent implements OnInit {
         this.error.set(this.describe(e));
       },
     });
+  }
+
+  saveUses(): void {
+    const c = this.current();
+    if (!c) return;
+    const parse = (value: string): Choice | null => (value ? { provider: value.split('|')[0], model: value.slice(value.indexOf('|') + 1) } : null);
+    const uses = Object.fromEntries(Object.entries(this.useChoice).map(([key, value]) => [key, parse(value)]).filter(([, value]) => value));
+    this.saving.set(true);
+    this.error.set(null);
+    this.http.put<{ selection: Selection }>(`${this.base}/provider`, { provider: c.provider, model: c.model, uses, fallback: parse(this.fallbackChoice) }).subscribe({
+      next: (r) => {
+        this.saving.set(false);
+        this.data.update((d) => (d ? { ...d, selection: r.selection } : d));
+        this.readUses(r.selection);
+      },
+      error: (e: HttpErrorResponse) => {
+        this.saving.set(false);
+        this.error.set(this.describe(e));
+      },
+    });
+  }
+
+  private readUses(selection: Selection | null): void {
+    const key = (c?: Choice | null) => (c ? `${c.provider}|${c.model}` : '');
+    this.useChoice = Object.fromEntries((this.data()?.uses ?? []).map((u) => [u.key, key(selection?.uses?.[u.key])]));
+    this.fallbackChoice = key(selection?.fallback);
   }
 
   test(): void {

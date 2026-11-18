@@ -196,7 +196,7 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
  * cite URLs present in the allowed list.
  */
 export function createDefaultRepairProvider(): RepairProvider {
-  const provider = getTextProvider();
+  const provider = getTextProvider("repair");
   return {
     async repair(input: RepairProviderInput): Promise<RepairProviderResult> {
       const systemPrompt = [
