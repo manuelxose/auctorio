@@ -6,7 +6,9 @@ import { writeAudit } from "./audit";
 import {
   buildModePayload,
   clampRepairAttempts,
+  DEFAULT_AUTOMATION_MODE,
   isAutomationMode,
+  MODE_FLAGS,
   type AutomationMode,
 } from "./automation-mode";
 import { notifyOperators } from "./notifications";
@@ -29,12 +31,8 @@ export const AUTOMATION_DEFAULTS = {
   socialTimingMinutesInstagram: 60,
   imageRequired: true,
   socialRequired: true,
-  autoGenerate: false,
-  autoApprove: false,
-  autoSchedule: false,
-  autoPublish: false,
-  mode: "manual",
-  autoRepair: false,
+  ...MODE_FLAGS[DEFAULT_AUTOMATION_MODE],
+  mode: DEFAULT_AUTOMATION_MODE,
   maxRepairAttempts: 4,
 } as const;
 
@@ -56,7 +54,7 @@ export async function getOrCreatePolicy(tenantId: string, siteId: string | null)
     data: {
       tenantId,
       siteId,
-      enabled: false,
+      enabled: AUTOMATION_DEFAULTS.enabled,
       state: "active",
       timezone: AUTOMATION_DEFAULTS.timezone,
       articlesPerDay: AUTOMATION_DEFAULTS.articlesPerDay,

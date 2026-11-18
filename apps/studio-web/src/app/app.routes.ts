@@ -39,9 +39,9 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Calendar', title: 'Calendar' } },
       },
       {
-        path: 'editorial-plan',
+        path: 'plan',
         loadComponent: () => import('./pages/editorial-plan-page.component').then((m) => m.EditorialPlanPageComponent),
-        data: { studioMeta: { section: 'Editorial Plan', title: 'Editorial Plan' } },
+        data: { studioMeta: { section: 'Advanced', title: 'Plan backlog' } },
       },
       {
         path: 'competencies',
@@ -54,9 +54,9 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Site Intelligence', title: 'Site Intelligence' } },
       },
       {
-        path: 'publications',
+        path: 'results',
         loadComponent: () => import('./pages/publications-page.component').then((m) => m.PublicationsPageComponent),
-        data: { studioMeta: { section: 'Publications', title: 'Publications' } },
+        data: { studioMeta: { section: 'Results', title: 'Results' } },
       },
       {
         path: 'inbox',
@@ -64,9 +64,9 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Inbox', title: 'Inbox' } },
       },
       {
-        path: 'editorial-engine',
+        path: 'review-queue',
         loadComponent: () => import('./pages/editorial-engine-page.component').then((m) => m.EditorialEnginePageComponent),
-        data: { studioMeta: { section: 'Editorial Engine', title: 'Editorial Engine' } },
+        data: { studioMeta: { section: 'Advanced', title: 'Review queue' } },
       },
       {
         path: 'sources',
@@ -77,7 +77,7 @@ export const routes: Routes = [
       {
         path: 'automation',
         loadComponent: () => import('./pages/automation-page.component').then((m) => m.AutomationPageComponent),
-        data: { studioMeta: { section: 'Automation', title: 'Automation' } },
+        data: { studioMeta: { section: 'Settings', title: 'Mode & rhythm' } },
       },
       {
         path: 'media',
@@ -129,6 +129,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Admin', title: 'Admin' } },
       },
       {
+        path: 'settings/writing',
+        loadComponent: () => import('./pages/writing-settings-page.component').then((m) => m.WritingSettingsPageComponent),
+        data: { studioMeta: { section: 'Settings', title: 'Writing' } },
+      },
+      {
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
         canActivate: [studioRoleGuard],
@@ -136,6 +141,10 @@ export const routes: Routes = [
       },
 
       // ── Compatibility redirects (old surface → new destination) ─────
+      // M5: the calendar is the main screen; query params (?id=, ?projectId=) carry over.
+      { path: 'editorial-plan', redirectTo: 'calendar', pathMatch: 'full' },
+      { path: 'editorial-engine', redirectTo: '/studio/calendar?chip=review', pathMatch: 'full' },
+      { path: 'publications', redirectTo: 'results', pathMatch: 'full' },
       { path: 'dashboard', redirectTo: 'overview', pathMatch: 'prefix' },
       { path: 'projects', redirectTo: 'content', pathMatch: 'prefix' },
       { path: 'editorial', redirectTo: 'content', pathMatch: 'prefix' },
@@ -144,7 +153,7 @@ export const routes: Routes = [
       { path: 'review', redirectTo: 'content', pathMatch: 'prefix' },
       { path: 'publishing/scheduled', redirectTo: 'calendar', pathMatch: 'prefix' },
       // Publishing was a read-only subset of Publications (queue, published) and Connections (destinations).
-      { path: 'publishing', redirectTo: 'publications', pathMatch: 'full' },
+      { path: 'publishing', redirectTo: 'results', pathMatch: 'full' },
       { path: 'integrations', redirectTo: 'sources', pathMatch: 'prefix' },
       { path: 'analytics', redirectTo: 'overview', pathMatch: 'prefix' },
     ],

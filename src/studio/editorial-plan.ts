@@ -5,7 +5,6 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { SOURCE_DATA_RULES } from "./prompt-injection";
 import { writeAudit } from "./audit";
 import { createProject } from "./repository";
-import { startProjectGeneration } from "./orchestration";
 import { structuredEvent } from "../shared/utils/logger";
 import { getNumberEnv } from "../shared/utils/env";
 import { generateStructured, StructuredOutputError, type StructuredGenerationAttempt } from "../infrastructure/ai/structured";
@@ -21,6 +20,10 @@ import {
 import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPlanningContext, type PlanningStrategy } from "./editorial-plan-context";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
+import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
+import { collectKeywordCandidates, type KeywordCandidate } from "./keyword-candidates";
+import { normalizeKeyword } from "../infrastructure/seo/dataforseo";
+import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
@@ -48,6 +51,8 @@ export type GenerateEditorialPlanInput = {
   allowWithoutIntelligence?: boolean;
   /** Deterministic publication slots; when set, publicationCount must equal slots.length. */
   slots?: PlanSlot[];
+  /** Guide length (site article_targets.words, else 2,300); guide/tutorial items are sized from it. */
+  guideWords?: number;
   slotRequest?: PlanSlotRequest;
   /** Extend an existing plan instead of creating one: only `slots` are generated, everything else is kept. */
   append?: PlanAppendMode;
@@ -204,7 +209,7 @@ function isNearDuplicateTitle(candidate: string, existing: string[]): boolean {
  */
 export function postValidatePlanItems(
   items: EditorialPlanBriefV2[],
-  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy" | "slots">,
+  input: Pick<GenerateEditorialPlanInput, "dateFrom" | "dateTo" | "publicationCount" | "channels" | "strategy" | "slots" | "guideWords">,
   context: EditorialPlanningContext,
 ): PostValidationResult {
   const kept: EditorialPlanBriefV2[] = [];
@@ -296,6 +301,12 @@ export function postValidatePlanItems(
     }
     wordMin = Math.max(200, Math.min(wordMin, wordMax));
     wordMax = Math.max(wordMin, Math.min(wordMax, formatTargets.max * 1.5));
+    // Guides use the guide template (production/plan-item.ts mapArticleType): its length wins over the model's guess.
+    if (item.contentType === "guide" || item.contentType === "tutorial") {
+      const words = input.guideWords ?? GUIDE_TARGETS.words;
+      wordMin = Math.round(words * 0.87);
+      wordMax = Math.round(words * 1.13);
+    }
 
     // 9. Duplicate target queries inside the same batch.
     const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : null;
@@ -330,6 +341,50 @@ export function postValidatePlanItems(
     warnings.push("no relevant items survived post-validation");
   }
   return { kept: finalItems, dropped, warnings };
+}
+
+/** Prompt block handing the model the app-chosen keywords; it writes briefs, it does not pick keywords. */
+export function keywordAssignmentBlock(keywords: KeywordCandidate[], count: number): string {
+  if (!keywords.length) return "";
+  const lines = keywords.map((candidate) => `- "${candidate.keyword}"${candidate.variants.length ? ` (variants: ${candidate.variants.join(", ")})` : ""}`);
+  const rest = count - keywords.length;
+  return [
+    "",
+    `KEYWORDS ARE FIXED (measured search demand). Write exactly one item per keyword below, in this order. Use the keyword verbatim as primaryKeyword and targetQuery and put its variants in secondaryKeywords. Do not choose other keywords: you only write the brief (title, angle, outline, FAQ, contentType).`,
+    ...lines,
+    rest > 0 ? `Then write ${rest} more item(s) with keywords of your choice.` : "",
+  ].join("\n");
+}
+
+/**
+ * Pins briefs to their measured keyword: the app's score replaces the model's, variants join
+ * secondaryKeywords. When every requested item had a keyword, a brief with another keyword is dropped.
+ */
+export function applyMeasuredKeywords(
+  items: EditorialPlanBriefV2[],
+  assigned: KeywordCandidate[],
+  count: number,
+): { items: EditorialPlanBriefV2[]; dropped: Array<{ title: string; reason: string }> } {
+  if (!assigned.length) return { items, dropped: [] };
+  const byKeyword = new Map(assigned.map((candidate) => [candidate.keyword, candidate]));
+  const kept: EditorialPlanBriefV2[] = [];
+  const dropped: Array<{ title: string; reason: string }> = [];
+  for (const item of items) {
+    const candidate = byKeyword.get(normalizeKeyword(item.primaryKeyword ?? ""));
+    if (candidate) {
+      kept.push({
+        ...item,
+        targetQuery: candidate.keyword,
+        opportunityScore: candidate.score,
+        secondaryKeywords: [...new Set([...candidate.variants, ...(item.secondaryKeywords ?? [])])],
+      });
+    } else if (assigned.length >= count) {
+      dropped.push({ title: item.workingTitle, reason: `keyword not from measured candidates: ${item.primaryKeyword}` });
+    } else {
+      kept.push(item);
+    }
+  }
+  return { items: kept, dropped };
 }
 
 function buildPromptV2(input: GenerateEditorialPlanInput, context: EditorialPlanningContext, countOverride?: number): string {
@@ -482,23 +537,42 @@ ${SOURCE_DATA_RULES}`;
     let lastProvider = "unknown";
     let lastModel = "unknown";
 
-    const runOnce = async (extraFeedback?: string, countOverride?: number) =>
-      generateStructured({
+    // Measured keywords (DataForSEO) are handed out to calls in score order; none → the model picks (previous flow).
+    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, input.publicationCount * 2).catch(() => [] as KeywordCandidate[]);
+    const measured = new Map(keywordPool.map((candidate) => [candidate.keyword, candidate]));
+    let keywordCursor = 0;
+    const takeKeywords = (count: number) => {
+      const slice = keywordPool.slice(keywordCursor, keywordCursor + count);
+      keywordCursor += slice.length;
+      return slice;
+    };
+
+    const runOnce = async (extraFeedback?: string, countOverride?: number) => {
+      const count = countOverride ?? input.publicationCount;
+      const keywords = takeKeywords(count);
+      const result = await generateStructured({
         schemaName: EDITORIAL_PLAN_SCHEMA_NAME,
         schema: editorialPlanSchemaV2,
-        prompt: buildPromptV2(input, context, countOverride) + (extraFeedback ?? ""),
+        use: "plans",
+        prompt: buildPromptV2(input, context, countOverride) + keywordAssignmentBlock(keywords, count) + (extraFeedback ?? ""),
         systemPrompt,
         temperature: 0.5,
         maxTokens: 8000,
         maxAttempts: 3,
         eventContext: { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, siteType: context.site.type },
       });
+      return { ...result, keywords };
+    };
 
     const mergeBatch = mergePlanBatches;
     const avoidTitles = input.append?.avoidTitles ?? [];
     // Post-validation plus, when extending a plan, rejection of anything that repeats a proposal it already holds.
-    const validate = (items: EditorialPlanBriefV2[], count: number): PostValidationResult => {
-      const batch = postValidatePlanItems(items, { ...input, publicationCount: count }, context);
+    const planningSettings = input.siteId ? await prisma.sitePlanningSettings.findUnique({ where: { siteId: input.siteId }, select: { articleTargets: true } }) : null;
+    const guideWords = resolveArticleTargets(planningSettings?.articleTargets).words;
+    const validate = (raw: EditorialPlanBriefV2[], count: number, keywords: KeywordCandidate[]): PostValidationResult => {
+      const pinned = applyMeasuredKeywords(raw, keywords, count);
+      const validatedBatch = postValidatePlanItems(pinned.items, { ...input, guideWords, publicationCount: count }, context);
+      const batch = { ...validatedBatch, dropped: [...pinned.dropped, ...validatedBatch.dropped] };
       if (avoidTitles.length === 0) return batch;
       const avoidKeys = new Set(avoidTitles.map(normalizeSlug));
       const kept: EditorialPlanBriefV2[] = [];
@@ -552,7 +626,7 @@ ${SOURCE_DATA_RULES}`;
             attempts = [...attempts, ...result.attempts];
             lastProvider = result.attempts[result.attempts.length - 1].provider;
             lastModel = result.attempts[result.attempts.length - 1].model;
-            const batch = validate(result.data.items, chunkCount);
+            const batch = validate(result.data.items, chunkCount, result.keywords);
             validated = validated ? mergeBatch(validated, batch, input.publicationCount) : batch;
             structuredEvent("editorial_plan.generation.chunk_completed", {
               tenantId: input.tenantId,
@@ -614,7 +688,7 @@ ${SOURCE_DATA_RULES}`;
         attempts = [...attempts, ...retryResult.attempts];
         lastProvider = retryResult.attempts[retryResult.attempts.length - 1].provider;
         lastModel = retryResult.attempts[retryResult.attempts.length - 1].model;
-        validated = validate(retryResult.data.items, input.publicationCount);
+        validated = validate(retryResult.data.items, input.publicationCount, retryResult.keywords);
       } catch (error) {
         if (error instanceof StructuredOutputError) {
           await recordGenerationAttempts(input.tenantId, plan.id, input.siteId, error.attempts, "failed");
@@ -643,7 +717,7 @@ ${SOURCE_DATA_RULES}`;
             attempts = [...attempts, ...topUpResult.attempts];
             lastProvider = topUpResult.attempts[topUpResult.attempts.length - 1].provider;
             lastModel = topUpResult.attempts[topUpResult.attempts.length - 1].model;
-            return validate(topUpResult.data.items, missing);
+            return validate(topUpResult.data.items, missing, topUpResult.keywords);
           } catch (error) {
             if (!(error instanceof StructuredOutputError)) throw error;
             structuredEvent("editorial_plan.generation.topup_failed", { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, requested: input.publicationCount }, "warn");
@@ -694,6 +768,7 @@ ${SOURCE_DATA_RULES}`;
         if (removed.count !== 1) throw new Error("editorial_plan_item_not_replaceable");
       }
       for (const item of items) {
+        const metrics = measured.get(normalizeKeyword(item.primaryKeyword ?? ""));
         await tx.editorialPlanItem.create({
           data: {
             tenantId: input.tenantId,
@@ -738,6 +813,8 @@ ${SOURCE_DATA_RULES}`;
             recommendedWordCountMin: item.recommendedWordCountMin,
             recommendedWordCountMax: item.recommendedWordCountMax,
             difficultyEstimate: item.difficultyEstimate,
+            // Candidate metrics are already measured: no second provider call for these items.
+            ...(metrics ? { searchVolume: metrics.volume, keywordDifficulty: metrics.difficulty, keywordMetricsSource: metrics.source, keywordMetricsAt: new Date() } : {}),
             opportunityScore: item.opportunityScore,
             relevanceScore: item.relevanceScore,
             cannibalizationRisk: item.cannibalizationRisk,
@@ -774,6 +851,7 @@ ${SOURCE_DATA_RULES}`;
             warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
             requestedCount: requestedTotal,
             filledCount: filledTotal,
+            keywordSource: keywordPool.length ? "dataforseo" : "model",
             unfilledSlots,
           } as unknown as Prisma.InputJsonObject,
           error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
@@ -786,6 +864,9 @@ ${SOURCE_DATA_RULES}`;
         },
       });
     });
+
+    // Measured demand (volume + difficulty) when a keyword provider is configured; never blocks the plan.
+    await enrichPlanItemsWithKeywordMetrics(input.tenantId, plan.id);
 
     // Register target queries so future plans avoid cannibalization.
     const targetItems = items.filter((item) => item.targetQuery);
@@ -1251,15 +1332,21 @@ export async function updateEditorialPlanItem(
     if (missing.length) throw new Error(`editorial_plan_item_url_not_in_inventory: ${missing.slice(0, 3).join(", ")}`);
   }
   const metadata = (item.metadata && typeof item.metadata === "object" && !Array.isArray(item.metadata) ? item.metadata : {}) as Record<string, unknown>;
-  return prisma.editorialPlanItem.update({
+  const nextKeyword = input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null;
+  // A new keyword invalidates the measured demand of the old one.
+  const keywordChanged = nextKeyword !== undefined && nextKeyword !== item.primaryKeyword;
+  const updated = await prisma.editorialPlanItem.update({
     where: { id: item.id },
     data: {
+      ...(keywordChanged ? { searchVolume: null, keywordDifficulty: null, keywordMetricsSource: null, keywordMetricsAt: null } : {}),
       secondaryKeywords: input.secondaryKeywords === undefined ? undefined : input.secondaryKeywords?.length ? (input.secondaryKeywords as Prisma.InputJsonArray) : Prisma.JsonNull,
       relatedEntities: input.relatedEntities === undefined ? undefined : input.relatedEntities?.length ? (input.relatedEntities as Prisma.InputJsonArray) : Prisma.JsonNull,
       audience: input.audience === undefined ? undefined : input.audience?.trim() || null,
       suggestedSlug: input.suggestedSlug === undefined ? undefined : input.suggestedSlug?.trim() || null,
       sourceEvidence: input.sourceEvidence === undefined ? undefined : input.sourceEvidence?.length ? (input.sourceEvidence as unknown as Prisma.InputJsonArray) : Prisma.JsonNull,
-      metadata: input.generation === undefined ? undefined : ({ ...metadata, generation: input.generation ?? undefined } as Prisma.InputJsonObject),
+      metadata: input.generation === undefined
+        ? undefined
+        : ({ ...metadata, generation: input.generation === null ? undefined : { ...(metadata.generation && typeof metadata.generation === "object" ? metadata.generation : {}), ...input.generation } } as Prisma.InputJsonObject),
       title: input.title?.trim() || undefined,
       workingTitle: input.workingTitle === undefined ? undefined : input.workingTitle?.trim() || null,
       finalSuggestedTitle: input.finalSuggestedTitle === undefined ? undefined : input.finalSuggestedTitle?.trim() || null,
@@ -1270,7 +1357,7 @@ export async function updateEditorialPlanItem(
       editorialObjective: input.editorialObjective === undefined ? undefined : input.editorialObjective?.trim() || null,
       competitorAngle: input.competitorAngle === undefined ? undefined : input.competitorAngle?.trim() || null,
       scheduledFor: input.scheduledFor,
-      primaryKeyword: input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null,
+      primaryKeyword: nextKeyword,
       seoTitle: input.seoTitle === undefined ? undefined : input.seoTitle?.trim() || null,
       metaDescription: input.metaDescription === undefined ? undefined : input.metaDescription?.trim() || null,
       socialHook: input.socialHook === undefined ? undefined : input.socialHook?.trim() || null,
@@ -1299,6 +1386,9 @@ export async function updateEditorialPlanItem(
       freshnessRequirement: input.freshnessRequirement === undefined ? undefined : input.freshnessRequirement?.trim() || null,
     },
   });
+  if (!keywordChanged || !nextKeyword) return updated;
+  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId);
+  return (await prisma.editorialPlanItem.findUnique({ where: { id: item.id } })) ?? updated;
 }
 
 export async function setEditorialPlanItemStatus(
@@ -1343,6 +1433,17 @@ export async function bulkDeleteEditorialPlanItems(tenantId: string, itemIds: st
   return { deletedCount: itemIds.length };
 }
 
+/** Deletes a plan and its items; articles already written from it stay in Articles. */
+export async function deleteEditorialPlan(tenantId: string, planId: string, userId?: string | null) {
+  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId } });
+  if (!plan) return null;
+  if (plan.status === "generating") throw new Error("editorial_plan_busy");
+  const items = await prisma.editorialPlanItem.deleteMany({ where: { tenantId, planId: plan.id } });
+  await prisma.editorialPlan.delete({ where: { id: plan.id } });
+  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan.deleted", entityType: "editorial_plan", entityId: plan.id, metadata: { name: plan.name, items: items.count } });
+  return { ok: true as const, deletedItems: items.count };
+}
+
 export async function deleteEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
   if (!item) return null;
@@ -1358,6 +1459,8 @@ export type PlanItemGenerationSettings = {
   includeFaq?: boolean | null;
   includeImage?: boolean | null;
   instructions?: string | null;
+  /** A page the writer takes as a model, set from the calendar's instructions modal. */
+  referenceUrl?: string | null;
 };
 
 function jsonArray(value: unknown): unknown[] {
@@ -1378,6 +1481,7 @@ export function readGenerationSettings(metadata: unknown): PlanItemGenerationSet
   if (typeof record.includeFaq === "boolean") settings.includeFaq = record.includeFaq;
   if (typeof record.includeImage === "boolean") settings.includeImage = record.includeImage;
   if (typeof record.instructions === "string" && record.instructions.trim()) settings.instructions = record.instructions.trim();
+  if (typeof record.referenceUrl === "string" && record.referenceUrl.trim()) settings.referenceUrl = record.referenceUrl.trim();
   return settings;
 }
 
@@ -1441,6 +1545,7 @@ export function buildProjectInputFromPlanItem(item: BriefSourceItem, options: { 
     generation.includeImage !== undefined && generation.includeImage !== null ? `Imagen destacada: ${yesNo(generation.includeImage)}` : null,
     item.imageConcept && generation.includeImage !== false ? `Concepto de imagen: ${item.imageConcept}` : null,
     generation.instructions ? `Instrucciones adicionales: ${generation.instructions}` : null,
+    generation.referenceUrl ? `Pagina de referencia (tomala como modelo, no la copies): ${generation.referenceUrl}` : null,
     item.notes ? `Notas del editor: ${item.notes}` : null,
   ].filter((section): section is string => Boolean(section));
 
@@ -1487,17 +1592,19 @@ export function buildProjectInputFromPlanItem(item: BriefSourceItem, options: { 
   };
 }
 
-export async function generateContentFromEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
+/** Social plan items: a project from the item, written by the production pipeline. */
+export async function generateSocialForPlanItem(tenantId: string, itemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId }, include: { project: true, plan: { select: { configuration: true } } } });
   if (!item) return null;
-  if (item.projectId && item.project) return { item, project: item.project };
+  if (item.projectId && item.project) return { item, project: item.project, job: null };
   if (item.status !== "approved") throw new Error("editorial_plan_item_must_be_approved");
   if (!item.siteId) throw new Error("editorial_plan_item_site_required");
 
   const language = ((item.plan.configuration ?? {}) as { language?: unknown }).language;
   const project = await createProject(tenantId, buildProjectInputFromPlanItem(item, { language: typeof language === "string" ? language : "es" }));
   await prisma.editorialPlanItem.update({ where: { id: item.id }, data: { projectId: project.id, status: "generating", contentGenerationStatus: "generating" } });
-  await startProjectGeneration(project.id, tenantId);
-  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.content_generation_started", entityType: "editorial_plan_item", entityId: item.id, metadata: { projectId: project.id } });
-  return { item: await prisma.editorialPlanItem.findUnique({ where: { id: item.id } }), project };
+  const { startProductionForProject } = await import("./production/pipeline");
+  const job = await startProductionForProject(tenantId, project.id, { userId });
+  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.content_generation_started", entityType: "editorial_plan_item", entityId: item.id, metadata: { projectId: project.id, productionJobId: job.id } });
+  return { item: await prisma.editorialPlanItem.findUnique({ where: { id: item.id } }), project, job };
 }

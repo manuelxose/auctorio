@@ -9,7 +9,8 @@ import { getPrismaClient } from "../db/prisma";
 import { getImageProvider, ImageDownloadError, ImageGenerationResult } from "../ai/image";
 import { resolveImagePrompt } from "../../studio/prompts";
 import { saveImageAsset } from "../storage/local-storage";
-import { buildImageDerivatives } from "../storage/image-processing";
+import { buildImageDerivatives, stripImageMetadata } from "../storage/image-processing";
+import { imageStylePrompt, infographicPrompt, IMAGE_STYLES, type ImageStyle } from "../../studio/editorial-engine/visuals";
 import { syncImageResultToStudio, syncInlineImageToVersion } from "../../studio/orchestration";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
@@ -130,10 +131,19 @@ export async function runImageWorker() {
       });
 
       const size = typeof data.options?.size === "string" ? data.options.size : undefined;
-      const section = data.options?.image_role === "inline" && typeof data.options.section === "string" ? data.options.section : null;
-      let usedPrompt = section
-        ? `${prompt.userPrompt.replace(/^.*hero image.*$/gim, "").trim()}\nCreate an in-article editorial image that illustrates the section "${section}". Its own composition, distinct from the hero. No text, logos or watermarks in the image.`
-        : prompt.userPrompt;
+      const role = data.options?.image_role;
+      const section = (role === "inline" || role === "infographic") && typeof data.options?.section === "string" ? data.options.section : null;
+      // Site visuals settings (M6): style per role and the site's own image instructions.
+      const style = IMAGE_STYLES.includes(data.options?.image_style as ImageStyle) ? (data.options?.image_style as ImageStyle) : null;
+      const styleLine = imageStylePrompt(style, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "", typeof data.options?.brand_colors === "string" ? data.options.brand_colors : "");
+      let usedPrompt = role === "infographic" && section && typeof data.options?.section_text === "string"
+        ? [infographicPrompt(section, data.options.section_text, data.options?.language === "en" ? "en" : "es"), imageStylePrompt(null, typeof data.options?.image_instructions === "string" ? data.options.image_instructions : "", typeof data.options?.brand_colors === "string" ? data.options.brand_colors : "")].filter(Boolean).join("\n")
+        : [
+            section
+              ? `${prompt.userPrompt.replace(/^.*hero image.*$/gim, "").trim()}\nCreate an in-article editorial image that illustrates the section "${section}". Its own composition, distinct from the hero. No text, logos or watermarks in the image.`
+              : prompt.userPrompt,
+            styleLine,
+          ].filter(Boolean).join("\n");
       let result: ImageGenerationResult;
       try {
         result = await provider.generate({
@@ -154,10 +164,11 @@ export async function runImageWorker() {
       }
 
       const extension = extensionFromContentType(result.contentType);
+      const clean = await stripImageMetadata(result.bytes);
       const stored = await saveImageAsset({
         tenantId: data.tenantId,
         contentImageId: data.contentImageId,
-        bytes: result.bytes,
+        bytes: clean.bytes,
         extension,
       });
 
@@ -194,6 +205,7 @@ export async function runImageWorker() {
           prompt: usedPrompt,
           promptPresetVersionId: prompt.promptPresetVersionId,
           storagePath: stored.relativePath,
+          metadataStripped: clean.stripped,
           width,
           height,
           costUsd,

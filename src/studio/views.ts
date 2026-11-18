@@ -1,15 +1,10 @@
 import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
 import { buildAssetPublicUrl } from "./orchestration";
-import { getProjectById } from "./repository";
+import { getProjectById, isWebsiteDelivery, mapWebsiteDelivery } from "./repository";
 import type { PublicationExecutionState, StudioProjectDetailView, VersionSummary } from "./types";
 
 export type ProjectRecord = NonNullable<Awaited<ReturnType<typeof getProjectById>>>;
 export type ProjectVersionRecord = ProjectRecord["versions"][number];
-export type PublicationRecord = ProjectRecord["publicationJobs"][number];
-
-function parsePublicationTargetStatus(value: unknown): "draft" | "publish" | null {
-  return value === "draft" || value === "publish" ? value : null;
-}
 
 export function mapQaState(
   status: ProjectVersionRecord["status"],
@@ -28,38 +23,16 @@ export function mapQaState(
   }
 }
 
-export function mapPublicationState(
-  publication: Pick<
-    PublicationRecord,
-    | "id"
-    | "status"
-    | "action"
-    | "externalId"
-    | "externalUrl"
-    | "error"
-    | "createdAt"
-    | "updatedAt"
-    | "publishedAt"
-    | "requestPayload"
-  >,
-): PublicationExecutionState {
-  const requestPayload =
-    publication.requestPayload && typeof publication.requestPayload === "object"
-      ? (publication.requestPayload as Record<string, unknown>)
-      : null;
+/** Website deliveries of the project, newest first (the execution history the views show). */
+function websiteDeliveries(project: ProjectRecord) {
+  return project.publications
+    .filter(isWebsiteDelivery)
+    .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+}
 
-  return {
-    id: publication.id,
-    status: publication.status,
-    action: publication.action,
-    targetStatus: parsePublicationTargetStatus(requestPayload?.targetStatus),
-    externalId: publication.externalId,
-    externalUrl: publication.externalUrl,
-    error: publication.error,
-    createdAt: publication.createdAt,
-    updatedAt: publication.updatedAt,
-    publishedAt: publication.publishedAt,
-  };
+function latestDeliveryFor(project: ProjectRecord, versionId: string): PublicationExecutionState | null {
+  const delivery = websiteDeliveries(project).find((publication) => publication.versionId === versionId);
+  return delivery ? mapWebsiteDelivery(delivery) : null;
 }
 
 export function readPromptFields(version: ProjectVersionRecord) {
@@ -76,7 +49,7 @@ export function readPromptFields(version: ProjectVersionRecord) {
   };
 }
 
-export async function toVersionSummary(version: ProjectVersionRecord): Promise<VersionSummary> {
+export async function toVersionSummary(version: ProjectVersionRecord, project: ProjectRecord): Promise<VersionSummary> {
   return {
     id: version.id,
     versionNumber: version.versionNumber,
@@ -99,6 +72,7 @@ export async function toVersionSummary(version: ProjectVersionRecord): Promise<V
           id: version.contentImage.id,
           status: version.contentImage.status,
           error: version.contentImage.error,
+          metadataStripped: version.contentImage.metadataStripped,
         }
       : null,
     ...readPromptFields(version),
@@ -109,9 +83,7 @@ export async function toVersionSummary(version: ProjectVersionRecord): Promise<V
     repairAttempts: version.repairAttempts,
     autonomousGatePassed: version.autonomousGatePassed,
     autonomousGateReport: version.autonomousGateReport,
-    latestPublicationJob: version.publicationJobs[0]
-      ? mapPublicationState(version.publicationJobs[0] as PublicationRecord)
-      : null,
+    latestPublicationJob: latestDeliveryFor(project, version.id),
     qaReport: version.qaReport,
   };
 }
@@ -142,11 +114,11 @@ export function buildProjectReviewGate(project: ProjectRecord) {
 
 export async function toProjectDetail(project: ProjectRecord): Promise<StudioProjectDetailView> {
   const latestVersionRecord = project.versions[0] ?? null;
-  const latestVersion = latestVersionRecord ? await toVersionSummary(latestVersionRecord) : null;
+  const latestVersion = latestVersionRecord ? await toVersionSummary(latestVersionRecord, project) : null;
   const latestAssetUrl = await buildAssetPublicUrl(latestVersionRecord?.contentImage?.storagePath);
   const versions = await Promise.all(
     project.versions.map(async (version) => ({
-      ...(await toVersionSummary(version)),
+      ...(await toVersionSummary(version, project)),
       bodyHtml: version.bodyHtml,
     })),
   );
@@ -271,11 +243,7 @@ export async function toProjectDetail(project: ProjectRecord): Promise<StudioPro
         finishedAt: attempt.finishedAt,
       })),
     })),
-    latestPublicationJob: project.publicationJobs[0]
-      ? mapPublicationState(project.publicationJobs[0] as PublicationRecord)
-      : null,
-    publicationJobs: project.publicationJobs.map((publication) =>
-      mapPublicationState(publication as PublicationRecord),
-    ),
+    latestPublicationJob: websiteDeliveries(project)[0] ? mapWebsiteDelivery(websiteDeliveries(project)[0]) : null,
+    publicationJobs: websiteDeliveries(project).map(mapWebsiteDelivery),
   };
 }

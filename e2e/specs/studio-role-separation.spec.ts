@@ -47,7 +47,7 @@ test('admin keeps team, roles and System health; autopilot saves without opening
 
   await page.goto('/studio/operations', { waitUntil: 'networkidle' });
   await expect(page).toHaveURL(/\/studio\/operations/);
-  await expect(page.getByRole('tab', { name: 'Workers' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Workers', exact: true })).toBeVisible();
   await context.close();
 });
 
@@ -57,7 +57,7 @@ for (const [width, height] of [[1440, 900], [1024, 768], [390, 844]]) {
     const tools = await settingsTools(page);
     // The QA account is also a platform admin, so the "All workspaces" links may follow.
     await expect(tools.first()).toHaveText('Sites');
-    await expect(tools).toContainText(['Sites', 'Connections', 'Web discovery', 'Autopilot', 'Assistant tools']);
+    await expect(tools).toContainText(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools']);
     for (const hidden of ['People', 'Roles', 'System health']) await expect(tools.filter({ hasText: hidden })).toHaveCount(0);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/editor-settings-${width}.png` });
 

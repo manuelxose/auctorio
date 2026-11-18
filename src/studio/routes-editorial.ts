@@ -52,8 +52,11 @@ import {
   listPlanPresets,
   putSitePlanningSettings,
   siteTimezone,
+  type PlanningSettingsInput,
   updatePlanPreset,
 } from "./planning-settings";
+import { MAX_PLAN_KEYWORDS, addPlanKeywords } from "./plan-keywords";
+import { dataForSeoConfigured } from "../infrastructure/seo/dataforseo";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
 import { getEnv } from "../shared/utils/env";
@@ -80,6 +83,7 @@ import {
   bulkApproveEditorialPlanItems,
   bulkDeleteEditorialPlanItems,
   bulkSetEditorialPlanItemStatus,
+  deleteEditorialPlan,
   deleteEditorialPlanItem,
   enqueueEditorialPlanGeneration,
   enqueueFillMissingSlots,
@@ -983,7 +987,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const site = query.siteId && isUuid(query.siteId)
       ? await prisma.site.findFirst({ where: { id: query.siteId, tenantId: context.tenantId }, select: { timezone: true } })
       : null;
-    return reply.send({ items: events, timeZone: site?.timezone ?? null });
+    // keywordMetrics=false tells the calendar why Volume/Difficulty show "—".
+    return reply.send({ items: events, timeZone: site?.timezone ?? null, keywordMetrics: dataForSeoConfigured() });
   });
 
   // ──────────────────────────────────────────────────────────── Social
@@ -1736,6 +1741,20 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.delete("/v2/editorial-plans/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    try {
+      const deleted = await deleteEditorialPlan(context.tenantId, planId, context.userId);
+      if (!deleted) return notFound(reply, "editorial plan not found");
+      return reply.send(deleted);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
   // ──────────────────────────────────────────────────────────── Planning presets & site defaults
 
   fastify.get("/v2/editorial-plan-presets", async (request, reply) => {
@@ -1821,6 +1840,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
             publishTimes: strings(body.publishTimes),
             channels: strings(body.channels),
             defaultPresetId: body.defaultPresetId as string | null | undefined,
+            articleTargets: body.articleTargets as PlanningSettingsInput["articleTargets"],
           },
           context.userId,
         ),
@@ -1829,6 +1849,21 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       const message = error instanceof Error ? error.message : String(error);
       return message === "site_not_found" ? notFound(reply, message) : badRequest(reply, message);
     }
+  });
+
+  // Calendar "Add keywords": up to 50, duplicates and off-topic ones are dropped.
+  fastify.post("/v2/sites/:id/plan-keywords", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const { keywords } = parseBody<{ keywords?: unknown }>(request);
+    if (!Array.isArray(keywords) || keywords.length === 0 || keywords.length > MAX_PLAN_KEYWORDS || keywords.some((keyword) => typeof keyword !== "string" || keyword.length > 160)) {
+      return badRequest(reply, `keywords must be 1-${MAX_PLAN_KEYWORDS} strings of up to 160 characters`);
+    }
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { id: true } });
+    if (!site) return notFound(reply, "site not found");
+    return reply.send(await addPlanKeywords(context.tenantId, siteId, keywords as string[], context.userId));
   });
 
   // Inventory the drawer may pick internal links / evidence from; PATCH re-validates every new URL server-side.
@@ -1866,6 +1901,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const wordMin = body.recommendedWordCountMin;
     const wordMax = body.recommendedWordCountMax;
     if (typeof wordMin === "number" && typeof wordMax === "number" && wordMin > wordMax) return badRequest(reply, "recommendedWordCountMin cannot exceed recommendedWordCountMax");
+    const referenceUrl = optionalText(generation?.referenceUrl, 500);
+    if (referenceUrl && !/^https?:\/\/[^\s]+$/i.test(referenceUrl)) return badRequest(reply, "referenceUrl must be an http(s) URL");
     const updated = await updateEditorialPlanItem(context.tenantId, itemId, {
       title: typeof body.title === "string" ? body.title : undefined,
       workingTitle: stringOrNull(body.workingTitle),
@@ -1883,7 +1920,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         ? undefined
         : generation === null
           ? null
-          : { tone: optionalText(generation.tone, 80), includeFaq: optionalBool(generation.includeFaq), includeImage: optionalBool(generation.includeImage), instructions: optionalText(generation.instructions, 2000) },
+          : {
+              // Only the keys sent change: the calendar modal sends instructions and referenceUrl, the drawer sends all.
+              ...("tone" in generation ? { tone: optionalText(generation.tone, 80) } : {}),
+              ...("includeFaq" in generation ? { includeFaq: optionalBool(generation.includeFaq) } : {}),
+              ...("includeImage" in generation ? { includeImage: optionalBool(generation.includeImage) } : {}),
+              ...("instructions" in generation ? { instructions: optionalText(generation.instructions, 2000) } : {}),
+              ...("referenceUrl" in generation ? { referenceUrl: referenceUrl ?? null } : {}),
+            },
       primaryKeyword: stringOrNull(body.primaryKeyword),
       seoTitle: stringOrNull(body.seoTitle),
       metaDescription: stringOrNull(body.metaDescription),

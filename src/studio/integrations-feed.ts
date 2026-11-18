@@ -3,6 +3,9 @@ import type { ContentImage, ContentProject, ContentVersion, Site } from "@prisma
 import { buildAssetPublicUrl } from "./orchestration";
 import { sanitizeEditorialHtml } from "./html-sanitizer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { buildArticleJsonLd, buildFaqJsonLd } from "./editorial-engine/json-ld";
+
+export { buildArticleJsonLd, buildFaqJsonLd };
 
 /**
  * Public article feed for client sites that pull their content instead of receiving a push
@@ -57,13 +60,6 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 
 const clean = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
 
-const withoutEmpty = (input: Record<string, unknown>): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(input).filter(([, value]) => {
-    if (value === undefined || value === null || value === "") return false;
-    if (Array.isArray(value) && value.length === 0) return false;
-    return true;
-  }));
-
 export function slugifyTitle(value: string): string {
   return value
     .toLowerCase()
@@ -87,48 +83,6 @@ export function feedFaqItems(source: FeedArticleSource): FeedFaqItem[] {
     .map((item) => asRecord(item))
     .filter((item) => clean(item.question) && clean(item.answer))
     .map((item) => ({ question: clean(item.question), answer: clean(item.answer) }));
-}
-
-export function buildFaqJsonLd(items: FeedFaqItem[]): Record<string, unknown> | null {
-  if (!items.length) return null;
-  return {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    mainEntity: items.map((item) => ({
-      "@type": "Question",
-      name: item.question,
-      acceptedAnswer: { "@type": "Answer", text: item.answer },
-    })),
-  };
-}
-
-export function buildArticleJsonLd(input: {
-  title: string;
-  description: string;
-  image: string;
-  publishedAt: string;
-  modifiedAt: string;
-  languageCode: string;
-  url: string;
-  publisherName: string;
-  publisherUrl: string;
-}): Record<string, unknown> {
-  return withoutEmpty({
-    "@context": "https://schema.org",
-    "@type": "Article",
-    headline: input.title,
-    description: input.description,
-    image: input.image ? [input.image] : [],
-    datePublished: input.publishedAt,
-    dateModified: input.modifiedAt,
-    inLanguage: input.languageCode,
-    mainEntityOfPage: input.url,
-    url: input.url,
-    author: input.publisherName ? { "@type": "Organization", name: input.publisherName } : undefined,
-    publisher: input.publisherName
-      ? withoutEmpty({ "@type": "Organization", name: input.publisherName, url: input.publisherUrl })
-      : undefined,
-  });
 }
 
 /**

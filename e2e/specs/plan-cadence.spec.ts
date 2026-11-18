@@ -16,7 +16,7 @@ test('STUDIO-06: plan page keeps proposals separate from the Calendar and stays 
 
   for (const [width, height] of [[1440, 900], [1024, 768], [390, 844]]) {
     await page.setViewportSize({ width, height });
-    await page.goto('/studio/editorial-plan', { waitUntil: 'networkidle' });
+    await page.goto('/studio/plan', { waitUntil: 'networkidle' });
     await expect(page.getByText('Dates and publishing live in Calendar.')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Open calendar' })).toBeVisible();
     await page.screenshot({ path: `test-results/plan-${width}.png`, fullPage: true });
@@ -25,7 +25,7 @@ test('STUDIO-06: plan page keeps proposals separate from the Calendar and stays 
   // Opening the generator is a pure UI action: it must not create plans or publications.
   const before = await (await context.request.get('/studio/api/v2/editorial-plans')).text();
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/studio/editorial-plan?new=1', { waitUntil: 'networkidle' });
+  await page.goto('/studio/plan?new=1', { waitUntil: 'networkidle' });
   await page.screenshot({ path: 'test-results/plan-generator-1440.png', fullPage: true });
   const after = await (await context.request.get('/studio/api/v2/editorial-plans')).text();
   expect(after).toBe(before);

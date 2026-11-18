@@ -2,6 +2,7 @@
 // parsed article and the brief. The engine never manufactures search
 // volume and never stuffs keywords.
 
+import { load } from "cheerio";
 import type {
   EditorialBrief,
   EngineInternalLink,
@@ -10,14 +11,45 @@ import type {
 } from "./types";
 
 export function slugify(value: string, maxLength = 90): string {
-  return value
+  const slug = value
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, maxLength)
-    .replace(/-+$/g, "");
+    .replace(/^-+|-+$/g, "");
+  if (slug.length <= maxLength) return slug;
+  // Cut at a word boundary, never mid-word ("\u2026-final-de-ma"); a single long word is cut as is.
+  const cut = slug.slice(0, maxLength + 1);
+  const boundary = cut.lastIndexOf("-");
+  return (boundary > 0 ? cut.slice(0, boundary) : slug.slice(0, maxLength)).replace(/-+$/g, "");
+}
+
+/**
+ * Deterministic table of contents from the article's H2s (guides): each H2 gets a stable id and
+ * a `<nav data-block="toc">` goes after the summary box (or the first paragraph). Re-running replaces it.
+ */
+export function withTableOfContents(html: string, language: "es" | "en" = "es"): string {
+  const $ = load(html, null, false);
+  $('nav[data-block="toc"]').remove();
+  const headings = $("h2").filter((_index, el) => $(el).closest("aside, nav").length === 0);
+  if (headings.length < 3) return $.html();
+  const used = new Set<string>();
+  const items: string[] = [];
+  headings.each((index, el) => {
+    const node = $(el);
+    const text = node.text().replace(/\s+/g, " ").trim();
+    let id = slugify(text, 60) || `seccion-${index + 1}`;
+    for (let n = 2; used.has(id); n += 1) id = `${slugify(text, 60)}-${n}`;
+    used.add(id);
+    node.attr("id", id);
+    items.push(`<li><a href="#${id}">${$("<span>").text(text).html()}</a></li>`);
+  });
+  const nav = `<nav data-block="toc"><p><strong>${language === "es" ? "Índice" : "Contents"}</strong></p><ol>${items.join("")}</ol></nav>`;
+  const anchor = $('aside[data-block="summary"]').first();
+  if (anchor.length) anchor.after(nav);
+  else if ($("p").first().length) $("p").first().after(nav);
+  else $.root().prepend(nav);
+  return $.html();
 }
 
 export function stripHtml(value: string): string {
@@ -33,6 +65,17 @@ export function stripHtml(value: string): string {
 
 export function wordCount(value: string): number {
   return value.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/** Words of the article itself, as BLG's panel counts them: without TOC, cards, summary box, Sources and Recommended reads. */
+export function bodyWordCount(html: string): number {
+  const $ = load(html, null, false);
+  $("nav, aside").remove();
+  $("h2").filter((_, el) => /^(fuentes|sources|lecturas recomendadas|recommended read|recomendaciones)/i.test($(el).text().trim())).each((_, el) => {
+    $(el).nextUntil("h2").remove();
+    $(el).remove();
+  });
+  return wordCount(stripHtml($.html()));
 }
 
 function truncateWords(value: string, maxWords: number): string {
@@ -125,7 +168,8 @@ export function buildSeoPackage(input: SeoInput): SeoPackage {
   const h1 = (article.h1 || article.title).trim();
   const seoTitle = buildSeoTitle(article, brief);
   const metaDescription = buildMetaDescription(article, brief);
-  const slug = slugify(article.title || h1 || primaryKeyword || "articulo");
+  // Guides: short, stable slug from the keyword ("canales-de-television-gratis"); news keep the headline (keywords repeat across them).
+  const slug = slugify((brief.articleTargets && primaryKeyword) || article.title || h1 || primaryKeyword || "articulo", 60);
 
   const entityCoverage = brief.entities.map((entity) => {
     const occurrences = countOccurrences(bodyText, entity.name);

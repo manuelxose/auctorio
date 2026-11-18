@@ -18,6 +18,7 @@ export const ARTICLE_TYPES = [
   "tv_programming",
   "review_info",
   "evergreen_explainer",
+  "guide",
   "list_ranking",
   "what_to_watch",
   "article_update",
@@ -162,6 +163,8 @@ export type EditorialBrief = {
   freshnessConstraints: string[];
   contentWarnings: string[];
   generatedAt: string;
+  /** Guide targets and section switches (site override, then plan item override). */
+  articleTargets?: import("./structure").ArticleTargets;
 };
 
 // ────────────────────────────────────────────────────────────── Article

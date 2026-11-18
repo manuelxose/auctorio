@@ -1,41 +1,42 @@
-# Studio navigation (current, STUDIO-09, 2026-11-15)
+# Studio navigation (M5, 2026-11-17)
 
-One registry, `apps/studio-web/src/app/layout/studio-nav.ts` (`STUDIO_NAV`), drives the area bar, the contextual sidebar, the step bar / "Next step" footer and the command palette. Each route appears exactly once (unit test `studio-nav.spec.ts`).
+One registry, `apps/studio-web/src/app/layout/studio-nav.ts` (`STUDIO_NAV`), drives the area bar, the contextual sidebar and the command palette. Each route appears exactly once (unit test `studio-nav.spec.ts`). The numbered guided flow (step bar, "Next step" footer) was removed in M5.
 
 ## Top bar (global)
 
-Sidebar toggle · brand (→ Overview) · site switcher (`AppContextService.switchSite`) · search / command palette (Ctrl/⌘K) · background jobs (live count) · notifications preview · New content (the only "New content" in the shell; Overview no longer repeats it) · account menu (Profile, Appearance, Log out).
+Sidebar toggle · brand (→ Overview) · site switcher (`AppContextService.switchSite`) · search / command palette (Ctrl/⌘K) · background jobs (live count) · notifications preview · New content · account menu (Profile, Appearance, Log out).
 
 ## Area bar (primary)
 
-`Home` · `1 Understand the site` · `2 Sources` · `3 Plan` · `4 Produce` · `5 Publish` · … · `Settings` (pushed to the far end, outside the numbered flow). The active area has `aria-current=page`; on phones the bar scrolls sideways and the active area is scrolled into view on every page activation.
+`Home` · `Calendar` · `Articles` · `Results` · … · `Advanced` · `Settings` (the last two pushed to the far end). The active area has `aria-current=page`; on phones the bar scrolls sideways and the active area is scrolled into view.
 
 ## Contextual sidebar (secondary)
 
-The active area's tools, then the assistant (embedded by owner decision — the right-hand dock was reverted in `ff50b77`; do not reintroduce it without asking).
+The active area's tools, then the assistant (embedded by owner decision; do not reintroduce the right-hand dock without asking).
 
 | Area | Sidebar entries |
 |---|---|
-| Home | Overview, Notifications, Background jobs |
-| Understand the site | Site intelligence, Competitors |
-| Sources | Sources, Inbox |
-| Plan | Editorial plan |
-| Produce | Content, Review queue, Media |
-| Publish | Calendar, Publications |
-| Settings | Sites, (admins) People, (admins) Roles, Connections, Web discovery, Autopilot (read-only for non-admins), Assistant tools · (admins) System health · (platform admins) Usage, Workspaces, AI providers |
+| Home | Overview, Notifications |
+| Calendar | Calendar (`/studio/calendar`) |
+| Articles | Articles (`/studio/content`) |
+| Results | Results (`/studio/results`) |
+| Advanced | Site · Site intelligence, Competitors · News · Sources (Technical settings is its last section), Inbox · Production · Plan backlog (`/studio/plan`), Review queue (`/studio/review-queue`), Media, Background jobs |
+| Settings | Business & brand · Sites · Articles · Mode & rhythm · Integrations · Connections, Web discovery, Assistant tools · Workspace · (admins) People, Roles · (admins) System health · (platform admins) Usage, Workspaces, AI providers |
 | Profile (account menu only) | Profile |
 
-Platform-admin entries are filtered client-side for display only; the server still enforces access. Since STUDIO-10, `adminOnly` items (People, Roles, System health) are hidden from non-admin workspace roles in the sidebar and the command palette, their routes send non-admins to Overview (`studioRoleGuard` with `requiredRole` / `adminSections`), and the API answers 403 without `workspace.manage` for worker, queue, metrics, cost and preflight reads.
+Redirects: `/studio/editorial-plan` → `/studio/calendar`, `/studio/editorial-engine` → `/studio/calendar?chip=review`, `/studio/publications` → `/studio/results` (query params kept).
+
+Platform-admin entries are filtered client-side for display only; the server still enforces access. `adminOnly` items are hidden from non-admin roles and their routes send non-admins to Overview (`studioRoleGuard`).
 
 ## Keyboard and focus
 
-Ctrl/⌘K palette (Esc closes, focus returns to the trigger) · Ctrl/⌘J toggles the assistant (closing returns focus to the "Assistant" launcher) · Arrow/Home/End move between sidebar entries · phone drawer: focus moves in, Esc/backdrop closes, focus returns to the menu button.
+Ctrl/⌘K palette (Esc closes, focus returns to the trigger) · Ctrl/⌘J toggles the assistant · Arrow/Home/End move between sidebar entries · phone drawer: focus moves in, Esc/backdrop closes, focus returns to the menu button.
 
 ## Breakpoints
 
 | Width | Sidebar | Assistant |
 |---|---|---|
-| ≥ 861 | 332 px column, toggle hides it entirely (preference persisted) | lower part of the sidebar; area tools stay on top (max 46 % height, scrolls) |
+| ≥ 861 | 332 px column, toggle hides it entirely (preference persisted) | lower part of the sidebar |
 | ≤ 860 | drawer | inside the drawer |
 
-Evidence: `evidence/studio-09/` (before vs after at 1440/1024/390), e2e `e2e/specs/studio-shell-nav.spec.ts`.
+Evidence: `evidence/m5/`, e2e `e2e/specs/studio-shell-nav.spec.ts` and `e2e/specs/calendar-m5.spec.ts`.

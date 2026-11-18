@@ -4,7 +4,6 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { structuredEvent } from "../shared/utils/logger";
 import { writeAudit } from "./audit";
 import { approveVersion, createProject, ensureProjectTopic } from "./repository";
-import { startProjectGeneration } from "./orchestration";
 import { createSocialGenerationJobs } from "./social";
 import { createPublication } from "./publication";
 import { findDuplicateCoverage } from "./editorial";
@@ -19,7 +18,9 @@ import { countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review"
 import { runQualityRepairCycle } from "./quality-repair";
 import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import type { QaReportV2 } from "./qa";
-import type { AutomationMode } from "./automation-mode";
+import { PLAN_LEAD_TIME_MINUTES, type AutomationMode } from "./automation-mode";
+import { bulkApproveEditorialPlanItems } from "./editorial-plan";
+import { startProductionForPlanItem, startProductionForProject } from "./production/pipeline";
 
 const prisma = getPrismaClient();
 
@@ -109,7 +110,7 @@ export type CreateProjectFromSourceItemInput = {
 export type CreateProjectFromSourceItemResult = {
   kind: "created" | "update";
   projectId: string;
-  versionId: string | null;
+  productionJobId: string;
   coveredByProjectId?: string;
 };
 
@@ -141,7 +142,11 @@ export async function createProjectFromSourceItem(
       project_id: coverage.project.id,
       source_item_id: item.id,
     });
-    const result = await startProjectGeneration(coverage.project.id, tenantId);
+    const update = `${coverage.project.brief}
+
+Nueva fuente: ${item.title}
+${(item.cleanedText ?? item.description ?? "").trim().slice(0, 3500)}`;
+    const job = await startProductionForProject(tenantId, coverage.project.id, { brief: update, userId: input.userId ?? null });
     await prisma.sourceItem.update({ where: { id: item.id }, data: { processingStatus: "processed" } });
     await prisma.contentProject.update({
       where: { id: coverage.project.id },
@@ -165,7 +170,7 @@ export async function createProjectFromSourceItem(
     return {
       kind: "update",
       projectId: coverage.project.id,
-      versionId: result.versionId,
+      productionJobId: job.id,
       coveredByProjectId: coverage.project.id,
     };
   }
@@ -208,7 +213,7 @@ export async function createProjectFromSourceItem(
     source_item_id: item.id,
   });
 
-  const result = await startProjectGeneration(project.id, tenantId);
+  const job = await startProductionForProject(tenantId, project.id, { userId: input.userId ?? null });
 
   await prisma.sourceItem.update({ where: { id: item.id }, data: { processingStatus: "selected" } });
   await markClusterSelected(tenantId, item.clusterId);
@@ -223,7 +228,7 @@ export async function createProjectFromSourceItem(
     metadata: { sourceItemId: item.id, sourceUrl: item.canonicalUrl },
   });
 
-  return { kind: "created", projectId: project.id, versionId: result.versionId };
+  return { kind: "created", projectId: project.id, productionJobId: job.id };
 }
 
 async function markClusterSelected(tenantId: string, clusterId: string | null) {
@@ -413,7 +418,7 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       // ── Legacy / assisted path (human approval semantics preserved). ──
       if (!latestVersion) {
         if (policy.autoGenerate) {
-          await startProjectGeneration(project.id, tenantId);
+          await startProductionForProject(tenantId, project.id);
           progress.projectsAdvanced += 1;
         }
         continue;
@@ -472,7 +477,7 @@ async function advanceAutopilotProject(
 
   if (!latestVersion) {
     if (policy.autoGenerate) {
-      await startProjectGeneration(project.id, tenantId);
+      await startProductionForProject(tenantId, project.id);
       await prisma.contentProject.update({
         where: { id: project.id },
         data: { automationSubstate: "generating" },
@@ -812,8 +817,51 @@ async function nextFreeSlot(
   return new Date(now.getTime() + 10 * 60_000);
 }
 
+const PLAN_ITEMS_PER_TICK = 3;
+
+/**
+ * Just-in-time plan production: approved website items whose slot is within
+ * the lead time start the article pipeline. Before that they stay a title,
+ * intent and keywords. Autopilot approves its own proposals for that window.
+ */
+export async function progressDuePlanItems(
+  policy: AutomationPolicy,
+  options: { now?: Date; start?: (tenantId: string, planItemId: string) => Promise<unknown> } = {},
+): Promise<number> {
+  if (!policy.siteId || (policy.mode !== "assisted" && policy.mode !== "autopilot")) return 0;
+  const now = options.now ?? new Date();
+  const start = options.start ?? startProductionForPlanItem;
+  const { tenantId, siteId } = policy;
+  const window = { tenantId, siteId, channel: "website" as const, scheduledFor: { lte: new Date(now.getTime() + PLAN_LEAD_TIME_MINUTES * 60_000) } };
+  if (policy.mode === "autopilot") {
+    const proposed = await prisma.editorialPlanItem.findMany({ where: { ...window, status: "proposed" }, select: { id: true } });
+    if (proposed.length) await bulkApproveEditorialPlanItems(tenantId, proposed.map((item) => item.id), null);
+  }
+  const startedToday = await prisma.productionJob.count({ where: { tenantId, siteId, kind: "plan_item", createdAt: { gte: startOfLocalDay(policy, now) } } });
+  const budget = Math.min(PLAN_ITEMS_PER_TICK, policy.articlesPerDay - startedToday);
+  if (budget <= 0) return 0;
+  const candidates = await prisma.editorialPlanItem.findMany({ where: { ...window, status: "approved", projectId: null }, orderBy: { scheduledFor: "asc" }, take: 50, select: { id: true } });
+  // A failed job returns its item to `approved`: only items never produced start here, retries stay manual.
+  const produced = new Set((await prisma.productionJob.findMany({ where: { tenantId, planItemId: { in: candidates.map((item) => item.id) } }, select: { planItemId: true } })).map((job) => job.planItemId));
+  let started = 0;
+  for (const item of candidates.filter((candidate) => !produced.has(candidate.id)).slice(0, budget)) {
+    try {
+      await start(tenantId, item.id);
+      started += 1;
+    } catch (error) {
+      structuredEvent("planner.plan_item_failed", { tenantId, planItemId: item.id, error: error instanceof Error ? error.message : String(error) }, "error");
+    }
+  }
+  return started;
+}
+
+async function hasActiveSources(tenantId: string, siteId: string | null): Promise<boolean> {
+  return (await prisma.contentSource.count({ where: { tenantId, enabled: true, ...(siteId ? { siteId } : {}) } })) > 0;
+}
+
 export type AutomationTickResult = {
   policiesProcessed: number;
+  planItemsStarted: number;
   candidatesSelected: number;
   projectsAdvanced: number;
   socialJobsCreated: number;
@@ -825,6 +873,7 @@ export type AutomationTickResult = {
 export async function runAutomationTick(): Promise<AutomationTickResult> {
   const result: AutomationTickResult = {
     policiesProcessed: 0,
+    planItemsStarted: 0,
     candidatesSelected: 0,
     projectsAdvanced: 0,
     socialJobsCreated: 0,
@@ -853,7 +902,10 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
       where: { tenantId, status: { in: ["draft", "ready", "scheduled"] } },
     });
 
-    if (policy.autoGenerate && websitePlanned < policy.articlesPerDay && pendingQueue < policy.maximumQueueSize) {
+    result.planItemsStarted += await progressDuePlanItems(policy);
+
+    // News sources are an Advanced feature: only sites with active Sources draft from SourceItems.
+    if (policy.autoGenerate && websitePlanned < policy.articlesPerDay && pendingQueue < policy.maximumQueueSize && (await hasActiveSources(tenantId, policy.siteId))) {
       const needed = Math.min(
         policy.articlesPerDay - websitePlanned,
         policy.maxArticlesPerDay - websitePlanned,

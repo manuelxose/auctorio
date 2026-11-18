@@ -5,6 +5,7 @@ import { ActivatedRoute, RouterLink } from '@angular/router';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
+import { ConfirmService } from '../services/confirm.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import type { AiUsageRow, DiscoverySettingsResponse, StudioRoleSummary, StudioSiteSummary, StudioUserSummary } from '../models/studio.models';
@@ -47,6 +48,9 @@ type SettingsSection = 'sites' | 'team' | 'roles' | 'discovery';
             <span class="au-row__meta">{{ site.baseUrl || '—' }}</span>
             <span class="au-badge au-badge--brand" *ngIf="site.id === activeSiteId">Active</span>
             <button class="au-btn" type="button" *ngIf="site.id !== activeSiteId" (click)="useSite(site.id)">Use</button>
+            <button class="au-btn au-btn--ghost au-btn--danger-ghost" type="button" (click)="deleteSite(site)" [attr.aria-label]="'Delete ' + site.name">
+              <app-icon name="trash"></app-icon>Delete
+            </button>
           </div>
         </section>
 
@@ -185,7 +189,7 @@ type SettingsSection = 'sites' | 'team' | 'roles' | 'discovery';
                 {{ runningDiscovery ? 'Running…' : 'Run discovery now' }}
               </button>
               <!-- Findings are reviewed in one place, next to each site's own recommendations. -->
-              <a class="au-btn au-btn--ghost" routerLink="/studio/sources">Review findings in Sources → Recommendations</a>
+              <a class="au-btn au-btn--ghost" routerLink="/studio/sources" [queryParams]="{ tab: 'recommendations' }">Review findings in Sources → Suggested for you</a>
             </div>
           </form>
         </section>
@@ -197,6 +201,7 @@ export class SettingsPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
+  private readonly confirm = inject(ConfirmService);
 
   readonly titles: Record<SettingsSection, string> = { sites: 'Sites', team: 'People', roles: 'Roles', discovery: 'Web discovery' };
   section: SettingsSection = 'sites';
@@ -352,6 +357,28 @@ export class SettingsPageComponent implements OnInit {
   async useSite(siteId: string): Promise<void> {
     await this.appContext.switchSite(siteId);
     this.load();
+  }
+
+  async deleteSite(site: StudioSiteSummary): Promise<void> {
+    const ok = await this.confirm.confirm({
+      title: `Delete ${site.name}?`,
+      message: `Its articles, editorial plans, settings and indexed pages are deleted from Auctorio. Nothing is removed from ${site.baseUrl || 'the destination website'}. This cannot be undone.`,
+      confirmLabel: 'Delete site',
+      danger: true,
+    });
+    if (!ok) return;
+    this.api.deleteSite(site.id).subscribe({
+      next: async (result) => {
+        this.toast.success(`${site.name} deleted (${result.projects} articles, ${result.plans} plans).`);
+        if (site.id === this.activeSiteId) {
+          const next = this.tenantSites.find((entry) => entry.id !== site.id);
+          if (next) await this.appContext.switchSite(next.id);
+          else await this.appContext.ensureSession(true);
+        }
+        this.load();
+      },
+      error: (err) => this.toast.error(err?.error?.message ? String(err.error.message) : 'The site could not be deleted.'),
+    });
   }
 
   rolesLabel(member: StudioUserSummary): string {

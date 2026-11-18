@@ -13,9 +13,11 @@ import {
   reviewProductionJob,
   startProduction,
   startProductionForPlanItem,
+  startProductionForProject,
 } from "../src/studio/production/pipeline";
 import { getDefaultProductionStages, setProductionStageOverrides } from "../src/studio/production/stages";
 import { listOperations } from "../src/studio/operations";
+import { listCalendarEvents } from "../src/studio/calendar";
 import { FakeWriter } from "./support/fake-editorial-writer";
 
 const prisma = getPrismaClient();
@@ -37,7 +39,7 @@ async function fixture() {
 }
 
 async function cleanup(tenantId: string) {
-  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "publicationJob", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "editorialPlan", "operation", "site"] as const) {
+  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
     await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where: { tenantId } });
   }
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
@@ -228,6 +230,210 @@ test("PROD-07b: a Spanish plan item gets Spanish template headings and its appro
     const findings = (version.qaReport as { findings: Array<{ key: string; passed: boolean; severity: string }> }).findings;
     const coverage = findings.find((finding) => finding.key === "outline_coverage");
     assert.deepEqual([coverage?.passed, coverage?.severity], [true, "error"]);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M1: an assisted plan item waits as ready in its slot; approval schedules it there", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 3 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const done = await getProductionJob(f.tenantId, job.id);
+    assert.equal(done!.status, "needs_review", done!.error ?? "");
+    const pending = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" } });
+    assert.equal(pending.status, "ready");
+    assert.equal(pending.scheduledFor?.toISOString(), slot.toISOString());
+
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const released = await prisma.publication.findUniqueOrThrow({ where: { id: pending.id } });
+    assert.equal(released.status, "scheduled");
+    assert.equal(released.manualOverride, true);
+    assert.equal(released.scheduledFor?.toISOString(), slot.toISOString());
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M1: approving after the slot passed publishes now; manual mode creates no publication", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: new Date(Date.now() - 3_600_000) } });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const before = Date.now();
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const released = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" } });
+    assert.equal(released.status, "scheduled");
+    assert.ok(released.scheduledFor!.getTime() >= before - 1000);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+
+  const m = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  await prisma.automationPolicy.create({ data: { tenantId: m.tenantId, siteId: m.siteId, mode: "manual", enabled: false } });
+  try {
+    const { job } = await startProduction(m.tenantId, { kind: "plan_item", planItemId: m.itemId }, { wait: true });
+    await reviewProductionJob(m.tenantId, job.id, { decision: "approve" }, null);
+    assert.equal(await prisma.publication.count({ where: { tenantId: m.tenantId } }), 0);
+  } finally {
+    await cleanup(m.tenantId);
+  }
+});
+
+test("M2: rewriting an existing project runs the pipeline into that project with the editor's feedback", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  const prompts: string[] = [];
+  const writer = new FakeWriter();
+  setArticleWriterFactory(() => ({ generate: async (input: Parameters<FakeWriter["generate"]>[0]) => (prompts.push(input.prompt), writer.generate(input)) }));
+  const project = await prisma.contentProject.create({ data: { tenantId: f.tenantId, siteId: f.siteId, title: "Series de misterio para maratonear", brief: "Guia propia de series de misterio", status: "draft" } });
+  try {
+    const job = await startProductionForProject(f.tenantId, project.id, { feedback: "Añade una tabla comparativa" });
+    const again = await startProductionForProject(f.tenantId, project.id);
+    assert.equal(again.id, job.id, "a run in flight is returned, not forked");
+    let done = await getProductionJob(f.tenantId, job.id);
+    for (let i = 0; i < 100 && done && ["queued", "running"].includes(done.status); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      done = await getProductionJob(f.tenantId, job.id);
+    }
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+    assert.ok(prompts.some((prompt) => prompt.includes("Añade una tabla comparativa")));
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: f.tenantId } }), 1);
+    assert.equal(await prisma.contentVersion.count({ where: { tenantId: f.tenantId, projectId: project.id } }), 1);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M2: a source-item project's stored facts reach the ledger, so its rewrite is not rejected as unsupported", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const topic = await prisma.topic.create({ data: { tenantId: f.tenantId, title: "Estrenos de series" } });
+  await prisma.fact.create({
+    data: {
+      tenantId: f.tenantId, topicId: topic.id, sourceType: "rss", sourceRef: "https://news-a.example/estrenos",
+      content: "La plataforma estrena tres series de misterio este viernes por la noche. La primera temporada tiene ocho episodios de una hora cada uno.",
+      contentHash: `facts-${f.tenantId}`,
+    },
+  });
+  const project = await prisma.contentProject.create({ data: { tenantId: f.tenantId, siteId: f.siteId, topicId: topic.id, title: "Estrenos de series de misterio este viernes", brief: "Noticia de estrenos", status: "draft" } });
+  try {
+    const job = await startProductionForProject(f.tenantId, project.id);
+    let done = await getProductionJob(f.tenantId, job.id);
+    for (let i = 0; i < 100 && done && ["queued", "running"].includes(done.status); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      done = await getProductionJob(f.tenantId, job.id);
+    }
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M3: an autopilot plan item that passes the single gate schedules itself in its slot", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 2 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  await prisma.automationPolicy.create({
+    data: {
+      tenantId: f.tenantId, siteId: f.siteId, mode: "autopilot", enabled: true, autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true,
+      autonomousQaThresholds: { overallQualityScore: 0, minSourceGroups: 0, minSiteMatch: 0 },
+    },
+  });
+  try {
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const done = await getProductionJob(f.tenantId, job.id);
+    assert.equal(done!.status, "ready", done!.error ?? "");
+    const publication = await prisma.publication.findFirstOrThrow({ where: { tenantId: f.tenantId, channel: "website" }, include: { version: true } });
+    assert.equal(publication.status, "scheduled");
+    assert.equal(publication.scheduledFor?.toISOString(), slot.toISOString());
+    assert.equal(publication.version.status, "approved");
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("M3: the calendar reports the derived lifecycle through an assisted run", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  const slot = new Date(Date.now() + 2 * 24 * 3_600_000);
+  await prisma.editorialPlanItem.update({ where: { id: f.itemId }, data: { scheduledFor: slot } });
+  const window = { from: new Date(Date.now() - 86_400_000), to: new Date(Date.now() + 5 * 86_400_000), siteId: f.siteId };
+  try {
+    const [planned] = await listCalendarEvents(f.tenantId, window);
+    assert.deepEqual([planned.kind, planned.lifecycle, planned.chip], ["plan_item", "planned", "queued"]);
+
+    const { job } = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const review = await listCalendarEvents(f.tenantId, window);
+    assert.equal(review.length, 1, "the plan item is represented by its publication, not twice");
+    assert.deepEqual([review[0].kind, review[0].lifecycle, review[0].chip], ["publication", "needs_review", "review"]);
+
+    await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
+    const [scheduled] = await listCalendarEvents(f.tenantId, window);
+    assert.deepEqual([scheduled.lifecycle, scheduled.chip], ["scheduled", "queued"]);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+// Acceptance 2026-11-18: Regenerate on a plan guide ran as a manual piece (news headings, no sources, no link card).
+test("Regenerate on a project from a plan item reruns the plan item (guide template), as a new version of the same project", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  setArticleWriterFactory(() => new FakeWriter());
+  try {
+    const first = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    const projectId = first.job.projectId!;
+    assert.ok(projectId);
+    const rerun = await startProductionForProject(f.tenantId, projectId, { feedback: "Más concreto" });
+    assert.equal(rerun.kind, "plan_item");
+    assert.notEqual(rerun.id, first.job.id);
+    // Wait for the rerun to finish: it writes version 2 of the same project.
+    for (let i = 0; i < 100 && !["needs_review", "ready", "failed"].includes((await getProductionJob(f.tenantId, rerun.id))!.status); i++) await new Promise((r) => setTimeout(r, 100));
+    const done = await getProductionJob(f.tenantId, rerun.id);
+    assert.ok(["needs_review", "ready"].includes(done!.status), `${done!.status} ${done!.error}`);
+    assert.equal(done!.projectId, projectId);
+    assert.equal(await prisma.contentVersion.count({ where: { tenantId: f.tenantId, projectId } }), 2);
+    assert.equal(await prisma.contentProject.count({ where: { tenantId: f.tenantId } }), 1);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+// Acceptance 2026-11-18: the same prompt gave a 2,341-word guide and then a 1,493-word one; a short guide gets one "expand" pass.
+test("a guide that comes back well under the minimum gets one expand pass, and the longer draft is kept", async () => {
+  const f = await fixture();
+  fakeImageQueue();
+  const prompts: string[] = [];
+  setArticleWriterFactory(() => ({
+    generate: async (input) => {
+      prompts.push(input.prompt);
+      const base = await new FakeWriter().generate(input);
+      if (!input.prompt.includes("Previous answer:")) return base;
+      const parsed = JSON.parse(base.output) as { bodyHtml: string };
+      parsed.bodyHtml += `<h2>Más detalle</h2><p>${"palabra ".repeat(2500)}</p>`;
+      return { ...base, output: JSON.stringify(parsed) };
+    },
+  }));
+  try {
+    const run = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    assert.ok(["needs_review", "ready"].includes(run.job.status), `${run.job.status} ${run.job.error}`);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /has only \d+ words in the article body/);
+    const version = await prisma.contentVersion.findFirstOrThrow({ where: { tenantId: f.tenantId, projectId: run.job.projectId! } });
+    assert.match(version.bodyHtml ?? "", /Más detalle/);
   } finally {
     await cleanup(f.tenantId);
   }

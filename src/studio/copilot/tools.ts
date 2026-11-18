@@ -41,7 +41,7 @@ export type WriteTool = Base & {
   execute(tenantId: string, userId: string, args: ToolArgs): Promise<ExecuteResult>;
 };
 
-const planPath = (planId: string, itemId?: string | null) => `/studio/editorial-plan?plan=${planId}${itemId ? `&item=${itemId}` : ""}`;
+const planPath = (planId: string, itemId?: string | null) => `/studio/plan?plan=${planId}${itemId ? `&item=${itemId}` : ""}`;
 const operationPath = (operationId: string) => `/studio/activity?operation=${operationId}`;
 
 function optionalId(args: ToolArgs, key: string, fallback: string | null | undefined): string | null {

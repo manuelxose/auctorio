@@ -37,6 +37,7 @@ const STORY_ANGLE_BY_TYPE: Record<string, string> = {
   tv_programming: "report the programming/schedule facts and the channel",
   review_info: "inform the reader about the work using validated metadata",
   evergreen_explainer: "explain the work or topic durably for search readers",
+  guide: "answer the search question first, then guide the reader through every option in depth",
   list_ranking: "rank/select works using only grounded facts",
   what_to_watch: "recommend what to watch using only validated availability",
   article_update: "update the existing article with the new verified facts",
@@ -168,7 +169,8 @@ export function buildStoryBrief(input: BriefInput): EditorialBrief {
     verifiedFacts,
     unresolvedFacts,
     requiredAttribution,
-    internalLinkOpportunities: input.site.internalLinks.slice(0, 6),
+    // Guides need 15+ internal links: the caller already sized the list to the article's target.
+    internalLinkOpportunities: input.site.internalLinks.slice(0, 40),
     relatedSiteContent,
     uniqueValueProposition,
     targetLengthRange: { ...LENGTH_BY_TYPE[classification.articleType] },
@@ -177,6 +179,9 @@ export function buildStoryBrief(input: BriefInput): EditorialBrief {
     generatedAt: now.toISOString(),
   };
 }
+
+/** Internal-link reason of the site's own published posts (Recommended reading candidates). */
+export const OWN_POST_REASON = "own blog post";
 
 /** Render the brief as a compact text block for the writer prompt. */
 export function renderBriefForWriter(brief: EditorialBrief): string {
@@ -203,7 +208,7 @@ export function renderBriefForWriter(brief: EditorialBrief): string {
       : ["- (none)"]),
     `Internal link opportunities (real URLs only):`,
     ...(brief.internalLinkOpportunities.length
-      ? brief.internalLinkOpportunities.map((link) => `- ${link.title} → ${link.url}`)
+      ? brief.internalLinkOpportunities.map((link) => `- ${link.title} → ${link.url}${link.reason === OWN_POST_REASON ? " (own post)" : ""}`)
       : ["- (none)"]),
     `Related site content: ${brief.relatedSiteContent.join("; ") || "(none)"}`,
     `Unique value proposition: ${brief.uniqueValueProposition}`,

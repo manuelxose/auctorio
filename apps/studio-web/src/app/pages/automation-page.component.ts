@@ -9,20 +9,21 @@ import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { ArticleSettingsCardComponent } from '../components/planning/article-settings-card.component';
 import { MODE_FLAGS, type AutomationMode } from '../utils/automation-mode';
 import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, AutomationStatus, PublishingAccount, PublishingWindow, StudioSite } from '../models/studio.models';
 
 @Component({
   selector: 'app-automation-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ArticleSettingsCardComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Autonomous operations</p>
-          <h1 class="au-page__title">Automation</h1>
-          <p class="au-page__subtitle">Configure autonomous discovery, generation and multi-channel publishing.</p>
+          <p class="au-page__eyebrow">Settings · Articles</p>
+          <h1 class="au-page__title">Mode & rhythm</h1>
+          <p class="au-page__subtitle">How much Auctorio does on its own, and how often articles go out.</p>
         </div>
         <div class="au-page__actions" *ngIf="isAdmin">
           <button
@@ -133,6 +134,8 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
           {{ advancedOpen ? 'Hide advanced controls' : 'Advanced controls' }}
         </button>
       </section>
+
+      <app-article-settings-card *ngIf="selectedSiteId" [siteId]="selectedSiteId"></app-article-settings-card>
 
       <section class="au-panel au-panel--padded au-mb-3" *ngIf="policy && advancedOpen">
         <h2 class="au-panel__title">Advanced controls</h2>

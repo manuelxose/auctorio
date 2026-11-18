@@ -204,6 +204,20 @@ test("refreshing suggestions or the detected profile never overwrites the approv
   assert.ok(layers.suggested?.evidence.pillars, "suggestions state their evidence");
 });
 
+test("reading the strategy derives a missing or outdated suggestion from the detected profile", async () => {
+  const { tenantId, siteId } = await fixture();
+  const first = await getStrategyLayers(tenantId, siteId);
+  assert.ok(first.suggested, "a profile without a suggestion gets one on read");
+  assert.equal(first.provenance.primaryAudience, "suggested");
+  assert.equal(first.effective.primaryAudience, first.detected?.audience);
+
+  // A newer crawl (profile indexed after the suggestion) refreshes it on the next read.
+  await prisma.siteIntelligenceProfile.update({ where: { siteId }, data: { detectedAudience: "nuevo público", indexedAt: new Date(Date.now() + 1000) } });
+  const second = await getStrategyLayers(tenantId, siteId);
+  assert.equal(second.suggested?.config.primaryAudience, "nuevo público");
+  assert.equal(second.approved, null);
+});
+
 test("strategy routes: save versions, cluster include/exclude, coverage and tenant isolation", async () => {
   const { tenantId, siteId } = await fixture();
   const server = Fastify();
@@ -238,7 +252,7 @@ test("strategy routes: save versions, cluster include/exclude, coverage and tena
   assert.equal(coverageBody.pages.length, 1);
   assert.ok(coverageBody.coverage.find((entry) => entry.subtopic === "tarta")!.pagesCovering >= 1);
   assert.ok(coverageBody.gaps.includes("pan"));
-  assert.match(coverageBody.proposalsUrl, /\/studio\/editorial-plan\?siteId=.*&pillar=Recetas/);
+  assert.match(coverageBody.proposalsUrl, /\/studio\/plan\?siteId=.*&pillar=Recetas/);
 
   const put = await server.inject({ method: "PUT", url: `/v2/sites/${siteId}/strategy`, payload: { config: { primaryAudience: "x".repeat(900) }, note: "audience" } });
   assert.equal(put.statusCode, 200);

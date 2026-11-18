@@ -1,14 +1,19 @@
 // Plan item + manual pre-stages of the unified production pipeline.
-// Everything generateContentFromEditorialPlanItem used to put in the project
+// Everything the legacy plan-item generator used to put in the project
 // brief/metadata is kept; the plan item is additionally mapped onto the same
 // EditorialBrief the cluster path uses so both converge on one writer + QA.
 
 import { Prisma, type EditorialPlanItem } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { createProject } from "../repository";
-import { suggestInternalLinks } from "../internal-linking";
+import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
+import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
+import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings } from "../editorial-engine/structure";
+import { youtubeVideoFor } from "../youtube-videos";
+import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
+import { crawlBrand, withCrawledBrand } from "../brand-colors";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
 import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
@@ -117,6 +122,7 @@ export async function ensurePlanItemProject(item: EditorialPlanItem, jobId: stri
       suggestedSlug: item.suggestedSlug ?? null,
       freshnessRequirement: item.freshnessRequirement ?? null,
       angle: item.angle ?? null,
+      rationale: item.rationale ?? null,
       cta: item.cta ?? null,
       generation,
     } as Prisma.InputJsonObject,
@@ -162,14 +168,38 @@ export function planEvidenceToLedger(sourceEvidence: unknown): { facts: LedgerFa
 
 // ────────────────────────────────────────────────────────────── Prepare
 
+/** Source facts already stored on the project's topic (source-item projects), as ledger entries. */
+async function projectFactLedger(tenantId: string, projectId: string): Promise<{ facts: LedgerFact[]; groups: number }> {
+  const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId }, select: { topicId: true } });
+  if (!project?.topicId) return { facts: [], groups: 0 };
+  const rows = await prisma.fact.findMany({ where: { tenantId, topicId: project.topicId, sourceType: { not: "manual" } }, orderBy: { createdAt: "desc" }, take: 6 });
+  const evidence = rows.flatMap((row) =>
+    row.content
+      .split(/(?<=[.!?])\s+/)
+      .map((sentence) => sentence.trim())
+      .filter((sentence) => sentence.length >= 30)
+      .slice(0, 15)
+      .map((title) => ({ title, url: row.sourceRef ?? null, sourceType: row.sourceType })),
+  );
+  return planEvidenceToLedger(evidence.slice(0, 40));
+}
+
 async function loadSite(tenantId: string, siteId: string) {
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId } });
   if (!site) throw new Error("site_not_found");
   return site;
 }
 
-async function loadInternalLinks(tenantId: string, siteId: string, keyword: string, topic: string, planUrls: string[]): Promise<EngineInternalLink[]> {
-  const suggested = await suggestInternalLinks(tenantId, siteId, { keyword, topic, limit: 6 });
+async function loadInternalLinks(
+  tenantId: string,
+  siteId: string,
+  keyword: string,
+  topic: string,
+  planUrls: string[],
+  limit = 6,
+  ownPosts: { excludeProjectId: string | null } | null = null,
+): Promise<EngineInternalLink[]> {
+  const suggested = await suggestInternalLinks(tenantId, siteId, { keyword, topic, limit, fillWithHubs: limit > 6 });
   const links: EngineInternalLink[] = suggested.map((link) => ({ ...link }) as EngineInternalLink);
   const missing = planUrls.filter((url) => !links.some((link) => link.url === url));
   if (missing.length > 0) {
@@ -178,7 +208,12 @@ async function loadInternalLinks(tenantId: string, siteId: string, keyword: stri
       links.unshift({ url: page.url, title: page.title ?? page.url, anchor: page.title ?? page.url, reason: "suggested by the editorial plan", score: 1 });
     }
   }
-  return links.slice(0, 8);
+  const capped = links.slice(0, Math.max(8, limit));
+  if (!ownPosts) return capped;
+  // Recommended reading: the site's own published posts closest to the keyword, listed first.
+  const posts = await suggestOwnPosts(tenantId, siteId, { keyword, topic, excludeProjectId: ownPosts.excludeProjectId, limit: 5 });
+  const postUrls = new Set(posts.map((post) => post.url));
+  return [...posts, ...capped.filter((link) => !postUrls.has(link.url))];
 }
 
 async function indexedTitles(tenantId: string, siteId: string): Promise<string[]> {
@@ -204,7 +239,17 @@ export function planGuidance(item: EditorialPlanItem): string[] {
   if (faq.length) lines.push(`FAQ candidates (only if genuinely useful):\n${faq.map((question) => `- ${question}`).join("\n")}`);
   if (item.cta) lines.push(`Call to action: ${item.cta}`);
   if (item.freshnessRequirement) lines.push(`Freshness requirement: ${item.freshnessRequirement}`);
+  // Set from the calendar's instructions modal (or the plan drawer).
+  const generation = readGenerationSettings(item);
+  if (typeof generation.instructions === "string" && generation.instructions) lines.push(`Editor instructions: ${generation.instructions}`);
+  if (typeof generation.referenceUrl === "string" && generation.referenceUrl) lines.push(`Reference page to take as a model (do not copy it): ${generation.referenceUrl}`);
+  if (item.notes) lines.push(`Editor notes: ${item.notes}`);
   return lines;
+}
+
+/** Brand data for the guide's intro, link card and promo block (business details and CTA wording when configured). */
+export function siteGuidance(site: { name: string; baseUrl: string | null }, brand: ResolvedBrand = resolveBrand(readBrandSettings(null), site)): string[] {
+  return renderBrandGuidance(brand);
 }
 
 export async function preparePlanItemInput(
@@ -217,9 +262,37 @@ export async function preparePlanItemInput(
   if (!item.siteId) throw new Error("editorial_plan_item_site_required");
   const site = await loadSite(tenantId, item.siteId);
   const generation = readGenerationSettings(item);
+  const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
+  const writing = resolveWritingSettings(planningSettings?.articleTargets);
+  const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
+  const brand = resolveBrand(withCrawledBrand(resolveBrandSettings(planningSettings?.articleTargets), await crawlBrand(tenantId, site.baseUrl)), site, profile);
+  const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
-  const evidence = planEvidenceToLedger(item.sourceEvidence);
+  const planEvidence = planEvidenceToLedger(item.sourceEvidence);
+  // Links are primary (BLG parity M4): enough internal candidates for the target, and the pages Google ranks
+  // for the keyword as citable external sources (own site and accepted competitors excluded).
+  const targets = resolveArticleTargets(planningSettings?.articleTargets, generation.articleTargets);
+  const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId: site.id, status: "accepted" }, select: { domain: true } });
+  const serpFacts = item.primaryKeyword && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide"
+    ? await serpSourceFacts({
+        tenantId,
+        siteId: site.id,
+        locale: site.locale,
+        keyword: item.primaryKeyword,
+        exclude: {
+          domains: [hostOf(site.baseUrl), ...competitors.map(({ domain }) => hostOf(`https://${domain.replace(/^https?:\/\//, "")}`))].filter((domain): domain is string => Boolean(domain)),
+          urls: planEvidence.facts.map((fact) => fact.sourceUrl).filter((url): url is string => Boolean(url)),
+        },
+        max: targets.externalLinks + 5, // a few spare so the writer picks the relevant ones
+      })
+    : [];
+  const isGuide = Boolean(item.primaryKeyword) && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide";
+  const youtube = isGuide
+    ? await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword: item.primaryKeyword!, youtube: resolveVisualSettings(planningSettings?.articleTargets).youtube })
+    : null;
+  const facts = [...planEvidence.facts, ...serpFacts];
+  const evidence = { facts, groups: new Set(facts.map((fact) => fact.publisherGroup)).size };
   const entities: EngineEntity[] = stringList(item.relatedEntities).map((name, index) => ({
     id: `plan-entity-${index}`,
     domain: "editorial_plan",
@@ -232,8 +305,8 @@ export async function preparePlanItemInput(
     kind: "plan_item",
     tenantId,
     siteId: site.id,
-    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
-    language: options.language ?? (generation.language === "en" ? "en" : "es"),
+    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig, baseUrl: site.baseUrl },
+    language,
     headline,
     summary: item.angle ?? item.rationale ?? null,
     entities,
@@ -242,10 +315,14 @@ export async function preparePlanItemInput(
     factContext: { clusterVerificationState: evidence.groups >= 2 ? "unverified" : "single_source", independentPublisherGroups: evidence.groups },
     memberTitles: evidence.facts.map((fact) => fact.statement),
     sourceTexts: evidence.facts.map((fact) => fact.statement),
-    internalLinks: await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks)),
+    // Site writing settings: internal linking can be off, and URLs follow its www / trailing-slash choice.
+    internalLinks: writing.internalLinks.enabled
+      ? (await loadInternalLinks(tenantId, site.id, keyword, item.topic ?? headline, stringList(item.suggestedInternalLinks), targets.internalLinks + 5, { excludeProjectId: item.projectId })).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: typeof item.relevanceScore === "number" ? Math.max(0, Math.min(1, item.relevanceScore > 1 ? item.relevanceScore / 100 : item.relevanceScore)) : null,
     primaryEntityNames: [keyword],
+    siteArticleTargets: planningSettings?.articleTargets ?? null,
     ownProjectId: item.projectId,
     cluster: null,
     plan: {
@@ -253,7 +330,10 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: planGuidance(item),
+      guidance: [...planGuidance(item), ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language)],
+      brand,
+      disclaimer: writing.disclaimer,
+      youtube,
     },
     options,
   };
@@ -261,31 +341,41 @@ export async function preparePlanItemInput(
 
 export async function prepareManualInput(
   tenantId: string,
-  request: { title: string; brief: string; siteId: string },
+  request: { title: string; brief: string; siteId: string; projectId?: string | null },
   options: ProductionRequestOptions,
 ): Promise<PreparedInput> {
   const site = await loadSite(tenantId, request.siteId);
+  const evidence = request.projectId ? await projectFactLedger(tenantId, request.projectId) : { facts: [], groups: 0 };
+  // Manual articles follow the same site writing, linking and brand settings as planned ones (M4/M5).
+  const planningSettings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: site.id }, select: { articleTargets: true } });
+  const writing = resolveWritingSettings(planningSettings?.articleTargets);
+  const targets = resolveArticleTargets(planningSettings?.articleTargets);
+  const profile = await prisma.siteIntelligenceProfile.findUnique({ where: { siteId: site.id }, select: { brandSummary: true, detectedAudience: true } });
+  const brand = resolveBrand(withCrawledBrand(resolveBrandSettings(planningSettings?.articleTargets), await crawlBrand(tenantId, site.baseUrl)), site, profile);
+  const language = options.language === "en" ? "en" : "es";
   return {
     kind: "manual",
     tenantId,
     siteId: site.id,
-    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig },
-    language: options.language === "en" ? "en" : "es",
+    site: { id: site.id, name: site.name, type: site.type, locale: site.locale, siteValueConfig: site.siteValueConfig, baseUrl: site.baseUrl },
+    language,
     headline: request.title,
     summary: request.brief.slice(0, 500),
     entities: [],
     enrichments: [],
-    ledgerFacts: [],
-    factContext: { clusterVerificationState: "unverified", independentPublisherGroups: 0 },
-    memberTitles: [],
-    sourceTexts: [request.brief],
-    internalLinks: await loadInternalLinks(tenantId, site.id, request.title, request.title, []),
+    ledgerFacts: evidence.facts,
+    factContext: { clusterVerificationState: evidence.groups >= 2 ? "unverified" : "single_source", independentPublisherGroups: evidence.groups },
+    memberTitles: evidence.facts.map((fact) => fact.statement),
+    sourceTexts: [request.brief, ...evidence.facts.map((fact) => fact.statement)],
+    internalLinks: writing.internalLinks.enabled
+      ? (await loadInternalLinks(tenantId, site.id, request.title, request.title, [], targets.internalLinks + 5, { excludeProjectId: request.projectId ?? null })).map((link) => ({ ...link, url: formatInternalUrl(link.url, writing.internalLinks) }))
+      : [],
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: null,
     primaryEntityNames: [request.title],
-    ownProjectId: null,
+    ownProjectId: request.projectId ?? null,
     cluster: null,
-    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`] },
+    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`, ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language, { summary: false })] },
     options,
   };
 }
@@ -300,11 +390,15 @@ function mapIntent(value: unknown): SearchIntent {
   return "informational";
 }
 
-function mapArticleType(record: Record<string, unknown>, generation: Record<string, unknown>): ArticleType {
+export function mapArticleType(record: Record<string, unknown>, generation: Record<string, unknown>): ArticleType {
   if (typeof generation.articleType === "string" && isArticleType(generation.articleType)) return generation.articleType;
   const contentType = String(record.contentType ?? "").toLowerCase();
+  const news = String(record.newsOrEvergreen ?? "").toLowerCase() === "news";
+  // Keyword-first items (guide/explainer/listicle) all use the BLG guide template (M3).
+  if (!news && String(record.primaryKeyword ?? "").trim() && !/review|analisis|análisis/.test(contentType)) return "guide";
   if (/list|ranking|top/.test(contentType)) return "list_ranking";
   if (/review|analisis|análisis/.test(contentType)) return "review_info";
+  if (/guide|guia|guía|tutorial/.test(contentType)) return "guide";
   if (String(record.newsOrEvergreen ?? "").toLowerCase() === "news") return "standard_news";
   return "evergreen_explainer";
 }
@@ -335,8 +429,17 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
     ageHours: 24 * 30,
     now,
   });
-  const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || LENGTH_BY_TYPE[articleType].min;
-  const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, LENGTH_BY_TYPE[articleType].max);
+  // Guides: site override, then the article's own (generation.articleTargets).
+  const articleTargets = articleType === "guide" ? resolveArticleTargets(input.siteArticleTargets, plan.generation.articleTargets) : undefined;
+  // Contact and map cards exist only when the site filled in their data.
+  const brand = input.plan?.brand;
+  if (articleTargets && brand) {
+    articleTargets.sections.contactCard &&= hasContactCard(brand);
+    articleTargets.sections.mapCard &&= hasMapCard(brand);
+  }
+  const typeLength = articleTargets ? { min: Math.round(articleTargets.words * 0.87), max: Math.round(articleTargets.words * 1.13) } : LENGTH_BY_TYPE[articleType];
+  const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || typeLength.min;
+  const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, typeLength.max);
   const keywords = [...stringList(record.secondaryKeywords), ...stringList(record.semanticKeywords)];
   const brief = {
     ...base,
@@ -349,6 +452,12 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
       ...(record.freshnessRequirement ? [String(record.freshnessRequirement)] : []),
       "all dates and availability statements must come from the fact ledger",
     ],
+    ...(articleTargets ? { articleTargets } : {}),
   };
   return { brief, siteValueBlocks: [], previousArticle: null, updateDelta: null, guidance: plan.guidance };
+}
+
+/** A plan item publishes at its calendar slot, or now when the slot already passed. */
+export function slotOrNow(slot: Date | null, now: Date): Date {
+  return slot && slot.getTime() > now.getTime() ? slot : now;
 }

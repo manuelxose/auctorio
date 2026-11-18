@@ -8,6 +8,7 @@ import type {
   PlanDetail,
   PlanGenerationAccepted,
   PlanItem,
+  PlanKeywordsResult,
   PlanPreset,
   PlanningInventory,
   SitePlanningSettings,
@@ -24,6 +25,10 @@ export class PlanningApiService {
   listPlans(siteId?: string): Observable<PaginatedResponse<PlanDetail>> {
     return this.http.get<PaginatedResponse<PlanDetail>>(`${this.base}/editorial-plans`, { params: { page: 1, pageSize: 100, ...(siteId ? { siteId } : {}) } });
   }
+  /** Calendar "Add keywords": up to 50; the server drops duplicates and off-topic ones. */
+  addKeywords(siteId: string, keywords: string[]): Observable<PlanKeywordsResult> {
+    return this.http.post<PlanKeywordsResult>(`${this.base}/sites/${siteId}/plan-keywords`, { keywords });
+  }
   getPlan(planId: string): Observable<PlanDetail> {
     return this.http.get<PlanDetail>(`${this.base}/editorial-plans/${planId}`);
   }
@@ -36,12 +41,18 @@ export class PlanningApiService {
   extendPlan(planId: string, payload: { dateTo: string; articlesPerDay?: number }): Observable<PlanGenerationAccepted> {
     return this.http.post<PlanGenerationAccepted>(`${this.base}/editorial-plans/${planId}/extend`, payload);
   }
+  deletePlan(planId: string): Observable<{ ok: true; deletedItems: number }> {
+    return this.http.delete<{ ok: true; deletedItems: number }>(`${this.base}/editorial-plans/${planId}`);
+  }
   updatePlan(planId: string, payload: { name?: string; status?: 'archived' }): Observable<PlanDetail> {
     return this.http.patch<PlanDetail>(`${this.base}/editorial-plans/${planId}`, payload);
   }
 
   updateItem(itemId: string, payload: Record<string, unknown>): Observable<PlanItem> {
     return this.http.patch<PlanItem>(`${this.base}/editorial-plan-items/${itemId}`, payload);
+  }
+  deleteItem(itemId: string): Observable<{ ok: true }> {
+    return this.http.delete<{ ok: true }>(`${this.base}/editorial-plan-items/${itemId}`);
   }
   approveItem(itemId: string): Observable<PlanItem> {
     return this.http.post<PlanItem>(`${this.base}/editorial-plan-items/${itemId}/approve`, {});

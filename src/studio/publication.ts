@@ -2,15 +2,7 @@ import { Prisma } from "@prisma/client";
 import type { Publication, PublicationAttemptStatus, PublicationChannel, PublicationState } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getNumberEnv } from "../shared/utils/env";
-import {
-  createPublicationJob,
-  getLatestVersion,
-  getProjectById,
-  getSiteById,
-  resetPublicationJobForRetry,
-  updateProjectStatus,
-} from "./repository";
-import { queuePublication } from "./orchestration";
+import { getLatestVersion, getProjectById, getSiteById, updateProjectStatus } from "./repository";
 import { writeAudit, type AuditEntryInput } from "./audit";
 import { getPublisher } from "./publishers";
 import { recordWebsitePublishFailure, resetWebsitePublishCircuit } from "./automation";
@@ -128,37 +120,88 @@ export function maxPublicationRetries(): number {
   return Math.max(0, getNumberEnv("PUBLICATION_MAX_RETRIES", 3));
 }
 
-export async function linkDurableWebsitePublication(
+/** The website publication row for one version (publish-now creates it when the calendar did not). */
+export async function ensureWebsitePublication(
   tenantId: string,
   siteId: string,
   projectId: string,
   versionId: string,
-  publicationJobId: string,
-): Promise<void> {
+): Promise<Publication> {
   const existing = await prisma.publication.findFirst({
-    where: { tenantId, projectId, versionId, channel: "website" },
+    where: { tenantId, projectId, versionId, channel: "website", status: { not: "deleted" } },
+    orderBy: { createdAt: "desc" },
   });
-  if (existing) {
-    await prisma.publication.update({
-      where: { id: existing.id },
-      data: { publicationJobId },
-    });
-    return;
+  return (
+    existing ??
+    createPublication({ tenantId, projectId, versionId, channel: "website", siteId, scheduledFor: new Date(), manualOverride: true })
+  );
+}
+
+export type WebsiteAttemptRequest = {
+  targetStatus?: "draft" | "publish";
+  /** Defaults to the row's metadata.unpublishRequested. */
+  unpublish?: boolean;
+  /** Publish this version instead of the row's (the scheduler always sends the latest). */
+  versionId?: string;
+  requestedBy: string;
+  requestedByUserId?: string | null;
+};
+
+/**
+ * One website delivery = one PublicationAttempt; the queue carries its id. The
+ * conditional claim keeps a second call from starting a parallel attempt, and the
+ * row's externalId makes a retry update the remote post instead of creating another.
+ */
+export async function startWebsiteAttempt(publicationId: string, request: WebsiteAttemptRequest) {
+  const publication = await prisma.publication.findUnique({ where: { id: publicationId } });
+  if (!publication) {
+    throw new Error("publication_not_found");
+  }
+  const previous = publication.metadata && typeof publication.metadata === "object" ? (publication.metadata as Record<string, unknown>) : {};
+  const unpublish = request.unpublish ?? previous.unpublishRequested === true;
+  const targetStatus = request.targetStatus ?? "publish";
+  const attemptNumber = publication.currentAttempt + 1;
+
+  const claim = await prisma.publication.updateMany({
+    where: { id: publication.id, status: { not: "publishing" }, currentAttempt: publication.currentAttempt },
+    data: {
+      status: "publishing",
+      currentAttempt: attemptNumber,
+      ...(request.versionId ? { versionId: request.versionId } : {}),
+      metadata: { ...previous, unpublishRequested: unpublish, targetStatus } as Prisma.InputJsonObject,
+    },
+  });
+  if (!claim.count) {
+    return null;
   }
 
-  const created = await createPublication({
-    tenantId,
-    projectId,
-    versionId,
-    channel: "website",
-    siteId,
-    scheduledFor: new Date(),
-    manualOverride: true,
+  const action = unpublish ? "unpublish" : "publish";
+  const attempt = await prisma.publicationAttempt.create({
+    data: {
+      tenantId: publication.tenantId,
+      publicationId: publication.id,
+      attemptNumber,
+      status: "queued",
+      requestPayload: { action, targetStatus, requestedBy: request.requestedBy, requestedByUserId: request.requestedByUserId ?? null } as Prisma.InputJsonObject,
+    },
   });
-  await prisma.publication.update({
-    where: { id: created.id },
-    data: { publicationJobId, status: "publishing" },
+  await updateProjectStatus(publication.tenantId, publication.projectId, "publish_queued");
+
+  const { createOperation } = await import("./operations");
+  const operation = await createOperation({
+    tenantId: publication.tenantId,
+    siteId: publication.siteId,
+    type: unpublish ? "unpublish" : "publish",
+    initiatorUserId: request.requestedByUserId ?? null,
+    entityType: "publication",
+    entityId: publication.id,
+    queueName: "queue_publishing",
+    jobKey: attempt.id,
+    metadata: { channel: "website", action, targetStatus },
   });
+  const { enqueuePublishingJob } = await import("../infrastructure/queue/producer");
+  await enqueuePublishingJob(attempt.id, { attemptId: attempt.id, publicationId: publication.id, operationId: operation.id });
+  return attempt;
 }
 
 // ────────────────────────────────────────────────────────────── CRUD
@@ -174,6 +217,8 @@ export type CreatePublicationInput = {
   scheduledFor?: Date | string | null;
   campaignId?: string | null;
   manualOverride?: boolean;
+  /** A dated row that waits for a human release (assisted plan items). */
+  status?: "ready";
 };
 
 export async function createPublication(input: CreatePublicationInput): Promise<Publication> {
@@ -238,7 +283,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       socialContentId: input.socialContentId ?? null,
       campaignId: input.campaignId ?? null,
       scheduledFor,
-      status: scheduledFor ? "scheduled" : "draft",
+      status: input.status ?? (scheduledFor ? "scheduled" : "draft"),
       manualOverride: input.manualOverride ?? false,
       idempotencyKey,
       metadata: Prisma.JsonNull,
@@ -247,7 +292,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
 
   await writeAudit({
     tenantId: input.tenantId,
-    action: scheduledFor ? "publication.scheduled" : "publication.created",
+    action: scheduledFor && !input.status ? "publication.scheduled" : "publication.created",
     entityType: "publication",
     entityId: publication.id,
     actorType: input.manualOverride ? "user" : "system",
@@ -667,7 +712,7 @@ export async function recoverStalledPublications(now: Date = new Date()): Promis
   const minutes = Math.max(5, getNumberEnv("PUBLICATION_STALL_MINUTES", 60));
   const stalled = await prisma.publication.findMany({
     where: { status: { in: ["queued", "publishing"] }, updatedAt: { lt: new Date(now.getTime() - minutes * 60_000) } },
-    select: { id: true, tenantId: true, status: true, publicationJobId: true },
+    select: { id: true, tenantId: true, status: true },
     take: 50,
   });
   let recovered = 0;
@@ -684,13 +729,6 @@ export async function recoverStalledPublications(now: Date = new Date()): Promis
     });
     if (!count) continue;
     recovered += 1;
-    // Free the website job so a manual retry requeues it instead of linking to a dead job.
-    if (row.publicationJobId) {
-      await prisma.publicationJob.updateMany({
-        where: { id: row.publicationJobId, status: { in: ["queued", "processing"] } },
-        data: { status: "failed", error: "stalled" },
-      });
-    }
     await writeAudit({
       tenantId: row.tenantId,
       action: "publication.stalled",
@@ -706,7 +744,7 @@ export async function recoverStalledPublications(now: Date = new Date()): Promis
       message: `Publication ${row.id} got no worker result after ${minutes} min. Check the destination before retrying.`,
       entityType: "publication",
       entityId: row.id,
-      actionUrl: `/studio/publications?id=${row.id}`,
+      actionUrl: `/studio/results?id=${row.id}`,
       dedupeKey: `ops.publication.${row.id}.stalled`,
       dedupeWindowMs: 6 * 3_600_000,
     });
@@ -803,75 +841,7 @@ async function enqueueWebsitePublication(publicationId: string): Promise<void> {
     throw new Error("site_not_found");
   }
 
-  const unpublishRequested =
-    publication.metadata &&
-    typeof publication.metadata === "object" &&
-    (publication.metadata as Record<string, unknown>).unpublishRequested === true;
-
-  const latestExternalId = publication.externalId;
-  const action = unpublishRequested ? "unpublish" : latestExternalId ? "update" : "publish";
-
-  const idempotencyKey = [
-    "pub",
-    site.id,
-    project.id,
-    version.id,
-    action,
-    "publish",
-  ].join(":");
-
-  const existingJob = await prisma.publicationJob.findFirst({
-    where: {
-      tenantId: publication.tenantId,
-      idempotencyKey,
-    },
-  });
-  if (existingJob && ["queued", "processing", "draft_synced", "published"].includes(existingJob.status)) {
-    await prisma.publication.update({
-      where: { id: publication.id },
-      data: { publicationJobId: existingJob.id },
-    });
-    return;
-  }
-
-  if (existingJob) {
-    // The idempotency key is stable per (site, project, version, action), so a
-    // failed/canceled job cannot be re-created without violating the unique
-    // index. Reset the row and requeue it instead — retries must be possible.
-    const retried = await resetPublicationJobForRetry(existingJob.id, {
-      action,
-      targetStatus: "publish",
-      requestedBy: "scheduler",
-    });
-    await updateProjectStatus(publication.tenantId, project.id, "publish_queued");
-    await prisma.publication.update({
-      where: { id: publication.id },
-      data: { publicationJobId: retried.id },
-    });
-    await queuePublication(retried.id);
-    return;
-  }
-
-  const job = await createPublicationJob(
-    publication.tenantId,
-    site.id,
-    project.id,
-    version.id,
-    action,
-    {
-      action,
-      targetStatus: "publish",
-      requestedBy: "scheduler",
-    },
-    null,
-    idempotencyKey,
-  );
-  await updateProjectStatus(publication.tenantId, project.id, "publish_queued");
-  await prisma.publication.update({
-    where: { id: publication.id },
-    data: { publicationJobId: job.id },
-  });
-  await queuePublication(job.id);
+  await startWebsiteAttempt(publication.id, { versionId: version.id, requestedBy: "scheduler" });
 }
 
 // ────────────────────────────────────────────────────────────── Attempt outcomes
@@ -886,7 +856,13 @@ export async function startAttempt(tenantId: string, attemptId: string) {
 export async function succeedAttempt(
   tenantId: string,
   attemptId: string,
-  input: { externalId?: string | null; externalUrl?: string | null; responsePayload?: Record<string, unknown> | null },
+  input: {
+    externalId?: string | null;
+    externalUrl?: string | null;
+    responsePayload?: Record<string, unknown> | null;
+    /** The website kept it as a remote draft: the row goes back to ready, not published. */
+    draft?: boolean;
+  },
 ) {
   const attempt = await prisma.publicationAttempt.findFirst({ where: { id: attemptId, tenantId } });
   if (!attempt) {
@@ -913,11 +889,12 @@ export async function succeedAttempt(
     typeof publication.metadata === "object" &&
     (publication.metadata as Record<string, unknown>).unpublishRequested === true;
 
+  const draft = !unpublishRequested && input.draft === true;
   await prisma.publication.update({
     where: { id: publication.id },
     data: {
-      status: unpublishRequested ? "unpublished" : "published",
-      publishedAt: unpublishRequested ? null : new Date(),
+      status: unpublishRequested ? "unpublished" : draft ? "ready" : "published",
+      publishedAt: unpublishRequested ? null : draft ? undefined : new Date(),
       externalId: input.externalId ?? publication.externalId,
       externalUrl: input.externalUrl ?? publication.externalUrl,
       lastError: null,
@@ -932,14 +909,16 @@ export async function succeedAttempt(
   if (!unpublishRequested && publication.channel === "website" && publication.siteId) {
     await resetWebsitePublishCircuit(tenantId, publication.siteId);
   }
-  await prisma.contentProject.updateMany({
-    where: { id: publication.projectId },
-    data: { automationSubstate: unpublishRequested ? "published" : "published" },
-  });
+  if (!draft) {
+    await prisma.contentProject.updateMany({
+      where: { id: publication.projectId },
+      data: { automationSubstate: "published" },
+    });
+  }
 
   await writeAudit({
     tenantId,
-    action: unpublishRequested ? "publication.unpublished" : "publication.published",
+    action: unpublishRequested ? "publication.unpublished" : draft ? "publication.draft_synced" : "publication.published",
     entityType: "publication",
     entityId: publication.id,
     actorType: "automation",

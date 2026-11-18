@@ -49,6 +49,23 @@ function assertSafeSegment(value: string): void {
   }
 }
 
+/**
+ * Re-encodes an image without its metadata (EXIF, XMP, IPTC and the C2PA/JUMBF "AI generated" manifest) before it
+ * is stored or published (BLG parity M6). EXIF orientation is applied first. Unknown formats are returned untouched.
+ */
+export async function stripImageMetadata(bytes: Buffer): Promise<{ bytes: Buffer; stripped: boolean }> {
+  try {
+    const { format } = await sharp(bytes).metadata();
+    const image = sharp(bytes).rotate();
+    if (format === "jpeg") return { bytes: await image.jpeg({ quality: 92 }).toBuffer(), stripped: true };
+    if (format === "png") return { bytes: await image.png().toBuffer(), stripped: true };
+    if (format === "webp") return { bytes: await image.webp({ quality: 92 }).toBuffer(), stripped: true };
+  } catch {
+    // Unreadable bytes: keep them; the derivative step reports the real error.
+  }
+  return { bytes, stripped: false };
+}
+
 export async function buildImageDerivatives(input: {
   storageRoot: string;
   originalRelativePath: string;

@@ -1,4 +1,5 @@
 import { getTextProvider, type TextGenerationResult, type TextProvider, type TextUsage } from "./text";
+import type { AiUse } from "./ai-settings";
 import type { SchemaDef, SchemaValidationResult } from "../../shared/schema";
 import { validateValue } from "../../shared/schema";
 import { structuredEvent } from "../../shared/utils/logger";
@@ -17,6 +18,8 @@ export type StructuredGenerationOptions<T> = {
   eventContext?: Record<string, unknown>;
   /** Test seam: inject a provider instead of the env-configured one. */
   providerOverride?: TextProvider;
+  /** Which per-use model (Settings → AI) to call; defaults to the workspace model. */
+  use?: AiUse;
 };
 
 export type StructuredGenerationAttempt = {
@@ -142,7 +145,7 @@ function useJsonSchemaResponseFormat(): boolean {
  * error if the output remains invalid.
  */
 export async function generateStructured<T>(options: StructuredGenerationOptions<T>): Promise<StructuredGenerationResult<T>> {
-  const provider = options.providerOverride ?? getTextProvider();
+  const provider = options.providerOverride ?? getTextProvider(options.use);
   const maxAttempts = Math.max(1, options.maxAttempts ?? getNumberEnv("STRUCTURED_MAX_ATTEMPTS", 2));
   const attempts: StructuredGenerationAttempt[] = [];
   const schemaJson = JSON.stringify(options.schema.jsonSchema());

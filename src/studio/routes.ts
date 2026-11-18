@@ -1,11 +1,12 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { Prisma } from "@prisma/client";
-import type { ProjectGoal, ProjectStatus, PublicationStatus, SiteType } from "@prisma/client";
+import type { ProjectGoal, ProjectStatus, SiteType } from "@prisma/client";
 import { Queue } from "bullmq";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Redis from "ioredis";
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { resolveArticleTargets } from "./editorial-engine/structure";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import { getRedisConnectionOptions } from "../infrastructure/queue/redis";
 import { getEnv, isProductionEnv } from "../shared/utils/env";
@@ -14,22 +15,18 @@ import { writeAudit } from "./audit";
 import {
   approveVersion,
   createProject,
-  createPublicationJob,
-  findPublicationJobByIdempotency,
-  resetPublicationJobForRetry,
   getLatestPublishedExternalId,
   createSite,
   getLatestVersion,
   getProjectById,
-  getPublicationJobById,
   getSiteById,
   listMediaImages,
   listProjects,
-  listPublicationJobs,
   listSites,
   updateProject,
   updateProjectStatus,
   updateSite,
+  deleteSite,
   updateVersionContent,
   updateVersionQa,
 } from "./repository";
@@ -65,15 +62,14 @@ import {
 } from "./auth";
 import {
   buildAssetPublicUrl,
-  queuePublication,
   requestImageGenerationForVersion,
   requestInlineImagesForVersion,
   retryImageGeneration,
   isProjectGenerationInFlight,
-  startProjectGeneration,
 } from "./orchestration";
 import { archiveProject } from "./projects";
-import { linkDurableWebsitePublication } from "./publication";
+import { startProductionForProject } from "./production/pipeline";
+import { ensureWebsitePublication, startWebsiteAttempt } from "./publication";
 import { runVersionQaV2 } from "./qa";
 import { getStudioGoogleClientId } from "./google";
 import {
@@ -96,7 +92,6 @@ import type {
   CreateStudioPromptVersionInput,
   CreateStudioRoleInput,
   PublicationPayload,
-  PublicationTargetStatus,
   UpdateStudioIdentityProviderInput,
   UpdateProjectInput,
   UpdateStudioPromptVersionInput,
@@ -132,13 +127,11 @@ import {
 } from "./http-utils";
 import {
   buildProjectReviewGate,
-  mapPublicationState,
   mapQaState,
   toProjectDetail,
   toVersionSummary,
   type ProjectRecord,
   type ProjectVersionRecord,
-  type PublicationRecord,
 } from "./views";
 import { registerEditorialRoutes } from "./routes-editorial";
 import { registerConnectionRoutes } from "./routes-connections";
@@ -180,14 +173,6 @@ const PROJECT_STATUSES: ProjectStatus[] = [
   "publish_failed",
 ];
 const CONTENT_STATUSES = ["queued", "processing", "done", "failed", "retryable", "canceled"] as const;
-const PUBLICATION_STATUSES: PublicationStatus[] = [
-  "queued",
-  "processing",
-  "draft_synced",
-  "published",
-  "failed",
-  "canceled",
-];
 const STUDIO_USER_STATUSES = ["invited", "active", "suspended"] as const;
 const STUDIO_PROMPT_SURFACES = [
   "text_seo",
@@ -241,10 +226,6 @@ function getAuthErrorStatus(message: string): number {
   }
 
   return 500;
-}
-
-function parsePublicationTargetStatus(value: unknown): PublicationTargetStatus | null {
-  return value === "draft" || value === "publish" ? value : null;
 }
 
 async function handleReadyCheck() {
@@ -1017,6 +998,17 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.delete("/v2/sites/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const deleted = await deleteSite(context.tenantId, siteId);
+    if (!deleted) return notFound(reply, "site not found");
+    await writeAudit({ tenantId: context.tenantId, actorType: "user", actorUserId: context.userId, action: "site.deleted", entityType: "site", entityId: siteId, metadata: deleted });
+    return reply.send({ ok: true, ...deleted });
+  });
+
   fastify.get("/v2/projects", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
@@ -1039,8 +1031,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (query.siteId && !isUuid(query.siteId)) {
       return badRequest(reply, "invalid siteId");
     }
-    if (query.status && !isOneOf(query.status, PROJECT_STATUSES)) {
-      return badRequest(reply, `status must be one of: ${PROJECT_STATUSES.join(", ")}`);
+    // status=a,b filters by any of them (the Studio's grouped Review/Ready/Failed filters).
+    const statuses = query.status ? query.status.split(",").map((value) => value.trim()).filter(Boolean) : [];
+    if (statuses.some((value) => !isOneOf(value, PROJECT_STATUSES))) {
+      return badRequest(reply, `status must be one or more of: ${PROJECT_STATUSES.join(", ")}`);
     }
     if (query.goal && !isOneOf(query.goal, PROJECT_GOALS)) {
       return badRequest(reply, `goal must be one of: ${PROJECT_GOALS.join(", ")}`);
@@ -1051,7 +1045,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
 
     const projects = await listProjects(context.tenantId, {
       siteId: query.siteId,
-      status: query.status as ProjectStatus | undefined,
+      status: statuses.length > 1 ? (statuses as ProjectStatus[]) : (statuses[0] as ProjectStatus | undefined),
       goal: query.goal as ProjectGoal | undefined,
       page,
       pageSize,
@@ -1206,7 +1200,19 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return notFound(reply, "project not found");
     }
 
-    return reply.send(await toProjectDetail(project));
+    // Article data panel: measured demand of the plan keyword (never estimated) and the targets the article is held to.
+    const [planItem, planning] = await Promise.all([
+      prisma.editorialPlanItem.findFirst({ where: { tenantId: context.tenantId, projectId }, select: { searchVolume: true, keywordDifficulty: true, keywordMetricsSource: true } }),
+      prisma.sitePlanningSettings.findUnique({ where: { siteId: project.siteId }, select: { articleTargets: true } }),
+    ]);
+    const metadata = (project.metadata ?? {}) as Record<string, unknown>;
+    return reply.send({
+      ...(await toProjectDetail(project)),
+      keywordMetrics: planItem?.keywordMetricsSource
+        ? { searchVolume: planItem.searchVolume, keywordDifficulty: planItem.keywordDifficulty, source: planItem.keywordMetricsSource }
+        : null,
+      articleTargets: resolveArticleTargets(planning?.articleTargets, metadata.articleTargets),
+    });
   });
 
   fastify.post("/v2/projects/:id/generate", async (request, reply) => {
@@ -1238,19 +1244,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         return notFound(reply, "prompt preset version not found");
       }
     }
-    const result = await startProjectGeneration(
-      project.id,
-      context.tenantId,
-      body.feedback ?? null,
-      presetVersionId,
-    );
-    return reply.code(202).send({
-      project_id: project.id,
-      version_id: result.versionId,
-      content_text_id: result.contentTextId,
-      job_id: result.jobId,
-      status: "queued",
-    });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback ?? null, presetVersionId, userId: context.userId });
+    return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 
   fastify.post("/v2/projects/:id/revise", async (request, reply) => {
@@ -1277,19 +1272,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
     }
 
-    const result = await startProjectGeneration(
-      project.id,
-      context.tenantId,
-      body.feedback.trim(),
-      null,
-    );
-    return reply.code(202).send({
-      project_id: project.id,
-      version_id: result.versionId,
-      content_text_id: result.contentTextId,
-      job_id: result.jobId,
-      status: "queued",
-    });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback.trim(), userId: context.userId });
+    return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 
   fastify.post("/v2/projects/:id/approve", async (request, reply) => {
@@ -1377,91 +1361,32 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "project has no published or synced external content");
     }
 
-    const idempotencyKey = [
-      "pub",
-      project.site.id,
-      project.id,
-      latestVersion.id,
-      action,
-      targetStatus,
-    ].join(":");
-
-    const existing = await findPublicationJobByIdempotency(context.tenantId, idempotencyKey);
-    if (existing) {
-      if (existing.status === "queued" || existing.status === "processing") {
-        await queuePublication(existing.id);
-        return reply.code(202).send({
-          publication_id: existing.id,
-          project_id: project.id,
-          version_id: latestVersion.id,
-          status: existing.status,
-          reused: true,
-        });
-      }
-
-      if (existing.status === "draft_synced" || existing.status === "published") {
-        return reply.code(202).send({
-          publication_id: existing.id,
-          project_id: project.id,
-          version_id: latestVersion.id,
-          status: existing.status,
-          reused: true,
-        });
-      }
-
-      const retried = await resetPublicationJobForRetry(
-        existing.id,
-        {
-          action,
-          targetStatus,
-          requestedBy: context.userId ? "studio_user" : "studio",
-        },
-        context.userId,
-      );
-      await updateProjectStatus(context.tenantId, project.id, "publish_queued");
-      await queuePublication(retried.id);
-
+    const publication = await ensureWebsitePublication(context.tenantId, project.site.id, project.id, latestVersion.id);
+    // In flight, or this version is already live: a second click must not post again ("update" re-sends on purpose).
+    const alreadyDone = publication.status === "published" && action === "publish" && targetStatus === "publish";
+    if (publication.status === "publishing" || alreadyDone) {
       return reply.code(202).send({
-        publication_id: retried.id,
+        publication_id: publication.id,
         project_id: project.id,
         version_id: latestVersion.id,
-        status: "queued",
-        retried: true,
+        status: publication.status,
+        reused: true,
       });
     }
 
-    const publication = await createPublicationJob(
-      context.tenantId,
-      project.site.id,
-      project.id,
-      latestVersion.id,
-      action,
-      {
-        action,
-        targetStatus,
-        requestedBy: context.userId ? "studio_user" : "studio",
-      },
-      context.userId,
-      idempotencyKey,
-    );
-    await updateProjectStatus(context.tenantId, project.id, "publish_queued");
-    await queuePublication(publication.id);
-
-    if (action === "publish" || action === "update") {
-      await linkDurableWebsitePublication(
-        context.tenantId,
-        project.site.id,
-        project.id,
-        latestVersion.id,
-        publication.id,
-      );
-    }
+    const attempt = await startWebsiteAttempt(publication.id, {
+      targetStatus,
+      unpublish: action === "unpublish",
+      requestedBy: context.userId ? "studio_user" : "studio",
+      requestedByUserId: context.userId,
+    });
 
     return reply.code(202).send({
       publication_id: publication.id,
       project_id: project.id,
       version_id: latestVersion.id,
       status: "queued",
+      ...(attempt ? {} : { reused: true }),
     });
   });
 
@@ -1873,90 +1798,6 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       const message = error instanceof Error ? error.message : String(error);
       return badRequest(reply, message);
     }
-  });
-
-  fastify.get("/v2/publication-jobs", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
-    if (!context) {
-      return;
-    }
-
-    const query = request.query as { page?: string; pageSize?: string; status?: string };
-    const page = parsePage(query.page, 1);
-    const pageSize = parsePageSize(query.pageSize, 20);
-    if (query.status && !isOneOf(query.status, PUBLICATION_STATUSES)) {
-      return badRequest(reply, `status must be one of: ${PUBLICATION_STATUSES.join(", ")}`);
-    }
-
-    const publications = await listPublicationJobs(
-      context.tenantId,
-      page,
-      pageSize,
-      query.status as PublicationStatus | undefined,
-    );
-
-    const items = await Promise.all(
-      publications.items.map(async (publication) => ({
-        id: publication.id,
-        status: publication.status,
-        action: publication.action,
-        targetStatus: parsePublicationTargetStatus(
-          publication.requestPayload && typeof publication.requestPayload === "object"
-            ? (publication.requestPayload as Record<string, unknown>).targetStatus
-            : null,
-        ),
-        externalId: publication.externalId,
-        externalUrl: publication.externalUrl,
-        error: publication.error,
-        createdAt: publication.createdAt,
-        updatedAt: publication.updatedAt,
-        publishedAt: publication.publishedAt,
-        site: {
-          id: publication.site.id,
-          key: publication.site.key,
-          name: publication.site.name,
-          type: publication.site.type,
-        },
-        project: {
-          id: publication.project.id,
-          title: publication.project.title,
-          status: publication.project.status,
-        },
-        version: {
-          id: publication.version.id,
-          versionNumber: publication.version.versionNumber,
-          status: publication.version.status,
-        },
-        assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath),
-      })),
-    );
-
-    return reply.send({
-      ...publications,
-      items,
-    });
-  });
-
-  fastify.get("/v2/publication-jobs/:id", async (request, reply) => {
-    const context = await requireStudioContext(request, reply);
-    if (!context) {
-      return;
-    }
-
-    const publicationId = (request.params as { id: string }).id;
-    if (!isUuid(publicationId)) {
-      return badRequest(reply, "invalid publication id");
-    }
-
-    const publication = await getPublicationJobById(context.tenantId, publicationId);
-    if (!publication) {
-      return notFound(reply, "publication not found");
-    }
-
-    return reply.send({
-      ...publication,
-      assetUrl: await buildAssetPublicUrl(publication.version.contentImage?.storagePath),
-    });
   });
 
   fastify.get("/v2/workspace/identity-provider", async (request, reply) => {

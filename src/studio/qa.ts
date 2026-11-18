@@ -1,6 +1,9 @@
 import type { ContentVersion } from "@prisma/client";
 import type { QaCheck, QaReport } from "./types";
 import { INLINE_IMAGE_MIN } from "./inline-images";
+import { wordBandForContentType } from "./quality-gate";
+import { countLinks, runQualityChecklist, type ChecklistItem } from "./editorial-engine/quality-checklist";
+import type { ArticleTargets } from "./editorial-engine/structure";
 
 export type QaSeverity = "error" | "warning" | "info";
 export type QaGroup = "structural" | "seo" | "editorial" | "evidence" | "publishing";
@@ -19,6 +22,8 @@ export type QaReportV2 = {
   score: number;
   checks: QaCheck[];
   findings: QaFinding[];
+  /** The 10 checks listed in the article panel (absent on reports stored before M4). */
+  checklist?: ChecklistItem[];
 };
 
 export type QaVersionContext = {
@@ -30,6 +35,7 @@ export type QaVersionContext = {
   evidenceCount?: number;
   cannibalizationRisk?: string | null;
   internalLinkInventorySize?: number;
+  externalSourceInventorySize?: number;
 };
 
 const GENERIC_AI_PHRASES = [
@@ -85,14 +91,6 @@ function hasMalformedHtml(html: string): boolean {
   const pOpens = (html.match(/<p[^>]*>/gi) ?? []).length;
   const pCloses = (html.match(/<\/p>/gi) ?? []).length;
   return pOpens !== pCloses;
-}
-
-function countInternalLinks(html: string): number {
-  return (html.match(/<a[^>]+href=["'](?!https?:\/\/|mailto:|tel:|#)/gi) ?? []).length;
-}
-
-function countExternalLinks(html: string): number {
-  return (html.match(/<a[^>]+href=["']https?:\/\//gi) ?? []).length;
 }
 
 function countImages(html: string): number {
@@ -160,11 +158,9 @@ export function runVersionQaV2(
   const faqCandidates = Array.isArray(metadata.faqCandidates) ? metadata.faqCandidates.length : 0;
   const outlineCount = Array.isArray(metadata.outline) ? metadata.outline.length : 0;
   const words = wordCount(bodyText);
-  const recommendedMin = context.recommendedWordCountMin ?? 1200;
-  const recommendedMax = context.recommendedWordCountMax ?? 2200;
-
-  const shortForm = contentType === "news" || contentType === "preview" || contentType === "match-report" || contentType === "match-preview";
-  const wordRangeTarget = shortForm ? { min: 500, max: 1500 } : { min: recommendedMin, max: recommendedMax };
+  // The plan's targets win; otherwise the content-type band the autonomous gate also uses.
+  const band = wordBandForContentType(contentType, intent);
+  const wordRangeTarget = { min: context.recommendedWordCountMin ?? band.min, max: context.recommendedWordCountMax ?? band.softMax };
 
   const findings: QaFinding[] = [];
   const add = (key: string, label: string, passed: boolean, severity: QaSeverity, message: string, group: QaGroup) => {
@@ -216,9 +212,9 @@ export function runVersionQaV2(
     const headingsBlob = [...body.matchAll(/<h[23][^>]*>(.*?)<\/h[23]>/gi)].map((match) => match[1]).join(" ");
     add("keyword_in_headings", "Keyword in headings", containsKeyword(stripHtml(headingsBlob), primaryKeyword), "warning", `Incluye la keyword "${primaryKeyword}" en algún H2/H3.`, "seo");
   }
-  const internalLinks = countInternalLinks(body);
+  const siteUrl = typeof metadata.siteUrl === "string" ? metadata.siteUrl : null;
+  const { internal: internalLinks, external: externalLinks } = countLinks(body, siteUrl);
   add("internal_links", "Internal links", internalLinks >= 2, "warning", `Añade al menos 2 enlaces internos reales del inventario del sitio (actual: ${internalLinks}).`, "seo");
-  const externalLinks = countExternalLinks(body);
   add("evidence_links", "External evidence links", externalLinks >= 1 || !(intent === "news" || intent === "commercial-investigation"), intent === "news" || intent === "commercial-investigation" ? "warning" : "info", "El contenido de actualidad o comparación debe citar fuentes externas verificables.", "seo");
   const imageCount = countImages(body);
   // Checked once the hero exists: inline images are queued with it and land in the body as they finish.
@@ -289,7 +285,23 @@ export function runVersionQaV2(
       severity: finding.severity as "error" | "warning",
     }));
 
-  return { passed, score, checks, findings };
+  const stringList = (value: unknown) => (Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : []);
+  const storedInventory = typeof metadata.internalLinkInventorySize === "number" ? metadata.internalLinkInventorySize : null;
+  const checklist = runQualityChecklist({
+    bodyHtml: body,
+    seoTitle,
+    seoDescription,
+    primaryKeyword,
+    semanticKeywords: [...stringList(metadata.semanticKeywords), ...stringList(metadata.secondaryKeywords)],
+    // Stored by the plan brief for guides only (structure.ts resolveArticleTargets).
+    targets: metadata.articleTargets && typeof metadata.articleTargets === "object" ? (metadata.articleTargets as ArticleTargets) : null,
+    cannibalizationRisk: context.cannibalizationRisk ?? null,
+    internalLinkInventorySize: context.internalLinkInventorySize ?? storedInventory,
+    externalSourceInventorySize: context.externalSourceInventorySize ?? (typeof metadata.externalSourceInventorySize === "number" ? metadata.externalSourceInventorySize : null),
+    siteUrl,
+  });
+
+  return { passed, score, checks, findings, checklist };
 }
 
 /** Backward-compatible entry point used by existing call sites. */

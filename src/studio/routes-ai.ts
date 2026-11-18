@@ -4,6 +4,7 @@ import {
   AI_IMAGE_PROVIDERS,
   AI_PROVIDERS,
   AI_TASKS,
+  AI_USES,
   findImageProvider,
   findProvider,
   isValidModel,
@@ -12,6 +13,7 @@ import {
   loadProviderKeys,
   secretOf,
   providerConfigured,
+  readSelection,
   saveAiSelection,
   saveImageSelection,
 } from "../infrastructure/ai/ai-settings";
@@ -30,6 +32,7 @@ export function registerAiSettingsRoutes(fastify: FastifyInstance) {
     const imageSelection = await loadImageSelection(context.tenantId, true);
     return reply.send({
       tasks: AI_TASKS,
+      uses: AI_USES,
       image: {
         selection: imageSelection,
         environmentDefault: { provider: getEnv("IMAGE_PROVIDER", "mock"), model: getEnv("IMAGE_MODEL", "") || null },
@@ -63,14 +66,25 @@ export function registerAiSettingsRoutes(fastify: FastifyInstance) {
   fastify.put("/v2/ai/provider", async (request, reply) => {
     const context = await requirePlatformAdmin(request, reply);
     if (!context) return;
-    const body = parseBody<{ provider?: string; model?: string }>(request);
+    const body = parseBody<{ provider?: string; model?: string; uses?: Record<string, unknown> | null; fallback?: unknown }>(request);
     const provider = findProvider(body.provider);
     if (!provider) return badRequest(reply, `provider must be one of: ${AI_PROVIDERS.map((p) => p.id).join(", ")}`);
     const model = String(body.model ?? "").trim();
     if (!isValidModel(provider, model)) return badRequest(reply, `model is not available for ${provider.label}`);
     if (!providerConfigured(provider)) return badRequest(reply, `${provider.label} has no API key on the server (${provider.keyEnv})`);
     const before = await loadAiSelection(context.tenantId, true);
-    const selection = await saveAiSelection(context.tenantId, { provider: provider.id, model }, context.userId);
+    // Per-use models and the fallback: omitted keeps the stored value, null clears it.
+    const extra: Array<[string, unknown]> = [...AI_USES.map(({ key }) => [`uses.${key}`, body.uses?.[key]] as [string, unknown]), ["fallback", body.fallback]];
+    for (const [field, value] of extra) {
+      if (value == null) continue;
+      const selection = readSelection(value);
+      if (!selection) return badRequest(reply, `${field}: provider/model is not available`);
+      const definition = findProvider(selection.provider)!;
+      if (!providerConfigured(definition)) return badRequest(reply, `${field}: ${definition.label} has no API key on the server (${definition.keyEnv})`);
+    }
+    const uses = body.uses === undefined ? before?.uses : body.uses === null ? {} : Object.fromEntries(AI_USES.map(({ key }) => [key, readSelection(body.uses?.[key])]).filter(([, value]) => value));
+    const fallback = body.fallback === undefined ? before?.fallback : readSelection(body.fallback);
+    const selection = await saveAiSelection(context.tenantId, { provider: provider.id, model, uses, fallback }, context.userId);
     await writeAudit({
       tenantId: context.tenantId,
       action: "ai.provider.updated",

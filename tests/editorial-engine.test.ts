@@ -141,7 +141,6 @@ async function cleanupEngineFixture(fixture: EngineFixture): Promise<void> {
   await prisma.articleGeneration.deleteMany({ where: { tenantId } });
   await prisma.publicationAttempt.deleteMany({ where: { tenantId } });
   await prisma.publication.deleteMany({ where: { tenantId } });
-  await prisma.publicationJob.deleteMany({ where: { tenantId } });
   await prisma.contentDerivative.deleteMany({ where: { tenantId } });
   await prisma.socialContent.deleteMany({ where: { tenantId } });
   await prisma.contentVersion.deleteMany({ where: { tenantId } });
@@ -468,11 +467,11 @@ test("SEO package: deterministic slug, no invented volume, stuffing detection", 
   assert.equal(seo.keywordDensity.stuffingRisk, true, "heavy repetition must be flagged as stuffing");
 });
 
-test("editorial QA: unsupported years hard-fail publication", () => {
+function qaForLedger(statement: string, bodyHtml: string, articleType: "standard_news" | "guide" = "standard_news") {
   const licenses: FactLicense[] = [
     {
       factKey: "headline",
-      statement: "Studio announces movie",
+      statement,
       usage: "state",
       sensitivity: "normal",
       reasons: [],
@@ -485,7 +484,7 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     title: "T",
     h1: "T",
     excerpt: "e",
-    bodyHtml: "<p>Studio announces movie. It all started in 1931.</p>",
+    bodyHtml,
     seoTitle: "T".padEnd(40, "x"),
     seoDescription: "d".padEnd(120, "x"),
     claims: [],
@@ -495,7 +494,7 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     targetSite: { id: null, name: null, type: null, locale: null },
     audience: "r",
     searchIntent: "informational" as const,
-    articleType: "standard_news" as const,
+    articleType,
     primaryKeyword: "Studio",
     secondaryKeywords: [],
     entities: [],
@@ -510,7 +509,7 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     contentWarnings: [],
     generatedAt: new Date().toISOString(),
   };
-  const report = runEditorialQa({
+  return runEditorialQa({
     article,
     brief,
     licenses,
@@ -537,8 +536,35 @@ test("editorial QA: unsupported years hard-fail publication", () => {
     enrichmentKnowledge: [],
     enrichmentDates: [],
   });
+}
+
+test("editorial QA: unsupported years hard-fail publication", () => {
+  const report = qaForLedger("Studio announces movie", "<p>Studio announces movie. It all started in 1931.</p>");
   assert.equal(report.passed, false, "unsupported year must hard-fail");
   assert.equal(report.criticalUnsupportedClaims.length, 1);
+});
+
+// Was flaky: the fixture's random site suffix ("eng-…-1847-site", "….example.com") read as an invented year 1 run in ~10.
+test("editorial QA: digits inside domains and slug-like names are not years; prose years still are", () => {
+  const body = "<p>Studio announces movie en eng-1795014467-1847-site, ver eng-1795014467-1847.example.com y radio2024.es; temporada 2024-2025.</p>";
+  const report = qaForLedger("Studio announces movie en la temporada 2024-2025", body);
+  assert.deepEqual(report.criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger("Studio announces movie", "<p>Studio announces movie en eng-1795-1847-site. Empezó en 1931.</p>").criticalUnsupportedClaims.length, 1);
+});
+
+test("editorial QA: durable content may name the current year; news and invented dates may not", () => {
+  const year = String(new Date().getFullYear());
+  const body = `<p>Studio announces movie: la guía de ${year}.</p>`;
+  assert.deepEqual(qaForLedger("Studio announces movie", body, "guide").criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger("Studio announces movie", body).criticalUnsupportedClaims.length, 1);
+  assert.equal(qaForLedger("Studio announces movie", `<p>Actualizado el 16 de noviembre de ${year}.</p>`, "guide").criticalUnsupportedClaims.length, 1);
+});
+
+test("editorial QA: a date anywhere in a ledger sentence is supported, even after another number", () => {
+  const statement = "Si vamos título a título vemos que la temporada 2 de Celeste, que se estrena el 19 de noviembre, está nominada.";
+  const report = qaForLedger(statement, "<p>Studio announces movie. La temporada 2 de Celeste se estrena el 19 de noviembre.</p>");
+  assert.deepEqual(report.criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger(statement, "<p>Se estrena el 21 de noviembre.</p>").criticalUnsupportedClaims.length, 1, "a different date stays unsupported");
 });
 
 test("publication gates: configurable ladder from auto_publish to reject", () => {
@@ -553,14 +579,14 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
   const auto = evaluatePublicationGates({
     ...baseInput,
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: false } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2 },
   });
   assert.equal(auto.decision, "auto_publish");
 
   const review = evaluatePublicationGates({
     ...baseInput,
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: true } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2, requireHumanApproval: true },
   });
   assert.equal(review.decision, "review");
 
@@ -568,7 +594,7 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
     ...baseInput,
     qa: { ...goodQa, score: 40 },
     policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true },
-    configJson: { autoPublish: { minQaScore: 80, allowUnsupportedClaims: false, allowCopyrightWarning: false, minSourceGroups: 2, minSiteMatch: 0.5, requireHumanApproval: false } },
+    configJson: { overallQualityScore: 80, minSourceGroups: 2 },
   });
   assert.equal(hold.decision, "hold", "quality gates must hold auto-publishing when approval is not required");
 
@@ -586,8 +612,11 @@ test("publication gates: configurable ladder from auto_publish to reject", () =>
   });
   assert.equal(policyOff.decision, "review");
 
-  assert.equal(resolveGatesConfig(null).minQaScore, 75);
-  assert.equal(resolveGatesConfig({ autoPublish: { minQaScore: 60 } }).minQaScore, 60);
+  // Defaults come from the single autonomous threshold config; autopilot needs no extra approval switch.
+  assert.equal(resolveGatesConfig(null).minQaScore, 90);
+  assert.equal(resolveGatesConfig(null).requireHumanApproval, false);
+  assert.equal(resolveGatesConfig({ overallQualityScore: 60 }).minQaScore, 60);
+  assert.equal(evaluatePublicationGates({ ...baseInput, policy: { autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true }, configJson: null }).decision, "auto_publish");
 });
 
 test("provenance: claims map back to ledger facts and single-source attribution is detected", () => {
@@ -822,7 +851,7 @@ test("scenario 6: fake rumor — single low-trust source stays attributed and ne
     const licenses = detail.factLicenses;
     assert.ok(licenses.some((license) => license.usage === "attribute"));
     assert.ok(detail.publication && detail.publication.decision !== "auto_publish", "a single low-trust source can never auto-publish");
-    assert.equal(detail.qa.criticalUnsupportedClaims.length, 0);
+    assert.equal(detail.qa.criticalUnsupportedClaims.length, 0, JSON.stringify(detail.qa.criticalUnsupportedClaims));
   } finally {
     await cleanupEngineFixture(fixture);
   }
@@ -843,7 +872,7 @@ test("scenario 7: release-date correction — update existing article, version h
     const cluster = await singleClusterFor(fixture);
     const firstGeneration = await generateArticleFromCluster(fixture.tenantId, cluster.id, { siteId: fixture.siteId });
     const firstProjectId = detailOf(firstGeneration).project?.id;
-    assert.ok(firstProjectId, "first generation must materialize a project");
+    assert.ok(firstProjectId, `first generation must materialize a project; decision=${detailOf(firstGeneration).publication?.decision} failed gates: ${JSON.stringify((detailOf(firstGeneration).publication?.gates ?? []).filter((gate) => !gate.passed))} qa=${JSON.stringify(detailOf(firstGeneration).qa)}`);
 
     // The release year changes: same externalId, updated content → developing.
     const corrected = makeItem({
@@ -952,7 +981,7 @@ test("scenario 9: irrelevant topic — site-match gate blocks automation, human 
     assert.ok(["breaking_news", "standard_news"].includes(detail.articleType), `expected a plain news type, got ${detail.articleType}`);
     const siteFit = detail.cluster?.siteFitScore ?? null;
     assert.ok(siteFit !== null && siteFit < 0.5, `expected low site fit, got ${siteFit}`);
-    assert.equal(detail.publication?.decision, "review", "policy is off → human review with gate evidence");
+    assert.equal(detail.publication?.decision, "review", `policy is off → human review with gate evidence; failed gates: ${JSON.stringify((detail.publication?.gates ?? []).filter((gate) => !gate.passed))} qa=${JSON.stringify(detail.qa)}`);
     assert.ok(
       detail.publication.gates.some((gate) => gate.key === "site_match" && gate.passed === false),
       "the failed site-match gate must be visible to the editor",

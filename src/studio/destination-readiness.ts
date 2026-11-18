@@ -1,4 +1,5 @@
 import { getPrismaClient } from "../infrastructure/db/prisma";
+import { getEnv } from "../shared/utils/env";
 
 /**
  * Read-only destination readiness (Site + ConnectorInstallation + last Publication).
@@ -82,6 +83,29 @@ export function installationToConnection(i: InstallationReadinessInput) {
   };
 }
 
+/**
+ * A site that publishes with its stored credential reference (before installations existed) is a working
+ * destination. It was never probed, so the reason says so instead of claiming a verification.
+ */
+export function legacySiteToConnection(site: { id: string; name: string }) {
+  return {
+    id: `legacy-site-${site.id}`,
+    platform: "website" as const,
+    displayName: site.name,
+    enabled: true,
+    status: "active",
+    connectionState: "connected",
+    readiness: "ready" as DestinationReadiness,
+    stage: "stored" as DestinationStage,
+    reason: "Publishing with the credentials already stored for this site. It has not been checked with a test draft.",
+    checks: { configured: true, authenticated: null, reachable: null, capabilitiesVerified: false, canCreateDraft: null, canPublish: null },
+    lastVerifiedAt: null,
+    lastSuccessfulPublicationAt: null,
+    siteId: site.id,
+    siteName: site.name,
+  };
+}
+
 /** One row per destination: an installation supersedes a legacy website account on the same site. */
 export function dedupeLegacyWebsiteAccounts<T extends { platform: string; siteId: string | null }>(
   accounts: T[],
@@ -121,7 +145,7 @@ export async function loadWebsiteDestinations(tenantId: string) {
         config: true, capabilities: true, credentialsRef: true, credentialsCiphertext: true,
       },
     }),
-    prisma.site.findMany({ where: { tenantId }, select: { id: true, name: true, baseUrl: true } }),
+    prisma.site.findMany({ where: { tenantId }, select: { id: true, name: true, baseUrl: true, publishingCredentialsRef: true } }),
   ]);
   const resolved = rows.map((row) => ({
     ...row,
@@ -136,7 +160,10 @@ export async function loadWebsiteDestinations(tenantId: string) {
       })
     : [];
   const lastBySite = new Map(published.map((p) => [p.siteId, p._max.publishedAt]));
-  return resolved.map((row) =>
+  const legacy = sites
+    .filter((site) => !siteIds.includes(site.id) && site.publishingCredentialsRef && getEnv(site.publishingCredentialsRef, "").trim())
+    .map(legacySiteToConnection);
+  return [...legacy, ...resolved.map((row) =>
     installationToConnection({
       id: row.id,
       displayName: row.displayName,
@@ -148,5 +175,5 @@ export async function loadWebsiteDestinations(tenantId: string) {
       capabilities: row.capabilities,
       lastPublishedAt: row.siteId ? lastBySite.get(row.siteId) ?? null : null,
     }),
-  );
+  )];
 }

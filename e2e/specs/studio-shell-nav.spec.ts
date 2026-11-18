@@ -22,7 +22,7 @@ test('desktop: area bar and contextual sidebar work together; shortcuts return f
   const areas = page.getByRole('navigation', { name: 'Areas' });
   const sidebar = page.getByRole('navigation', { name: 'Home tools' });
   await expect(areas.getByRole('link', { name: 'Home' })).toHaveAttribute('aria-current', 'page');
-  await expect(sidebar.getByRole('link')).toHaveText(['Overview', 'Notifications', 'Background jobs']);
+  await expect(sidebar.getByRole('link')).toHaveText(['Overview', 'Notifications']);
 
   // Settings is one click from anywhere and its tools fill the sidebar.
   await areas.getByRole('link', { name: 'Settings' }).click();
@@ -32,7 +32,7 @@ test('desktop: area bar and contextual sidebar work together; shortcuts return f
 
   // Deep link keeps its area lit.
   await page.goto('/studio/content/new', { waitUntil: 'networkidle' });
-  await expect(areas.getByRole('link', { name: /Produce/ })).toHaveAttribute('aria-current', 'page');
+  await expect(areas.getByRole('link', { name: 'Articles' })).toHaveAttribute('aria-current', 'page');
 
   // Ctrl+K palette: Esc closes and focus goes back.
   await page.getByRole('button', { name: /Search and go to/ }).focus();
@@ -48,7 +48,7 @@ test('desktop: area bar and contextual sidebar work together; shortcuts return f
   await expect(assistant).toHaveCount(0);
   await page.keyboard.press('Control+j');
   await expect(assistant).toBeVisible();
-  await expect(page.getByRole('navigation', { name: 'Produce tools' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Articles tools' })).toBeVisible();
   await page.keyboard.press('Control+j');
   await expect(page.getByRole('button', { name: /^Assistant/ })).toBeFocused();
   await context.close();
@@ -56,15 +56,15 @@ test('desktop: area bar and contextual sidebar work together; shortcuts return f
 
 test('phone: drawer opens and closes with Esc, active area stays in view', async ({ browser }) => {
   const { context, page } = await signIn(browser, 390, 844);
-  await page.goto('/studio/publications', { waitUntil: 'networkidle' });
-  const active = page.getByRole('navigation', { name: 'Areas' }).getByRole('link', { name: /Publish/ });
+  await page.goto('/studio/plan', { waitUntil: 'networkidle' });
+  const active = page.getByRole('navigation', { name: 'Areas' }).getByRole('link', { name: 'Advanced' });
   await expect(active).toBeInViewport();
 
   const menu = page.getByRole('button', { name: 'Open navigation' });
   await menu.click();
-  await expect(page.getByRole('navigation', { name: 'Publish tools' }).getByRole('link', { name: 'Calendar' })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Advanced tools' }).getByRole('link', { name: 'Review queue' })).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('navigation', { name: 'Publish tools' })).toBeHidden();
+  await expect(page.getByRole('navigation', { name: 'Advanced tools' })).toBeHidden();
   await expect(menu).toBeFocused();
   await context.close();
 });

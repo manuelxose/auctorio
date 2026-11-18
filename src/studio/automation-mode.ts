@@ -13,6 +13,13 @@ export type AutomationMode = "manual" | "assisted" | "autopilot";
 
 export const AUTOMATION_MODES: AutomationMode[] = ["manual", "assisted", "autopilot"];
 
+/** New sites start assisted: plan items are drafted just in time and a human approves the release. */
+export const DEFAULT_AUTOMATION_MODE: AutomationMode = "assisted";
+
+// shortcut: one lead time for every site; move it to the policy when Advanced exposes it.
+/** Minutes before a plan item's slot when its article is drafted. */
+export const PLAN_LEAD_TIME_MINUTES = 60;
+
 export type AutomationFlagSet = {
   enabled: boolean;
   autoGenerate: boolean;

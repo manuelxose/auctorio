@@ -1,9 +1,43 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, DestroyRef, ElementRef, EventEmitter, Inject, Input, OnDestroy, OnInit, Output, PLATFORM_ID, ViewChild, inject } from '@angular/core';
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { AppIconComponent } from './app-icon.component';
 
-const ALLOWED_TAGS = new Set(['P', 'H2', 'H3', 'H4', 'STRONG', 'B', 'EM', 'I', 'U', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'A', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TH', 'TD', 'IMG', 'BR', 'FIGURE', 'FIGCAPTION']);
+// Mirrors src/studio/html-sanitizer.ts: summary/TOC/brand cards are <aside>/<nav> blocks and must survive an edit.
+const ALLOWED_TAGS = new Set(['P', 'H2', 'H3', 'H4', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'BLOCKQUOTE', 'UL', 'OL', 'LI', 'A', 'HR', 'TABLE', 'THEAD', 'TBODY', 'TFOOT', 'TR', 'TH', 'TD', 'IMG', 'BR', 'FIGURE', 'FIGCAPTION', 'ASIDE', 'NAV']);
+const ALLOWED_ATTRS: Record<string, string[]> = {
+  A: ['href', 'title', 'rel', 'target', 'style'],
+  IMG: ['src', 'alt', 'width', 'height', 'loading', 'style'],
+  STRONG: ['style'],
+  H2: ['id', 'style'],
+  H3: ['id', 'style'],
+  TH: ['scope'],
+  ASIDE: ['style'],
+  P: ['style'],
+};
+const STYLE_PROPERTIES = new Set(['text-align', 'color', 'background-color', 'border', 'border-left', 'border-color', 'border-radius', 'padding', 'margin', 'display', 'text-decoration', 'font-weight', 'border-top', 'font-size', 'line-height', 'letter-spacing', 'text-transform', 'width', 'overflow']);
+
+function cleanStyle(value: string): string {
+  return value
+    .split(';')
+    .map((declaration) => declaration.split(':'))
+    .filter((parts) => parts.length === 2 && STYLE_PROPERTIES.has(parts[0].trim().toLowerCase()) && /^[#a-z0-9 .%-]+$/i.test(parts[1].trim()))
+    .map(([property, val]) => `${property.trim().toLowerCase()}:${val.trim()}`)
+    .join(';');
+}
+
+/** youtube.com/watch?v=, youtu.be/ or /shorts/ → video id. */
+export function youtubeId(url: string): string | null {
+  const match = /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|shorts\/|embed\/)|youtu\.be\/)([\w-]{11})/.exec(url);
+  return match ? match[1] : null;
+}
+
+/** No-JS video block: the thumbnail links to the video (iframes are stripped by the publishers' sanitizer). */
+export function youtubeFigure(id: string, title: string): string {
+  const safe = title.replace(/[<>"&]/g, '');
+  return `<figure data-block="youtube"><a href="https://www.youtube.com/watch?v=${id}"><img src="https://i.ytimg.com/vi/${id}/hqdefault.jpg" alt="${safe}" width="480" height="360" loading="lazy"></a><figcaption>${safe}</figcaption></figure>`;
+}
 
 function sanitizeHtml(html: string): string {
   if (isPlatformBrowserSafe()) {
@@ -16,9 +50,13 @@ function sanitizeHtml(html: string): string {
         }
         for (const attribute of Array.from(child.attributes)) {
           const name = attribute.name.toLowerCase();
-          const allowed = child.tagName === 'A' ? ['href', 'title', 'rel', 'target'] : child.tagName === 'IMG' ? ['src', 'alt', 'width', 'height'] : [];
+          const allowed = ALLOWED_ATTRS[child.tagName] ?? [];
           if (!allowed.includes(name) && !name.startsWith('data-')) {
             child.removeAttribute(attribute.name);
+          } else if (name === 'style') {
+            const style = cleanStyle(attribute.value);
+            if (style) child.setAttribute('style', style);
+            else child.removeAttribute('style');
           }
         }
         if (child.tagName === 'A') {
@@ -61,12 +99,21 @@ function isPlatformBrowserSafe(): boolean {
         <span class="au-rich-editor__sep" aria-hidden="true"></span>
         <button class="au-rich-editor__btn au-rich-editor__btn--bold" type="button" title="Bold (Ctrl+B)" aria-label="Bold" (mousedown)="exec('bold')"><strong>B</strong></button>
         <button class="au-rich-editor__btn au-rich-editor__btn--italic" type="button" title="Italic (Ctrl+I)" aria-label="Italic" (mousedown)="exec('italic')"><em>I</em></button>
+        <button class="au-rich-editor__btn" type="button" title="Underline (Ctrl+U)" aria-label="Underline" (mousedown)="exec('underline')"><u>U</u></button>
+        <button class="au-rich-editor__btn" type="button" title="Strikethrough" aria-label="Strikethrough" (mousedown)="exec('strikeThrough')"><s>S</s></button>
         <span class="au-rich-editor__sep" aria-hidden="true"></span>
         <button class="au-rich-editor__btn" type="button" title="Bullet list" aria-label="Bullet list" (mousedown)="exec('insertUnorderedList')">• List</button>
         <button class="au-rich-editor__btn" type="button" title="Numbered list" aria-label="Numbered list" (mousedown)="exec('insertOrderedList')">1. List</button>
         <button class="au-rich-editor__btn" type="button" title="Blockquote" aria-label="Blockquote" (mousedown)="exec('formatBlock', '<blockquote>')">❝</button>
         <button class="au-rich-editor__btn" type="button" title="Link" aria-label="Link" (mousedown)="insertLink()"><app-icon name="link"></app-icon></button>
         <button class="au-rich-editor__btn" type="button" title="Insert table" aria-label="Insert table" (mousedown)="insertTable()">▦</button>
+        <button class="au-rich-editor__btn" type="button" title="Divider" aria-label="Divider" (mousedown)="exec('insertHorizontalRule')">―</button>
+        <button class="au-rich-editor__btn" type="button" title="Image" aria-label="Insert image" (mousedown)="insertImage()"><app-icon name="media"></app-icon></button>
+        <button class="au-rich-editor__btn" type="button" title="YouTube video" aria-label="Insert YouTube video" (mousedown)="insertYoutube()">▶</button>
+        <span class="au-rich-editor__sep" aria-hidden="true"></span>
+        <button class="au-rich-editor__btn" type="button" title="Align left" aria-label="Align left" (mousedown)="exec('justifyLeft')">⇤</button>
+        <button class="au-rich-editor__btn" type="button" title="Align center" aria-label="Align center" (mousedown)="exec('justifyCenter')">↔</button>
+        <button class="au-rich-editor__btn" type="button" title="Align right" aria-label="Align right" (mousedown)="exec('justifyRight')">⇥</button>
         <span class="au-rich-editor__sep" aria-hidden="true"></span>
         <button class="au-rich-editor__btn" type="button" title="Clear formatting" aria-label="Clear formatting" (mousedown)="exec('removeFormat')">Tx</button>
       </div>
@@ -78,7 +125,7 @@ function isPlatformBrowserSafe(): boolean {
         role="textbox"
         aria-multiline="true"
         aria-label="Article content editor"
-        [innerHTML]="safeHtml"
+        [innerHTML]="trustedHtml"
         (input)="onInput()"
         (paste)="onPaste($event)"
         (keydown.control.z)="exec('undo')"
@@ -102,6 +149,9 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
   @Output() autosave = new EventEmitter<string>();
   private readonly platformId = inject(PLATFORM_ID);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly domSanitizer = inject(DomSanitizer);
+  /** safeHtml went through sanitizeHtml (allowlist + cleanStyle); trusting it keeps the cards' style and data-block, which Angular would strip. Set only from writeValue so typing never re-renders the surface. */
+  trustedHtml: SafeHtml = '';
 
   value = '';
   safeHtml = '';
@@ -120,6 +170,8 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
 
   ngOnInit(): void {
     this.browser = isPlatformBrowser(this.platformId);
+    // Alignment as inline text-align (kept by both sanitizers), not <div align>.
+    if (this.browser) document.execCommand('styleWithCSS', false, 'true');
     if (this.browser && this.autosaveMs > 0) {
       const interval = setInterval(() => {
         if (this.dirty) {
@@ -141,6 +193,7 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
     if (this.safeHtml === next) return;
     this.value = next;
     this.safeHtml = next;
+    this.trustedHtml = this.domSanitizer.bypassSecurityTrustHtml(next);
     this.refreshStats();
   }
 
@@ -196,6 +249,23 @@ export class AuRichEditorComponent implements OnInit, OnDestroy, ControlValueAcc
     const href = window.prompt('Link URL (use only verified destination URLs for internal links):');
     if (!href || href.trim().toLowerCase().startsWith('javascript:')) return;
     document.execCommand('createLink', false, href.trim());
+    this.onInput();
+  }
+
+  insertImage(): void {
+    if (!this.browser) return;
+    const src = window.prompt('Image URL (https://…):')?.trim();
+    if (!src || !/^https?:\/\//i.test(src)) return;
+    const alt = (window.prompt('Describe the image (alt text):') ?? '').replace(/[<>"&]/g, '').trim();
+    document.execCommand('insertHTML', false, `<figure><img src="${src.replace(/"/g, '%22')}" alt="${alt}" loading="lazy"></figure>`);
+    this.onInput();
+  }
+
+  insertYoutube(): void {
+    if (!this.browser) return;
+    const id = youtubeId(window.prompt('YouTube video URL:') ?? '');
+    if (!id) return;
+    document.execCommand('insertHTML', false, youtubeFigure(id, window.prompt('Video title (caption):') ?? 'Vídeo'));
     this.onInput();
   }
 

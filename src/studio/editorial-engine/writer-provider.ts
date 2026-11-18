@@ -54,5 +54,5 @@ export function getArticleWriter(): ArticleWriter {
   if (writerFactory) {
     return writerFactory();
   }
-  return new DefaultArticleWriter(getTextProvider());
+  return new DefaultArticleWriter(getTextProvider("articles"));
 }

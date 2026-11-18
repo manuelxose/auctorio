@@ -2,11 +2,14 @@ import { CommonModule } from '@angular/common';
 import { Component, DestroyRef, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
+import { DomSanitizer, type SafeHtml } from '@angular/platform-browser';
 import { AppContextService } from '../services/app-context.service';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AuRichEditorComponent } from '../components/ui/au-rich-editor.component';
+import { htmlToMarkdown } from '../utils/html-to-markdown';
+import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import type {
   InternalLinkSuggestion,
   ProjectVersionDetail,
@@ -34,485 +37,354 @@ function strOf(value: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+/** "https://www.site.com/x" → "site.com"; '' when not an absolute URL. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
 @Component({
   selector: 'app-content-workspace-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AuRichEditorComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AuRichEditorComponent, AppPopoverComponent],
+  styleUrls: ['./studio-page-kit.css', './content-workspace-page.component.css', './content-workspace-edit.css'],
   template: `
-    <section class="au-page" *ngIf="project; else loadingState">
-      <a class="au-link au-mb-2" routerLink="/studio/content">
-        <app-icon name="chevron-left"></app-icon>
-        Back to content
-      </a>
+    @if (project; as project) {
+    <section class="sp art">
+      <a class="art-back" routerLink="/studio/content"><app-icon name="chevron-left"></app-icon>Articles</a>
 
-      <header class="au-page__header">
-        <div>
-          <h1 class="au-page__title">{{ project.title }}</h1>
-          <div class="au-page__tags">
-            <span class="au-badge au-badge--neutral">{{ project.site.name }}</span>
-            <span class="au-badge" [class]="'au-badge--' + stageTone(project.reviewGate)">
-              {{ stageLabel(project.reviewGate) }}
-            </span>
-            <span class="au-badge au-badge--brand" *ngIf="project.origin === 'auto'" title="Created by automation">automatic</span>
-          </div>
-          <div class="au-readiness">
-            <span class="au-readiness__item" [class.is-ready]="readiness.article">Article</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.media">Media</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.seo">SEO</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.x">X</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.instagram">Instagram</span>
-            <span class="au-readiness__item" [class.is-ready]="readiness.schedule">Schedule</span>
-          </div>
+      <header class="art-head">
+        <div class="art-head__text">
+          <h1 class="art-head__title">{{ project.title }}</h1>
+          <p class="art-head__meta">
+            <span class="sp-status" [attr.data-tone]="stageTone(project.reviewGate)"><i class="sp-dot" aria-hidden="true"></i>{{ stageLabel(project.reviewGate) }}</span>
+            <span>{{ project.site.name }}</span>
+            @if (project.origin === 'auto') { <span>Automatic</span> }
+            @if (project.latestVersion; as version) { <span>Version {{ version.versionNumber }}</span> }
+          </p>
         </div>
-        <div class="au-page__actions">
-          <button class="au-btn au-btn--ghost" type="button" (click)="refresh()">
-            <app-icon name="refresh"></app-icon>
-            Refresh
-          </button>
-          <button class="au-btn au-btn--secondary" type="button" *ngIf="canGenerate" (click)="generate()">
-            <app-icon name="sparkles"></app-icon>
-            {{ project.versions.length > 0 ? 'Regenerate' : 'Generate article' }}
-          </button>
-          <button class="au-btn au-btn--secondary" type="button" *ngIf="imageNeedsRetry" (click)="retryImage()">
-            <app-icon name="refresh"></app-icon>
-            Retry image
-          </button>
-          <button class="au-btn au-btn--secondary" type="button" *ngIf="canApprove" (click)="approve()">
-            <app-icon name="circle-check"></app-icon>
-            Approve
-          </button>
-          <button class="au-btn au-btn--primary" type="button" *ngIf="canSyncDraft" (click)="syncDraft()">Save to site as draft</button>
-          <button class="au-btn au-btn--primary" type="button" *ngIf="canPublish" (click)="publish()">
-            <app-icon name="publications"></app-icon>
-            {{ published ? 'Republish' : 'Publish' }}
-          </button>
-          <button class="au-btn au-btn--danger" type="button" *ngIf="canUnpublish" (click)="unpublish()">Unpublish</button>
+        <div class="art-head__actions">
+          @if (project.latestVersion) {
+            <div class="sp-seg" role="group" aria-label="Mode">
+              <button type="button" class="sp-seg__item" [class.is-active]="!editing" [attr.aria-pressed]="!editing" (click)="editing = false">Preview</button>
+              <button type="button" class="sp-seg__item" [class.is-active]="editing" [attr.aria-pressed]="editing" (click)="editing = true">Edit</button>
+            </div>
+          }
+          @if (canApprove) {
+            <button class="au-btn au-btn--primary" type="button" (click)="approve()"><app-icon name="circle-check"></app-icon>Approve</button>
+          } @else if (canPublish) {
+            <button class="au-btn au-btn--primary" type="button" (click)="publish()"><app-icon name="publications"></app-icon>{{ published ? 'Republish' : 'Publish' }}</button>
+          } @else if (!project.latestVersion && canGenerate) {
+            <button class="au-btn au-btn--primary" type="button" (click)="generate()"><app-icon name="sparkles"></app-icon>Generate article</button>
+          }
+          <button class="au-btn au-btn--secondary au-btn--icon" type="button" #moreTrigger (click)="moreMenu.toggle(moreTrigger)" aria-label="More actions" aria-haspopup="menu"><app-icon name="dots"></app-icon></button>
+          <app-popover #moreMenu>
+            <div class="au-menu">
+              @if (canApprove && canPublish) { <button class="au-menu__item" type="button" (click)="moreMenu.hide(); publish()"><app-icon name="publications"></app-icon>{{ published ? 'Republish' : 'Publish' }}</button> }
+              @if (canSyncDraft) { <button class="au-menu__item" type="button" (click)="moreMenu.hide(); syncDraft()"><app-icon name="upload"></app-icon>Save to site as draft</button> }
+              @if (canGenerate && project.latestVersion) { <button class="au-menu__item" type="button" (click)="moreMenu.hide(); generate()"><app-icon name="sparkles"></app-icon>Regenerate</button> }
+              @if (imageNeedsRetry) { <button class="au-menu__item" type="button" (click)="moreMenu.hide(); retryImage()"><app-icon name="refresh"></app-icon>Retry image</button> }
+              @if (project.latestVersion) {
+                <button class="au-menu__item" type="button" (click)="moreMenu.hide(); exportHtml()"><app-icon name="arrow-down"></app-icon>Export HTML</button>
+                <button class="au-menu__item" type="button" (click)="moreMenu.hide(); exportMarkdown()"><app-icon name="arrow-down"></app-icon>Export Markdown</button>
+                <button class="au-menu__item" type="button" (click)="moreMenu.hide(); copyHtml()"><app-icon name="copy"></app-icon>Copy HTML</button>
+              }
+              <a class="au-menu__item" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }" (click)="moreMenu.hide()"><app-icon name="calendar"></app-icon>Schedule in Calendar</a>
+              @if (publications.length) { <a class="au-menu__item" routerLink="/studio/results" [queryParams]="{ projectId: projectId }" (click)="moreMenu.hide()"><app-icon name="publications"></app-icon>See publications</a> }
+              <button class="au-menu__item" type="button" (click)="moreMenu.hide(); refresh()"><app-icon name="refresh"></app-icon>Refresh</button>
+              @if (canUnpublish) {
+                <div class="au-menu__sep"></div>
+                <button class="au-menu__item is-danger" type="button" (click)="moreMenu.hide(); unpublish()"><app-icon name="arrow-down"></app-icon>Unpublish</button>
+              }
+            </div>
+          </app-popover>
         </div>
       </header>
 
-      <ol class="au-stepper au-stepper--article" aria-label="Article pipeline">
-        @for (step of pipeline(); track step.id; let i = $index) {
-          <li
-            class="au-step"
-            [class.is-done]="step.state === 'done'"
-            [class.is-current]="step.state === 'current'"
-            [class.is-failed]="step.state === 'failed'"
-            [attr.aria-current]="step.state === 'current' || step.state === 'failed' ? 'step' : null"
-          >
-            <span class="au-step__dot">
-              @if (step.state === 'done') {
-                <app-icon name="check"></app-icon>
-              } @else if (step.state === 'failed') {
-                <app-icon name="warning"></app-icon>
-              } @else {
-                {{ i + 1 }}
-              }
-            </span>
-            <span class="au-step__label">{{ step.label }}</span>
-            @if (step.state === 'failed') {
-              <span class="au-step__meta">Needs attention</span>
-            }
+      <ol class="art-steps" aria-label="Article pipeline">
+        @for (step of pipeline(); track step.id) {
+          <li class="art-step" [class.is-done]="step.state === 'done'" [class.is-current]="step.state === 'current'" [class.is-failed]="step.state === 'failed'"
+            [attr.aria-current]="step.state === 'current' || step.state === 'failed' ? 'step' : null">
+            <span class="art-step__bar" aria-hidden="true"></span>
+            <span class="art-step__label">{{ step.label }}@if (step.state === 'failed') { · needs attention }</span>
           </li>
         }
       </ol>
 
-      <div class="au-banner au-banner--error" *ngIf="error">
-        <app-icon name="warning"></app-icon>
-        <span class="au-banner__text">{{ error }}</span>
-      </div>
-      <div class="au-banner au-banner--success" *ngIf="notice">
-        <app-icon name="circle-check"></app-icon>
-        <span class="au-banner__text">{{ notice }}</span>
-      </div>
+      @if (error) { <div class="au-banner au-banner--error"><app-icon name="warning"></app-icon><span class="au-banner__text">{{ error }}</span></div> }
+      @if (notice) { <div class="au-banner au-banner--success"><app-icon name="circle-check"></app-icon><span class="au-banner__text">{{ notice }}</span></div> }
 
-      <div class="au-workspace">
-        <div class="au-workspace__main">
-          <nav class="au-tabs" aria-label="Content sections">
-            <button
-              *ngFor="let tab of tabs"
-              class="au-tab"
-              [class.is-active]="tab === activeTab"
-              type="button"
-              (click)="activeTab = tab"
-            >
-              {{ tabLabel(tab) }}
-            </button>
-          </nav>
-
-          <ng-container [ngSwitch]="activeTab">
-            <section class="au-panel au-panel--padded" *ngSwitchCase="'content'">
-              <div class="au-empty" *ngIf="!project.latestVersion">
-                <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
-                <p class="au-empty__title">Generating your article…</p>
-                <p class="au-empty__text">The workspace refreshes automatically when the first version is ready.</p>
-              </div>
-
-              <ng-container *ngIf="project.latestVersion">
-                <label class="au-field">
-                  <span class="au-field__label">Title</span>
-                  <input class="au-input" type="text" [(ngModel)]="draftTitle" />
-                </label>
-                <label class="au-field">
-                  <span class="au-field__label">Excerpt</span>
-                  <textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea>
-                </label>
-                <div class="au-field au-mb-2">
-                  <span class="au-field__label">Article</span>
-                  <au-rich-editor [(ngModel)]="draftBody" (autosave)="onAutosave()"></au-rich-editor>
-                </div>
-                <div class="au-form__actions">
-                  <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
-                    {{ saving ? 'Saving…' : 'Save' }}
-                  </button>
-                  <span class="au-muted" *ngIf="bodyDirty">Unsaved changes are autosaved periodically.</span>
-                </div>
-              </ng-container>
-
-              <details class="au-advanced au-mt-3">
-                <summary>Ask the AI to improve this</summary>
-                <textarea class="au-textarea au-mt-2" rows="2" placeholder="e.g. Add a section about prices…" [(ngModel)]="feedback"></textarea>
-                <div class="au-form__actions">
-                  <button class="au-btn au-btn--secondary" type="button" [disabled]="revising" (click)="revise()">
-                    <app-icon name="sparkles"></app-icon>
-                    {{ revising ? 'Revising…' : 'Revise with AI' }}
-                  </button>
-                </div>
-              </details>
-            </section>
-
-            <section class="au-panel au-panel--padded" *ngSwitchCase="'media'">
-              <div class="au-media-grid" *ngIf="project.latestVersion?.assetVariants?.length">
-                <article class="au-media-card" *ngFor="let variant of project.latestVersion?.assetVariants ?? []">
-                  <img [src]="variant.publicUrl || ''" [alt]="variant.kind" loading="lazy" />
-                  <div class="au-media-card__body">
-                    <span class="au-badge au-badge--neutral">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</span>
-                  </div>
-                </article>
-              </div>
-              <div class="au-empty" *ngIf="!(project.latestVersion?.assetVariants?.length)">
-                <span class="au-empty__icon"><app-icon name="media"></app-icon></span>
-                <p class="au-empty__title" *ngIf="project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing'">
-                  Generating hero image…
-                </p>
-                <p class="au-empty__title" *ngIf="project.latestVersion?.image?.status === 'failed' || project.latestVersion?.image?.status === 'retryable'">
-                  {{ imageError }}
-                </p>
-                <p class="au-empty__title" *ngIf="!project.latestVersion?.image">No hero image yet</p>
-                <p class="au-empty__text">A hero image improves article performance on social channels.</p>
-              </div>
-              <div class="au-form__actions">
-                <button class="au-btn au-btn--secondary" type="button" (click)="generateAsset()">
-                  <app-icon name="media"></app-icon>
-                  {{ project.latestVersion?.assetVariants?.length ? 'Generate new hero image' : 'Generate hero image' }}
-                </button>
-              </div>
-              <div class="au-mt-3">
-                <strong>Images in the article: {{ inlineImageCount }}/{{ INLINE_IMAGE_MIN }}</strong>
-                <p class="au-muted">Every article carries at least {{ INLINE_IMAGE_MIN }} images between its sections. They are generated with the article and placed after the first paragraph of a section.</p>
-                <div class="au-form__actions" *ngIf="inlineImageCount < INLINE_IMAGE_MIN">
-                  <button class="au-btn au-btn--primary" type="button" (click)="generateInlineImages()">
-                    <app-icon name="sparkles"></app-icon>
-                    Generate {{ INLINE_IMAGE_MIN - inlineImageCount }} missing {{ INLINE_IMAGE_MIN - inlineImageCount === 1 ? 'image' : 'images' }}
-                  </button>
-                </div>
-              </div>
-            </section>
-
-            <section class="au-panel au-panel--padded" *ngSwitchCase="'seo'">
-              <ng-container *ngIf="project.latestVersion; else seoEmpty">
-                <!-- Explainable readiness score -->
-                <div class="au-seo-score">
-                  <div class="au-seo-score__value" [class.is-good]="seoScore >= 70" [class.is-mid]="seoScore >= 45 && seoScore < 70" [class.is-low]="seoScore < 45">
-                    {{ seoScore }}
-                    <span>/100</span>
-                  </div>
-                  <div class="au-seo-score__body">
-                    <strong>SEO readiness: {{ seoScore }}/100</strong>
-                    <p class="au-muted">{{ seoSummary }}</p>
-                  </div>
-                </div>
-
-                <!-- Metadata -->
-                <h3 class="au-panel__subtitle au-mb-1"><strong>Metadata</strong></h3>
-                <div class="au-field-grid">
-                  <label class="au-field">
-                    <span class="au-field__label">SEO title</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
-                    <span class="au-field__hint" [class.au-hint--over]="(draftSeoTitle || '').length > 70">{{ (draftSeoTitle || '').length }} / 70 characters</span>
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Slug</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftSlug" placeholder="suggested-slug" />
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Canonical URL</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftCanonicalUrl" placeholder="https://…" />
-                  </label>
-                </div>
-                <label class="au-field">
-                  <span class="au-field__label">Meta description</span>
-                  <textarea class="au-textarea" rows="3" [(ngModel)]="draftSeoDescription"></textarea>
-                  <span class="au-field__hint" [class.au-hint--over]="(draftSeoDescription || '').length > 165">{{ (draftSeoDescription || '').length }} / 165 characters</span>
-                </label>
-
-                <!-- Strategy -->
-                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Strategy</strong></h3>
-                <div class="au-field-grid">
-                  <label class="au-field">
-                    <span class="au-field__label">Primary search intent</span>
-                    <select class="au-select" [(ngModel)]="draftPrimaryIntent">
-                      <option value="">— none —</option>
-                      <option *ngFor="let intent of intentOptions" [value]="intent">{{ intent }}</option>
-                    </select>
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Content type</span>
-                    <select class="au-select" [(ngModel)]="draftContentType">
-                      <option value="">— none —</option>
-                      <option *ngFor="let format of formatOptions" [value]="format">{{ format }}</option>
-                    </select>
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Target query</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftTargetQuery" />
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Primary keyword</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftPrimaryKeyword" />
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Secondary keywords</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftSecondaryKeywords" placeholder="Comma-separated" />
-                  </label>
-                  <label class="au-field">
-                    <span class="au-field__label">Topic cluster</span>
-                    <input class="au-input" type="text" [(ngModel)]="draftTopicCluster" />
-                  </label>
-                </div>
-
-                <div class="au-form__actions">
-                  <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save()">
-                    {{ saving ? 'Saving…' : 'Save SEO' }}
-                  </button>
-                  <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('seoTitle')">
-                    <app-icon name="sparkles"></app-icon> Improve SEO title
-                  </button>
-                  <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('metaDescription')">
-                    <app-icon name="sparkles"></app-icon> Improve meta description
-                  </button>
-                </div>
-
-                <!-- SERP preview -->
-                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Search preview</strong></h3>
-                <div class="au-serp">
-                  <p class="au-serp__title">{{ draftSeoTitle || project.latestVersion?.title || 'SEO title' }}</p>
-                  <p class="au-serp__url">{{ serpUrl }}</p>
-                  <p class="au-serp__desc">{{ draftSeoDescription || 'Meta description appears here.' }}</p>
-                </div>
-
-                <!-- Content analysis -->
-                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Content analysis</strong></h3>
-                <ul class="au-seo-findings">
-                  <li *ngFor="let finding of seoFindings" [class.is-fail]="!finding.passed" [class.is-warn]="!finding.passed && finding.severity === 'warning'" [class.is-error]="!finding.passed && finding.severity === 'error'">
-                    <app-icon [name]="finding.passed ? 'circle-check' : 'warning'"></app-icon>
-                    <span><strong>{{ finding.label }}</strong> — {{ finding.message }}</span>
-                  </li>
-                </ul>
-
-                <!-- Internal links from real inventory -->
-                <h3 class="au-panel__subtitle au-mb-1 au-mt-2"><strong>Internal links (real site inventory)</strong></h3>
-                <div class="au-form__actions au-mt-1">
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="linksLoading" (click)="loadLinkSuggestions()">
-                    <app-icon name="connections"></app-icon>
-                    {{ linksLoading ? 'Looking up…' : 'Suggest internal links' }}
-                  </button>
-                </div>
-                <ul class="au-link-suggestions au-mt-1" *ngIf="linkSuggestions.length > 0">
-                  <li *ngFor="let suggestion of linkSuggestions">
-                    <div>
-                      <strong>{{ suggestion.title }}</strong>
-                      <span class="au-muted au-block">{{ suggestion.url }} · {{ suggestion.reason }} · score {{ suggestion.score }}</span>
-                    </div>
-                    <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="insertLinkSuggestion(suggestion)">Insert</button>
-                  </li>
-                </ul>
-                <p class="au-muted" *ngIf="linksChecked && linkSuggestions.length === 0">No matching pages in the site inventory for the current keyword. Index more pages or refine the keyword.</p>
-              </ng-container>
-              <ng-template #seoEmpty>
+      <div class="art-grid">
+        <div class="art-main">
+          @if (!editing) {
+            <article class="art-canvas" aria-label="Article preview">
+              @if (project.latestVersion; as version) {
+                @if (coverUrl) { <img class="art-canvas__cover" [src]="coverUrl" alt="" /> }
+                <h2 class="art-canvas__title">{{ version.title }}</h2>
+                @if (version.excerpt) { <p class="art-canvas__excerpt">{{ version.excerpt }}</p> }
+                <!-- Already allowlist-sanitized server-side (html-sanitizer.ts); Angular's own pass would strip the cards' style/data-block. -->
+                <div class="art-canvas__body" [innerHTML]="trusted(version.bodyHtml)"></div>
+              } @else {
                 <div class="au-empty">
-                  <p class="au-empty__title">No version to optimize yet</p>
-                  <p class="au-empty__text">Generate the article first; the SEO workspace analyzes the latest version.</p>
+                  <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
+                  <p class="au-empty__title">Writing your article</p>
+                  <p class="au-empty__text">This page refreshes by itself when the first version is ready.</p>
                 </div>
-              </ng-template>
-            </section>
+              }
+            </article>
+          } @else {
+            <div class="sp-seg art-tabs" role="tablist" aria-label="Edit sections">
+              @for (tab of tabs; track tab) {
+                <button type="button" role="tab" class="sp-seg__item" [class.is-active]="tab === activeTab" [attr.aria-selected]="tab === activeTab" (click)="activeTab = tab">{{ tabLabel(tab) }}</button>
+              }
+            </div>
 
-            <section class="au-panel au-panel--padded" *ngSwitchCase="'social'">
-              <div class="au-social-generate au-mb-3">
-                <p class="au-hint">Generate platform-native copy from the current article version.</p>
-                <div class="au-social-generate__controls au-mt-2">
-                  <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X post</label>
-                  <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
-                  <label class="au-inline au-muted">
-                    <span>X thread length</span>
-                    <select class="au-select au-filter-select" [(ngModel)]="socialThreadLength">
-                      <option [ngValue]="1">single post</option>
-                      <option [ngValue]="2">2 posts</option>
-                      <option [ngValue]="3">3 posts</option>
-                      <option [ngValue]="5">5 posts</option>
+            @switch (activeTab) {
+              @case ('content') {
+                <section class="art-card">
+                  @if (!project.latestVersion) {
+                    <p class="sp-muted">The editor opens when the first version is ready.</p>
+                  } @else {
+                    <label class="au-field"><span class="au-field__label">Title</span><input class="au-input" type="text" [(ngModel)]="draftTitle" /></label>
+                    <label class="au-field"><span class="au-field__label">Excerpt</span><textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea></label>
+                    <div class="au-field">
+                      <span class="au-field__label">Article</span>
+                      <au-rich-editor [(ngModel)]="draftBody" (ngModelChange)="bodyDirty = true" (autosave)="onAutosave()"></au-rich-editor>
+                    </div>
+                    <div class="art-actions">
+                      <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save' }}</button>
+                      <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save(); editing = false">Save &amp; close</button>
+          <button class="au-btn au-btn--ghost" type="button" (click)="patchDrafts(project); editing = false">Discard</button>
+                      <span class="sp-muted">{{ bodyDirty ? 'Unsaved changes, autosaved every few minutes' : '' }}</span>
+                    </div>
+                  }
+                  <details class="art-ai">
+                    <summary>Ask the AI to improve this</summary>
+                    <textarea class="au-textarea" rows="2" placeholder="e.g. Add a section about prices" [(ngModel)]="feedback" aria-label="What to improve"></textarea>
+                    <button class="au-btn au-btn--secondary" type="button" [disabled]="revising" (click)="revise()"><app-icon name="sparkles"></app-icon>{{ revising ? 'Revising…' : 'Revise with AI' }}</button>
+                  </details>
+                </section>
+              }
+              @case ('media') {
+                <section class="art-card">
+                  <h3 class="art-card__title">Cover</h3>
+                  @if (project.latestVersion?.assetVariants?.length) {
+                    <div class="art-media">
+                      @for (variant of project.latestVersion?.assetVariants ?? []; track variant.id) {
+                        <figure class="art-media__item"><img [src]="variant.publicUrl || ''" [alt]="variant.kind" loading="lazy" /><figcaption class="sp-num sp-muted">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</figcaption></figure>
+                      }
+                    </div>
+                  } @else {
+                    <p class="sp-muted">{{ project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing' ? 'Generating the cover…' : imageNeedsRetry ? imageError : 'No cover yet.' }}</p>
+                  }
+                  <div class="art-actions"><button class="au-btn au-btn--secondary" type="button" (click)="generateAsset()"><app-icon name="media"></app-icon>{{ coverUrl ? 'Generate a new cover' : 'Generate cover' }}</button></div>
+                  <h3 class="art-card__title">Images in the article · <span class="sp-num">{{ inlineImageCount }}/{{ INLINE_IMAGE_MIN }}</span></h3>
+                  <p class="sp-muted">Every article carries at least {{ INLINE_IMAGE_MIN }} images, placed after the first paragraph of a section.</p>
+                  @if (inlineImageCount < INLINE_IMAGE_MIN) {
+                    <div class="art-actions"><button class="au-btn au-btn--primary" type="button" (click)="generateInlineImages()"><app-icon name="sparkles"></app-icon>Generate {{ INLINE_IMAGE_MIN - inlineImageCount }} missing</button></div>
+                  }
+                </section>
+              }
+              @case ('seo') {
+                <section class="art-card">
+                  @if (project.latestVersion) {
+                    <h3 class="art-card__title">Search preview</h3>
+                    <div class="au-serp">
+                      <p class="au-serp__title">{{ draftSeoTitle || project.latestVersion.title || 'SEO title' }}</p>
+                      <p class="au-serp__url">{{ serpUrl }}</p>
+                      <p class="au-serp__desc">{{ draftSeoDescription || 'The meta description appears here.' }}</p>
+                    </div>
+                    <div class="au-field-grid">
+                      <label class="au-field">
+                        <span class="au-field__label">SEO title</span>
+                        <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
+                        <span class="au-field__hint" [class.au-hint--over]="draftSeoTitle.length > 60">{{ draftSeoTitle.length }} / 60</span>
+                      </label>
+                      <label class="au-field"><span class="au-field__label">Canonical URL</span><input class="au-input" type="text" [(ngModel)]="draftCanonicalUrl" placeholder="https://" /></label>
+                      <label class="au-field">
+                        <span class="au-field__label">Search intent</span>
+                        <select class="au-select" [(ngModel)]="draftPrimaryIntent"><option value="">None</option>@for (intent of intentOptions; track intent) { <option [value]="intent">{{ intent }}</option> }</select>
+                      </label>
+                      <label class="au-field">
+                        <span class="au-field__label">Content type</span>
+                        <select class="au-select" [(ngModel)]="draftContentType"><option value="">None</option>@for (format of formatOptions; track format) { <option [value]="format">{{ format }}</option> }</select>
+                      </label>
+                      <label class="au-field"><span class="au-field__label">Primary keyword</span><input class="au-input" type="text" [(ngModel)]="draftPrimaryKeyword" /></label>
+                      <label class="au-field"><span class="au-field__label">Target query</span><input class="au-input" type="text" [(ngModel)]="draftTargetQuery" /></label>
+                      <label class="au-field"><span class="au-field__label">Secondary keywords</span><input class="au-input" type="text" [(ngModel)]="draftSecondaryKeywords" placeholder="Comma-separated" /></label>
+                      <label class="au-field"><span class="au-field__label">Topic cluster</span><input class="au-input" type="text" [(ngModel)]="draftTopicCluster" /></label>
+                    </div>
+                    <div class="art-actions">
+                      <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save' }}</button>
+                      <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('seoTitle')"><app-icon name="sparkles"></app-icon>Improve SEO title</button>
+                      <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('metaDescription')"><app-icon name="sparkles"></app-icon>Improve meta description</button>
+                    </div>
+                    <h3 class="art-card__title">Internal links from your sitemap</h3>
+                    <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="linksLoading" (click)="loadLinkSuggestions()"><app-icon name="link"></app-icon>{{ linksLoading ? 'Looking up…' : 'Suggest internal links' }}</button>
+                    @if (linkSuggestions.length) {
+                      <ul class="art-list">
+                        @for (suggestion of linkSuggestions; track suggestion.url) {
+                          <li><span><strong>{{ suggestion.title }}</strong><span class="sp-meta">{{ suggestion.url }} · {{ suggestion.reason }}</span></span><button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="insertLinkSuggestion(suggestion)">Insert</button></li>
+                        }
+                      </ul>
+                    } @else if (linksChecked) {
+                      <p class="sp-muted">No page of the site inventory matches the current keyword.</p>
+                    }
+                  } @else {
+                    <p class="sp-muted">Generate the article first; SEO works on the latest version.</p>
+                  }
+                </section>
+              }
+              @case ('social') {
+                <section class="art-card">
+                  <div class="art-actions art-actions--top">
+                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X post</label>
+                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
+                    <select class="au-select art-select" [(ngModel)]="socialThreadLength" aria-label="X thread length">
+                      <option [ngValue]="1">Single post</option><option [ngValue]="2">2 posts</option><option [ngValue]="3">3 posts</option><option [ngValue]="5">5 posts</option>
                     </select>
-                  </label>
-                  <button class="au-btn au-btn--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()">
-                    <app-icon name="sparkles"></app-icon>
-                    {{ socialGenerating ? 'Generating social copy…' : 'Generate social copy' }}
-                  </button>
-                </div>
-              </div>
-
-              <div class="au-empty" *ngIf="social.length === 0">
-                <span class="au-empty__icon"><app-icon name="publications"></app-icon></span>
-                <p class="au-empty__title">No social derivatives yet</p>
-                <p class="au-empty__text">Generate X and Instagram copy from this article.</p>
-              </div>
-
-              <article class="au-social-card" *ngFor="let piece of social">
-                <header class="au-social-card__header">
-                  <span class="au-channel" [class]="'au-channel--' + piece.channel">{{ piece.channel }}</span>
-                  <span class="au-badge au-badge--neutral">{{ piece.contentType }}</span>
-                  <span class="au-badge" [class.au-badge--success]="piece.editorialStatus === 'approved'" [class.au-badge--danger]="piece.editorialStatus === 'rejected'" [class.au-badge--warning]="piece.editorialStatus !== 'approved' && piece.editorialStatus !== 'rejected'">
-                    {{ piece.generationStatus }} / {{ piece.editorialStatus }}
-                  </span>
-                  <span class="au-social-card__count" [class.is-over]="isOverLimit(piece)">
-                    {{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}
-                  </span>
-                  <span class="au-social-card__meta" *ngIf="piece.threadPosition !== null">post {{ piece.threadPosition + 1 }}</span>
-                </header>
-                <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)"></textarea>
-                <div class="au-social-card__hashtags" *ngIf="piece.hashtags?.length">
-                  <span class="au-badge au-badge--neutral" *ngFor="let tag of piece.hashtags">{{ tag }}</span>
-                </div>
-                <footer class="au-social-card__actions">
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="regenerateSocialPiece(piece)">
-                    <app-icon name="refresh"></app-icon>
-                    Regenerate
-                  </button>
-                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="saveSocialPiece(piece)">Save</button>
-                  <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="approveSocial(piece)">
-                    <app-icon name="circle-check"></app-icon>
-                    Approve
-                  </button>
-                </footer>
-              </article>
-            </section>
-
-            <section class="au-panel" *ngSwitchCase="'schedule'">
-              <!-- Read-only summary: dates live in Calendar, publication state in Publications. -->
-              <p class="au-hint au-panel-pad">Where and when this article goes out. Schedule it in Calendar; publish now, retry or cancel it in Publications.</p>
-              <div class="au-table-wrap" *ngIf="publications.length > 0">
-                <table class="au-table">
-                  <thead>
-                    <tr><th>Channel</th><th>Destination</th><th>Status</th><th>When</th></tr>
-                  </thead>
-                  <tbody>
-                    <tr *ngFor="let publication of publications">
-                      <td><span class="au-channel" [class]="'au-channel--' + publication.channel">{{ publication.channel }}</span></td>
-                      <td>{{ destinationLabel(publication) }}</td>
-                      <td>
-                        <span class="au-badge" [class]="statusClass(publication.status)">{{ publication.status }}</span>
-                        <span class="au-table__sub" *ngIf="publication.lastError">{{ publication.lastError }}</span>
-                      </td>
-                      <td>{{ publication.scheduledFor ? (publication.scheduledFor | date: 'medium') : 'Not scheduled' }}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <div class="au-form__actions au-panel-pad au-mt-0">
-                <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }">
-                  <app-icon name="calendar"></app-icon>
-                  Schedule in Calendar
-                </a>
-                <a class="au-btn au-btn--secondary au-btn--sm" *ngIf="publications.length > 0" routerLink="/studio/publications" [queryParams]="{ projectId: projectId }">
-                  <app-icon name="publications"></app-icon>
-                  Manage in Publications
-                </a>
-              </div>
-            </section>
-
-            <section class="au-panel au-panel--padded" *ngSwitchCase="'history'">
-              <div class="au-history">
-                <button
-                  class="au-history__item"
-                  type="button"
-                  *ngFor="let version of project.versions"
-                  [class.is-active]="version.id === selectedVersionId"
-                  (click)="selectVersion(version)"
-                >
-                  <span class="au-badge au-badge--neutral">v{{ version.versionNumber }}</span>
-                  <span class="au-history__label">{{ version.title }}</span>
-                  <span class="au-badge" [class]="'au-badge--' + versionStatusTone(version.status)">{{ version.status }}</span>
-                  <span class="au-row__meta">{{ version.approvedBy || version.updatedAt | date: 'short' }}</span>
-                </button>
-              </div>
-              <p class="au-hint au-mt-2" *ngIf="selectedVersionId">
-                Comparing v{{ project.latestVersion?.versionNumber }} with v{{ selectedVersion?.versionNumber }}. Select a version to inspect its content below.
-              </p>
-              <pre class="au-diff" *ngIf="selectedVersion">{{ selectedVersion.bodyHtml }}</pre>
-            </section>
-          </ng-container>
+                    <button class="au-btn au-btn--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()"><app-icon name="sparkles"></app-icon>{{ socialGenerating ? 'Writing…' : 'Write social posts' }}</button>
+                  </div>
+                  @for (piece of social; track piece.id) {
+                    <article class="art-social">
+                      <header class="art-social__head">
+                        <span>{{ piece.channel }} · {{ piece.contentType }}@if (piece.threadPosition !== null) { · post {{ piece.threadPosition + 1 }} }</span>
+                        <span class="sp-status" [attr.data-tone]="piece.editorialStatus === 'approved' ? 'success' : piece.editorialStatus === 'rejected' ? 'danger' : 'warning'"><i class="sp-dot" aria-hidden="true"></i>{{ piece.editorialStatus }}</span>
+                        <span class="sp-num" [class.art-over]="isOverLimit(piece)">{{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}</span>
+                      </header>
+                      <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)" [attr.aria-label]="piece.channel + ' post'"></textarea>
+                      <footer class="art-actions">
+                        <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="approveSocial(piece)"><app-icon name="circle-check"></app-icon>Approve</button>
+                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="saveSocialPiece(piece)">Save</button>
+                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="regenerateSocialPiece(piece)"><app-icon name="refresh"></app-icon>Rewrite</button>
+                      </footer>
+                    </article>
+                  } @empty {
+                    <p class="sp-muted">No social posts yet. Write X and Instagram posts from this article.</p>
+                  }
+                </section>
+              }
+              @case ('schedule') {
+                <section class="art-card">
+                  <p class="sp-muted">Where and when this article goes out. Dates are set in Calendar; publish now, retry or cancel in Results.</p>
+                  @if (publications.length) {
+                    <ul class="art-list">
+                      @for (publication of publications; track publication.id) {
+                        <li>
+                          <span><strong>{{ publication.channel }} · {{ destinationLabel(publication) }}</strong><span class="sp-meta">{{ publication.scheduledFor ? (publication.scheduledFor | date: 'medium') : 'Not scheduled' }}</span>
+                            @if (publication.lastError) { <span class="sp-meta sp-meta--danger">{{ publication.lastError }}</span> }</span>
+                          <span class="sp-status" [attr.data-tone]="pubTone(publication.status)"><i class="sp-dot" aria-hidden="true"></i>{{ publication.status }}</span>
+                        </li>
+                      }
+                    </ul>
+                  }
+                  <div class="art-actions">
+                    <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }"><app-icon name="calendar"></app-icon>Schedule in Calendar</a>
+                    @if (publications.length) { <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/results" [queryParams]="{ projectId: projectId }">Manage in Results</a> }
+                  </div>
+                </section>
+              }
+              @case ('history') {
+                <section class="art-card">
+                  <ul class="art-list">
+                    @for (version of project.versions; track version.id) {
+                      <li [class.is-active]="version.id === selectedVersionId">
+                        <button type="button" class="art-version" (click)="selectVersion(version)">
+                          <span class="sp-num">v{{ version.versionNumber }}</span>
+                          <span>{{ version.title }}</span>
+                          <span class="sp-muted">{{ version.status.replace('_', ' ') }} · {{ version.updatedAt | date: 'short' }}</span>
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                  @if (selectedVersion) { <pre class="au-diff">{{ selectedVersion.bodyHtml }}</pre> }
+                </section>
+              }
+            }
+          }
         </div>
 
-        <aside class="au-workspace__rail">
-          <section class="au-panel au-panel--padded">
-            <h2 class="au-panel__title au-mb-2">Quality</h2>
-            <div class="au-qa" *ngIf="project.latestVersion; else noVersion">
-              <div class="au-qa__score">
-                <strong>{{ qaScore }}</strong><span>/ 100</span>
-              </div>
-              <ul class="au-qa__list">
-                <li *ngFor="let issue of project.reviewGate.issues" [class.is-blocking]="issue.severity === 'blocking'">
-                  <span class="au-qa__mark">
-                    <app-icon [name]="issue.severity === 'blocking' ? 'circle-x' : 'warning'"></app-icon>
-                  </span>
-                  {{ issue.message }}
-                </li>
+        <aside class="art-rail" aria-label="Article panel">
+          <a class="art-row art-row--link" routerLink="/studio/settings/writing"><app-icon name="settings"></app-icon>Customize future articles<app-icon name="chevron-right"></app-icon></a>
+
+          <section class="art-box" aria-labelledby="art-checks">
+            <button type="button" class="art-box__toggle" (click)="checksOpen = !checksOpen" [attr.aria-expanded]="checksOpen" aria-controls="art-checks-list">
+              <span class="sp-status" [attr.data-tone]="checklist.length && checklistPassed === checklist.length ? 'success' : 'warning'"><i class="sp-dot" aria-hidden="true"></i></span>
+              <span id="art-checks" class="art-box__title">Built for search</span>
+              <span class="sp-num sp-muted">{{ checklist.length ? checklistPassed + '/' + checklist.length + ' checks' : 'Not checked yet' }}</span>
+              <app-icon [name]="checksOpen ? 'chevron-up' : 'chevron-down'"></app-icon>
+            </button>
+            @if (checksOpen) {
+              <ul class="art-checks" id="art-checks-list">
+                @for (issue of blockingIssues; track issue.message) {
+                  <li class="is-fail"><app-icon name="circle-x"></app-icon><span>{{ issue.message }}</span></li>
+                }
+                @for (item of checklist; track item.key) {
+                  <li [class.is-fail]="!item.passed" [title]="item.detail"><app-icon [name]="item.passed ? 'circle-check' : 'warning'"></app-icon><span>{{ item.label }}<span class="sp-meta">{{ item.detail }}</span></span></li>
+                }
               </ul>
-              <p class="au-hint" *ngIf="project.reviewGate.blockerCount > 0">
-                {{ project.reviewGate.blockerCount }} issue{{ project.reviewGate.blockerCount === 1 ? '' : 's' }} must be fixed before publishing.
-              </p>
-              <button class="au-btn au-btn--secondary au-btn--block" type="button" *ngIf="canFixWithAi" (click)="fixWithAi()">
-                <app-icon name="sparkles"></app-icon>
-                Fix with AI
-              </button>
-            </div>
-            <ng-template #noVersion><p class="au-hint">Quality checks run after generation.</p></ng-template>
+              @if (canFixWithAi) { <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="fixWithAi()"><app-icon name="sparkles"></app-icon>Fix with AI</button> }
+            }
           </section>
 
-          <section class="au-panel au-panel--padded">
-            <h2 class="au-panel__title au-mb-2">Publishing</h2>
-            <p class="au-hint">
-              {{ project.site.name }} · {{ project.site.baseUrl || 'destination' }}
-            </p>
-            <div class="au-stack au-mt-2" *ngIf="project.latestPublicationJob">
-              <span class="au-badge" [class]="'au-badge--' + jobTone(project.latestPublicationJob.status)">{{ project.latestPublicationJob.status }}</span>
-              <a
-                class="au-link"
-                *ngIf="project.latestPublicationJob.externalUrl"
-                [href]="externalLink"
-                target="_blank"
-                rel="noopener"
-              >
-                Open published page
-                <app-icon name="external"></app-icon>
-              </a>
-            </div>
-            <p class="au-hint" *ngIf="!project.latestPublicationJob">Not published yet.</p>
+          <section class="art-box">
+            <h2 class="art-label">Published URL</h2>
+            @if (project.latestPublicationJob?.externalUrl) {
+              <a class="art-url" [href]="externalLink" target="_blank" rel="noopener" [title]="externalLink"><i class="sp-dot" data-tone="success" aria-hidden="true"></i><span>{{ externalLink }}</span><app-icon name="external"></app-icon></a>
+            } @else {
+              <p class="sp-muted art-tight">Not published yet · <a class="au-link" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }">Schedule</a></p>
+            }
           </section>
+
+          @if (project.latestVersion) {
+            <section class="art-box">
+              <h2 class="art-label">Article data</h2>
+              <div class="art-kw">
+                <span class="sp-muted">Target keyword</span>
+                <strong>{{ draftPrimaryKeyword || '—' }}</strong>
+                <div class="art-kw__metrics">
+                  <span><span class="sp-muted">Searches/mo</span><b class="sp-num">{{ project.keywordMetrics?.searchVolume != null ? (project.keywordMetrics!.searchVolume | number) : '—' }}</b></span>
+                  <span><span class="sp-muted">Difficulty</span><b class="sp-num">{{ project.keywordMetrics?.keywordDifficulty ?? '—' }}</b>
+                    @if (difficultyWord(project.keywordMetrics?.keywordDifficulty); as word) { <em class="art-chip" [attr.data-tone]="word.tone"><i class="sp-dot" aria-hidden="true"></i>{{ word.label }}</em> }</span>
+                </div>
+              </div>
+              <ul class="art-stats">
+                @for (stat of stats; track stat.label) {
+                  <li [title]="stat.title"><app-icon [name]="stat.icon"></app-icon><span>{{ stat.label }}</span><b class="sp-num">{{ stat.value }}</b><i class="sp-dot" [attr.data-tone]="stat.ok ? 'success' : 'warning'" [attr.aria-label]="stat.ok ? 'meets target' : 'below target'"></i></li>
+                }
+              </ul>
+            </section>
+
+            <section class="art-box">
+              <label class="art-label" for="art-slug">Slug</label>
+              <input class="au-input" id="art-slug" [(ngModel)]="draftSlug" (ngModelChange)="metaDirty = true" placeholder="article-slug" />
+              <span class="art-hint" [class.is-over]="draftSlug.length > 60">{{ draftSlug.length }}/60</span>
+              <label class="art-label" for="art-meta">Meta description <span class="sp-num" [class.art-ok]="metaOk" [class.art-warn]="!metaOk">{{ draftSeoDescription.length }}/160</span></label>
+              <textarea class="au-textarea" id="art-meta" rows="4" [(ngModel)]="draftSeoDescription" (ngModelChange)="metaDirty = true"></textarea>
+              <span class="art-bar" aria-hidden="true"><i [style.width.%]="metaPercent" [class.art-ok]="metaOk"></i></span>
+              @if (metaDirty) { <button class="au-btn au-btn--primary au-btn--sm art-box__btn" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save slug and meta' }}</button> }
+            </section>
+
+            <section class="art-box">
+              <h2 class="art-label">Cover image</h2>
+              @if (coverUrl) { <img class="art-cover" [src]="coverUrl" alt="Cover image" /> } @else { <p class="sp-muted art-tight">No cover yet</p> }
+              @if (coverUrl && project.latestVersion?.image?.metadataStripped) { <p class="art-badge" title="EXIF, XMP and C2PA metadata were removed before storing the image"><app-icon name="check"></app-icon>No AI watermark metadata</p> }
+              <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="generateAsset()"><app-icon name="refresh"></app-icon>{{ coverUrl ? 'Replace cover' : 'Generate cover' }}</button>
+            </section>
+
+            @if (whyThisTopic) {
+              <details class="art-box art-why"><summary class="art-label">Why this topic</summary><p class="sp-muted">{{ whyThisTopic }}</p></details>
+            }
+          }
         </aside>
       </div>
     </section>
-
-    <ng-template #loadingState>
+    } @else {
       <div class="au-boot"><span class="au-spinner" aria-label="Loading"></span></div>
-    </ng-template>
+    }
   `,
 })
 export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
@@ -521,9 +393,20 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly domSanitizer = inject(DomSanitizer);
+  private trustedCache: { html: string; safe: SafeHtml } | null = null;
+
+  /** The stored body (server-sanitized) as trusted HTML, cached so change detection does not re-render it. */
+  trusted(html: string | null | undefined): SafeHtml {
+    const value = html ?? '';
+    if (this.trustedCache?.html !== value) this.trustedCache = { html: value, safe: this.domSanitizer.bypassSecurityTrustHtml(value) };
+    return this.trustedCache.safe;
+  }
 
   project: StudioProjectDetailView | null = null;
   activeTab: WorkspaceTab = 'content';
+  /** M5: the article opens as a preview; editing (the tabs) is a separate mode. */
+  editing = false;
   tabs: WorkspaceTab[] = ['content', 'media', 'seo', 'social', 'schedule', 'history'];
   error = '';
   notice = '';
@@ -548,20 +431,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     return list.filter((publication) => publication.status !== 'deleted') as ProjectPublication[];
   }
 
-  get readiness(): { article: boolean; media: boolean; seo: boolean; x: boolean; instagram: boolean; schedule: boolean } {
-    const version = this.project?.latestVersion;
-    const xDone = this.social.some((piece) => piece.channel === 'x' && piece.generationStatus === 'done');
-    const igDone = this.social.some((piece) => piece.channel === 'instagram' && piece.generationStatus === 'done');
-    return {
-      article: Boolean(version?.bodyHtml),
-      media: Boolean(version?.hasAsset),
-      seo: Boolean(version?.seoTitle),
-      x: xDone,
-      instagram: igDone,
-      schedule: this.publications.some((publication) => ['scheduled', 'published'].includes(publication.status)),
-    };
-  }
-
   draftTitle = '';
   draftExcerpt = '';
   draftBody = '';
@@ -582,51 +451,109 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   intentOptions = ['informational', 'navigational', 'commercial-investigation', 'transactional', 'comparison', 'news', 'entertainment-discovery', 'where-to-watch', 'sports-live', 'mixed'];
   formatOptions = ['guide', 'news', 'ranking', 'comparison', 'analysis', 'explainer', 'tutorial', 'faq', 'review', 'preview', 'match-preview', 'match-report', 'schedule', 'where-to-watch', 'streaming-recommendation', 'evergreen-pillar', 'cluster-article'];
 
-  get seoScore(): number {
-    const report = this.project?.latestVersion?.qaReport as { score?: number; checks?: Array<{ passed: boolean; severity: string }> } | null;
-    if (typeof report?.score === 'number') {
-      return report.score;
-    }
-    if (!report?.checks?.length) {
-      return 0;
-    }
-    const passed = report.checks.filter((check) => check.passed).length;
-    return Math.round((passed / report.checks.length) * 100);
+  checksOpen = false;
+  metaDirty = false;
+  private checksOpenedOnce = false;
+
+  get blockingIssues(): Array<{ message: string }> {
+    return (this.project?.reviewGate.issues ?? []).filter((issue) => issue.severity === 'blocking');
   }
 
-  get seoFindings(): Array<{ key: string; label: string; passed: boolean; severity: string; message: string; group: string }> {
-    const report = this.project?.latestVersion?.qaReport as {
-      findings?: Array<{ key: string; label: string; passed: boolean; severity: string; message: string; group: string }>;
-      checks?: Array<{ key: string; passed: boolean; message: string; severity: string }>;
-    } | null;
-    if (report?.findings?.length) {
-      return report.findings.filter((finding) => finding.severity !== 'info');
-    }
-    return (report?.checks ?? []).map((check) => ({
-      key: check.key,
-      label: check.key,
-      passed: check.passed,
-      severity: check.severity,
-      message: check.message,
-      group: 'seo',
-    }));
+  /** 140–160 characters reads complete in search results without being cut. */
+  get metaOk(): boolean {
+    const length = this.draftSeoDescription.length;
+    return length >= 140 && length <= 160;
   }
 
-  get seoSummary(): string {
-    const findings = this.seoFindings;
-    if (findings.length === 0) {
-      return 'No analysis yet. Generate the article and save to refresh checks.';
-    }
-    const failures = findings.filter((finding) => !finding.passed);
-    if (failures.length === 0) {
-      return 'All checks passed.';
-    }
-    const errors = failures.filter((finding) => finding.severity === 'error').length;
-    const warnings = failures.length - errors;
-    const parts: string[] = [];
-    if (errors > 0) parts.push(`${errors} blocking issue${errors === 1 ? '' : 's'}`);
-    if (warnings > 0) parts.push(`${warnings} warning${warnings === 1 ? '' : 's'}`);
-    return `${parts.join(' and ')} to resolve.`;
+  get metaPercent(): number {
+    return Math.min(100, Math.round((this.draftSeoDescription.length / 160) * 100));
+  }
+
+  difficultyWord(difficulty: number | null | undefined): { label: string; tone: string } | null {
+    if (difficulty == null) return null;
+    if (difficulty < 30) return { label: 'Easy', tone: 'success' };
+    if (difficulty < 50) return { label: 'Medium', tone: 'warning' };
+    return { label: difficulty < 70 ? 'Hard' : 'Very hard', tone: 'danger' };
+  }
+
+  private get keywordList(): string[] {
+    const list = [this.draftPrimaryKeyword, ...this.draftSecondaryKeywords.split(',')].map((keyword) => keyword.trim()).filter(Boolean);
+    return [...new Set(list)];
+  }
+
+  /** Article data rows: measured from the current draft, compared with the targets the article is held to. */
+  get stats(): Array<{ icon: 'content' | 'search' | 'media' | 'link' | 'external'; label: string; value: string | number; ok: boolean; title: string }> {
+    const targets = this.project?.articleTargets;
+    const fold = (value: string) => value.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+    const text = fold(this.draftBody.replace(/<[^>]+>/g, ' '));
+    const keywords = this.keywordList;
+    const present = keywords.filter((keyword) => text.includes(fold(keyword)));
+    const host = hostOf(this.project?.site.baseUrl ?? '');
+    const hrefs = [...this.draftBody.matchAll(/<a\s[^>]*href="([^"]+)"/gi)].map((match) => match[1]);
+    const internal = hrefs.filter((href) => href.startsWith('/') || (host && hostOf(href) === host)).length;
+    const external = hrefs.filter((href) => /^https?:/i.test(href) && hostOf(href) !== host).length;
+    const images = this.inlineImageCount + (this.coverUrl ? 1 : 0);
+    const minWords = targets ? Math.round(targets.words * 0.87) : 0;
+    return [
+      { icon: 'content', label: 'Word count', value: this.wordCount.toLocaleString('en-US'), ok: this.wordCount >= minWords, title: targets ? `Target ${minWords.toLocaleString('en-US')}+ words` : '' },
+      { icon: 'search', label: 'Keywords', value: `${present.length}/${keywords.length}`, ok: keywords.length > 0 && present.length === keywords.length, title: keywords.length ? `In the text: ${present.join(', ') || 'none'}. Planned: ${keywords.join(', ')}` : 'No keywords planned' },
+      { icon: 'media', label: 'Images', value: images, ok: images >= (targets?.images ?? this.INLINE_IMAGE_MIN), title: `Target ${targets?.images ?? this.INLINE_IMAGE_MIN}, cover included` },
+      { icon: 'link', label: 'Internal links', value: internal, ok: internal >= (targets?.internalLinks ?? 0), title: `Target ${targets?.internalLinks ?? 0}` },
+      { icon: 'external', label: 'External links', value: external, ok: external >= (targets?.externalLinks ?? 0), title: `Target ${targets?.externalLinks ?? 0}` },
+    ];
+  }
+
+  pubTone(status: string): string {
+    if (status === 'published' || status === 'draft_synced') return 'success';
+    if (status === 'failed' || status === 'canceled') return 'danger';
+    return ['scheduled', 'queued', 'publishing', 'processing'].includes(status) ? 'warning' : 'muted';
+  }
+
+  /** Standalone HTML file of the current draft (title, meta description, body). */
+  exportHtml(): void {
+    const title = this.draftTitle || this.project?.title || 'Article';
+    const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    const html = `<!doctype html>\n<html lang="${this.project?.primaryLanguage ?? 'es'}">\n<head>\n<meta charset="utf-8">\n<title>${escape(this.draftSeoTitle || title)}</title>\n<meta name="description" content="${escape(this.draftSeoDescription)}">\n</head>\n<body>\n<h1>${escape(title)}</h1>\n${this.draftBody}\n</body>\n</html>\n`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    link.download = `${this.draftSlug || 'article'}.html`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  /** Markdown file of the current draft (title as H1, then the body). */
+  exportMarkdown(): void {
+    const title = this.draftTitle || this.project?.title || 'Article';
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([`# ${title}
+
+${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
+    link.download = `${this.draftSlug || 'article'}.md`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  }
+
+  copyHtml(): void {
+    navigator.clipboard.writeText(this.draftBody).then(
+      () => this.toast.success('Article HTML copied.'),
+      () => this.toast.error('The HTML could not be copied.'),
+    );
+  }
+
+  /** The 10 checks QA v2 stores for the latest version (absent on reports from before M4). */
+  get checklist(): Array<{ key: string; label: string; passed: boolean; detail: string }> {
+    const report = this.project?.latestVersion?.qaReport as { checklist?: Array<{ key: string; label: string; passed: boolean; detail: string }> } | null;
+    return report?.checklist ?? [];
+  }
+
+  get checklistPassed(): number {
+    return this.checklist.filter((item) => item.passed).length;
+  }
+
+  /** The plan item's rationale, copied to the project when the plan item was produced. */
+  get whyThisTopic(): string | null {
+    const value = (this.project?.metadata as Record<string, unknown> | undefined)?.['rationale'];
+    return typeof value === 'string' && value.trim() ? value.trim() : null;
   }
 
   get serpUrl(): string {
@@ -666,7 +593,15 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   }
 
   get canFixWithAi(): boolean {
-    return Boolean(this.project && this.project.reviewGate.blockerCount > 0 && this.project.versions.length > 0);
+    return Boolean(this.project && this.project.versions.length > 0 && (this.project.reviewGate.blockerCount > 0 || this.checklist.some((item) => !item.passed)));
+  }
+
+  get coverUrl(): string | null {
+    return this.project?.latestVersion?.assetVariants?.find((variant) => variant.publicUrl)?.publicUrl ?? null;
+  }
+
+  get wordCount(): number {
+    return this.draftBody.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
   }
 
   readonly INLINE_IMAGE_MIN = 3;
@@ -683,17 +618,6 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   get imageError(): string {
     return this.project?.latestVersion?.image?.error || 'Image generation failed.';
-  }
-
-  get qaScore(): number {
-    const report = this.project?.latestVersion?.qaReport as
-      | { checks?: Array<{ passed: boolean; severity: string }> }
-      | null;
-    if (!report?.checks?.length) {
-      return 0;
-    }
-    const passed = report.checks.filter((check) => check.passed).length;
-    return Math.round((passed / report.checks.length) * 100);
   }
 
   get selectedVersion(): ProjectVersionDetail | null {
@@ -726,6 +650,11 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
       next: (project) => {
         this.project = project;
         this.patchDrafts(project);
+        if (!this.checksOpenedOnce) {
+          // Open the checks when one fails, the first time the page loads.
+          this.checksOpen = this.checklist.some((item) => !item.passed) || this.blockingIssues.length > 0;
+          this.checksOpenedOnce = true;
+        }
         if (this.isWorkInFlight(project)) {
           this.startPolling();
         }
@@ -740,7 +669,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     this.load();
   }
 
-  private patchDrafts(project: StudioProjectDetailView): void {
+  patchDrafts(project: StudioProjectDetailView): void {
     const version = project.latestVersion;
     this.draftTitle = version?.title ?? project.title;
     this.draftExcerpt = version?.excerpt ?? '';
@@ -757,6 +686,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
     this.draftTopicCluster = strOf(metadata['topicCluster']);
     this.draftSecondaryKeywords = Array.isArray(metadata['secondaryKeywords']) ? (metadata['secondaryKeywords'] as unknown[]).filter((entry): entry is string => typeof entry === 'string').join(', ') : strOf(metadata['secondaryKeywords']);
     this.bodyDirty = false;
+    this.metaDirty = false;
   }
 
   private isWorkInFlight(project: StudioProjectDetailView): boolean {
@@ -1151,66 +1081,11 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   // ── Schedule tab actions ──
 
-  hasChannel(channel: string): boolean {
-    return this.publications.some((publication) => publication.channel === channel);
-  }
-
   destinationLabel(publication: ProjectPublication): string {
     if (publication.channel === 'website') {
       return publication.site?.name ?? 'Website';
     }
     return publication.account?.displayName ?? publication.channel;
-  }
-
-  statusClass(status: string): string {
-    switch (status) {
-      case 'published':
-      case 'draft_synced':
-        return 'au-badge--success';
-      case 'failed':
-      case 'canceled':
-        return 'au-badge--danger';
-      case 'scheduled':
-      case 'queued':
-      case 'publishing':
-      case 'processing':
-        return 'au-badge--warning';
-      default:
-        return 'au-badge--neutral';
-    }
-  }
-
-  versionStatusTone(status: string): 'success' | 'danger' | 'warning' | 'brand' | 'neutral' {
-    switch (status) {
-      case 'approved':
-      case 'published':
-        return 'success';
-      case 'qa_failed':
-      case 'archived':
-        return 'danger';
-      case 'in_review':
-      case 'qa_passed':
-        return 'warning';
-      case 'ai_generated':
-        return 'brand';
-      default:
-        return 'neutral';
-    }
-  }
-
-  jobTone(status: string): 'success' | 'danger' | 'warning' | 'neutral' {
-    switch (status) {
-      case 'published':
-        return 'success';
-      case 'failed':
-      case 'canceled':
-        return 'danger';
-      case 'queued':
-      case 'processing':
-        return 'warning';
-      default:
-        return 'neutral';
-    }
   }
 
   private describe(err: unknown): string {

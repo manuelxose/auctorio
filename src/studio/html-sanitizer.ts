@@ -16,6 +16,7 @@ const ALLOWED_TAGS = new Set([
   "em",
   "i",
   "u",
+  "s",
   "blockquote",
   "ul",
   "ol",
@@ -33,11 +34,17 @@ const ALLOWED_TAGS = new Set([
   "br",
   "figure",
   "figcaption",
+  "aside",
+  "nav",
 ]);
 
 const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
-  a: ["href", "title", "rel", "target"],
-  img: ["src", "alt", "width", "height", "loading"],
+  a: ["href", "title", "rel", "target", "style"],
+  // TOC anchors (withTableOfContents).
+  h2: ["id", "style"],
+  h3: ["id", "style"],
+  img: ["src", "alt", "width", "height", "loading", "style"],
+  strong: ["style"],
   table: [],
   thead: [],
   tbody: [],
@@ -45,7 +52,22 @@ const ALLOWED_ATTRIBUTES: Record<string, string[]> = {
   tr: [],
   th: ["scope"],
   td: [],
+  // Brand CTA cards (brand.ts applyBrandCards) and editor alignment: presentational inline style only, filtered by cleanStyle.
+  aside: ["style"],
+  p: ["style"],
 };
+
+const STYLE_PROPERTIES = new Set(["text-align", "color", "background-color", "border", "border-left", "border-color", "border-radius", "padding", "margin", "display", "text-decoration", "font-weight", "border-top", "font-size", "line-height", "letter-spacing", "text-transform", "width", "overflow"]);
+
+/** Keeps only whitelisted declarations with plain values (no url(), expression(), var(), quotes or escapes). */
+export function cleanStyle(value: string): string {
+  return value
+    .split(";")
+    .map((declaration) => declaration.split(":"))
+    .filter((parts) => parts.length === 2 && STYLE_PROPERTIES.has(parts[0].trim().toLowerCase()) && /^[#a-z0-9 .%-]+$/i.test(parts[1].trim()))
+    .map(([property, val]) => `${property.trim().toLowerCase()}:${val.trim()}`)
+    .join(";");
+}
 
 /**
  * Scheme check for href/src values. Normalizes embedded control characters
@@ -96,6 +118,13 @@ export function sanitizeEditorialHtml(html: string | null | undefined): string {
         if (!allowedAttrs.includes(name) && !name.startsWith("data-")) {
           node.removeAttr(attribute);
         }
+      }
+
+      const style = node.attr("style");
+      if (style !== undefined) {
+        const clean = cleanStyle(style);
+        if (clean) node.attr("style", clean);
+        else node.removeAttr("style");
       }
 
       if (tagName === "a") {

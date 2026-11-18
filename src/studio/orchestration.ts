@@ -1,12 +1,15 @@
 import crypto from "node:crypto";
 import { Prisma, type ContentProject, type DerivativeType, type Site } from "@prisma/client";
-import { enqueueImageJob, enqueuePublishingJob, enqueueTextJob, getPublishingQueue } from "../infrastructure/queue/producer";
+import { enqueueImageJob } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getContentTypeFromPath } from "../shared/utils/mime";
 import { getPublicBaseUrl } from "../shared/utils/env";
-import { attachImageToVersion, createQueuedImage, createQueuedText, createVersion, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
+import { attachImageToVersion, createQueuedImage, ensureProjectTopic, findVersionByImageId, findVersionByTextId, getContentImageById, getContentTextById, replaceDerivatives, updateProjectStatus, updateVersionFromText, updateVersionQa } from "./repository";
 import { runVersionQaV2 } from "./qa";
-import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
+import { INLINE_IMAGE_MIN, filledInlineSlots, h2Headings, headingIndexForSlot, inlineAlt, inlineFigureHtml, inlineImageHash, insertInlineFigure, parseInlineImageHash } from "./inline-images";
+import { resolveBrandSettings, resolveVisualSettings } from "./editorial-engine/structure";
+import { crawlBrand, withCrawledBrand } from "./brand-colors";
+import { INFOGRAPHIC_PROMPT_PREFIX, infographicSection } from "./editorial-engine/visuals";
 import { createOperation } from "./operations";
 import type { GeneratedDerivative, StudioVersionDerivation } from "./types";
 
@@ -145,6 +148,8 @@ export async function buildAssetPublicUrl(relativePath: string | null | undefine
 
 /** True while the project's latest version is still being written: a second run would fork a parallel version. */
 export async function isProjectGenerationInFlight(tenantId: string, projectId: string): Promise<boolean> {
+  const activeJob = await prisma.productionJob.findFirst({ where: { tenantId, projectId, status: { in: ["queued", "running"] }, updatedAt: { gte: new Date(Date.now() - 30 * 60_000) } }, select: { id: true } });
+  if (activeJob) return true;
   const latest = await prisma.contentVersion.findFirst({
     where: { tenantId, projectId },
     orderBy: { versionNumber: "desc" },
@@ -154,94 +159,6 @@ export async function isProjectGenerationInFlight(tenantId: string, projectId: s
   // A text untouched for 30 min is a lost job, not a live one: let the user regenerate.
   const fresh = Boolean(text && Date.now() - text.updatedAt.getTime() < 30 * 60_000);
   return fresh && (text?.status === "queued" || text?.status === "processing");
-}
-
-export async function startProjectGeneration(
-  projectId: string,
-  tenantId: string,
-  feedback?: string | null,
-  promptPresetVersionId?: string | null,
-) {
-  const project = await prisma.contentProject.findFirst({
-    where: { id: projectId, tenantId },
-    include: { site: true },
-  });
-  if (!project) {
-    throw new Error("project_not_found");
-  }
-
-  const topicId = await ensureProjectTopic(tenantId, projectId, project.title, project.brief);
-  await prisma.fact.create({
-    data: {
-      tenantId,
-      topicId,
-      sourceType: "manual",
-      content: feedback?.trim() ? `${project.brief}\n\nFeedback de revision:\n${feedback.trim()}` : project.brief,
-      contentHash: `${projectId}:${Date.now()}`,
-      metadata: {
-        project_id: projectId,
-        goal: project.goal,
-      },
-    },
-  });
-
-  const contentText = await createQueuedText(
-    tenantId,
-    topicId,
-    project.primaryLanguage === "en" ? "en" : "es",
-  );
-  const version = await createVersion(tenantId, projectId, contentText.id, feedback);
-  const textJob = await prisma.job.create({
-    data: {
-      tenantId,
-      type: "text",
-      status: "queued",
-    },
-  });
-
-  const operation = await createOperation({
-    tenantId,
-    siteId: project.siteId,
-    type: "text_generation",
-    initiatorUserId: null,
-    entityType: "content_project",
-    entityId: projectId,
-    queueName: "queue_text",
-    jobKey: textJob.id,
-    metadata: { goal: project.goal },
-  });
-
-  await enqueueTextJob(textJob.id, {
-    jobId: textJob.id,
-    tenantId,
-    operationId: operation.id,
-    topicId,
-    contentTextId: contentText.id,
-    type: "seo",
-    language: project.primaryLanguage === "en" ? "en" : "es",
-    options: {
-      goal: project.goal,
-      site_id: project.siteId,
-      site_name: project.site.name,
-      site_type: project.site.type,
-      brand_voice: project.site.brandVoice ?? {},
-      seo_rules: project.site.seoRules ?? {},
-      metadata: project.metadata ?? {},
-      revision_feedback: feedback ?? undefined,
-      promptPresetVersionId: promptPresetVersionId ?? undefined,
-    },
-  });
-
-  await updateProjectStatus(tenantId, projectId, "draft");
-
-  if (project.origin === "auto") {
-    await prisma.contentProject.update({
-      where: { id: projectId },
-      data: { automationSubstate: "generating" },
-    });
-  }
-
-  return { versionId: version.id, contentTextId: contentText.id, jobId: textJob.id };
 }
 
 export async function requestImageGenerationForVersion(
@@ -301,10 +218,61 @@ export async function requestImageGenerationForVersion(
       goal: version.project.goal,
       site_name: version.project.site?.name ?? undefined,
       promptPresetVersionId: promptPresetVersionId ?? undefined,
+      ...(await visualImageOptions(version.project.siteId, "cover")),
     },
   });
 
   return contentImage.id;
+}
+
+/** Site visuals settings for one image job: its style and the site's image instructions (M6). */
+async function visualImageOptions(siteId: string, role: "cover" | "body"): Promise<Record<string, string>> {
+  const settings = await prisma.sitePlanningSettings.findUnique({ where: { siteId }, select: { articleTargets: true } });
+  const visuals = resolveVisualSettings(settings?.articleTargets);
+  // Brand palette (Settings › Branding, else crawled from the site) so images match the cards and the site.
+  const site = await prisma.site.findUnique({ where: { id: siteId }, select: { tenantId: true, baseUrl: true } });
+  const brand = withCrawledBrand(resolveBrandSettings(settings?.articleTargets), site ? await crawlBrand(site.tenantId, site.baseUrl) : null);
+  const palette = [brand.primaryColor, brand.secondaryColor].filter(Boolean).join(", ");
+  return { image_style: role === "cover" ? visuals.coverStyle : visuals.bodyStyle, image_instructions: visuals.imageInstructions, ...(palette ? { brand_colors: palette } : {}) };
+}
+
+/**
+ * «Use only my media library» (M6): fills the missing inline slots with finished images of the same site, best
+ * word overlap between their prompt and the section first, never one already in the body. Returns the slots filled.
+ */
+async function fillSlotsFromLibrary(
+  tenantId: string,
+  version: { id: string; bodyHtml: string | null; title: string | null; project: { siteId: string; title: string; metadata: unknown } },
+  slots: number[],
+): Promise<number> {
+  const library = await prisma.contentImage.findMany({
+    where: { tenantId, status: "done", storagePath: { not: null }, topic: { projects: { some: { siteId: version.project.siteId } } } },
+    include: { assetVariants: true },
+    orderBy: { createdAt: "desc" },
+    take: 200,
+  });
+  let body = version.bodyHtml ?? "";
+  const headings = h2Headings(body);
+  const keyword = readString(version.project.metadata, "primaryKeyword");
+  const words = (value: string) => new Set(value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/\W+/).filter((word) => word.length > 3));
+  let filled = 0;
+  for (const slot of slots) {
+    const section = headings[headingIndexForSlot(slot, headings.length)] ?? version.title ?? version.project.title;
+    const wanted = words(`${section} ${keyword ?? ""}`);
+    const ranked = library
+      .filter((image) => !body.includes(image.id))
+      .map((image) => ({ image, score: [...words(image.prompt ?? "")].filter((word) => wanted.has(word)).length }))
+      .sort((a, b) => b.score - a.score);
+    const pick = ranked[0]?.image;
+    if (!pick) break;
+    const variant = pick.assetVariants.find((item) => item.kind === "hero") ?? pick.assetVariants.find((item) => item.kind === "original");
+    const src = await buildAssetPublicUrl(variant?.storagePath ?? pick.storagePath);
+    if (!src) continue;
+    body = insertInlineFigure(body, inlineFigureHtml(src, inlineAlt(section, keyword), slot, pick.id), slot);
+    filled++;
+  }
+  if (filled > 0) await prisma.contentVersion.update({ where: { id: version.id }, data: { bodyHtml: body } });
+  return filled;
 }
 
 export async function syncTextResultToStudio(tenantId: string, contentTextId: string) {
@@ -374,10 +342,22 @@ export async function requestInlineImagesForVersion(tenantId: string, versionId:
   const mode = textId ? "contextual" : "independent";
   const projectMetadata = asRecord(version.project.metadata);
   const ids: string[] = [];
+  const style = await visualImageOptions(version.project.siteId, "body");
+  if (style.image_style === "media_library") {
+    const free = Array.from({ length: INLINE_IMAGE_MIN * 2 }, (_, slot) => slot).filter((slot) => !taken.has(slot)).slice(0, Math.max(0, missing));
+    await fillSlotsFromLibrary(tenantId, version, free);
+    return ids;
+  }
+  const settings = await prisma.sitePlanningSettings.findUnique({ where: { siteId: version.project.siteId }, select: { articleTargets: true } });
+  // One infographic per article, only for a section with steps or a comparison, and only if none is in the body yet.
+  const infographic = resolveVisualSettings(settings?.articleTargets).infographic && !/data-auctorio-infographic/.test(body) ? infographicSection(body) : null;
+  let infographicQueued = false;
   for (let slot = 0; missing > 0 && slot < INLINE_IMAGE_MIN * 2; slot++) {
     if (taken.has(slot)) continue;
     missing--;
     const section = headings[headingIndexForSlot(slot, headings.length)] ?? version.title ?? version.project.title;
+    const asInfographic = Boolean(infographic) && !infographicQueued && headingIndexForSlot(slot, headings.length) === infographic!.index;
+    if (asInfographic) infographicQueued = true;
     const image = await prisma.contentImage.create({
       data: { tenantId, topicId, textId, status: "queued", dedupeHash: inlineImageHash(versionId, slot, crypto.randomUUID()) },
     });
@@ -406,8 +386,10 @@ export async function requestInlineImagesForVersion(tenantId: string, versionId:
         site_id: version.project.siteId,
         goal: version.project.goal,
         site_name: version.project.site?.name ?? undefined,
-        image_role: "inline",
+        image_role: asInfographic ? "infographic" : "inline",
         section,
+        ...style,
+        ...(asInfographic ? { section_text: infographic!.text, language: version.project.primaryLanguage === "en" ? "en" : "es" } : {}),
       },
     });
     ids.push(image.id);
@@ -447,8 +429,9 @@ export async function syncInlineImageToVersion(tenantId: string, contentImageId:
   }
   const body = version.bodyHtml ?? "";
   const headings = h2Headings(body);
-  const alt = headings[headingIndexForSlot(ref.slot, headings.length)] ?? version.title ?? "";
-  const next = insertInlineFigure(body, inlineFigureHtml(src, alt, ref.slot, image.id), ref.slot);
+  const alt = inlineAlt(headings[headingIndexForSlot(ref.slot, headings.length)] ?? version.title ?? "", readString(version.project.metadata, "primaryKeyword"));
+  const infographic = image.prompt?.startsWith(INFOGRAPHIC_PROMPT_PREFIX) ?? false;
+  const next = insertInlineFigure(body, inlineFigureHtml(src, alt, ref.slot, image.id, infographic), ref.slot);
   if (next === body) {
     return;
   }
@@ -522,37 +505,6 @@ export async function syncImageResultToStudio(tenantId: string, contentImageId: 
       data: { automationSubstate: qaReport.passed ? "qa_passed" : "qa_failed" },
     });
   }
-}
-
-export async function queuePublication(publicationJobId: string) {
-  const queue = await getPublishingQueue();
-  const inFlight = await queue.getJobs(["waiting", "active", "delayed"], 0, -1);
-  const alreadyQueued = inFlight.some((job) => job.data?.publicationJobId === publicationJobId);
-  if (alreadyQueued) {
-    return;
-  }
-
-  const publicationJob = await prisma.publicationJob.findUnique({ where: { id: publicationJobId } });
-  let operationId: string | null = null;
-  if (publicationJob) {
-    const operation = await createOperation({
-      tenantId: publicationJob.tenantId,
-      siteId: publicationJob.siteId ?? null,
-      type: publicationJob.action === "unpublish" ? "unpublish" : "publish",
-      initiatorUserId: null,
-      entityType: "publication_job",
-      entityId: publicationJobId,
-      queueName: "queue_publishing",
-      metadata: { action: publicationJob.action ?? null },
-    });
-    operationId = operation.id;
-  }
-
-  const jobId = crypto.randomUUID();
-  await enqueuePublishingJob(jobId, {
-    publicationJobId,
-    ...(operationId ? { operationId } : {}),
-  });
 }
 
 export async function retryImageGeneration(tenantId: string, contentImageId: string) {

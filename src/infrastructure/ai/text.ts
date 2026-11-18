@@ -1,6 +1,7 @@
 import { getEnv, getNumberEnv, isProductionEnv } from "../../shared/utils/env";
 import { fetchJson } from "../../shared/utils/http";
-import { activeAiSelection } from "./ai-settings";
+import { activeAiChain, type AiUse } from "./ai-settings";
+import { structuredEvent } from "../../shared/utils/logger";
 import { AnthropicTextProvider } from "./anthropic-text";
 
 export type TextGenerationInput = {
@@ -107,14 +108,34 @@ class MockTextProvider implements TextProvider {
   }
 }
 
-export function getTextProvider(): TextProvider {
-  // A workspace admin's choice (Settings → AI) wins over the environment default.
-  const selected = activeAiSelection();
-  if (selected) {
-    return selected.provider === "anthropic"
-      ? new AnthropicTextProvider(selected.apiKey, selected.model)
-      : new OpenAICompatibleTextProvider(selected.provider, selected.baseUrl ?? "", selected.apiKey, selected.model, true);
+/** Tries each provider in order; a failure (no credit, outage, timeout, empty output) moves on to the next. */
+export class FallbackTextProvider implements TextProvider {
+  constructor(private readonly chain: Array<{ label: string; provider: TextProvider }>) {}
+
+  async generate(input: TextGenerationInput): Promise<TextGenerationResult> {
+    let lastError: unknown;
+    for (const [index, entry] of this.chain.entries()) {
+      try {
+        return await entry.provider.generate(input);
+      } catch (error) {
+        lastError = error;
+        const next = this.chain[index + 1];
+        if (next) structuredEvent("ai.text.fallback", { from: entry.label, to: next.label, error: (error instanceof Error ? error.message : String(error)).slice(0, 300) }, "warn");
+      }
+    }
+    throw lastError;
   }
+}
+
+export function getTextProvider(use?: AiUse): TextProvider {
+  // A workspace admin's choice (Settings → AI) wins over the environment default.
+  const chain = activeAiChain(use).map((selected) => ({
+    label: `${selected.provider}/${selected.model}`,
+    provider: selected.provider === "anthropic"
+      ? new AnthropicTextProvider(selected.apiKey, selected.model)
+      : new OpenAICompatibleTextProvider(selected.provider, selected.baseUrl ?? "", selected.apiKey, selected.model, true),
+  }));
+  if (chain.length) return chain.length === 1 ? chain[0].provider : new FallbackTextProvider(chain);
 
   const provider = getEnv("TEXT_PROVIDER", "mock").toLowerCase();
   if (provider === "mock") {

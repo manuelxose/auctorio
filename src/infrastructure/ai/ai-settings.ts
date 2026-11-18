@@ -9,6 +9,7 @@
 // behalf of a workspace uses that workspace's choice without changing call sites.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../db/prisma";
 import { getEnv } from "../../shared/utils/env";
 import { encryptSecret, tryDecryptSecret } from "../../shared/utils/crypto";
@@ -61,6 +62,17 @@ export const AI_PROVIDERS: AiProviderDefinition[] = [
 ];
 
 export type AiSelection = { provider: AiProviderId; model: string };
+/** What a text call is for; each may use its own model (Settings → AI). */
+export type AiUse = "plans" | "articles" | "repair" | "social" | "copilot";
+export const AI_USES: Array<{ key: AiUse; label: string }> = [
+  { key: "plans", label: "Editorial plans" },
+  { key: "articles", label: "Articles" },
+  { key: "repair", label: "Quality repair" },
+  { key: "social", label: "Social posts" },
+  { key: "copilot", label: "Copilot" },
+];
+/** The workspace's text choice: a default model, optional per-use models and an explicit fallback. */
+export type AiTextSettings = AiSelection & { uses?: Partial<Record<AiUse, AiSelection>>; fallback?: AiSelection | null };
 export type AiImageProviderId = "openai" | "custom";
 export type AiImageSelection = { provider: AiImageProviderId; model: string };
 
@@ -91,7 +103,7 @@ export const AI_IMAGE_PROVIDERS: Array<Omit<AiProviderDefinition, "id"> & { id: 
 
 /** What each task is used for, shown in Settings -> AI so admins know what a choice affects. */
 export const AI_TASKS = [
-  { task: "text", label: "Writing", uses: ["Editorial plans", "Articles", "Quality repair", "Social posts", "Copilot"] },
+  { task: "text", label: "Writing", uses: AI_USES.map((use) => use.label) },
   { task: "image", label: "Images", uses: ["Article cover images", "Social post images"] },
 ];
 export type ResolvedAiSelection = AiSelection & { apiKey: string; baseUrl?: string };
@@ -99,7 +111,7 @@ export type ResolvedAiSelection = AiSelection & { apiKey: string; baseUrl?: stri
 const MODEL_ID = /^[A-Za-z0-9._:/-]{1,100}$/;
 const CACHE_TTL_MS = 15_000;
 const tenantContext = new AsyncLocalStorage<{ tenantId: string | null }>();
-const cache = new Map<string, { value: AiSelection | null; at: number }>();
+const cache = new Map<string, { value: AiTextSettings | null; at: number }>();
 const imageCache = new Map<string, { value: AiImageSelection | null; at: number }>();
 
 export function findImageProvider(id: string | null | undefined) {
@@ -164,25 +176,60 @@ export function isValidModel(provider: AiProviderDefinition, model: string): boo
   return Boolean(provider.freeModel && MODEL_ID.test(model));
 }
 
+/** A stored {provider, model} pair, or null when it no longer names a known provider/model. */
+export function readSelection(value: unknown): AiSelection | null {
+  const raw = value as { provider?: unknown; model?: unknown } | null;
+  const provider = findProvider(typeof raw?.provider === "string" ? raw.provider : null);
+  const model = typeof raw?.model === "string" ? raw.model.trim() : "";
+  return provider && model && isValidModel(provider, model) ? { provider: provider.id, model } : null;
+}
+
+function readUses(value: unknown): Partial<Record<AiUse, AiSelection>> {
+  const uses: Partial<Record<AiUse, AiSelection>> = {};
+  for (const { key } of AI_USES) {
+    const selection = readSelection((value as Record<string, unknown> | null)?.[key]);
+    if (selection) uses[key] = selection;
+  }
+  return uses;
+}
+
 /** Reads (and caches) a workspace's stored choice. */
-export async function loadAiSelection(tenantId: string, fresh = false): Promise<AiSelection | null> {
+export async function loadAiSelection(tenantId: string, fresh = false): Promise<AiTextSettings | null> {
   const hit = cache.get(tenantId);
   if (!fresh && hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
   const row = await getPrismaClient().aiProviderSetting.findUnique({ where: { tenantId } });
   const provider = findProvider(row?.provider);
-  const value = row && provider ? { provider: provider.id, model: row.model } : null;
+  const value = row && provider ? { provider: provider.id, model: row.model, uses: readUses(row.uses), fallback: readSelection(row.fallback) } : null;
   cache.set(tenantId, { value, at: Date.now() });
   return value;
 }
 
-export async function saveAiSelection(tenantId: string, selection: AiSelection, userId: string | null): Promise<AiSelection> {
-  await getPrismaClient().aiProviderSetting.upsert({
-    where: { tenantId },
-    create: { tenantId, provider: selection.provider, model: selection.model, updatedByUserId: userId },
-    update: { provider: selection.provider, model: selection.model, updatedByUserId: userId },
-  });
-  cache.set(tenantId, { value: selection, at: Date.now() });
-  return selection;
+export async function saveAiSelection(tenantId: string, settings: AiTextSettings, userId: string | null): Promise<AiTextSettings> {
+  const value: AiTextSettings = { provider: settings.provider, model: settings.model, uses: readUses(settings.uses ?? {}), fallback: readSelection(settings.fallback) };
+  const data = { provider: value.provider, model: value.model, uses: value.uses as object, fallback: value.fallback ?? Prisma.DbNull, updatedByUserId: userId };
+  await getPrismaClient().aiProviderSetting.upsert({ where: { tenantId }, create: { tenantId, ...data }, update: data });
+  cache.set(tenantId, { value, at: Date.now() });
+  return value;
+}
+
+/**
+ * Models to try for a text call, in order: the use's model (or the default), the explicit
+ * fallback, then every other configured provider on its default model, so a provider that is
+ * down or out of credit never stops the work. Pure: `configured` says which providers have a key.
+ */
+export function textChain(settings: AiTextSettings, use: AiUse | undefined, configured: (provider: AiProviderDefinition) => boolean): AiSelection[] {
+  const chain: AiSelection[] = [];
+  const add = (selection: AiSelection | null | undefined) => {
+    const provider = findProvider(selection?.provider);
+    if (!selection || !provider || !configured(provider)) return;
+    if (!chain.some((entry) => entry.provider === selection.provider && entry.model === selection.model)) chain.push(selection);
+  };
+  add((use && settings.uses?.[use]) || settings);
+  add(settings.fallback);
+  for (const provider of AI_PROVIDERS) {
+    if (provider.defaultModel && !chain.some((entry) => entry.provider === provider.id)) add({ provider: provider.id, model: provider.defaultModel });
+  }
+  return chain;
 }
 
 export async function loadImageSelection(tenantId: string, fresh = false): Promise<AiImageSelection | null> {
@@ -228,20 +275,26 @@ export async function withAiTenant<T>(tenantId: string | null | undefined, fn: (
   return tenantContext.run({ tenantId }, fn);
 }
 
-/** The selection that applies right now, with its server-side key; null means "use the environment default". */
-export function activeAiSelection(): ResolvedAiSelection | null {
+/** The models that apply right now for a use, in fallback order, with their server-side keys; empty means "use the environment default". */
+export function activeAiChain(use?: AiUse): ResolvedAiSelection[] {
   const tenantId = tenantContext.getStore()?.tenantId;
-  if (!tenantId) return null;
-  const selection = cache.get(tenantId)?.value;
-  if (!selection) return null;
-  const provider = findProvider(selection.provider);
-  if (!provider) return null;
-  const apiKey = secretOf(provider.keyEnv);
-  if (!apiKey) {
-    throw new Error(`${provider.label} is selected for this workspace but ${provider.keyEnv} is not set on the server`);
+  const settings = tenantId ? cache.get(tenantId)?.value : null;
+  if (!settings) return [];
+  const chain = textChain(settings, use, providerConfigured);
+  if (!chain.length) {
+    const provider = findProvider(settings.provider);
+    throw new Error(`${provider?.label ?? settings.provider} is selected for this workspace but no text provider has a key on the server`);
   }
-  const baseUrl = provider.baseUrlEnv ? secretOf(provider.baseUrlEnv, provider.defaultBaseUrl ?? "") : provider.defaultBaseUrl;
-  return { ...selection, apiKey, baseUrl };
+  return chain.map((selection) => {
+    const provider = findProvider(selection.provider)!;
+    const baseUrl = provider.baseUrlEnv ? secretOf(provider.baseUrlEnv, provider.defaultBaseUrl ?? "") : provider.defaultBaseUrl;
+    return { ...selection, apiKey: secretOf(provider.keyEnv), baseUrl };
+  });
+}
+
+/** The first model of the chain (what a call tries first); null means "use the environment default". */
+export function activeAiSelection(use?: AiUse): ResolvedAiSelection | null {
+  return activeAiChain(use)[0] ?? null;
 }
 
 /** The image selection that applies right now, with its server-side key and endpoint; null means "use the environment default". */

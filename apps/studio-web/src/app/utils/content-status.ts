@@ -2,13 +2,14 @@ import type { ReviewGateSummary } from '../models/studio.models';
 
 export type ContentFilter = 'all' | 'draft' | 'review' | 'ready' | 'published' | 'failed';
 
-export const CONTENT_FILTERS: Array<{ key: ContentFilter; label: string }> = [
-  { key: 'all', label: 'All' },
-  { key: 'draft', label: 'Draft' },
-  { key: 'review', label: 'Review' },
-  { key: 'ready', label: 'Ready' },
-  { key: 'published', label: 'Published' },
-  { key: 'failed', label: 'Failed' },
+/** `statuses` is what the projects API filters by (status=a,b); 'all' sends none. */
+export const CONTENT_FILTERS: Array<{ key: ContentFilter; label: string; statuses: string }> = [
+  { key: 'all', label: 'All', statuses: '' },
+  { key: 'draft', label: 'Draft', statuses: 'draft,ai_generated' },
+  { key: 'review', label: 'Review', statuses: 'qa_failed,qa_passed,in_review' },
+  { key: 'ready', label: 'Ready', statuses: 'approved,publish_queued' },
+  { key: 'published', label: 'Published', statuses: 'published' },
+  { key: 'failed', label: 'Failed', statuses: 'publish_failed' },
 ];
 
 export function contentFilterOf(gate: ReviewGateSummary): ContentFilter {

@@ -1,7 +1,8 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { sectionFor } from '../layout/studio-nav';
 import { lastValueFrom, Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
@@ -13,14 +14,6 @@ import type { CostBudgetView, CostControlsView, OperationsHealth } from '../mode
 
 type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'cost';
 
-const TABS: Array<{ id: TabId; label: string }> = [
-  { id: 'overview', label: 'Overview' },
-  { id: 'workers', label: 'Workers' },
-  { id: 'queues', label: 'Queues' },
-  { id: 'production', label: 'Production jobs' },
-  { id: 'failures', label: 'Failures' },
-  { id: 'cost', label: 'Cost controls' },
-];
 
 @Component({
   selector: 'app-operations-page',
@@ -48,20 +41,6 @@ const TABS: Array<{ id: TabId; label: string }> = [
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
-      </div>
-
-      <div class="au-tabs" role="tablist" aria-label="Operations sections">
-        <button
-          class="au-tab"
-          type="button"
-          role="tab"
-          *ngFor="let tab of tabs"
-          [class.is-active]="activeTab === tab.id"
-          [attr.aria-selected]="activeTab === tab.id"
-          (click)="activeTab = tab.id"
-        >
-          {{ tab.label }}
-        </button>
       </div>
 
       <ng-container *ngIf="loading && !health">
@@ -320,8 +299,10 @@ export class OperationsPageComponent implements OnInit, OnDestroy {
   jobKind = '';
   readonly jobStatuses = ['queued', 'running', 'needs_review', 'ready', 'failed', 'cancelled'];
 
-  readonly tabs = TABS;
+  private readonly route = inject(ActivatedRoute);
+  /** Section picked in the sidebar (?tab=). */
   activeTab: TabId = 'overview';
+  private readonly tabSub = this.route.queryParamMap.subscribe((params) => (this.activeTab = sectionFor('/studio/operations', params.get('tab')) as TabId));
 
   health: OperationsHealth | null = null;
   costControls: CostControlsView | null = null;

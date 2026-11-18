@@ -62,7 +62,7 @@ const strategyStep: OnboardingStepHandler = async ({ tenantId, siteId }) => {
 const firstPlanOfferStep: OnboardingStepHandler = async ({ tenantId, siteId, userId }) => {
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId }, select: { name: true } });
   if (!site) throw new Error("site_not_found");
-  const actionUrl = `/studio/editorial-plan?siteId=${siteId}`;
+  const actionUrl = `/studio/plan?siteId=${siteId}`;
   // Only an offer: no plan or content is generated or published here.
   await notify({
     tenantId,

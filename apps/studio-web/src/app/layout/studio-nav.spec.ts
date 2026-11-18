@@ -1,57 +1,39 @@
-import { GUIDED_STEPS, STUDIO_NAV, canSeeNavItem, currentStep, nextStep } from './studio-nav';
+import { STUDIO_NAV, activeNavItem, canSeeNavItem } from './studio-nav';
 
-describe('studio nav guided process', () => {
+describe('studio nav (M5)', () => {
   it('lists every route exactly once', () => {
     const paths = STUDIO_NAV.flatMap((group) => group.items.map((item) => item.path));
     expect(new Set(paths).size).toBe(paths.length);
   });
 
-  it('numbers the steps in process order', () => {
-    expect(GUIDED_STEPS.map((step) => `${step.number} ${step.item.label}`)).toEqual([
-      '1.1 Site intelligence',
-      '1.2 Competitors',
-      '2.1 Sources',
-      '2.2 Inbox',
-      '3.1 Editorial plan',
-      '4.1 Content',
-      '4.2 Review queue',
-      '4.3 Media',
-      '5.1 Calendar',
-      '5.2 Publications',
+  it('shows Home, Calendar, Articles, Results, then Advanced and Settings at the end', () => {
+    const bar = STUDIO_NAV.filter((group) => !group.hidden);
+    expect(bar.map((group) => group.label)).toEqual(['Home', 'Calendar', 'Articles', 'Results', 'Advanced', 'Settings']);
+    expect(bar.filter((group) => group.end).map((group) => group.id)).toEqual(['advanced', 'settings']);
+  });
+
+  it('keeps the specialist tools under Advanced', () => {
+    const advanced = STUDIO_NAV.find((group) => group.id === 'advanced')!;
+    expect(advanced.items.map((item) => item.label)).toEqual([
+      'Site intelligence', 'Competitors', 'Sources', 'Inbox', 'Plan backlog', 'Review queue', 'Media', 'Background jobs',
     ]);
   });
 
-  it('chains each step to the next, across areas', () => {
-    expect(nextStep('/studio/overview')?.item.label).toBe('Site intelligence');
-    expect(nextStep('/studio/competitors')?.item.label).toBe('Sources');
-    expect(nextStep('/studio/editorial-plan')?.item.label).toBe('Content');
-    expect(nextStep('/studio/content/abc')?.item.label).toBe('Review queue');
-    expect(nextStep('/studio/media')?.item.label).toBe('Calendar');
-    expect(nextStep('/studio/publications')).toBeNull();
+  it('lights up the area of deep links', () => {
+    expect(activeNavItem('/studio/content/abc')?.group.id).toBe('articles');
+    expect(activeNavItem('/studio/content/new')?.group.id).toBe('articles');
+    expect(activeNavItem('/studio/results')?.group.id).toBe('results');
   });
 
-  it('keeps settings outside the flow', () => {
-    expect(currentStep('/studio/settings/sites')).toBeNull();
-    expect(nextStep('/studio/connections')).toBeNull();
-  });
-
-  it('gives Home a purposeful sidebar and puts Settings in the area bar', () => {
-    const home = STUDIO_NAV.find((group) => group.id === 'home')!;
-    expect(home.items.map((item) => item.label)).toEqual(['Overview', 'Notifications', 'Background jobs']);
-    expect(nextStep('/studio/notifications')).toBeNull();
+  it('groups settings as business, articles and integrations; team and system only for admins', () => {
     const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
-    expect(settings.hidden).toBeFalsy();
-    expect(settings.end).toBeTrue();
-  });
-
-  it('shows team, roles and system internals only to admins', () => {
-    const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
+    expect(settings.items.filter((item) => item.heading).slice(0, 3).map((item) => item.heading)).toEqual(['Business & brand', 'Articles', 'Integrations']);
     const visible = (role: string, platform = false) =>
       settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);
     for (const role of ['viewer', 'editor']) {
-      expect(visible(role)).toEqual(['Sites', 'Connections', 'Web discovery', 'Autopilot', 'Assistant tools']);
+      expect(visible(role)).toEqual(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools']);
     }
-    expect(visible('admin')).toEqual(['Sites', 'People', 'Roles', 'Connections', 'Web discovery', 'Autopilot', 'Assistant tools', 'System health']);
+    expect(visible('admin')).toEqual(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
     expect(visible('admin', true)).toContain('AI providers');
   });
 });

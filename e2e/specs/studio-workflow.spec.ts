@@ -102,14 +102,14 @@ test('Content workflow: create → generate → workspace renders', async ({ bro
 
   const page = await context.newPage();
   await page.goto('/studio/content');
-  await expect(page.getByText('Content', { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole('link', { name: 'New content' }).first()).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Articles' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'New article' })).toBeVisible();
   await expect(page.getByText(project.title).first()).toBeVisible();
 
   await page.goto(`/studio/content/${project.id}`);
   await expect(page.getByText(project.title).first()).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Quality' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Publishing' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Published URL' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Customize future articles' })).toBeVisible();
 
   await context.close();
 });

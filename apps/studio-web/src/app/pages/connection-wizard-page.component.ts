@@ -34,12 +34,7 @@ const PLATFORM_GROUPS: Array<{ label: string; items: Platform[] }> = [
     items: [
       { id: 'wordpress', name: 'WordPress', mark: 'WP', method: 'Application password', provider: 'generic_rest',
         preset: { authScheme: 'basic_user_pass', restBasePath: '/wp-json/wp/v2', contentPath: '/posts', mediaPath: '/media' } },
-      // shortcut: these need native adapters in src/studio/publishers.ts; enable each once its publisher exists.
-      { id: 'webflow', name: 'Webflow', mark: 'WF', method: 'API token + CMS collection', provider: null },
-      { id: 'shopify', name: 'Shopify', mark: 'SH', method: 'Custom app', provider: null },
-      { id: 'wix', name: 'Wix', mark: 'WX', method: 'API key + Site ID', provider: null },
-      { id: 'ghost', name: 'Ghost', mark: 'GH', method: 'Admin API key', provider: null },
-      { id: 'framer', name: 'Framer', mark: 'FR', method: 'Plugin', provider: null },
+      // M5: only platforms with a publisher are listed (Webflow, Shopify, Wix, Ghost, Framer come back with their adapters in src/studio/publishers.ts).
     ],
   },
   {

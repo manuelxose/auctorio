@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
-import { runAutomationTick } from "../src/studio/planner";
+import { progressDuePlanItems, runAutomationTick } from "../src/studio/planner";
 
 const prisma = getPrismaClient();
 
@@ -329,5 +329,64 @@ test("manual mode never auto-approves or schedules, even QA-passed content", asy
     assert.equal(await prisma.publication.count({ where: { projectId: passed.id } }), 0);
   } finally {
     await cleanupWorkspace(workspace.tenantId);
+  }
+});
+
+async function dropPlanWorkspace(tenantId: string) {
+  for (const model of ["auditLog", "editorialPlanItem", "editorialPlan", "automationPolicy", "site"] as const) {
+    await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where: { tenantId } });
+  }
+  await prisma.tenant.delete({ where: { id: tenantId } });
+}
+
+async function planWorkspace(mode: "assisted" | "autopilot", articlesPerDay = 3) {
+  const seed = `due-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const tenant = await prisma.tenant.create({ data: { name: seed, apiKeyHash: sha256(`${seed}-key`), status: "active" } });
+  const site = await prisma.site.create({ data: { tenantId: tenant.id, key: seed, name: seed, type: "guiatv", locale: "es-ES", baseUrl: "https://example.test" } });
+  const policy = await prisma.automationPolicy.create({ data: { tenantId: tenant.id, siteId: site.id, enabled: true, state: "active", mode, articlesPerDay } });
+  const plan = await prisma.editorialPlan.create({ data: { tenantId: tenant.id, siteId: site.id, name: "p", dateFrom: new Date(), dateTo: new Date(Date.now() + 30 * 86_400_000), status: "ready" } });
+  const item = (title: string, minutesFromNow: number, status: "approved" | "proposed") =>
+    prisma.editorialPlanItem.create({ data: { tenantId: tenant.id, planId: plan.id, siteId: site.id, title, channel: "website", status, scheduledFor: new Date(Date.now() + minutesFromNow * 60_000) } });
+  return { tenantId: tenant.id, policy, item };
+}
+
+test("M1: due approved plan items start production; later ones and unapproved ones wait (assisted)", async () => {
+  const w = await planWorkspace("assisted");
+  try {
+    const due = await w.item("Due", 30, "approved");
+    await w.item("Tomorrow", 24 * 60, "approved");
+    const proposed = await w.item("Proposed", 10, "proposed");
+    const started: string[] = [];
+    const count = await progressDuePlanItems(w.policy, { start: async (_tenant, id) => { started.push(id); } });
+    assert.equal(count, 1);
+    assert.deepEqual(started, [due.id]);
+    assert.equal((await prisma.editorialPlanItem.findUniqueOrThrow({ where: { id: proposed.id } })).status, "proposed");
+  } finally {
+    await dropPlanWorkspace(w.tenantId);
+  }
+});
+
+test("M1: autopilot approves its due proposals and respects the daily cap", async () => {
+  const w = await planWorkspace("autopilot", 1);
+  try {
+    await w.item("A", 5, "proposed");
+    await w.item("B", 20, "proposed");
+    const started: string[] = [];
+    const count = await progressDuePlanItems(w.policy, { start: async (_tenant, id) => { started.push(id); } });
+    assert.equal(count, 1);
+    assert.equal(await prisma.editorialPlanItem.count({ where: { tenantId: w.tenantId, status: "approved" } }), 2);
+  } finally {
+    await dropPlanWorkspace(w.tenantId);
+  }
+});
+
+test("M1: manual mode never starts plan production", async () => {
+  const w = await planWorkspace("assisted");
+  try {
+    await w.item("Due", 5, "approved");
+    const count = await progressDuePlanItems({ ...w.policy, mode: "manual" }, { start: async () => assert.fail("must not start") });
+    assert.equal(count, 0);
+  } finally {
+    await dropPlanWorkspace(w.tenantId);
   }
 });

@@ -23,12 +23,16 @@ export type ProductionRequestOptions = {
   searchIntentOverride?: string | null;
   /** Cluster runs only: when false the draft is not materialized (dry run). */
   persistDraft?: boolean;
+  /** Editor feedback for a rewrite, passed to the writer as guidance. */
+  feedback?: string | null;
+  /** Approved Studio prompt preset version whose instructions the writer follows. */
+  presetVersionId?: string | null;
 };
 
 export type ProductionRequest =
   | ({ kind: "plan_item"; planItemId: string } & ProductionRequestOptions)
   | ({ kind: "cluster"; clusterId: string; siteId?: string | null } & ProductionRequestOptions)
-  | ({ kind: "manual"; title: string; brief: string; siteId: string } & ProductionRequestOptions);
+  | ({ kind: "manual"; title: string; brief: string; siteId: string; /** Rewrite into this existing project. */ projectId?: string | null } & ProductionRequestOptions);
 
 export type ProductionKind = ProductionRequest["kind"];
 
@@ -53,7 +57,7 @@ export type PreparedInput = {
   kind: ProductionKind;
   tenantId: string;
   siteId: string;
-  site: { id: string; name: string; type: string; locale: string; siteValueConfig: unknown };
+  site: { id: string; name: string; type: string; locale: string; siteValueConfig: unknown; baseUrl?: string | null };
   language: "es" | "en";
   headline: string;
   summary: string | null;
@@ -68,6 +72,8 @@ export type PreparedInput = {
   siteFitScore: number | null;
   /** Primary entity names used by the duplicate check. */
   primaryEntityNames: string[];
+  /** Site `article_targets` override (guides only); resolved in the plan brief. */
+  siteArticleTargets?: unknown;
   /** Project created for this job before writing (plan item shell); excluded from the duplicate check. */
   ownProjectId: string | null;
   /** Cluster specifics (classifier / site-value pre-stages). */
@@ -80,12 +86,19 @@ export type PreparedInput = {
     ageHours: number;
   } | null;
   /** Plan item / manual specifics. */
+  /** News/cluster articles: the site's writing rules (plan and manual items carry theirs in plan.guidance). */
+  siteGuidance?: string[];
   plan: {
     planItemId: string | null;
     planId: string | null;
     record: Record<string, unknown>;
     generation: Record<string, unknown>;
     guidance: string[];
+    /** Guides: brand + CTA settings the app renders into the cards (M5). */
+    brand?: import("../editorial-engine/brand").ResolvedBrand;
+    /** Guides: the one YouTube video the seo stage places in the body (M6). */
+    youtube?: import("../editorial-engine/visuals").YoutubeVideo | null;
+    disclaimer?: string;
   } | null;
   options: ProductionRequestOptions;
 };

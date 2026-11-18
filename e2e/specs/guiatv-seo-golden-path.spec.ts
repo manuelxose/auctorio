@@ -176,7 +176,9 @@ test('3. Brief → content: approve one row and generate a deep, semantic articl
   expect(recent).toBeTruthy();
   const detail = (await api.get(`/studio/api/backend/v2/editorial-plans/${recent!.id}`)).json() as Promise<PlanView>;
   const plan = await detail;
-  const candidate = plan.items.find((item) => item.status === 'proposed' && !item.projectId);
+  // Prefer a guide: it exercises the M4 template (TOC, checklist, JSON-LD).
+  const open = plan.items.filter((item) => item.status === 'proposed' && !item.projectId);
+  const candidate = open.find((item) => item.contentType === 'guide') ?? open[0];
   expect(candidate).toBeTruthy();
 
   const approve = await api.post(`/studio/api/backend/v2/editorial-plan-items/${candidate!.id}/approve`, {});
@@ -194,7 +196,7 @@ test('3. Brief → content: approve one row and generate a deep, semantic articl
     bodyHtml: string;
     seoTitle: string | null;
     qaState: string;
-    qaReport?: { passed: boolean; score?: number };
+    qaReport?: { passed: boolean; score?: number; checklist?: Array<{ key: string; passed: boolean; detail: string }> };
   } | null = null;
   await waitFor(async () => {
     const projectResponse = await api.get(`/studio/api/backend/v2/projects/${projectId}`);
@@ -213,6 +215,12 @@ test('3. Brief → content: approve one row and generate a deep, semantic articl
   expect(article!.bodyHtml.toLowerCase()).toContain('<p');
   expect(article!.qaReport?.passed).toBe(true);
   expect(typeof article!.qaReport?.score).toBe('number');
+  // M4: the article panel's 10 checks are stored with QA v2.
+  expect(article!.qaReport?.checklist?.map((item) => item.key)).toEqual([
+    'answer_first', 'statistic', 'semantic_keywords', 'credible_source', 'structure',
+    'internal_links', 'plagiarism', 'image_alt', 'meta_tags', 'json_ld',
+  ]);
+  if (candidate!.contentType === 'guide') expect(article!.bodyHtml).toContain('data-block="toc"');
 });
 
 test('4. Publishing fidelity: save to GuiaTV as draft and verify destination metadata', async () => {

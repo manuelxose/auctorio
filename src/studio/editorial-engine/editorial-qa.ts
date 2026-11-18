@@ -9,7 +9,8 @@
 // ledger) are errors and hard-fail publication.
 
 import { detectVerbatimOverlap } from "./fact-safety";
-import { getStructureSpec, localizedHeading } from "./structure";
+import { countLinks } from "./quality-checklist";
+import { getStructureSpec, localizedHeading, sectionEnabled } from "./structure";
 import { stripHtml, wordCount } from "./seo-package";
 import { titleSimilarity } from "../editorial";
 import type {
@@ -146,6 +147,16 @@ function extractDates(value: string): string[] {
   return Array.from(value.matchAll(DATE_PATTERN)).map((match) => match[0]);
 }
 
+/**
+ * The article's prose without URLs, domains and slug-like identifiers ("eng-1795…-1847-site", "radio2024.es"),
+ * whose digits are not years or dates the writer claims. Prose year ranges ("2024-2025") have no letters and stay.
+ */
+export function proseForDateChecks(text: string): string {
+  return text
+    .replace(/\b(?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?/gi, " ")
+    .replace(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/gi, (token) => (/[a-z]/i.test(token) && /\d/.test(token) ? " " : token));
+}
+
 export function sentenceSplit(value: string): string[] {
   return value
     .split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑÜ"«])/g)
@@ -155,7 +166,7 @@ export function sentenceSplit(value: string): string[] {
 
 // ────────────────────────────────────────────────────────────── QA
 
-const NEWS_TYPES = new Set([
+export const NEWS_TYPES = new Set([
   "breaking_news",
   "standard_news",
   "developing_story",
@@ -207,16 +218,20 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   const allowedYears = new Set(
     licenses.flatMap((license) => extractYears(license.statement)).concat(input.enrichmentDates.flatMap((date) => extractYears(date))),
   );
+  // Durable content (guides, explainers) may name the current year ("guía 2026"); news still needs it in the ledger.
+  if (!NEWS_TYPES.has(brief.articleType) && /^\d{4}/.test(brief.generatedAt)) allowedYears.add(brief.generatedAt.slice(0, 4));
   const allowedDates = new Set(
     [
-      ...licenses.map((license) => normalizeDate(license.statement)),
+      // Each date in a sentence: normalizing the whole sentence picks up unrelated numbers ("temporada 2") as the day.
+      ...licenses.flatMap((license) => [normalizeDate(license.statement), ...extractDates(license.statement).map(normalizeDate)]),
       ...input.enrichmentDates.map((date) => normalizeDate(date)),
     ].filter((value): value is string => Boolean(value)),
   );
 
   // ── Unsupported claims (years/dates not in the ledger are critical) ────
-  const years = extractYears(bodyText);
-  const dates = extractDates(bodyText);
+  const prose = proseForDateChecks(bodyText);
+  const years = extractYears(prose);
+  const dates = extractDates(prose);
   const criticalUnsupportedClaims: Array<{ claim: string; reason: string }> = [];
 
   for (const year of years) {
@@ -393,7 +408,7 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   const spec = getStructureSpec(brief.articleType);
   const h2s = [...article.bodyHtml.matchAll(/<h2[^>]*>(.*?)<\/h2>/gi)].map((match) => normalize(stripHtml(match[1])));
   const outlined = (input.plannedOutline?.length ?? 0) > 0;
-  for (const section of spec.sections.filter((entry) => entry.required && !(outlined && entry.heading))) {
+  for (const section of spec.sections.filter((entry) => entry.required && sectionEnabled(entry, brief.articleTargets) && !(outlined && entry.heading))) {
     let present: boolean;
     if (section.kind === "lead" || section.kind === "update_note") {
       present = bodyWords.length > 40;
@@ -436,7 +451,8 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   add("seo_quality", "structured_data", "Structured data recommendation", seo.structuredDataRecommendation.length > 0, "info", seo.structuredDataRecommendation);
 
   // ── Internal linking ────────────────────────────────────────────────────
-  const internalLinksUsed = [...article.bodyHtml.matchAll(/href=["']((?!https?:\/\/|mailto:|tel:|#)[^"']+)["']/gi)].length;
+  // Inventory URLs are the site's own: absolute links on that host are internal too (the writer emits absolute URLs).
+  const internalLinksUsed = countLinks(article.bodyHtml, brief.internalLinkOpportunities.find((link) => /^https?:/i.test(link.url))?.url).internal;
   const requiredInternal = brief.articleType === "evergreen_explainer" || brief.articleType === "list_ranking" || brief.articleType === "what_to_watch" || brief.articleType === "review_info" ? 2 : 1;
   const inventoryEmpty = brief.internalLinkOpportunities.length === 0;
   add(

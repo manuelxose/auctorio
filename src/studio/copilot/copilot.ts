@@ -250,7 +250,7 @@ async function generateAnswer(
     ]
       .filter(Boolean)
       .join("\n\n");
-    result = await getTextProvider().generate({ systemPrompt: SYSTEM_PROMPT, prompt, temperature: 0.3, maxTokens: 900 });
+    result = await getTextProvider("copilot").generate({ systemPrompt: SYSTEM_PROMPT, prompt, temperature: 0.3, maxTokens: 900 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "";
     // Configuration details stay in the server log, not in the user's answer.

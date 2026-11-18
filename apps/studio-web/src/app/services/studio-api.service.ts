@@ -718,7 +718,7 @@ export class StudioApiService {
     return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/publications/${publicationId}/unpublish`, {});
   }
 
-  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[]; timeZone?: string | null }> {
+  listCalendar(from: string, to: string, channel?: PublicationChannel, siteId?: string): Observable<{ items: CalendarEvent[]; timeZone?: string | null; keywordMetrics?: boolean }> {
     let params = new HttpParams().set('from', from).set('to', to);
     if (channel) {
       params = params.set('channel', channel);
@@ -726,7 +726,7 @@ export class StudioApiService {
     if (siteId) {
       params = params.set('siteId', siteId);
     }
-    return this.http.get<{ items: CalendarEvent[]; timeZone?: string | null }>(`${this.apiBase}/backend/v2/calendar`, { params });
+    return this.http.get<{ items: CalendarEvent[]; timeZone?: string | null; keywordMetrics?: boolean }>(`${this.apiBase}/backend/v2/calendar`, { params });
   }
 
   // ─── Editorial platform: social ───────────────────────────────────────
@@ -1001,6 +1001,10 @@ export class StudioApiService {
 
   deleteCostBudget(id: string): Observable<{ ok: boolean }> {
     return this.http.delete<{ ok: boolean }>(`${this.apiBase}/backend/v2/cost-controls/${id}`);
+  }
+
+  deleteSite(siteId: string): Observable<{ ok: true; projects: number; plans: number }> {
+    return this.http.delete<{ ok: true; projects: number; plans: number }>(`${this.apiBase}/backend/v2/sites/${siteId}`);
   }
 
   deleteProject(projectId: string, payload: { reason?: string; mode?: 'archive' | 'unpublish_delete' }): Observable<{ archived: boolean }> {

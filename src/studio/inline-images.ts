@@ -50,7 +50,16 @@ export function insertInlineFigure(html: string, figureHtml: string, slot: numbe
   return `${html.slice(0, at)}\n${figureHtml}${html.slice(at)}`;
 }
 
-export function inlineFigureHtml(src: string, alt: string, slot: number, contentImageId: string): string {
+/** Descriptive alt: the section heading, with the article keyword when the heading does not already carry it (M6). */
+export function inlineAlt(heading: string, keyword: string | null | undefined): string {
+  const fold = (value: string) => value.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const clean = heading.trim();
+  const key = keyword?.trim() ?? "";
+  if (!key || fold(clean).includes(fold(key))) return clean || key;
+  return clean ? `${clean}: ${key}` : key;
+}
+
+export function inlineFigureHtml(src: string, alt: string, slot: number, contentImageId: string, infographic = false): string {
   const safeAlt = alt.replace(/[<>"&]/g, " ").replace(/\s+/g, " ").trim();
-  return `<figure data-auctorio-slot="${slot}" data-auctorio-image="${contentImageId}"><img src="${src}" alt="${safeAlt}" loading="lazy" /></figure>`;
+  return `<figure data-auctorio-slot="${slot}" data-auctorio-image="${contentImageId}"${infographic ? ' data-auctorio-infographic="true"' : ""}><img src="${src}" alt="${safeAlt}" loading="lazy" /></figure>`;
 }

@@ -12,6 +12,8 @@ import type {
 import { buildAssetPublicUrl } from "./orchestration";
 import { isProductionEnv } from "../shared/utils/env";
 import { sanitizeEditorialHtml } from "./html-sanitizer";
+import { load } from "cheerio";
+import { buildPublicationJsonLd, faqItemsFromHtml, splitFaqSection } from "./editorial-engine/json-ld";
 import { loadActiveInstallationForSite } from "./connectors/installation";
 import { validateScrapeUrl } from "../infrastructure/scraping";
 
@@ -155,13 +157,14 @@ export function buildGuiaTvPayload(
   const metadata = getMetadata(context.project);
   const categories = getStringArray(metadata.categories);
   const keywords = getStringArray(metadata.keywords);
+  const body = guiaTvBody(context);
 
   return {
     title: context.version.title || context.project.title,
     slug: String(metadata.slug || "").trim() || undefined,
     status,
     excerpt: sanitizeEditorialHtml(context.version.excerpt || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-    content: sanitizeEditorialHtml(context.version.bodyHtml || ""),
+    content: sanitizeEditorialHtml(body.html),
     categories,
     contentType: normalizeGuiaTvContentType(String(metadata.contentType || "guide")),
     featured: Boolean(metadata.featured),
@@ -169,7 +172,7 @@ export function buildGuiaTvPayload(
     targetQuery: metadata.targetQuery ? String(metadata.targetQuery) : undefined,
     relatedPlatformKeys: filterGuiaTvRelatedPlatformKeys(getStringArray(metadata.relatedPlatformKeys)),
     relatedRouteKeys: filterGuiaTvRelatedRouteKeys(getStringArray(metadata.relatedRouteKeys)),
-    faqItems: getFaqItems(context.project),
+    faqItems: body.faqItems,
     evergreen: metadata.evergreen !== false,
     featuredImage: assetUrl ?? undefined,
     coverImage: assetUrl ?? undefined,
@@ -290,6 +293,42 @@ function getFaqItems(project: ContentProject): Array<{ question: string; answer:
       question: String(item.question),
       answer: String(item.answer),
     }));
+}
+
+/**
+ * GuíaTV builds the contents list from the headings and renders faqItems as its own FAQ block (with
+ * FAQPage JSON-LD) next to its Article schema: the body ships without our TOC and with its FAQ moved to faqItems.
+ */
+function guiaTvBody(context: PublisherContext): { html: string; faqItems: Array<{ question: string; answer: string }> } {
+  const $ = load(context.version.bodyHtml || "", null, false);
+  $('nav[data-block="toc"]').remove();
+  const stored = getFaqItems(context.project);
+  if (stored.length) return { html: $.html(), faqItems: stored };
+  return splitFaqSection($.html());
+}
+
+/** Editor-set FAQ items win; otherwise the questions under the body's FAQ H2 (guides). */
+function articleFaqItems(context: PublisherContext): Array<{ question: string; answer: string }> {
+  const stored = getFaqItems(context.project);
+  return stored.length ? stored : faqItemsFromHtml(context.version.bodyHtml || "");
+}
+
+/** Article + BreadcrumbList (+ FAQPage); undefined when the site switched JSON-LD off (project metadata.articleTargets). */
+export function publicationJsonLd(context: PublisherContext, assetUrl: string | null): Array<Record<string, unknown>> | undefined {
+  const metadata = getMetadata(context.project);
+  if (asRecord(asRecord(metadata.articleTargets).sections).jsonLd === false) return undefined;
+  return buildPublicationJsonLd({
+    title: context.version.title || context.project.title,
+    description: context.version.seoDescription || context.version.excerpt || "",
+    image: assetUrl,
+    publishedAt: (context.version.publishedAt ?? new Date()).toISOString(),
+    modifiedAt: (context.version.updatedAt ?? new Date()).toISOString(),
+    languageCode: context.project.primaryLanguage || context.site.locale || "es",
+    url: metadata.canonicalUrl ? String(metadata.canonicalUrl) : null,
+    siteName: context.site.name,
+    siteUrl: context.site.baseUrl || null,
+    faqItems: articleFaqItems(context),
+  });
 }
 
 function imageFileName(assetUrl: string): string {
@@ -527,23 +566,23 @@ class GuiaTvPublisher implements PublisherAdapter {
     // Validate the approval identity before creating a remote draft, so a
     // missing credential cannot leave orphaned unpublished records in GuiaTV.
     const approvalHeaders = this.getApprovalHeaders(context.site);
-    const draft = externalId ? { externalId } : await this.publishDraft(context);
-    if (!draft.externalId) return draft;
+    // An existing post gets the current version first (GuíaTV keeps it as a draft until approved), then approval.
+    const draft = externalId ? await this.updateDraft(context, externalId) : await this.publishDraft(context);
+    if (!draft.externalId) throw new Error("guiatv_draft_without_id: the draft was not created, nothing to approve");
 
     const siteBaseUrl = String(context.site.baseUrl || "").replace(/\/$/, "");
-    const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(
-      `${siteBaseUrl}/v2/blog/${draft.externalId}/approve`,
-      {
-        method: "POST",
-        headers: approvalHeaders,
-        body: { notes: "Automatically approved after Auctorio maximum quality gates." },
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      },
-    ).catch((error: unknown) => {
-      // The remote draft exists: carry its id so the retry approves it instead of creating another.
-      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
-    });
+    // With the Auctorio review key GuíaTV publishes directly (its owner decision, ADR 0001); only its emergency stop and blocking findings refuse.
+    const response = await fetchJson<{ data?: { post?: { id?: string; link?: string } } }>(`${siteBaseUrl}/v2/blog/${draft.externalId}/approve`, {
+      method: "POST",
+      headers: approvalHeaders,
+      body: { notes: "Approved by Auctorio after its quality gates." },
+      timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+      retries: 1,
+    })
+      .catch((error: unknown) => {
+        // The remote draft exists: carry its id so the retry approves it instead of creating another.
+        throw Object.assign(error instanceof Error ? error : new Error(String(error)), { externalId: draft.externalId });
+      });
     return {
       externalId: draft.externalId,
       externalUrl: response.data?.post?.link || null,
@@ -1184,6 +1223,7 @@ class GenericRestPublisher implements PublisherAdapter {
 
   private buildPayload(context: PublisherContext, assetUrl: string | null, status: "draft" | "publish") {
     const metadata = getMetadata(context.project);
+    const jsonLd = publicationJsonLd(context, assetUrl);
     return {
       title: context.version.title || context.project.title,
       slug: String(metadata.slug || "").trim() || undefined,
@@ -1197,6 +1237,7 @@ class GenericRestPublisher implements PublisherAdapter {
       meta: {
         _auctorio_seo_title: context.version.seoTitle || undefined,
         _auctorio_seo_description: context.version.seoDescription || undefined,
+        _auctorio_json_ld: jsonLd ? JSON.stringify(jsonLd) : undefined,
       },
     };
   }
@@ -1320,10 +1361,12 @@ class GenericRestPublisher implements PublisherAdapter {
         timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
         retries: 1,
       });
+      // WordPress-style APIs echo the stored status: "pending"/"draft" means the site did not publish it.
+      const stored = typeof response.status === "string" ? response.status : "publish";
       return {
         externalId,
         externalUrl: typeof response.link === "string" ? response.link : null,
-        effectiveTargetStatus: "publish",
+        effectiveTargetStatus: stored === "publish" || stored === "future" ? "publish" : "draft",
         responsePayload: response,
       };
     }

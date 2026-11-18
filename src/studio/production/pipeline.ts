@@ -10,6 +10,7 @@
 import crypto from "node:crypto";
 import { Prisma, type ProductionJob, type ProductionJobStatus } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
+import { withAiTenant } from "../../infrastructure/ai/ai-settings";
 import { structuredEvent } from "../../shared/utils/logger";
 import { writeAudit } from "../audit";
 import {
@@ -22,9 +23,11 @@ import {
   startOperation,
   touchOperationProgress,
 } from "../operations";
-import { generateContentFromEditorialPlanItem } from "../editorial-plan";
+import { generateSocialForPlanItem } from "../editorial-plan";
 import { resolveClusterSite } from "../editorial-engine/cluster-production";
-import { ensurePlanItemProject } from "./plan-item";
+import { ensurePlanItemProject, slotOrNow } from "./plan-item";
+import { getOrCreatePolicy } from "../automation";
+import { createPublication } from "../publication";
 import { productionStages } from "./stages";
 import {
   ACTIVE_JOB_STATUSES,
@@ -185,7 +188,8 @@ async function syncPlanItem(job: ProductionJob, outcome: "generating" | "needs_r
 
 // ────────────────────────────────────────────────────────────── Start
 
-type StartOptions = { userId?: string | null; wait?: boolean; now?: Date };
+/** rerun: an editor asked to rewrite a finished plan item (Regenerate), so its finished job does not answer for it. */
+type StartOptions = { userId?: string | null; wait?: boolean; now?: Date; rerun?: boolean };
 
 function manualKey(request: { siteId: string; title: string; brief: string }): string {
   return crypto.createHash("sha256").update(`${request.siteId}\u0000${request.title.trim()}\u0000${request.brief.trim()}`).digest("hex").slice(0, 40);
@@ -212,6 +216,11 @@ async function resolveTarget(tenantId: string, request: ProductionRequest) {
   if (!request.title?.trim() || !request.brief?.trim()) throw new ProductionError("manual_title_and_brief_required");
   const site = await prisma.site.findFirst({ where: { id: request.siteId, tenantId }, select: { id: true } });
   if (!site) throw new ProductionError("site_not_found", undefined, 404);
+  if (request.projectId) {
+    const project = await prisma.contentProject.findFirst({ where: { id: request.projectId, tenantId, siteId: site.id }, select: { id: true } });
+    if (!project) throw new ProductionError("project_not_found", undefined, 404);
+    return { siteId: site.id, key: `project:${project.id}`, item: null };
+  }
   return { siteId: site.id, key: `manual:${manualKey(request)}`, item: null };
 }
 
@@ -229,7 +238,7 @@ export async function startProduction(
     if (existing.status === "failed" || existing.status === "cancelled" || isStale(existing)) {
       return { job: await retryProductionJob(tenantId, existing.id, options), created: false };
     }
-    if (request.kind === "plan_item") {
+    if (request.kind === "plan_item" && !options.rerun) {
       // A plan item produces one piece; a finished job is the answer.
       return { job: toProductionJobView(existing), created: false };
     }
@@ -278,7 +287,7 @@ export async function startProduction(
     metadata: { kind: request.kind, planItemId: job.planItemId, clusterId: job.clusterId },
   });
 
-  let projectId: string | null = null;
+  let projectId: string | null = request.kind === "manual" ? request.projectId ?? null : null;
   if (target.item) {
     projectId = (await ensurePlanItemProject(target.item, job.id)).id;
   }
@@ -325,6 +334,12 @@ async function finishCancelled(job: ProductionJob): Promise<void> {
 
 /** Execute (or resume) a job. Safe to call concurrently: only the caller that claims the queued job runs it. */
 export async function runProductionJob(jobId: string, options: { now?: Date } = {}): Promise<ProductionJobView | null> {
+  // Automation ticks run jobs outside any HTTP request: without the workspace scope the writer falls back to the env default (mock).
+  const row = await prisma.productionJob.findUnique({ where: { id: jobId }, select: { tenantId: true } });
+  return withAiTenant(row?.tenantId, () => executeProductionJob(jobId, options));
+}
+
+async function executeProductionJob(jobId: string, options: { now?: Date } = {}): Promise<ProductionJobView | null> {
   const claim = await prisma.productionJob.updateMany({
     where: { id: jobId, status: "queued" },
     data: { status: "running", attempts: { increment: 1 }, startedAt: new Date(), error: null, errorCode: null },
@@ -467,6 +482,7 @@ export async function reviewProductionJob(
       await prisma.contentVersion.updateMany({ where: { id: job.versionId, tenantId }, data: { status: "qa_passed" } });
     }
     if (job.generationId) await prisma.articleGeneration.updateMany({ where: { id: job.generationId, tenantId }, data: { status: "approved" } });
+    if (job.kind === "plan_item") await releasePlanItemPublication(updated, new Date());
     await syncPlanItem(updated, "ready");
   } else {
     // Rejection keeps the draft for reference; a retry writes a new version into the same project.
@@ -479,6 +495,24 @@ export async function reviewProductionJob(
   }
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId ?? null, action: `production.job.${approved ? "approved" : "rejected"}`, entityType: "production_job", entityId: job.id, metadata: { notes, projectId: job.projectId, versionId: job.versionId } });
   return toProductionJobView(updated);
+}
+
+/**
+ * Human approval of a plan-item draft is the release: the article goes out in
+ * its calendar slot (or now if the slot passed). Manual mode only marks it ready.
+ */
+export async function releasePlanItemPublication(job: ProductionJob, now: Date): Promise<string | null> {
+  if (!job.versionId || !job.projectId || !job.planItemId) return null;
+  const policy = await getOrCreatePolicy(job.tenantId, job.siteId);
+  if (policy.mode === "manual") return null;
+  const item = await prisma.editorialPlanItem.findFirst({ where: { id: job.planItemId, tenantId: job.tenantId }, select: { scheduledFor: true } });
+  const pending = await prisma.publication.findFirst({ where: { tenantId: job.tenantId, versionId: job.versionId, channel: "website", status: "ready" } });
+  if (pending) {
+    await prisma.publication.update({ where: { id: pending.id }, data: { status: "scheduled", manualOverride: true, scheduledFor: slotOrNow(pending.scheduledFor, now) } });
+    return pending.id;
+  }
+  const created = await createPublication({ tenantId: job.tenantId, projectId: job.projectId, versionId: job.versionId, channel: "website", siteId: job.siteId, scheduledFor: slotOrNow(item?.scheduledFor ?? null, now), manualOverride: true });
+  return created.id;
 }
 
 // ────────────────────────────────────────────────────────────── Queries
@@ -515,20 +549,56 @@ export async function listProductionJobs(
   return { items: rows.map(toProductionJobView), page, pageSize, total, counts: statusCounts };
 }
 
-// ────────────────────────────────────────────────────────────── Plan item entry (replaces generateContentFromEditorialPlanItem)
+// ────────────────────────────────────────────────────────────── Existing project entry
+
+/** (Re)write an existing project through the pipeline; a run already in flight is returned, not forked. */
+export async function startProductionForProject(
+  tenantId: string,
+  projectId: string,
+  options: { feedback?: string | null; presetVersionId?: string | null; brief?: string | null; userId?: string | null } = {},
+): Promise<ProductionJobView> {
+  const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId } });
+  if (!project) throw new ProductionError("project_not_found", undefined, 404);
+  const language: "en" | "es" = project.primaryLanguage === "en" ? "en" : "es";
+  // A keyword guide from the plan regenerates through its plan item (guide template, SERP sources, brand cards), not as a manual piece.
+  const planItemId = (project.metadata as { editorialPlanItemId?: unknown } | null)?.editorialPlanItemId;
+  if (typeof planItemId === "string" && !options.brief?.trim()) {
+    const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId, channel: "website" }, select: { id: true } });
+    if (item) {
+      const request = { kind: "plan_item" as const, planItemId: item.id, language, feedback: options.feedback ?? null, presetVersionId: options.presetVersionId ?? null };
+      return (await startProduction(tenantId, request, { userId: options.userId ?? null, rerun: true })).job;
+    }
+  }
+  const { job } = await startProduction(
+    tenantId,
+    {
+      kind: "manual",
+      projectId: project.id,
+      siteId: project.siteId,
+      title: project.title,
+      brief: options.brief?.trim() || project.brief?.trim() || project.title,
+      language,
+      feedback: options.feedback ?? null,
+      presetVersionId: options.presetVersionId ?? null,
+    },
+    { userId: options.userId ?? null },
+  );
+  return job;
+}
+
+// ────────────────────────────────────────────────────────────── Plan item entry
 
 /**
- * Drop-in replacement for generateContentFromEditorialPlanItem: same return
- * shape ({ item, project }) plus `job`. Website items run through the governed
- * pipeline; social items (x/instagram) still use the legacy social generator.
+ * Plan item entry: returns { item, project, job }. Website items run through
+ * the governed pipeline; social items get a pipeline-written base article.
  */
 export async function startProductionForPlanItem(tenantId: string, planItemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId }, include: { project: true } });
   if (!item) return null;
   if (item.channel !== "website") {
-    // shortcut: the article writer cannot produce social packs; move social to the pipeline once a social writer stage exists.
-    const legacy = await generateContentFromEditorialPlanItem(tenantId, planItemId, userId);
-    return legacy ? { ...legacy, job: null } : null;
+    // shortcut: social items get a pipeline article as the base for their social pack; add a social writer stage to skip it.
+    const social = await generateSocialForPlanItem(tenantId, planItemId, userId);
+    return social;
   }
   const jobByItem = await prisma.productionJob.findFirst({ where: { tenantId, planItemId: item.id }, orderBy: { createdAt: "desc" } });
   if (item.projectId && item.project && !jobByItem) {

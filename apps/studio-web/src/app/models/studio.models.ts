@@ -173,6 +173,8 @@ export type VersionSummary = {
     id: string;
     status: string;
     error: string | null;
+    /** EXIF/XMP/C2PA removed before storing (M6). */
+    metadataStripped?: boolean;
   } | null;
   promptPresetVersionId: string | null;
   promptVersionLabel: string | null;
@@ -280,6 +282,10 @@ export type ProjectVersionDetail = VersionSummary & {
 
 export type StudioProjectDetailView = StudioProjectSummary & {
   metadata: JsonRecord;
+  /** Measured demand of the plan keyword (GET /projects/:id); null when never measured. */
+  keywordMetrics?: { searchVolume: number | null; keywordDifficulty: number | null; source: string } | null;
+  /** Targets the article is held to (site settings + article override). */
+  articleTargets?: { words: number; internalLinks: number; externalLinks: number; images: number; faqCount: number } | null;
   origin: string;
   deletedAt: string | null;
   deletionReason: string | null;
@@ -1010,6 +1016,10 @@ export type CalendarEvent = {
   planItemId: string | null;
   priority: number | null;
   contentType: string | null;
+  /** Plan items only. Volume/difficulty are null unless a provider measured them (never estimated). */
+  primaryKeyword?: string | null;
+  searchVolume?: number | null;
+  keywordDifficulty?: number | null;
   channel: PublicationChannel;
   /** PublicationState for publications, EditorialPlanItem status for plan items. */
   status: string;
@@ -1027,7 +1037,12 @@ export type CalendarEvent = {
   failureClass: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Derived lifecycle (src/studio/article-lifecycle.ts); null chip = canceled. */
+  lifecycle?: string;
+  chip?: ArticleChip | null;
 };
+
+export type ArticleChip = 'queued' | 'drafting' | 'review' | 'published' | 'failed';
 
 export type PublishingAccount = {
   id: string;

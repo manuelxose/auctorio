@@ -14,6 +14,8 @@ import { weaknessFindings } from "../src/studio/copilot/tools";
 process.env.TEXT_PROVIDER = "mock";
 const prisma = getPrismaClient();
 const never = () => false;
+// The plan fixture starts tomorrow: update_proposal refuses dates before the real clock.
+const day = (offset: number) => new Date(Date.now() + (offset + 1) * 86_400_000).toISOString().slice(0, 10);
 
 type Fixture = { tenantId: string; siteId: string; planId: string; itemIds: string[] };
 
@@ -27,17 +29,17 @@ async function createFixture(): Promise<Fixture> {
       siteId: site.id,
       name: `Plan ${seed}`,
       status: "partial",
-      dateFrom: new Date("2026-11-16T00:00:00Z"),
-      dateTo: new Date("2026-11-20T23:59:00Z"),
+      dateFrom: new Date(`${day(0)}T00:00:00Z`),
+      dateTo: new Date(`${day(4)}T23:59:00Z`),
       timezone: "UTC",
-      generatedOutput: { requestedCount: 4, unfilledSlots: [{ localDate: "2026-11-19", localTime: "09:00", scheduledFor: "2026-11-19T09:00:00.000Z", reason: "no_valid_brief" }] },
+      generatedOutput: { requestedCount: 4, unfilledSlots: [{ localDate: day(3), localTime: "09:00", scheduledFor: `${day(3)}T09:00:00.000Z`, reason: "no_valid_brief" }] },
     },
   });
   const items = await Promise.all(
     [
-      { title: "Champions league fixtures tonight guide", day: "2026-11-16", evidence: [{ title: "UEFA calendar", url: "https://uefa.example/cal" }], cluster: "football" },
-      { title: "Champions league fixtures tonight preview", day: "2026-11-17", evidence: null, cluster: "football" },
-      { title: "Weekend film premieres", day: "2026-11-18", evidence: null, cluster: "football" },
+      { title: "Champions league fixtures tonight guide", day: day(0), evidence: [{ title: "UEFA calendar", url: "https://uefa.example/cal" }], cluster: "football" },
+      { title: "Champions league fixtures tonight preview", day: day(1), evidence: null, cluster: "football" },
+      { title: "Weekend film premieres", day: day(2), evidence: null, cluster: "football" },
     ].map((entry) =>
       prisma.editorialPlanItem.create({
         data: {
@@ -122,7 +124,7 @@ test("deterministic router answers read tools with real plan data", async () => 
   assert.match(message.content, /3 active proposal\(s\)/);
   assert.match(message.content, /deterministic intent router/);
   const findings = (message.evidence as { findings: Array<{ message: string }>; answeredBy: string }).findings.map((finding) => finding.message).join(" | ");
-  assert.match(findings, /1 slot\(s\) have no proposal \(2026-11-19\)/);
+  assert.match(findings, new RegExp(`1 slot\\(s\\) have no proposal \\(${day(3)}\\)`));
   assert.match(findings, /near-duplicate/);
   assert.match(findings, /2 of 3 active proposal\(s\) have no stored evidence/);
   assert.match(findings, /Cluster imbalance: "football" holds 3 of 3/);
@@ -227,18 +229,18 @@ test("update_proposal validates the date against the plan and refuses items alre
   const ctx = await loadEditorialContext(a.tenantId, { planItemId: a.itemIds[1] });
   const prepare = (args: Record<string, unknown>) => prepareAction(actor, ctx, "update_proposal", args);
   const refused = (status: number) => (error: unknown) => error instanceof CopilotError && error.status === status;
-  await assert.rejects(prepare({ scheduledFor: "2026-12-30" }), refused(400));
-  await assert.rejects(prepare({ scheduledFor: "2026-11-01" }), refused(400));
-  const ok = await prepare({ scheduledFor: "2026-11-18" });
-  assert.equal(ok.args.scheduledFor, "2026-11-18T09:00:00.000Z");
+  await assert.rejects(prepare({ scheduledFor: day(44) }), refused(400));
+  await assert.rejects(prepare({ scheduledFor: day(-15) }), refused(400));
+  const ok = await prepare({ scheduledFor: day(2) });
+  assert.equal(ok.args.scheduledFor, `${day(2)}T09:00:00.000Z`);
   await prisma.editorialPlan.update({ where: { id: a.planId }, data: { timezone: "Europe/Madrid" } });
   try {
-    assert.equal((await prepare({ scheduledFor: "2026-11-18" })).args.scheduledFor, "2026-11-18T08:00:00.000Z");
+    assert.equal((await prepare({ scheduledFor: day(2) })).args.scheduledFor, `${day(2)}T08:00:00.000Z`);
   } finally {
     await prisma.editorialPlan.update({ where: { id: a.planId }, data: { timezone: "UTC" } });
   }
   const busy = await prisma.editorialPlanItem.create({
-    data: { tenantId: a.tenantId, planId: a.planId, siteId: a.siteId, title: "Already generating item", channel: "website", status: "generating", scheduledFor: new Date("2026-11-17T09:00:00Z"), topicCluster: "x", rationale: "r", relevanceScore: 0.5 },
+    data: { tenantId: a.tenantId, planId: a.planId, siteId: a.siteId, title: "Already generating item", channel: "website", status: "generating", scheduledFor: new Date(`${day(1)}T09:00:00Z`), topicCluster: "x", rationale: "r", relevanceScore: 0.5 },
   });
   await assert.rejects(prepareAction(actor, await loadEditorialContext(a.tenantId, { planItemId: busy.id }), "update_proposal", { title: "Nope" }), refused(409));
 });

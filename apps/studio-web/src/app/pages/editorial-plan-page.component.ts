@@ -15,6 +15,7 @@ import { BacklogAction, PlanBacklogViewComponent } from '../components/planning/
 import { PlanPipelineViewComponent } from '../components/planning/plan-pipeline-view.component';
 import { PlanItemDrawerComponent } from '../components/planning/plan-item-drawer.component';
 import { addDays, localDate } from '../components/planning/planning-utils';
+import { sectionFor } from '../layout/studio-nav';
 import type { OperationItem, StudioSite } from '../models/studio.models';
 import type { PlanDetail, PlanGenerationAccepted, PlanItem } from '../models/planning.models';
 
@@ -41,16 +42,10 @@ type View = 'backlog' | 'pipeline';
       .pw-op { padding: var(--au-s3) var(--au-s4); border-bottom: 1px solid var(--au-border); }
       .pw-counts { display: flex; flex-wrap: wrap; gap: var(--au-s3); padding: var(--au-s2) var(--au-s4); font-size: var(--au-fs-metadata); color: var(--au-muted); border-bottom: 1px solid var(--au-border); }
       .pw-counts strong { color: var(--au-text); }
-      .pw-tabs { display: flex; gap: var(--au-s1); padding: var(--au-s2) var(--au-s4) 0; border-bottom: 1px solid var(--au-border); }
-      .pw-tab { border: none; background: transparent; font: inherit; color: var(--au-muted); padding: var(--au-s2) var(--au-s3); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
-      .pw-tab:hover { color: var(--au-text); }
-      .pw-tab[aria-selected='true'] { color: var(--au-text); border-bottom-color: var(--au-brand); font-weight: 600; }
-      .pw-tab:focus-visible { outline: 2px solid var(--au-brand); outline-offset: -2px; }
       .pw-body { padding: var(--au-s3) var(--au-s4); }
       .pw-warn { margin: var(--au-s3) var(--au-s4) 0; }
       @media (max-width: 640px) {
-        .pw-head, .pw-body, .pw-counts, .pw-tabs, .pw-op, .pw-extend { padding-left: var(--au-s3); padding-right: var(--au-s3); }
-        .pw-tab { padding: var(--au-s2); }
+        .pw-head, .pw-body, .pw-counts, .pw-op, .pw-extend { padding-left: var(--au-s3); padding-right: var(--au-s3); }
       }
     `,
   ],
@@ -121,6 +116,9 @@ type View = 'backlog' | 'pipeline';
             <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!activeOp || plan.status === 'archived'" (click)="archive()">
               <app-icon name="archive"></app-icon> Archive
             </button>
+            <button class="au-btn au-btn--ghost au-btn--sm au-btn--danger-ghost" type="button" [disabled]="!!activeOp || plan.status === 'generating'" (click)="deletePlan()">
+              <app-icon name="trash"></app-icon> Delete
+            </button>
           </div>
         </header>
 
@@ -160,10 +158,7 @@ type View = 'backlog' | 'pipeline';
           <span><strong>{{ count('scheduled') + count('published') }}</strong> scheduled or published</span>
         </div>
 
-        <div class="pw-tabs" role="tablist" aria-label="Plan views">
-          <button *ngFor="let tab of tabs" class="pw-tab" role="tab" type="button" [id]="'pw-tab-' + tab.id" [attr.aria-selected]="view === tab.id" aria-controls="pw-panel" [attr.tabindex]="view === tab.id ? 0 : -1" (click)="view = tab.id" (keydown.arrowright)="moveTab(1)" (keydown.arrowleft)="moveTab(-1)">{{ tab.label }}</button>
-        </div>
-        <div class="pw-body" id="pw-panel" role="tabpanel" [attr.aria-labelledby]="'pw-tab-' + view">
+        <div class="pw-body">
           <div class="au-skeleton" *ngIf="detailLoading">Loading plan…</div>
           <ng-container *ngIf="!detailLoading">
             <app-empty-state *ngIf="items().length === 0" icon="plan" title="This plan has no proposals" text="Use Fill missing slots to generate proposals for the empty slots."></app-empty-state>
@@ -205,11 +200,8 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   showArchived = false;
   extending = false;
   extendTo = '';
+  /** Backlog or Pipeline, picked in the sidebar (?tab=). */
   view: View = 'backlog';
-  tabs: Array<{ id: View; label: string }> = [
-    { id: 'backlog', label: 'Backlog' },
-    { id: 'pipeline', label: 'Pipeline' },
-  ];
   activeOp: OperationItem | null = null;
   opLabel = '';
   bulkBusy = false;
@@ -223,6 +215,7 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
     // ?new=1 (Overview "Plan the next 30 days") and ?pillar= open the generator; ?plan=&item= (Calendar) open an item.
     if (this.initialPillar || query.get('new')) this.showGenerator = true;
     this.pendingItemId = query.get('item');
+    this.route.queryParamMap.subscribe((params) => (this.view = sectionFor('/studio/plan', params.get('tab')) as View));
     this.context.update({ area: 'plan', siteId: this.siteId || null });
     this.load(query.get('plan') ?? undefined);
   }
@@ -250,11 +243,6 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   opPercent(): number {
     const op = this.activeOp;
     return op && op.totalSteps ? Math.round((op.completedSteps / op.totalSteps) * 100) : 0;
-  }
-  moveTab(step: number): void {
-    const index = this.tabs.findIndex((tab) => tab.id === this.view);
-    this.view = this.tabs[(index + step + this.tabs.length) % this.tabs.length].id;
-    queueMicrotask(() => document.getElementById('pw-tab-' + this.view)?.focus());
   }
 
   load(selectId?: string): void {
@@ -378,6 +366,25 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
         this.load();
       },
       error: (err) => (this.error = apiMessage(err, 'The plan could not be archived.')),
+    });
+  }
+
+  async deletePlan(): Promise<void> {
+    if (!this.plan) return;
+    const ok = await this.confirm.confirm({
+      title: 'Delete this plan?',
+      message: `"${this.plan.name}" and its ${this.items().length} proposals are deleted. Articles already written stay in Articles. This cannot be undone.`,
+      confirmLabel: 'Delete plan',
+      danger: true,
+    });
+    if (!ok) return;
+    this.api.deletePlan(this.plan.id).subscribe({
+      next: () => {
+        this.toast.success('Plan deleted.');
+        this.plan = null;
+        this.load();
+      },
+      error: (err) => (this.error = apiMessage(err, 'The plan could not be deleted.')),
     });
   }
 

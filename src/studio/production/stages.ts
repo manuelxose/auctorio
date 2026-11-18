@@ -17,13 +17,17 @@ import { buildFactSafetyReport, hasCopyrightWarningCues, type FactSafetyReport }
 import { decideCreateUpdateOrSkip, type DuplicateCheckResult } from "../editorial-engine/duplicate-check";
 import { buildWriterPrompt, parseWriterOutput } from "../editorial-engine/writer-prompt";
 import { getArticleWriter } from "../editorial-engine/writer-provider";
-import { buildSeoPackage } from "../editorial-engine/seo-package";
+import { bodyWordCount, buildSeoPackage, withTableOfContents } from "../editorial-engine/seo-package";
+import { linkInlineAttributions } from "../editorial-engine/inline-citations";
+import { applyBrandCards } from "../editorial-engine/brand";
+import { insertYoutube } from "../editorial-engine/visuals";
 import { buildProvenance, summarizeProvenance } from "../editorial-engine/provenance";
 import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
 import { buildClusterBrief, enrichmentKnowledgeOf, prepareClusterInput } from "../editorial-engine/cluster-production";
 import type { SeoPackage } from "../editorial-engine/types";
-import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput } from "./plan-item";
+import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput, slotOrNow } from "./plan-item";
+import { approveVersion } from "../repository";
 import {
   ProductionStop,
   type BriefArtifact,
@@ -31,6 +35,7 @@ import {
   type MaterializeArtifact,
   type PreparedInput,
   type ProductionRequest,
+  type ProductionRequestOptions,
   type QaArtifact,
   type StageContext,
   type WriteArtifact,
@@ -103,6 +108,31 @@ export function writerMaxTokens(targetWordMax: number): number {
   return Math.min(8000, Math.max(3000, Math.round(targetWordMax * 5)));
 }
 
+/** Per-run editor input (rewrite feedback, prompt preset) on top of the brief's guidance. */
+async function requestGuidance(tenantId: string, options: ProductionRequestOptions): Promise<string[]> {
+  const out: string[] = [];
+  if (options.feedback?.trim()) out.push(`Revision feedback from the editor (apply it in this rewrite):
+${options.feedback.trim().slice(0, 4000)}`);
+  if (options.presetVersionId) {
+    const version = await prisma.studioPromptVersion.findFirst({ where: { id: options.presetVersionId, status: "approved", preset: { tenantId } }, select: { systemTemplate: true, userTemplate: true } });
+    const text = version?.systemTemplate?.trim() || version?.userTemplate?.trim();
+    if (text) out.push(`House writing instructions (prompt preset):
+${text.slice(0, 4000)}`);
+  }
+  return out;
+}
+
+/** Second pass for a guide that came back short: same envelope and blocks, longer body sections. */
+export function expandPrompt(userPrompt: string, previousOutput: string, words: number, minimum: number): string {
+  return `${userPrompt}
+
+Your previous answer (below) has only ${words} words in the article body (without TOC, cards, Sources and Recommended reading); the minimum is ${minimum}.
+Return the same JSON envelope, keeping every block, heading, link, card placeholder and source, and expand the body sections with more concrete detail grounded in the fact ledger (steps, examples, figures, comparisons) until the body has at least ${minimum} words. No conclusion section, no filler.
+
+Previous answer:
+${previousOutput.slice(0, 60_000)}`;
+}
+
 async function write(ctx: StageContext): Promise<WriteArtifact> {
   const briefArtifact = need(ctx.artifacts.brief, "brief");
   const factSafety = need(ctx.artifacts.evidence, "evidence");
@@ -114,7 +144,7 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
     previousArticle: briefArtifact.previousArticle,
     updateDelta: briefArtifact.updateDelta,
     language: ctx.input.language,
-    editorialGuidance: briefArtifact.guidance,
+    editorialGuidance: [...briefArtifact.guidance, ...(await requestGuidance(ctx.tenantId, ctx.request))],
     plannedOutline: outlineHeadings(ctx.input.plan?.record ?? {}),
   });
   await updateGeneration(ctx, {
@@ -137,10 +167,33 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
       language: ctx.input.language,
     });
     await updateGeneration(ctx, { provider: result.provider, model: result.model, articleOutput: result.output.slice(0, 300_000) });
-    const parsed = parseWriterOutput(result.output);
+    let parsed = parseWriterOutput(result.output);
     if (parsed) {
+      // Guides: one bounded "expand" pass when the body falls clearly short (below QA's 85 % tolerance; models vary run to run).
+      const minimum = briefArtifact.brief.articleTargets ? briefArtifact.brief.targetLengthRange.min : 0;
+      const words = bodyWordCount(parsed.bodyHtml);
+      if (words < minimum * 0.85) {
+        const expanded = await getArticleWriter()
+          .generate({
+            prompt: expandPrompt(writerPrompt.userPrompt, result.output, words, minimum),
+            systemPrompt: writerPrompt.systemPrompt,
+            maxTokens: 8000,
+            language: ctx.input.language,
+          })
+          .catch(() => null);
+        const longer = expanded ? parseWriterOutput(expanded.output) : null;
+        const longerWords = longer ? bodyWordCount(longer.bodyHtml) : 0;
+        structuredEvent("production.writer_expanded", { jobId: ctx.jobId, words, minimum, expandedWords: longerWords });
+        if (longer && longerWords > words) {
+          parsed = longer;
+          await updateGeneration(ctx, { articleOutput: expanded!.output.slice(0, 300_000) });
+        }
+      }
       // Editorial HTML is allowlist-sanitized before anything is stored.
-      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml);
+      // The brief marks own posts «(own post)» for the writer; a copied marker never reaches the article.
+      parsed.bodyHtml = sanitizeEditorialHtml(parsed.bodyHtml).replace(/\s*\((?:own post|post propio)\)/gi, "");
+      // Named-but-unlinked sources («Según television.digital.gob.es…») get their link inline, not only in «Fuentes».
+      parsed.bodyHtml = linkInlineAttributions(parsed.bodyHtml, ctx.input.ledgerFacts);
       return { parsed, provider: result.provider, model: result.model, writerPrompt: writerPrompt.userPrompt };
     }
     structuredEvent("production.writer_output_invalid", { jobId: ctx.jobId, attempt: attempt + 1, maxTokens: attempts[attempt], outputChars: result.output.length }, "warn");
@@ -150,9 +203,16 @@ async function write(ctx: StageContext): Promise<WriteArtifact> {
 }
 
 async function seo(ctx: StageContext): Promise<SeoPackage> {
+  const brief = need(ctx.artifacts.brief, "brief").brief;
+  const article = need(ctx.artifacts.write, "write").parsed;
+  const brand = ctx.input.plan?.brand;
+  const video = ctx.input.plan?.youtube;
+  if (brief.articleTargets && video) article.bodyHtml = insertYoutube(article.bodyHtml, video);
+  if (brief.articleTargets && brand) article.bodyHtml = applyBrandCards(article.bodyHtml, brand, brief.articleTargets.sections, ctx.input.language, ctx.input.plan?.disclaimer);
+  if (brief.articleTargets?.sections.toc) article.bodyHtml = withTableOfContents(article.bodyHtml, ctx.input.language);
   return buildSeoPackage({
-    brief: need(ctx.artifacts.brief, "brief").brief,
-    article: need(ctx.artifacts.write, "write").parsed,
+    brief,
+    article,
     internalLinks: ctx.input.internalLinks,
     factSourceUrls: ctx.input.ledgerFacts.map((fact) => ({ url: fact.sourceUrl, publisher: fact.publisher })),
   });
@@ -191,6 +251,9 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         primaryIntent: record.primaryIntent ?? record.searchIntent ?? briefArtifact.brief.searchIntent,
         primaryKeyword: briefArtifact.brief.primaryKeyword,
         outline: record.outline ?? [],
+        secondaryKeywords: briefArtifact.brief.secondaryKeywords,
+        siteUrl: input.site.baseUrl ?? null,
+        ...(briefArtifact.brief.articleTargets ? { articleTargets: briefArtifact.brief.articleTargets } : {}),
       },
       siteType: input.site.type,
       recommendedWordCountMin: briefArtifact.brief.targetLengthRange.min,
@@ -198,6 +261,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
       evidenceCount: input.ledgerFacts.length,
       cannibalizationRisk: overlap ? "high" : typeof record.cannibalizationRisk === "string" ? record.cannibalizationRisk : null,
       internalLinkInventorySize: input.internalLinks.length,
+      externalSourceInventorySize: externalSourceCount(input.ledgerFacts),
     },
   );
   return { editorial, version };
@@ -213,7 +277,7 @@ async function gates(ctx: StageContext): Promise<GatesArtifact> {
   const copyrightWarning = hasCopyrightWarningCues(input.memberTitles);
   const decision = evaluatePublicationGates({
     qa: qaArtifact.editorial,
-    configJson: asRecord(policy.qaGates),
+    configJson: asRecord(policy.autonomousQaThresholds),
     policy: { autoGenerate: policy.autoGenerate, autoApprove: policy.autoApprove, autoSchedule: policy.autoSchedule, autoPublish: policy.autoPublish },
     sourceGroups: summarizeProvenance(provenance).sourceGroups.size,
     siteFitScore: input.siteFitScore,
@@ -259,6 +323,11 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   const existing = projectId ? await prisma.contentProject.findFirst({ where: { id: projectId, tenantId: ctx.tenantId } }) : null;
   if (!existing) projectId = null;
   // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
+  // Guide targets + inventory size: QA v2 re-runs rebuild the checklist from project metadata; publishers read the JSON-LD switch.
+  const articleTargets = need(ctx.artifacts.brief, "brief").brief.articleTargets;
+  const guideMetadata = articleTargets
+    ? { articleTargets, internalLinkInventorySize: input.internalLinks.length, externalSourceInventorySize: externalSourceCount(input.ledgerFacts) }
+    : {};
   const sourceOrigins = input.ledgerFacts.flatMap((fact) => (fact.origin ? [{ ...fact.origin, url: fact.sourceUrl }] : [])).slice(0, 40);
 
   if (!existing) {
@@ -283,6 +352,8 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           articleType: duplicate.decision === "update_existing" ? "article_update" : "create_new",
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
+          ...guideMetadata,
+          siteUrl: input.site.baseUrl ?? null,
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
       },
@@ -300,6 +371,8 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           productionJobId: ctx.jobId,
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
+          ...guideMetadata,
+          siteUrl: input.site.baseUrl ?? null,
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),
         } as Prisma.InputJsonValue,
@@ -336,6 +409,20 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
       await enqueuePublication(publication.id);
       result.publicationId = publication.id;
       await writeAudit({ tenantId: ctx.tenantId, action: "editorial_engine.auto_published", entityType: "article_generation", entityId: ctx.generationId, actorType: "automation", metadata: { projectId, publicationId: publication.id, productionJobId: ctx.jobId } });
+    }
+  }
+
+  if (ctx.request.kind === "plan_item") {
+    // Plan items publish in their calendar slot, never earlier: assisted waits for approval, autopilot schedules itself.
+    const policy = await getOrCreatePolicy(ctx.tenantId, ctx.siteId);
+    const autopilot = policy.mode === "autopilot" && gate.decision.decision === "auto_publish";
+    if (autopilot || policy.mode === "assisted") {
+      const item = await prisma.editorialPlanItem.findFirst({ where: { id: ctx.request.planItemId, tenantId: ctx.tenantId }, select: { scheduledFor: true } });
+      const scheduledFor = slotOrNow(item?.scheduledFor ?? null, ctx.now);
+      if (autopilot) await approveVersion(ctx.tenantId, projectId!, version.id, "automation", null);
+      // The scheduler claims the row once its slot is due.
+      const publication = await createPublication({ tenantId: ctx.tenantId, projectId: projectId!, versionId: version.id, channel: "website", siteId: ctx.siteId, scheduledFor, ...(autopilot ? {} : { status: "ready" as const }) });
+      if (autopilot) result.publicationId = publication.id;
     }
   }
 
@@ -403,4 +490,9 @@ export function getDefaultProductionStages(): ProductionStageRegistry {
 /** Test seam: replace stages (spies, fake image queue). Pass null to restore defaults. */
 export function setProductionStageOverrides(overrides: Partial<ProductionStageRegistry> | null): void {
   Object.assign(productionStages, defaultStages, overrides ?? {});
+}
+
+/** Distinct source URLs in the ledger: the most external links a guide can honestly carry. */
+function externalSourceCount(facts: Array<{ sourceUrl: string | null }>): number {
+  return new Set(facts.map((fact) => fact.sourceUrl).filter(Boolean)).size;
 }

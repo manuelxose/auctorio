@@ -3,15 +3,17 @@ import { activityLabel, humanError, autopilotHeadline, difficultyLabel, planChip
 const facts = { websiteConnected: false, siteAnalyzed: false, planReady: false, autopilotMode: null, automationEnabled: false, instagramConnected: false, xConnected: false, sourceCount: 0 } as const;
 
 describe('overview model', () => {
-  it('requires website, analysis, plan and mode before autopilot', () => {
+  it('requires only connecting the website; the rest can be skipped', () => {
     const steps = setupSteps({ ...facts });
-    expect(steps.filter((s) => s.required).map((s) => s.id)).toEqual(['website', 'learn', 'plan', 'autopilot']);
-    expect(autopilotHeadline(steps, { enabled: false, paused: false, pausedReason: null, mode: null }).text).toBe('4 setup steps left before autopilot can run');
+    expect(steps.filter((s) => s.required).map((s) => s.id)).toEqual(['website']);
+    expect(autopilotHeadline(steps, { enabled: false, paused: false, pausedReason: null, mode: null }).text).toBe('Connect your website to start');
+    const connected = setupSteps({ ...facts, websiteConnected: true });
+    expect(autopilotHeadline(connected, { enabled: true, paused: false, pausedReason: null, mode: 'assisted', review: 2 })).toEqual({ tone: 'warn', text: '2 articles to review' });
   });
 
   it('reports autopilot running once every required step is done', () => {
     const steps = setupSteps({ ...facts, websiteConnected: true, siteAnalyzed: true, planReady: true, autopilotMode: 'autopilot', automationEnabled: true });
-    expect(autopilotHeadline(steps, { enabled: true, paused: false, pausedReason: null, mode: 'autopilot' })).toEqual({ tone: 'ok', text: 'Running on autopilot. Nothing needs you right now' });
+    expect(autopilotHeadline(steps, { enabled: true, paused: false, pausedReason: null, mode: 'autopilot' })).toEqual({ tone: 'ok', text: 'Everything runs on its own. Nothing needs you right now' });
     expect(autopilotHeadline(steps, { enabled: true, paused: true, pausedReason: 'publish failures', mode: 'autopilot' }).text).toBe('Paused: publish failures');
   });
 

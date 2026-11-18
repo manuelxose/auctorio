@@ -41,6 +41,6 @@ export async function getClusterCoverage(tenantId: string, siteId: string, slug:
     pages,
     coverage,
     gaps: coverage.filter((entry) => entry.pagesCovering === 0).map((entry) => entry.subtopic),
-    proposalsUrl: `/studio/editorial-plan?siteId=${encodeURIComponent(siteId)}&pillar=${encodeURIComponent(pillarName)}`,
+    proposalsUrl: `/studio/plan?siteId=${encodeURIComponent(siteId)}&pillar=${encodeURIComponent(pillarName)}`,
   };
 }
