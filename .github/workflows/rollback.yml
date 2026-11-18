@@ -23,5 +23,7 @@ jobs:
           script: |
             cd /var/www/content-ai-platform
             git fetch --all --tags
+            # dist/ is rebuilt by deploy-production.sh; the current build's output would block the checkout.
+            git checkout -- dist
             git checkout --detach "$DEPLOY_REF"
             /var/www/content-ai-platform/scripts/deploy-production.sh
