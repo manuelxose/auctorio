@@ -1003,6 +1003,10 @@ export class StudioApiService {
     return this.http.delete<{ ok: boolean }>(`${this.apiBase}/backend/v2/cost-controls/${id}`);
   }
 
+  deleteSite(siteId: string): Observable<{ ok: true; projects: number; plans: number }> {
+    return this.http.delete<{ ok: true; projects: number; plans: number }>(`${this.apiBase}/backend/v2/sites/${siteId}`);
+  }
+
   deleteProject(projectId: string, payload: { reason?: string; mode?: 'archive' | 'unpublish_delete' }): Observable<{ archived: boolean }> {
     return this.http.delete<{ archived: boolean }>(`${this.apiBase}/backend/v2/projects/${projectId}`, {
       body: payload,

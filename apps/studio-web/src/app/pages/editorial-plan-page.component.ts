@@ -116,6 +116,9 @@ type View = 'backlog' | 'pipeline';
             <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!activeOp || plan.status === 'archived'" (click)="archive()">
               <app-icon name="archive"></app-icon> Archive
             </button>
+            <button class="au-btn au-btn--ghost au-btn--sm au-btn--danger-ghost" type="button" [disabled]="!!activeOp || plan.status === 'generating'" (click)="deletePlan()">
+              <app-icon name="trash"></app-icon> Delete
+            </button>
           </div>
         </header>
 
@@ -363,6 +366,25 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
         this.load();
       },
       error: (err) => (this.error = apiMessage(err, 'The plan could not be archived.')),
+    });
+  }
+
+  async deletePlan(): Promise<void> {
+    if (!this.plan) return;
+    const ok = await this.confirm.confirm({
+      title: 'Delete this plan?',
+      message: `"${this.plan.name}" and its ${this.items().length} proposals are deleted. Articles already written stay in Articles. This cannot be undone.`,
+      confirmLabel: 'Delete plan',
+      danger: true,
+    });
+    if (!ok) return;
+    this.api.deletePlan(this.plan.id).subscribe({
+      next: () => {
+        this.toast.success('Plan deleted.');
+        this.plan = null;
+        this.load();
+      },
+      error: (err) => (this.error = apiMessage(err, 'The plan could not be deleted.')),
     });
   }
 

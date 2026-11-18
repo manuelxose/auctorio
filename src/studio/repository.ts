@@ -72,6 +72,29 @@ export async function getSiteById(tenantId: string, siteId: string): Promise<Sit
   return prisma.site.findFirst({ where: { id: siteId, tenantId } });
 }
 
+/**
+ * Hard-deletes a site and everything written for it: its articles (versions and derivatives first — those
+ * relations do not cascade), its editorial plans and items; the rest cascades or is unlinked by the schema.
+ * Nothing is unpublished from the destination website.
+ */
+export async function deleteSite(tenantId: string, siteId: string): Promise<{ projects: number; plans: number } | null> {
+  const site = await getSiteById(tenantId, siteId);
+  if (!site) return null;
+  return prisma.$transaction(
+    async (tx) => {
+      const projectIds = (await tx.contentProject.findMany({ where: { tenantId, siteId }, select: { id: true } })).map((project) => project.id);
+      await tx.contentDerivative.deleteMany({ where: { projectId: { in: projectIds } } });
+      await tx.contentVersion.deleteMany({ where: { projectId: { in: projectIds } } });
+      await tx.contentProject.deleteMany({ where: { id: { in: projectIds } } });
+      await tx.editorialPlanItem.deleteMany({ where: { tenantId, siteId } });
+      const plans = await tx.editorialPlan.deleteMany({ where: { tenantId, siteId } });
+      await tx.site.delete({ where: { id: site.id } });
+      return { projects: projectIds.length, plans: plans.count };
+    },
+    { timeout: 60_000 },
+  );
+}
+
 export async function updateSite(tenantId: string, siteId: string, input: UpdateSiteInput): Promise<Site | null> {
   const site = await getSiteById(tenantId, siteId);
   if (!site) {

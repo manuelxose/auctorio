@@ -83,6 +83,7 @@ import {
   bulkApproveEditorialPlanItems,
   bulkDeleteEditorialPlanItems,
   bulkSetEditorialPlanItemStatus,
+  deleteEditorialPlan,
   deleteEditorialPlanItem,
   enqueueEditorialPlanGeneration,
   enqueueFillMissingSlots,
@@ -1735,6 +1736,20 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       const updated = await updateEditorialPlan(context.tenantId, planId, { name: body.name as string | undefined, status: body.status as "archived" | undefined }, context.userId);
       if (!updated) return notFound(reply, "editorial plan not found");
       return reply.send(updated);
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.delete("/v2/editorial-plans/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const planId = (request.params as { id: string }).id;
+    if (!isUuid(planId)) return badRequest(reply, "invalid editorial plan id");
+    try {
+      const deleted = await deleteEditorialPlan(context.tenantId, planId, context.userId);
+      if (!deleted) return notFound(reply, "editorial plan not found");
+      return reply.send(deleted);
     } catch (error) {
       return conflict(reply, error instanceof Error ? error.message : String(error));
     }

@@ -26,6 +26,7 @@ import {
   updateProject,
   updateProjectStatus,
   updateSite,
+  deleteSite,
   updateVersionContent,
   updateVersionQa,
 } from "./repository";
@@ -995,6 +996,17 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     } catch (error) {
       return badRequest(reply, String(error));
     }
+  });
+
+  fastify.delete("/v2/sites/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const deleted = await deleteSite(context.tenantId, siteId);
+    if (!deleted) return notFound(reply, "site not found");
+    await writeAudit({ tenantId: context.tenantId, actorType: "user", actorUserId: context.userId, action: "site.deleted", entityType: "site", entityId: siteId, metadata: deleted });
+    return reply.send({ ok: true, ...deleted });
   });
 
   fastify.get("/v2/projects", async (request, reply) => {

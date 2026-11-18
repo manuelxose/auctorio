@@ -41,6 +41,9 @@ export class PlanningApiService {
   extendPlan(planId: string, payload: { dateTo: string; articlesPerDay?: number }): Observable<PlanGenerationAccepted> {
     return this.http.post<PlanGenerationAccepted>(`${this.base}/editorial-plans/${planId}/extend`, payload);
   }
+  deletePlan(planId: string): Observable<{ ok: true; deletedItems: number }> {
+    return this.http.delete<{ ok: true; deletedItems: number }>(`${this.base}/editorial-plans/${planId}`);
+  }
   updatePlan(planId: string, payload: { name?: string; status?: 'archived' }): Observable<PlanDetail> {
     return this.http.patch<PlanDetail>(`${this.base}/editorial-plans/${planId}`, payload);
   }

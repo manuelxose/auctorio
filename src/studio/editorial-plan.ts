@@ -1432,6 +1432,17 @@ export async function bulkDeleteEditorialPlanItems(tenantId: string, itemIds: st
   return { deletedCount: itemIds.length };
 }
 
+/** Deletes a plan and its items; articles already written from it stay in Articles. */
+export async function deleteEditorialPlan(tenantId: string, planId: string, userId?: string | null) {
+  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId } });
+  if (!plan) return null;
+  if (plan.status === "generating") throw new Error("editorial_plan_busy");
+  const items = await prisma.editorialPlanItem.deleteMany({ where: { tenantId, planId: plan.id } });
+  await prisma.editorialPlan.delete({ where: { id: plan.id } });
+  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan.deleted", entityType: "editorial_plan", entityId: plan.id, metadata: { name: plan.name, items: items.count } });
+  return { ok: true as const, deletedItems: items.count };
+}
+
 export async function deleteEditorialPlanItem(tenantId: string, itemId: string, userId?: string | null) {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
   if (!item) return null;
