@@ -253,6 +253,7 @@ enum PublicationChannel {
   website
   x
   instagram
+  facebook
 }
 
 enum PublicationState {

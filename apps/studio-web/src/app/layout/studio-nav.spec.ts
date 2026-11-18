@@ -31,9 +31,9 @@ describe('studio nav (M5)', () => {
     const visible = (role: string, platform = false) =>
       settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);
     for (const role of ['viewer', 'editor']) {
-      expect(visible(role)).toEqual(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools']);
+      expect(visible(role)).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Instagram & Facebook', 'Web discovery', 'Assistant tools']);
     }
-    expect(visible('admin')).toEqual(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
+    expect(visible('admin')).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Instagram & Facebook', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
     expect(visible('admin', true)).toContain('AI providers');
   });
 });

@@ -122,7 +122,7 @@ export const INTENTS_BY_STRATEGY: Record<StrategyMode, SearchIntent[]> = {
 
 // ────────────────────────────────────────────────────────────── Schema V2
 
-const channelSchema = enums(["website", "x", "instagram"] as const);
+const channelSchema = enums(["website", "x", "instagram", "facebook"] as const);
 const contentTypeSchema = enums(CONTENT_FORMATS);
 const intentSchema = enums(SEARCH_INTENTS);
 const funnelStageSchema = enums(FUNNEL_STAGES);

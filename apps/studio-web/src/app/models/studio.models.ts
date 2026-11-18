@@ -918,7 +918,7 @@ export type StudioEditorialProfile = {
 };
 
 export type SocialChannel = 'x' | 'instagram' | 'facebook';
-export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post';
+export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post' | 'instagram_carousel' | 'facebook_post';
 
 export type StudioSocialContent = {
   id: string;
@@ -938,6 +938,25 @@ export type StudioSocialContent = {
   metadata: JsonRecord;
   createdAt: string;
   updatedAt: string;
+};
+
+export type SiteSocialSettings = {
+  siteId: string;
+  workflow: 'auto' | 'approve' | 'manual';
+  postDays: number[];
+  postTime: string;
+  timezone: string;
+  categories: string[];
+  imageStyle: 'photo' | 'sketch';
+  fontFamily: 'sans' | 'serif' | 'mono';
+  highlightStyle: 'color' | 'marker' | 'underline' | 'none';
+  useLogo: boolean;
+  showBrandMark: boolean;
+};
+
+export type SiteSocialPost = StudioSocialContent & {
+  projectTitle: string;
+  publication: { id: string; status: string; scheduledFor: string | null } | null;
 };
 
 export type PublicationChannel = 'website' | 'x' | 'instagram' | 'facebook';

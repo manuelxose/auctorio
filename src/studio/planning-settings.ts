@@ -6,7 +6,7 @@ import { readArticleTargetsOverride, type ArticleTargetsOverride } from "./edito
 const prisma = getPrismaClient();
 const INDEXED_STATES = ["extracted", "stale"] as const;
 const LOCAL_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
-const CHANNELS = ["website", "x", "instagram"] as const;
+const CHANNELS = ["website", "x", "instagram", "facebook"] as const;
 const MAX_PRESET_BYTES = 16_000;
 
 // ──────────────────────────────────────────── URL inventory (internal links + evidence)

@@ -56,6 +56,8 @@ import type {
   StudioSiteDetail,
   StudioSiteSummary,
   StudioSocialContent,
+  SiteSocialSettings,
+  SiteSocialPost,
   StudioSource,
   StudioSourceItem,
   StudioStoryCluster,
@@ -750,6 +752,18 @@ export class StudioApiService {
     mediaAssetIds?: string[];
   }): Observable<StudioSocialContent> {
     return this.http.patch<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${socialId}`, payload);
+  }
+
+  listSiteSocial(siteId: string): Observable<{ items: SiteSocialPost[] }> {
+    return this.http.get<{ items: SiteSocialPost[] }>(`${this.apiBase}/backend/v2/sites/${siteId}/social`);
+  }
+
+  getSocialSettings(siteId: string): Observable<SiteSocialSettings> {
+    return this.http.get<SiteSocialSettings>(`${this.apiBase}/backend/v2/sites/${siteId}/social-settings`);
+  }
+
+  putSocialSettings(siteId: string, patch: Partial<SiteSocialSettings>): Observable<SiteSocialSettings> {
+    return this.http.put<SiteSocialSettings>(`${this.apiBase}/backend/v2/sites/${siteId}/social-settings`, patch);
   }
 
   regenerateSocial(socialId: string): Observable<{ job_id: string }> {

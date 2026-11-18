@@ -72,6 +72,8 @@ import {
 import {
   createSocialGenerationJobs,
   listSocialContent,
+  listSiteSocialContent,
+  scheduleApprovedSocial,
   regenerateSocial,
   updateSocialContent,
 } from "./social";
@@ -116,7 +118,7 @@ const SOURCE_ITEM_STATUSES = [
   "failed",
 ] as const;
 const CLUSTER_STATUSES = ["open", "selected", "covered", "rejected", "archived"] as const;
-const PUBLICATION_CHANNELS = ["website", "x", "instagram"] as const;
+const PUBLICATION_CHANNELS = ["website", "x", "instagram", "facebook"] as const;
 const PUBLICATION_STATES = [
   "draft",
   "ready",
@@ -129,7 +131,7 @@ const PUBLICATION_STATES = [
   "deleted",
   "unpublished",
 ] as const;
-const ACCOUNT_PLATFORMS = ["website", "x", "instagram"] as const;
+const ACCOUNT_PLATFORMS = ["website", "x", "instagram", "facebook"] as const;
 const ACCOUNT_STATUSES = ["pending", "active", "error", "disabled"] as const;
 const SOCIAL_CHANNELS = ["x", "instagram", "facebook"] as const;
 const SOCIAL_EDITORIAL_STATUSES = ["draft", "approved", "rejected"] as const;
@@ -1087,7 +1089,26 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!social) {
       return notFound(reply, "social content not found");
     }
-    return reply.send(social);
+    const publication = body.editorialStatus === "approved" ? await scheduleApprovedSocial(context.tenantId, social.id) : null;
+    // approved but unscheduled ⇒ no connected account for this channel yet.
+    return reply.send({ ...social, publication, needsAccount: body.editorialStatus === "approved" && !publication });
+  });
+
+  fastify.get("/v2/sites/:id/social", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) {
+      return badRequest(reply, "invalid site id");
+    }
+    const channel = parseOptionalString((request.query as { channel?: string }).channel);
+    if (channel && !isOneOf(channel, SOCIAL_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${SOCIAL_CHANNELS.join(", ")}`);
+    }
+    const items = await listSiteSocialContent(context.tenantId, siteId, channel as (typeof SOCIAL_CHANNELS)[number] | undefined);
+    return reply.send({ items });
   });
 
   fastify.post("/v2/social/:id/regenerate", async (request, reply) => {

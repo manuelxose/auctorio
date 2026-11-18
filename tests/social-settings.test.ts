@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SOCIAL_SETTINGS_DEFAULTS, validateSocialSettings } from "../src/studio/social-settings";
+import { SOCIAL_SETTINGS_DEFAULTS, nextSocialSlot, validateSocialSettings } from "../src/studio/social-settings";
 import { validateFacebookPayload, validateInstagramPayload } from "../src/studio/social-provider";
 
 test("social settings: defaults pass their own validation", () => {
@@ -47,4 +47,14 @@ test("instagram carousel: 2-10 images", () => {
   assert.deepEqual(validateInstagramPayload(p(1)), ["instagram_carousel_requires_multiple_images"]);
   assert.deepEqual(validateInstagramPayload(p(10)), []);
   assert.deepEqual(validateInstagramPayload(p(11)), ["instagram_carousel_supports_max_10_images"]);
+});
+
+test("social settings: next slot respects day, time and zone", () => {
+  // Wed 2026-11-18 12:00 UTC = 13:00 Madrid; Mon/Wed 10:00 Madrid → next is Mon 23rd 09:00 UTC.
+  const now = new Date("2026-11-18T12:00:00Z");
+  assert.equal(nextSocialSlot({ postDays: [1, 3], postTime: "10:00", timezone: "Europe/Madrid" }, now).toISOString(), "2026-11-23T09:00:00.000Z");
+  // Same day still ahead: Wed 18:30 Madrid → 17:30 UTC today.
+  assert.equal(nextSocialSlot({ postDays: [3], postTime: "18:30", timezone: "Europe/Madrid" }, now).toISOString(), "2026-11-18T17:30:00.000Z");
+  // Only today's slot, already past → one week later.
+  assert.equal(nextSocialSlot({ postDays: [3], postTime: "10:00", timezone: "UTC" }, now).toISOString(), "2026-11-25T10:00:00.000Z");
 });

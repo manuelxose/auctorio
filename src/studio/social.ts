@@ -5,7 +5,7 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { writeAudit } from "./audit";
 import { buildAssetPublicUrl } from "./orchestration";
-import { getSiteSocialSettings } from "./social-settings";
+import { getSiteSocialSettings, nextSocialSlot } from "./social-settings";
 import { renderSlideImages, type SlideText } from "./social-slides";
 
 const prisma = getPrismaClient();
@@ -424,6 +424,53 @@ export async function updateSocialContent(
   return updated;
 }
 
+/**
+ * An approved post gets a delivery record at the site's next slot: `scheduled`
+ * (the publication scheduler fires it), or `ready` in manual mode (a human posts it).
+ * Thread replies ride on their head post, so only position 0 is scheduled.
+ */
+export async function scheduleApprovedSocial(tenantId: string, socialContentId: string, now: Date = new Date()) {
+  const social = await prisma.socialContent.findFirst({
+    where: { id: socialContentId, tenantId, editorialStatus: "approved", threadPosition: 0 },
+    include: { project: { select: { siteId: true } } },
+  });
+  if (!social) return null;
+  const siteId = social.project.siteId;
+  const settings = await getSiteSocialSettings(tenantId, siteId);
+  const account = await prisma.publishingAccount.findFirst({
+    where: { tenantId, platform: social.channel, enabled: true, OR: [{ siteId }, { siteId: null }] },
+    orderBy: [{ siteId: { sort: "desc", nulls: "last" } }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  // Without an account the scheduler could only fail; manual posting needs none.
+  if (!account && settings.workflow !== "manual") return null;
+  const { createPublication } = await import("./publication");
+  return createPublication({
+    tenantId,
+    projectId: social.projectId,
+    versionId: social.versionId,
+    channel: social.channel,
+    accountId: account?.id ?? null,
+    siteId,
+    socialContentId: social.id,
+    scheduledFor: nextSocialSlot(settings, now),
+    ...(settings.workflow === "manual" ? { status: "ready" as const } : {}),
+  });
+}
+
+export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel) {
+  const items = await prisma.socialContent.findMany({
+    where: { tenantId, project: { siteId }, threadPosition: 0, ...(channel ? { channel } : {}) },
+    include: {
+      project: { select: { title: true } },
+      publications: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, scheduledFor: true } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  return items.map(({ project, publications, ...item }) => ({ ...item, projectTitle: project.title, publication: publications[0] ?? null }));
+}
+
 export async function listSocialContent(tenantId: string, input: { projectId?: string; versionId?: string; channel?: SocialChannel }) {
   return prisma.socialContent.findMany({
     where: {
@@ -561,6 +608,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
           } as Prisma.InputJsonObject,
         },
       });
+      if (editorialStatus === "approved") await scheduleApprovedSocial(data.tenantId, social.id);
       generated += 1;
     } catch (error) {
       await prisma.socialContent.update({

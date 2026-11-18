@@ -27,7 +27,7 @@ import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structu
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
-const CHANNELS = ["website", "x", "instagram"] as const;
+const CHANNELS = ["website", "x", "instagram", "facebook"] as const;
 type PlanChannel = (typeof CHANNELS)[number];
 
 export type GenerateEditorialPlanInput = {

@@ -81,6 +81,39 @@ export function validateSocialSettings(input: SiteSocialSettingsInput): SiteSoci
   return out;
 }
 
+function zoneParts(at: Date, tz: string) {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone: tz, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric" })
+      .formatToParts(at)
+      .map((p) => [p.type, Number(p.value)]),
+  ) as Record<string, number>;
+  return parts;
+}
+
+/** Wall-clock time in `tz` → UTC instant (two passes cover DST shifts). */
+function zonedToUtc(y: number, m: number, d: number, h: number, mi: number, tz: string): Date {
+  let guess = Date.UTC(y, m - 1, d, h, mi);
+  for (let i = 0; i < 2; i += 1) {
+    const p = zoneParts(new Date(guess), tz);
+    const shown = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute);
+    guess += Date.UTC(y, m - 1, d, h, mi) - shown;
+  }
+  return new Date(guess);
+}
+
+/** Next posting slot strictly after `now` on one of `postDays` at `postTime` in `timezone`. */
+export function nextSocialSlot(settings: { postDays: number[]; postTime: string; timezone: string }, now: Date = new Date()): Date {
+  const [hour, minute] = settings.postTime.split(":").map(Number);
+  const today = zoneParts(now, settings.timezone);
+  for (let offset = 0; offset < 8; offset += 1) {
+    const local = new Date(Date.UTC(today.year, today.month - 1, today.day + offset));
+    if (!settings.postDays.includes(local.getUTCDay())) continue;
+    const slot = zonedToUtc(local.getUTCFullYear(), local.getUTCMonth() + 1, local.getUTCDate(), hour, minute, settings.timezone);
+    if (slot.getTime() > now.getTime()) return slot;
+  }
+  throw new Error("no_social_slot");
+}
+
 async function assertSite(tenantId: string, siteId: string) {
   const site = await getPrismaClient().site.findFirst({ where: { id: siteId, tenantId }, select: { id: true } });
   if (!site) throw new Error("site_not_found");
