@@ -147,6 +147,16 @@ function extractDates(value: string): string[] {
   return Array.from(value.matchAll(DATE_PATTERN)).map((match) => match[0]);
 }
 
+/**
+ * The article's prose without URLs, domains and slug-like identifiers ("eng-1795…-1847-site", "radio2024.es"),
+ * whose digits are not years or dates the writer claims. Prose year ranges ("2024-2025") have no letters and stay.
+ */
+export function proseForDateChecks(text: string): string {
+  return text
+    .replace(/\b(?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?:\/\S*)?/gi, " ")
+    .replace(/\b[a-z0-9]+(?:-[a-z0-9]+)+\b/gi, (token) => (/[a-z]/i.test(token) && /\d/.test(token) ? " " : token));
+}
+
 export function sentenceSplit(value: string): string[] {
   return value
     .split(/(?<=[.!?])\s+(?=[A-ZÁÉÍÓÚÑÜ"«])/g)
@@ -219,8 +229,9 @@ export function runEditorialQa(input: QaInput): EditorialQaReport {
   );
 
   // ── Unsupported claims (years/dates not in the ledger are critical) ────
-  const years = extractYears(bodyText);
-  const dates = extractDates(bodyText);
+  const prose = proseForDateChecks(bodyText);
+  const years = extractYears(prose);
+  const dates = extractDates(prose);
   const criticalUnsupportedClaims: Array<{ claim: string; reason: string }> = [];
 
   for (const year of years) {

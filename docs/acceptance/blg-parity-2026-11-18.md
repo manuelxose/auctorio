@@ -68,6 +68,10 @@ tarjeta CTA que no se parecía a la de BLG y ni tarjetas ni imágenes con los co
 | 11 | Atribuciones en el texto sin enlace («Según television.digital.gob.es…», «TDTChannels»): v4 tenía 0 enlaces externos en el cuerpo, los 23 solo en Fuentes | el redactor nombra la fuente pero no la enlaza | `linkInlineAttributions`: la primera mención sin enlazar del editor o dominio de cada fuente del ledger se enlaza a su URL, una vez por URL, fuera de tarjetas, TOC, FAQ y listas finales (sobre el HTML de v4: 19 enlaces en el texto) | `tests/brand-palette-expand.test.ts` |
 | 12 | «Según facebook.com», «según youtube.com» como fuentes | la SERP incluía redes sociales | redes sociales y YouTube no son fuentes citables (el vídeo ya va como bloque propio) | idem |
 
+| 13 | `editorial-engine` intermitente (~1 de cada 10 pasadas, un escenario distinto cada vez) | la QA editorial leía como «año inventado» los dígitos de identificadores y dominios del texto: el sufijo aleatorio del fixture (`eng-…-1847-site`, `….example.com`) → «year 1847 does not appear in the fact ledger» → `reject`. En producción pasaría igual con un dominio o nombre tipo `radio2024.es` | `proseForDateChecks` quita URLs, dominios e identificadores con guiones que mezclan letras y dígitos antes de buscar años/fechas; los rangos de la prosa («2024-2025») y los años inventados («en 1931») siguen detectándose | nuevo test en `tests/editorial-engine.test.ts`; con el sufijo «1847» forzado solo en la semilla del fixture: 1/11 sin el arreglo, 11/11 con él; 15 pasadas seguidas en verde |
+
+Los tests de `editorial-engine` y `production-pipeline` no gastan IA (redactor falso), así que respetan el tope de modelo.
+
 En la BD local se vació el `primaryColor` de prueba de GuíaTV (`#e4572e`) para que se aplique la paleta crawleada
 (`#1ed760` / `#121212`, logo `assets/logo.svg`).
 

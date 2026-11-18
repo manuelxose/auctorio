@@ -544,6 +544,14 @@ test("editorial QA: unsupported years hard-fail publication", () => {
   assert.equal(report.criticalUnsupportedClaims.length, 1);
 });
 
+// Was flaky: the fixture's random site suffix ("eng-…-1847-site", "….example.com") read as an invented year 1 run in ~10.
+test("editorial QA: digits inside domains and slug-like names are not years; prose years still are", () => {
+  const body = "<p>Studio announces movie en eng-1795014467-1847-site, ver eng-1795014467-1847.example.com y radio2024.es; temporada 2024-2025.</p>";
+  const report = qaForLedger("Studio announces movie en la temporada 2024-2025", body);
+  assert.deepEqual(report.criticalUnsupportedClaims, []);
+  assert.equal(qaForLedger("Studio announces movie", "<p>Studio announces movie en eng-1795-1847-site. Empezó en 1931.</p>").criticalUnsupportedClaims.length, 1);
+});
+
 test("editorial QA: durable content may name the current year; news and invented dates may not", () => {
   const year = String(new Date().getFullYear());
   const body = `<p>Studio announces movie: la guía de ${year}.</p>`;
@@ -843,7 +851,7 @@ test("scenario 6: fake rumor — single low-trust source stays attributed and ne
     const licenses = detail.factLicenses;
     assert.ok(licenses.some((license) => license.usage === "attribute"));
     assert.ok(detail.publication && detail.publication.decision !== "auto_publish", "a single low-trust source can never auto-publish");
-    assert.equal(detail.qa.criticalUnsupportedClaims.length, 0);
+    assert.equal(detail.qa.criticalUnsupportedClaims.length, 0, JSON.stringify(detail.qa.criticalUnsupportedClaims));
   } finally {
     await cleanupEngineFixture(fixture);
   }
@@ -864,7 +872,7 @@ test("scenario 7: release-date correction — update existing article, version h
     const cluster = await singleClusterFor(fixture);
     const firstGeneration = await generateArticleFromCluster(fixture.tenantId, cluster.id, { siteId: fixture.siteId });
     const firstProjectId = detailOf(firstGeneration).project?.id;
-    assert.ok(firstProjectId, "first generation must materialize a project");
+    assert.ok(firstProjectId, `first generation must materialize a project; decision=${detailOf(firstGeneration).publication?.decision} failed gates: ${JSON.stringify((detailOf(firstGeneration).publication?.gates ?? []).filter((gate) => !gate.passed))} qa=${JSON.stringify(detailOf(firstGeneration).qa)}`);
 
     // The release year changes: same externalId, updated content → developing.
     const corrected = makeItem({
@@ -973,7 +981,7 @@ test("scenario 9: irrelevant topic — site-match gate blocks automation, human 
     assert.ok(["breaking_news", "standard_news"].includes(detail.articleType), `expected a plain news type, got ${detail.articleType}`);
     const siteFit = detail.cluster?.siteFitScore ?? null;
     assert.ok(siteFit !== null && siteFit < 0.5, `expected low site fit, got ${siteFit}`);
-    assert.equal(detail.publication?.decision, "review", "policy is off → human review with gate evidence");
+    assert.equal(detail.publication?.decision, "review", `policy is off → human review with gate evidence; failed gates: ${JSON.stringify((detail.publication?.gates ?? []).filter((gate) => !gate.passed))} qa=${JSON.stringify(detail.qa)}`);
     assert.ok(
       detail.publication.gates.some((gate) => gate.key === "site_match" && gate.passed === false),
       "the failed site-match gate must be visible to the editor",
