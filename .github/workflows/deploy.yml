@@ -39,6 +39,9 @@ jobs:
             set -euo pipefail
             cd /var/www/content-ai-platform
             git fetch --all --tags --prune
+            # dist/ is tracked but rebuilt on the server by deploy-production.sh (npm run build); the previous build's
+            # output would block the checkout ("local changes would be overwritten"), so it is discarded first.
+            git checkout -- dist
             # A branch name must resolve to the fetched remote branch; the server's local branch is never updated.
             if git rev-parse --verify --quiet "origin/$DEPLOY_REF^{commit}" >/dev/null; then
               git checkout --detach "origin/$DEPLOY_REF"
