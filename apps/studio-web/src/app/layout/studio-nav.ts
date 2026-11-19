@@ -26,6 +26,11 @@ export const SOCIAL_VIEWS = [
   { id: 'stats', label: 'Estadísticas', queryParam: 'view' },
 ] as const satisfies readonly StudioNavSection[];
 
+export const OPPORTUNITY_SECTIONS = [
+  { id: 'reddit', label: 'Reddit' },
+  { id: 'quora', label: 'Quora' },
+] as const;
+
 /** A primary area (horizontal nav). Its items are the contextual sidebar's tools. */
 export type StudioNavGroup = {
   id: string;
@@ -52,6 +57,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     items: [
       { label: 'Overview', path: '/studio/overview', icon: 'overview', hint: 'See what needs you today and what the next step is.' },
       { label: 'Notifications', path: '/studio/notifications', icon: 'bell', hint: 'Read what happened and jump to the item.' },
+      { label: 'Oportunidades', path: '/studio/opportunities', icon: 'message', sections: [...OPPORTUNITY_SECTIONS] },
     ],
   },
   {

@@ -53,6 +53,7 @@ import {
   type SourceConfigPatch,
 } from "./source-registry-discovery";
 import { registerCompetitorRoutes } from "./competitors/routes";
+import { registerEngagementRoutes } from "./engagement/routes";
 import type { FastifyReply } from "fastify";
 
 const SOURCE_STATE_ACTIONS = ["pause", "resume", "archive", "restore"] as const;
@@ -259,6 +260,7 @@ const BULK_ACTIONS: BulkSourceAction[] = [
 export function registerSourceRegistryRoutes(fastify: FastifyInstance) {
   registerSiteSourceRoutes(fastify);
   registerCompetitorRoutes(fastify);
+  registerEngagementRoutes(fastify);
 
   // ── Source packs
 

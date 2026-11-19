@@ -1,0 +1,9 @@
+{
+  "data": {
+    "children": [
+      { "kind": "t3", "data": { "permalink": "/r/television/comments/abc123/series/", "title": "Series y documentales para ver", "selftext": "Programación de televisión", "score": 43, "created_utc": 1795046400 } },
+      { "kind": "t3", "data": { "permalink": "/r/television/comments/abc234/closed/", "title": "Hilo cerrado", "score": 95, "created_utc": 1795046400, "locked": true } },
+      { "kind": "t3", "data": { "permalink": "/r/television/comments/abc345/archived/", "title": "Hilo archivado", "score": 24, "created_utc": 1795046400, "archived": true } }
+    ]
+  }
+}

@@ -6,10 +6,11 @@ describe('studio nav (M5)', () => {
     expect(new Set(paths).size).toBe(paths.length);
   });
 
-  it('groups Artículos and Redes under Publicaciones', () => {
+  it('groups Artículos and Redes under Publicaciones and Oportunidades under Home', () => {
     const bar = STUDIO_NAV.filter((group) => !group.hidden);
     expect(bar.map((group) => group.label)).toEqual(['Home', 'Calendar', 'Publicaciones', 'Results', 'Advanced', 'Settings']);
     expect(bar.find((group) => group.id === 'articles')?.items.map((item) => item.label)).toEqual(['Artículos', 'Redes']);
+    expect(bar.find((group) => group.id === 'home')?.items.map((item) => item.label)).toContain('Oportunidades');
     expect(bar.filter((group) => group.end).map((group) => group.id)).toEqual(['advanced', 'settings']);
   });
 
@@ -25,11 +26,10 @@ describe('studio nav (M5)', () => {
     expect(activeNavItem('/studio/content/new')?.group.id).toBe('articles');
     expect(activeNavItem('/studio/results')?.group.id).toBe('results');
     expect(activeNavItem('/studio/social?tab=x')?.group.id).toBe('articles');
+    expect(activeNavItem('/studio/opportunities?tab=quora')?.group.id).toBe('home');
     expect(activeNavItem('/studio/settings/social')?.group.id).toBe('settings');
   });
 
-  it('groups settings as business, articles and integrations; team and system only for admins', () => {
-    const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
   it('selects the management view independently of the active social channel', () => {
     const path = '/studio/social';
     const sections = activeNavItem(path)?.item.sections;
@@ -38,6 +38,8 @@ describe('studio nav (M5)', () => {
     expect(sectionFor(path, 'x', 'calendar')).toBe('');
   });
 
+  it('groups settings as business, articles and integrations; team and system only for admins', () => {
+    const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
     expect(settings.items.filter((item) => item.heading).slice(0, 3).map((item) => item.heading)).toEqual(['Business & brand', 'Articles', 'Integrations']);
     const visible = (role: string, platform = false) =>
       settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);

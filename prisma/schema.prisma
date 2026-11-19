@@ -332,6 +332,8 @@ model Tenant {
   studioIdentityProvider         StudioIdentityProvider?
   studioAccountsLastWorkspace    StudioAccount[]                  @relation("StudioAccountLastWorkspace")
   studioUsers                    StudioUser[]
+  engagementOpportunities        EngagementOpportunity[]
+  engagementSettings             EngagementSettings[]
   studioRoles                    StudioRole[]
   studioInvitations              StudioInvitation[]
   studioUserSessions             StudioUserSession[]
@@ -602,6 +604,8 @@ model Site {
   editorialPlanPresets   EditorialPlanPreset[]
   planningSettings       SitePlanningSettings?
   socialSettings         SiteSocialSettings?
+  engagementOpportunities EngagementOpportunity[]
+  engagementSettings      EngagementSettings[]
   // onboarding + strategy (agent B)
   onboardingRun          SiteOnboardingRun?
   editorialStrategy      SiteEditorialStrategy?
@@ -2060,7 +2064,48 @@ model EditorialPlanPreset {
   @@map("editorial_plan_presets")
 }
 
-/// Per-site planning defaults that prefill the plan generator.
+model EngagementOpportunity {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  platform     String
+  url          String
+  title        String
+  snippet      String?  @db.Text
+  community    String?
+  votes        Int?
+  reason       String   @default("keyword_match")
+  score        Int      @default(0)
+  keyword      String
+  publishedAt  DateTime? @map("published_at")
+  discoveredAt DateTime @default(now()) @map("discovered_at")
+  status       String   @default("to_reply")
+  draft        String?  @db.Text
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, url])
+  @@index([tenantId, siteId, platform, status, discoveredAt], map: "engagement_opportunity_inbox_idx")
+  @@map("engagement_opportunities")
+}
+
+model EngagementSettings {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  siteId     String   @map("site_id") @db.Uuid
+  platform   String
+  keywords   String[] @default([])
+  subreddits String[] @default([])
+  replyStyle String   @default("") @map("reply_style") @db.Text
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, platform])
+  @@map("engagement_settings")
+}
+
 model SiteSocialSettings {
   id             String   @id @default(uuid()) @db.Uuid
   tenantId       String   @map("tenant_id") @db.Uuid
@@ -2085,6 +2130,7 @@ model SiteSocialSettings {
   @@map("site_social_settings")
 }
 
+/// Per-site planning defaults that prefill the plan generator.
 model SitePlanningSettings {
   id              String   @id @default(uuid()) @db.Uuid
   tenantId        String   @map("tenant_id") @db.Uuid
