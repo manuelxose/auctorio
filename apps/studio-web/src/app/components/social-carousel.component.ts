@@ -1,4 +1,4 @@
-import { Component, input, linkedSignal, signal } from '@angular/core';
+import { Component, input, linkedSignal, output, signal } from '@angular/core';
 import { AppIconComponent } from './ui/app-icon.component';
 
 export type SocialSlide = { headline?: string; body?: string; imageUrl?: string };
@@ -9,6 +9,66 @@ export type SocialSlide = { headline?: string; body?: string; imageUrl?: string 
   imports: [AppIconComponent],
   template: `
     @if (slides()[position()]; as slide) {
+      @if (studioGallery()) {
+        <section aria-roledescription="carrusel" aria-label="Vistas de la publicación"
+          (keydown.arrowleft)="move(-1, $event)" (keydown.arrowright)="move(1, $event)">
+          <div class="preview-stage">
+            @if (slides().length > 1) {
+              <button class="stage-arrow previous" type="button" aria-label="Diapositiva anterior" [disabled]="position() === 0" (click)="move(-1)">
+                <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-chevron-left" /></svg>
+              </button>
+            }
+            <div class="slide-content">
+              @if (slide.imageUrl; as source) {
+                <img class="preview-image" [src]="source" [alt]="slide.headline || 'Diapositiva ' + (position() + 1)" />
+              } @else {
+                <div class="slide-placeholder">
+                  <div class="slide-visual"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-image" /></svg></div>
+                  <h3>{{ slide.headline || 'Diapositiva ' + (position() + 1) }}</h3>
+                  @if (slide.body) { <p>{{ slide.body }}</p> }
+                </div>
+              }
+            </div>
+            @if (slides().length > 1) {
+              <button class="stage-arrow next" type="button" aria-label="Diapositiva siguiente" [disabled]="position() === slides().length - 1" (click)="move(1)">
+                <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-chevron-right" /></svg>
+              </button>
+            }
+          </div>
+          <div class="thumbnails" role="group" aria-label="Elegir diapositiva">
+            @for (preview of slides(); track $index) {
+              <button class="thumbnail" type="button" [class.active]="position() === $index"
+                [attr.aria-current]="position() === $index ? 'true' : null"
+                [attr.aria-label]="'Diapositiva ' + ($index + 1) + (preview.headline ? ' · ' + preview.headline : '')" (click)="select($index)">
+                @if (preview.imageUrl; as source) { <img [src]="source" alt="" loading="lazy" /> }
+                @else { <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-image" /></svg> }
+                <span class="thumbnail-num">{{ $index + 1 }}</span>
+              </button>
+            }
+            @if (canAddSlide()) {
+              <button class="add-thumbnail" type="button" aria-label="Añadir diapositiva" [disabled]="busy()" (click)="addSlide.emit()">
+                <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-plus" /></svg>Añadir
+              </button>
+            }
+          </div>
+          <div class="gallery-footer">
+            <div role="status" aria-atomic="true">
+              <span class="slide-index">{{ position() + 1 }} / {{ slides().length }}</span>
+              <strong class="slide-title">{{ slide.headline }}</strong>
+            </div>
+            @if (slides().length > 1) {
+              <div class="gallery-nav">
+                <button class="square-button" type="button" aria-label="Anterior" [disabled]="position() === 0" (click)="move(-1)">
+                  <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-chevron-left" /></svg>
+                </button>
+                <button class="square-button" type="button" aria-label="Siguiente" [disabled]="position() === slides().length - 1" (click)="move(1)">
+                  <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-chevron-right" /></svg>
+                </button>
+              </div>
+            }
+          </div>
+        </section>
+      } @else {
       <section class="viewer" [class.viewer--backward]="direction() < 0" aria-roledescription="carrusel" aria-label="Vistas de la publicación"
         (keydown.arrowleft)="move(-1, $event)" (keydown.arrowright)="move(1, $event)">
         <figure class="stage">
@@ -56,6 +116,7 @@ export type SocialSlide = { headline?: string; body?: string; imageUrl?: string 
           </div>
         }
       </section>
+      }
     }
   `,
   styles: [`
@@ -105,6 +166,10 @@ export type SocialSlide = { headline?: string; body?: string; imageUrl?: string 
 })
 export class SocialCarouselComponent {
   readonly slides = input.required<readonly SocialSlide[]>();
+  readonly studioGallery = input(false);
+  readonly canAddSlide = input(false);
+  readonly busy = input(false);
+  readonly addSlide = output<void>();
   readonly position = linkedSignal({ source: () => this.slides().length, computation: () => 0 });
   readonly direction = signal<-1 | 1>(1);
 
@@ -118,7 +183,9 @@ export class SocialCarouselComponent {
     const count = this.slides().length;
     if (count < 2) return;
     event?.preventDefault();
+    const next = this.position() + offset;
+    if (this.studioGallery() && (next < 0 || next >= count)) return;
     this.direction.set(offset);
-    this.position.update((position) => (position + offset + count) % count);
+    this.position.set((next + count) % count);
   }
 }

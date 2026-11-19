@@ -15,4 +15,20 @@ describe('SocialCarouselComponent', () => {
     carousel.move(-1);
     expect(carousel.position()).toBe(0);
   });
+
+  it('stops at the first and last slides in the Social Studio gallery', () => {
+    const fixture = TestBed.createComponent(SocialCarouselComponent);
+    fixture.componentRef.setInput('slides', [{ headline: 'Portada' }, { headline: 'Cierre' }]);
+    fixture.componentRef.setInput('studioGallery', true);
+    fixture.detectChanges();
+
+    const previous = fixture.nativeElement.querySelector('.stage-arrow.previous') as HTMLButtonElement;
+    const next = fixture.nativeElement.querySelector('.stage-arrow.next') as HTMLButtonElement;
+    expect(previous.disabled).toBeTrue();
+    next.click();
+    fixture.detectChanges();
+    expect(next.disabled).toBeTrue();
+    fixture.componentInstance.move(1);
+    expect(fixture.componentInstance.position()).toBe(1);
+  });
 });

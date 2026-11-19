@@ -222,7 +222,10 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
                 <ul class="au-sb__sub" [attr.aria-label]="item.label + ' sections'">
                   @for (section of item.sections; track section.id) {
                     <li>
-                      <a class="au-sb__item au-sb__item--sub" [routerLink]="item.path" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">
+                      <a class="au-sb__item au-sb__item--sub" [routerLink]="item.path"
+                        [queryParams]="section.queryParam === 'view' ? { view: section.id, post: null } : { tab: section.id }"
+                        [queryParamsHandling]="section.queryParam === 'view' ? 'merge' : 'replace'"
+                        [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">
                         <span class="au-sb__label">{{ section.label }}</span>
                       </a>
                     </li>
@@ -257,7 +260,10 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           @if (collapsed() && !isPhone() && activeSections(); as sections) {
             <nav class="au-sectionbar" aria-label="Page sections">
               @for (section of sections; track section.id) {
-                <a [routerLink]="activePath()" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
+                <a [routerLink]="activePath()"
+                  [queryParams]="section.queryParam === 'view' ? { view: section.id, post: null } : { tab: section.id }"
+                  [queryParamsHandling]="section.queryParam === 'view' ? 'merge' : 'replace'"
+                  [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
               }
             </nav>
           }
@@ -390,7 +396,8 @@ export class AppShellComponent implements OnInit, OnDestroy {
         const match = activeNavItem(url);
         if (match) this.activeArea.set(match.group);
         this.activePath.set(match?.item.path === url ? url : '');
-        this.activeSection.set(match ? sectionFor(match.item.path, this.router.parseUrl(this.router.url).queryParamMap.get('tab')) : '');
+        const params = this.router.parseUrl(this.router.url).queryParamMap;
+        this.activeSection.set(match ? sectionFor(match.item.path, params.get('tab'), params.get('view')) : '');
       });
 
     void this.bootstrap();

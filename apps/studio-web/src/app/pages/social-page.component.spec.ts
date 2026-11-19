@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
-import { SocialPageComponent, socialPostState } from './social-page.component';
+import { editSocialHashtags, SocialPageComponent, socialPostState } from './social-page.component';
 import { SocialSettingsPageComponent } from './social-settings-page.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
@@ -14,6 +14,16 @@ describe('socialPostState', () => {
     expect(socialPostState({ ...done, editorialStatus: 'approved', publication: { id: 'p', status: 'scheduled', scheduledFor: null } })).toBe('Programado');
     expect(socialPostState({ ...done, editorialStatus: 'approved', publication: { id: 'p', status: 'ready', scheduledFor: null } })).toBe('Listo para publicar a mano');
     expect(socialPostState({ generationStatus: 'processing', editorialStatus: 'draft', publication: null })).toBe('Generando');
+  });
+});
+
+describe('editSocialHashtags', () => {
+  it('updates the text sent to the platform without creating another post in an X thread', () => {
+    const updated = editSocialHashtags('Primero\n\nSegundo', [], '#Guía', false);
+    expect(updated).toEqual({ body: 'Primero\n\nSegundo\n#Guía', hashtags: ['#Guía'] });
+    expect(editSocialHashtags(updated.body, updated.hashtags, '#guía', true))
+      .toEqual({ body: 'Primero\n\nSegundo', hashtags: [] });
+    expect(editSocialHashtags('Lee #GuíaLocal y #GUÍA', [], '#guía', true).body).toBe('Lee #GuíaLocal y');
   });
 });
 

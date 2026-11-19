@@ -1,4 +1,4 @@
-import { STUDIO_NAV, activeNavItem, canSeeNavItem } from './studio-nav';
+import { STUDIO_NAV, activeNavItem, canSeeNavItem, sectionFor } from './studio-nav';
 
 describe('studio nav (M5)', () => {
   it('lists every route exactly once', () => {
@@ -30,6 +30,14 @@ describe('studio nav (M5)', () => {
 
   it('groups settings as business, articles and integrations; team and system only for admins', () => {
     const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
+  it('selects the management view independently of the active social channel', () => {
+    const path = '/studio/social';
+    const sections = activeNavItem(path)?.item.sections;
+    expect(sections?.map(({ label }) => label)).toEqual(['Borradores', 'Plantillas', 'Estadísticas']);
+    expect(sectionFor(path, 'x', 'templates')).toBe('templates');
+    expect(sectionFor(path, 'x', 'calendar')).toBe('');
+  });
+
     expect(settings.items.filter((item) => item.heading).slice(0, 3).map((item) => item.heading)).toEqual(['Business & brand', 'Articles', 'Integrations']);
     const visible = (role: string, platform = false) =>
       settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);

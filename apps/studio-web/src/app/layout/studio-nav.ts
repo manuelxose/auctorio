@@ -11,14 +11,20 @@ export type StudioNavItem = {
   heading?: string;
   /** One line: what the user does here. Shown as the item's tooltip. */
   hint?: string;
-  /** Sections of the page, listed under the item in the sidebar and opened with ?tab=<id>; the first is the default. */
+  /** Sections of the page listed under the item. The first is the default. */
   sections?: StudioNavSection[];
 };
-export type StudioNavSection = { id: string; label: string };
+export type StudioNavSection = { id: string; label: string; queryParam?: 'view' };
 export const SOCIAL_SECTIONS = [
   { id: 'instagram', label: 'Instagram' },
   { id: 'x', label: 'X' },
 ] satisfies Array<{ id: 'instagram' | 'x'; label: string }>;
+
+export const SOCIAL_VIEWS = [
+  { id: 'drafts', label: 'Borradores', queryParam: 'view' },
+  { id: 'templates', label: 'Plantillas', queryParam: 'view' },
+  { id: 'stats', label: 'Estadísticas', queryParam: 'view' },
+] as const satisfies readonly StudioNavSection[];
 
 /** A primary area (horizontal nav). Its items are the contextual sidebar's tools. */
 export type StudioNavGroup = {
@@ -60,7 +66,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     icon: 'content',
     items: [
       { label: 'Artículos', path: '/studio/content', icon: 'content', hint: 'Consulta, aprueba y publica los artículos de la web.' },
-      { label: 'Redes', path: '/studio/social', icon: 'share', sections: SOCIAL_SECTIONS, hint: 'Consulta y programa publicaciones de Instagram y X.' },
+      { label: 'Redes', path: '/studio/social', icon: 'share', sections: [...SOCIAL_VIEWS], hint: 'Consulta y programa publicaciones de Instagram y X.' },
     ],
   },
   {
@@ -184,8 +190,9 @@ export function activeNavItem(url: string): { group: StudioNavGroup; item: Studi
   return best;
 }
 
-/** The section ?tab= names on the page at `path`, else its first section. */
-export function sectionFor(path: string, tab: string | null | undefined): string {
+export function sectionFor(path: string, tab: string | null | undefined, view?: string | null): string {
   const sections = STUDIO_NAV.flatMap((group) => group.items).find((item) => item.path === path)?.sections ?? [];
-  return sections.find((section) => section.id === tab)?.id ?? sections[0]?.id ?? '';
+  return sections.find((section) => section.queryParam === 'view' && section.id === view)?.id
+    ?? sections.find((section) => !section.queryParam && section.id === tab)?.id
+    ?? sections.find((section) => !section.queryParam)?.id ?? '';
 }

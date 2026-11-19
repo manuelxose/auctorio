@@ -956,7 +956,10 @@ export type SiteSocialSettings = {
 
 export type SiteSocialPost = StudioSocialContent & {
   projectTitle: string;
-  publication: { id: string; status: string; scheduledFor: string | null; externalUrl?: string | null } | null;
+  publication: {
+    id: string; status: string; scheduledFor: string | null; externalUrl?: string | null;
+    account?: { displayName: string } | null;
+  } | null;
 };
 
 export type PublicationChannel = 'website' | 'x' | 'instagram' | 'facebook';

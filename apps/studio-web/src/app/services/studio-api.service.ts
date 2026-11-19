@@ -741,17 +741,39 @@ export class StudioApiService {
     return this.http.get<{ items: StudioSocialContent[] }>(`${this.apiBase}/backend/v2/projects/${projectId}/social`, { params });
   }
 
-  generateSocial(projectId: string, payload: { channels: Array<'x' | 'instagram' | 'facebook'>; threadLength?: number; versionId?: string }): Observable<{ job_id: string }> {
+  generateSocial(projectId: string, payload: {
+    channels: Array<'x' | 'instagram' | 'facebook'>;
+    threadLength?: number;
+    versionId?: string;
+    instagramFormat?: 'instagram_carousel' | 'instagram_story';
+  }): Observable<{ job_id: string }> {
     return this.http.post<{ job_id: string }>(`${this.apiBase}/backend/v2/projects/${projectId}/social/generate`, payload);
   }
 
   updateSocial(socialId: string, payload: {
     body?: string;
+    title?: string;
     hashtags?: string[];
     editorialStatus?: 'draft' | 'approved' | 'rejected';
     mediaAssetIds?: string[];
   }): Observable<StudioSocialContent> {
     return this.http.patch<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${socialId}`, payload);
+  }
+
+  duplicateSocial(id: string): Observable<StudioSocialContent> {
+    return this.http.post<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${id}/duplicate`, {});
+  }
+
+  deleteSocialDraft(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBase}/backend/v2/social/${id}`);
+  }
+
+  appendSocialSlide(id: string, slide: { headline: string; body: string }): Observable<void> {
+    return this.http.post<void>(`${this.apiBase}/backend/v2/social/${id}/slides`, slide);
+  }
+
+  scheduleSocial(id: string, scheduledFor: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/social/${id}/schedule`, { scheduledFor });
   }
 
   listSiteSocial(siteId: string, channel: SiteSocialPost['channel'], postId?: string | null): Observable<{ items: SiteSocialPost[] }> {

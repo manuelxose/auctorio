@@ -4533,6 +4533,7 @@ html[data-theme="dark"] .au-app {
 .au-shell {
   --au-sb-w: var(--au-sb-assist-w);
   grid-template-columns: var(--au-sb-w) minmax(0, 1fr);
+  --au-workspace-height: calc(100vh - var(--au-topnav-h) - var(--au-areas-h) - var(--au-gap) * 4);
   grid-template-rows: var(--au-topnav-h) var(--au-areas-h) minmax(0, 1fr);
   grid-template-areas: 'top top' 'areas areas' 'side main';
 }
@@ -4577,7 +4578,7 @@ html[data-theme="dark"] .au-app {
 
 .au-sb {
   top: calc(var(--au-topnav-h) + var(--au-areas-h) + var(--au-gap) * 3);
-  height: calc(100vh - var(--au-topnav-h) - var(--au-areas-h) - var(--au-gap) * 4);
+  height: var(--au-workspace-height);
   padding: var(--au-s3) var(--au-s2) 0;
   overflow: hidden;
 }

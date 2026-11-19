@@ -21,6 +21,7 @@ export type SocialGenerateRequest = {
   channels: SocialChannel[];
   threadLength?: number;
   regenerate?: boolean;
+  instagramFormat?: "instagram_carousel" | "instagram_story";
 };
 
 export type GeneratedSocialPiece = {
@@ -294,8 +295,8 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
       requested.push({ channel, contentType: threadLength === 1 ? "x_post" : "x_thread" });
     }
     if (channel === "instagram") {
-      requested.push({ channel: "instagram", contentType: "instagram_carousel" });
-      requested.push({ channel: "instagram", contentType: "instagram_story" });
+      const formats = input.instagramFormat ? [input.instagramFormat] : ["instagram_carousel", "instagram_story"] as const;
+      for (const contentType of formats) requested.push({ channel, contentType });
     }
     if (channel === "facebook") {
       requested.push({ channel: "facebook", contentType: "facebook_post" });
@@ -395,6 +396,7 @@ export async function updateSocialContent(
   socialContentId: string,
   input: {
     body?: string;
+    title?: string;
     hashtags?: string[];
     editorialStatus?: SocialEditorialStatus;
     mediaAssetIds?: string[];
@@ -405,6 +407,12 @@ export async function updateSocialContent(
     return null;
   }
 
+  if (input.title !== undefined && (!input.title.trim() || input.title.trim().length > 200)) {
+    throw new Error("El título debe tener entre 1 y 200 caracteres.");
+  }
+  if (input.body !== undefined && social.channel === "instagram" && input.body.trim().length > INSTAGRAM_CAPTION_LIMIT) {
+    throw new Error("El texto supera el límite de 2200 caracteres.");
+  }
   if (social.channel === "x" && (input.body !== undefined || input.editorialStatus === "approved")) {
     const body = (input.body ?? social.body).trim();
     if (input.editorialStatus === "approved" && social.generationStatus !== "done") {
@@ -422,6 +430,7 @@ export async function updateSocialContent(
     where: { id: social.id },
     data: {
       body: input.body?.trim() ?? undefined,
+      title: input.title?.trim(),
       hashtags: input.hashtags === undefined ? undefined : input.hashtags.length ? (input.hashtags as Prisma.InputJsonValue) : Prisma.JsonNull,
       editorialStatus: input.editorialStatus,
       mediaAssetIds: input.mediaAssetIds === undefined ? undefined : input.mediaAssetIds.length ? (input.mediaAssetIds as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -440,12 +449,73 @@ export async function updateSocialContent(
   return updated;
 }
 
+export async function duplicateSocialContent(tenantId: string, id: string) {
+  const source = await prisma.socialContent.findFirst({ where: { id, tenantId }, include: { project: { select: { title: true } } } });
+  if (!source) return null;
+  if (source.generationStatus !== "done" || source.threadPosition !== null) {
+    throw new Error("Solo se pueden duplicar publicaciones completas.");
+  }
+  const { projectId, versionId, channel, contentType, body, title, hashtags, mentions, mediaAssetIds,
+    characterCount, metadata, promptPresetVersionId } = source;
+  return prisma.socialContent.create({ data: {
+    tenantId, projectId, versionId, channel, contentType, body, characterCount, promptPresetVersionId,
+    title: `${(title || source.project.title).slice(0, 192)} (copia)`,
+    hashtags: hashtags ?? Prisma.JsonNull, mentions: mentions ?? Prisma.JsonNull,
+    mediaAssetIds: mediaAssetIds ?? Prisma.JsonNull, metadata: metadata ?? Prisma.JsonNull,
+    generationStatus: "done", editorialStatus: "draft",
+  } });
+}
+
+export async function deleteSocialDraft(tenantId: string, id: string) {
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.socialContent.deleteMany({ where: {
+      id, tenantId, threadPosition: null, editorialStatus: { in: ["draft", "rejected"] },
+      generationStatus: { in: ["done", "failed"] }, publications: { none: {} },
+    } });
+    if (result.count) {
+      await writeAudit({ tenantId, action: "social.deleted", entityType: "social_content", entityId: id, actorType: "user" }, tx);
+    }
+    return result.count > 0;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function appendSocialSlide(tenantId: string, id: string, slide: SlideText) {
+  const post = await prisma.socialContent.findFirst({
+    where: { id, tenantId, contentType: "instagram_carousel", generationStatus: "done", editorialStatus: "draft", publications: { none: {} } },
+    include: { project: { include: { site: true } }, version: { select: { contentImage: { select: { storagePath: true } } } } },
+  });
+  if (!post) return null;
+  const metadata = post.metadata as { slides?: SlideText[] } | null;
+  const slides = Array.isArray(metadata?.slides) ? [...metadata.slides] : [];
+  if (slides.length >= 10) throw new Error("El carrusel admite hasta 10 diapositivas.");
+  slides.splice(Math.max(0, slides.length - 1), 0, slide);
+  const site = post.project.site;
+  const settings = await getSiteSocialSettings(tenantId, site.id);
+  const rendered = await renderSlideImages({
+    tenantId, socialContentId: crypto.randomUUID(), slides,
+    style: {
+      fontFamily: settings.fontFamily, highlightStyle: settings.highlightStyle, imageStyle: settings.imageStyle,
+      showBrandMark: settings.showBrandMark, brandName: site.name, accent: brandAccent(site.brandVoice),
+    },
+    backgroundStoragePath: post.version.contentImage?.storagePath,
+  });
+  const result = await prisma.socialContent.updateMany({
+    where: { id, tenantId, updatedAt: post.updatedAt, editorialStatus: "draft", publications: { none: {} } },
+    data: {
+      metadata: { ...metadata, slides: slides.map(({ headline, body }, index) => ({ headline, body, ...rendered[index] })) },
+      mediaAssetIds: rendered.map(({ storagePath }) => storagePath),
+    },
+  });
+  if (!result.count) throw new Error("La publicación cambió. Vuelve a cargarla e inténtalo de nuevo.");
+  return true;
+}
+
 /**
  * An approved post gets a delivery record at the site's next slot: `scheduled`
  * (the publication scheduler fires it), or `ready` in manual mode (a human posts it).
  * Thread replies ride on their head post, so only position 0 is scheduled.
  */
-export async function scheduleApprovedSocial(tenantId: string, socialContentId: string, now: Date = new Date()) {
+export async function scheduleApprovedSocial(tenantId: string, socialContentId: string, now: Date = new Date(), scheduledFor?: Date) {
   const social = await prisma.socialContent.findFirst({
     where: { id: socialContentId, tenantId, editorialStatus: "approved", generationStatus: "done", OR: [{ threadPosition: null }, { threadPosition: 0 }] },
     include: { project: { select: { siteId: true } } },
@@ -459,9 +529,9 @@ export async function scheduleApprovedSocial(tenantId: string, socialContentId: 
     select: { id: true },
   });
   // Without an account the scheduler could only fail; manual posting needs none.
-  if (!account && settings.workflow !== "manual") return null;
-  const { createPublication } = await import("./publication");
-  return createPublication({
+  if (!account && (scheduledFor || settings.workflow !== "manual")) return null;
+  const { createPublication, updatePublicationSchedule } = await import("./publication");
+  const publication = await createPublication({
     tenantId,
     projectId: social.projectId,
     versionId: social.versionId,
@@ -469,9 +539,16 @@ export async function scheduleApprovedSocial(tenantId: string, socialContentId: 
     accountId: account?.id ?? null,
     siteId,
     socialContentId: social.id,
-    scheduledFor: nextSocialSlot(settings, now),
-    ...(settings.workflow === "manual" ? { status: "ready" as const } : {}),
+    scheduledFor: scheduledFor ?? nextSocialSlot(settings, now),
+    ...(!scheduledFor && settings.workflow === "manual" ? { status: "ready" as const } : {}),
   });
+  if (!scheduledFor) return publication;
+  if (!["draft", "ready", "scheduled", "failed", "canceled"].includes(publication.status)) {
+    throw new Error("No se puede reprogramar la publicación en su estado actual.");
+  }
+  if (publication.status === "scheduled" && publication.scheduleLocked && publication.accountId &&
+      publication.scheduledFor?.getTime() === scheduledFor.getTime()) return publication;
+  return updatePublicationSchedule(tenantId, publication.id, { scheduledFor, accountId: publication.accountId ?? account?.id });
 }
 
 export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel, postId?: string | null) {
@@ -479,7 +556,10 @@ export async function listSiteSocialContent(tenantId: string, siteId: string, ch
     where: { tenantId, project: { siteId }, OR: [{ threadPosition: null }, { threadPosition: 0 }], ...(channel ? { channel } : {}), ...(postId ? { id: postId } : {}) },
     include: {
       project: { select: { title: true } },
-      publications: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, scheduledFor: true, externalUrl: true } },
+      publications: { orderBy: { createdAt: "desc" }, take: 1, select: {
+        id: true, status: true, scheduledFor: true, externalUrl: true,
+        account: { select: { displayName: true } },
+      } },
     },
     orderBy: { createdAt: "desc" },
     take: 100,

@@ -70,7 +70,10 @@ import {
   type UpdatePolicyInput,
 } from "./automation";
 import {
+  appendSocialSlide,
   createSocialGenerationJobs,
+  deleteSocialDraft,
+  duplicateSocialContent,
   listSocialContent,
   listSiteSocialContent,
   scheduleApprovedSocial,
@@ -1029,7 +1032,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       channels?: string[];
       threadLength?: number;
       versionId?: string;
+      instagramFormat?: "instagram_carousel" | "instagram_story";
     }>(request);
+    if (body.instagramFormat !== undefined && !isOneOf(body.instagramFormat, ["instagram_carousel", "instagram_story"] as const)) {
+      return badRequest(reply, "invalid Instagram format");
+    }
     if (body.channels !== undefined && !Array.isArray(body.channels)) {
       return badRequest(reply, "channels must be an array");
     }
@@ -1058,6 +1065,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         versionId,
         channels,
         threadLength: body.threadLength ?? 1,
+        instagramFormat: body.instagramFormat,
       });
       return reply.code(202).send({ job_id: result.jobId, status: "queued" });
     } catch (error) {
@@ -1076,6 +1084,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
     const body = parseBody<{
       body?: string;
+      title?: string;
       hashtags?: string[];
       editorialStatus?: string;
       mediaAssetIds?: string[];
@@ -1084,10 +1093,18 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return badRequest(reply, `editorialStatus must be one of: ${SOCIAL_EDITORIAL_STATUSES.join(", ")}`);
     }
     if (body.body !== undefined && typeof body.body !== "string") return badRequest(reply, "invalid social body");
+    if (body.title !== undefined && typeof body.title !== "string") return badRequest(reply, "invalid social title");
+    if (body.hashtags !== undefined && (!Array.isArray(body.hashtags) || body.hashtags.some((tag) => typeof tag !== "string"))) {
+      return badRequest(reply, "invalid social hashtags");
+    }
+    if (body.mediaAssetIds !== undefined && (!Array.isArray(body.mediaAssetIds) || body.mediaAssetIds.some((id) => typeof id !== "string"))) {
+      return badRequest(reply, "invalid social media assets");
+    }
     let social;
     try {
       social = await updateSocialContent(context.tenantId, socialId, {
         body: body.body,
+        title: body.title,
         hashtags: body.hashtags,
         editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
         mediaAssetIds: body.mediaAssetIds,
@@ -1121,6 +1138,63 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (postId && !isUuid(postId)) return badRequest(reply, "invalid social content id");
     const items = await listSiteSocialContent(context.tenantId, siteId, channel as (typeof SOCIAL_CHANNELS)[number] | undefined, postId);
     return reply.send({ items });
+  });
+
+  fastify.post("/v2/social/:id/duplicate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    try {
+      const copy = await duplicateSocialContent(context.tenantId, id);
+      return copy ? reply.code(201).send(copy) : notFound(reply, "social content not found");
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.delete("/v2/social/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    if (!await deleteSocialDraft(context.tenantId, id)) return conflict(reply, "Solo se pueden eliminar borradores sin historial de publicación.");
+    return reply.code(204).send();
+  });
+
+  fastify.post("/v2/social/:id/slides", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    const { headline, body } = parseBody<{ headline?: string; body?: string }>(request);
+    if (typeof headline !== "string" || !headline.trim() || headline.trim().length > 60 ||
+        typeof body !== "string" || body.trim().length > 180) {
+      return badRequest(reply, "Escribe un título de hasta 60 caracteres y un texto de hasta 180.");
+    }
+    try {
+      if (!await appendSocialSlide(context.tenantId, id, { headline: headline.trim(), body: body.trim() })) {
+        return conflict(reply, "Solo se pueden añadir diapositivas a un carrusel en borrador.");
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.post("/v2/social/:id/schedule", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    const scheduledFor = parseIsoDate(parseBody<{ scheduledFor?: string }>(request).scheduledFor);
+    if (!scheduledFor || isPastSchedule(scheduledFor)) return badRequest(reply, "Elige una fecha y hora futuras.");
+    try {
+      const publication = await scheduleApprovedSocial(context.tenantId, id, new Date(), scheduledFor);
+      return publication ? reply.send(publication) : conflict(reply, "Aprueba el contenido y conecta una cuenta para programarlo.");
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
   });
 
   fastify.post("/v2/social/:id/regenerate", async (request, reply) => {
