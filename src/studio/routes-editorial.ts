@@ -1112,11 +1112,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!isUuid(siteId)) {
       return badRequest(reply, "invalid site id");
     }
-    const channel = parseOptionalString((request.query as { channel?: string }).channel);
+    const query = request.query as { channel?: string; postId?: string };
+    const channel = parseOptionalString(query.channel);
     if (channel && !isOneOf(channel, SOCIAL_CHANNELS)) {
       return badRequest(reply, `channel must be one of: ${SOCIAL_CHANNELS.join(", ")}`);
     }
-    const items = await listSiteSocialContent(context.tenantId, siteId, channel as (typeof SOCIAL_CHANNELS)[number] | undefined);
+    const postId = parseOptionalString(query.postId);
+    if (postId && !isUuid(postId)) return badRequest(reply, "invalid social content id");
+    const items = await listSiteSocialContent(context.tenantId, siteId, channel as (typeof SOCIAL_CHANNELS)[number] | undefined, postId);
     return reply.send({ items });
   });
 

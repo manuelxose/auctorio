@@ -1,6 +1,8 @@
 import { TestBed } from '@angular/core/testing';
+import { ActivatedRoute, convertToParamMap } from '@angular/router';
 import { of } from 'rxjs';
 import { SocialPageComponent, socialPostState } from './social-page.component';
+import { SocialSettingsPageComponent } from './social-settings-page.component';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
@@ -25,6 +27,7 @@ describe('SocialPageComponent', () => {
     };
     TestBed.configureTestingModule({
       providers: [
+        { provide: ActivatedRoute, useValue: { queryParamMap: of(convertToParamMap({ tab: 'x', post: 'post-1' })) } },
         { provide: StudioApiService, useValue: api },
         { provide: AppContextService, useValue: { activeSite: () => ({ id: 'site-1' }) } },
         { provide: ToastService, useValue: jasmine.createSpyObj('ToastService', ['success', 'error', 'info']) },
@@ -32,10 +35,15 @@ describe('SocialPageComponent', () => {
     });
     const page = TestBed.runInInjectionContext(() => new SocialPageComponent());
     page.ngOnInit();
-    page.toggleDay(3);
-    expect(page.settings()!.postDays).toEqual([1, 3]);
+    expect(api.listSiteSocial).toHaveBeenCalledWith('site-1', 'x', 'post-1');
     page.approve({ id: 'post-1', body: 'Edited' } as never);
     expect(api.updateSocial).toHaveBeenCalledWith('post-1', { body: 'Edited', editorialStatus: 'approved' });
     expect(api.listSiteSocial).toHaveBeenCalledTimes(2);
+    expect(api.getSocialSettings).not.toHaveBeenCalled();
+
+    const settings = TestBed.runInInjectionContext(() => new SocialSettingsPageComponent());
+    settings.ngOnInit();
+    settings.toggleDay(3);
+    expect(settings.settings()!.postDays).toEqual([1, 3]);
   });
 });

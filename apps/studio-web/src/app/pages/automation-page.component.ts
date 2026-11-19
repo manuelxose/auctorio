@@ -159,7 +159,6 @@ import type { AutomationHealth, AutomationPolicy, AutomationRecoveryReport, Auto
           <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoSchedule" /> Auto-schedule</label>
           <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.autoPublish" /> Auto-publish when due</label>
           <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.imageRequired" /> Require image</label>
-          <label class="au-checkbox"><input type="checkbox" [(ngModel)]="policy.socialRequired" /> Require social derivatives</label>
         </div>
 
         <h3 class="au-panel__title au-mt-4 au-mb-2">Quality & self-healing</h3>

@@ -474,12 +474,12 @@ export async function scheduleApprovedSocial(tenantId: string, socialContentId: 
   });
 }
 
-export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel) {
+export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel, postId?: string | null) {
   const items = await prisma.socialContent.findMany({
-    where: { tenantId, project: { siteId }, OR: [{ threadPosition: null }, { threadPosition: 0 }], ...(channel ? { channel } : {}) },
+    where: { tenantId, project: { siteId }, OR: [{ threadPosition: null }, { threadPosition: 0 }], ...(channel ? { channel } : {}), ...(postId ? { id: postId } : {}) },
     include: {
       project: { select: { title: true } },
-      publications: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, scheduledFor: true } },
+      publications: { orderBy: { createdAt: "desc" }, take: 1, select: { id: true, status: true, scheduledFor: true, externalUrl: true } },
     },
     orderBy: { createdAt: "desc" },
     take: 100,

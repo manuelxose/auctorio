@@ -18,6 +18,8 @@ import {
 import { getDefaultProductionStages, setProductionStageOverrides } from "../src/studio/production/stages";
 import { listOperations } from "../src/studio/operations";
 import { listCalendarEvents } from "../src/studio/calendar";
+import { archiveProject } from "../src/studio/projects";
+import { listSiteSocialContent } from "../src/studio/social";
 import { FakeWriter } from "./support/fake-editorial-writer";
 
 const prisma = getPrismaClient();
@@ -39,7 +41,7 @@ async function fixture() {
 }
 
 async function cleanup(tenantId: string) {
-  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
+  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "socialContent", "contentDerivative", "contentVersion", "editorialPlanItem", "contentProject", "fact", "topic", "editorialPlan", "operation", "site"] as const) {
     await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where: { tenantId } });
   }
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
@@ -383,6 +385,43 @@ test("M3: the calendar reports the derived lifecycle through an assisted run", a
     await reviewProductionJob(f.tenantId, job.id, { decision: "approve" }, null);
     const [scheduled] = await listCalendarEvents(f.tenantId, window);
     assert.deepEqual([scheduled.lifecycle, scheduled.chip], ["scheduled", "queued"]);
+  } finally {
+    await cleanup(f.tenantId);
+  }
+});
+
+test("social drafts survive article archival and the calendar replaces an approved X draft with its scheduled post", async () => {
+  const f = await fixture();
+  const window = { from: new Date(Date.now() - 86_400_000), to: new Date(Date.now() + 8 * 86_400_000), siteId: f.siteId };
+  try {
+    const project = await prisma.contentProject.create({
+      data: { tenantId: f.tenantId, siteId: f.siteId, title: "Artículo", brief: "Enfoque editorial" },
+    });
+    const version = await prisma.contentVersion.create({
+      data: { tenantId: f.tenantId, projectId: project.id, versionNumber: 1, title: project.title },
+    });
+    const common = { tenantId: f.tenantId, projectId: project.id, versionId: version.id, generationStatus: "done" as const, editorialStatus: "draft" as const };
+    const thread = await prisma.socialContent.create({ data: { ...common, channel: "x", contentType: "x_thread", body: "Entrada\n\nSegunda parte" } });
+    const carousel = await prisma.socialContent.create({ data: { ...common, channel: "instagram", contentType: "instagram_carousel", body: "Carrusel" } });
+    await archiveProject(f.tenantId, project.id, { mode: "archive" });
+    const social = await listSiteSocialContent(f.tenantId, f.siteId, "x", thread.id);
+    assert.deepEqual(social.map((item) => item.id), [thread.id]);
+    const initial = (await listCalendarEvents(f.tenantId, window)).filter((event) => event.kind === "social_draft");
+    assert.deepEqual(initial.map((event) => event.id).sort(), [thread.id, carousel.id].sort());
+    assert.ok(initial.every((event) => event.chip === "review"));
+    assert.equal((await listCalendarEvents(f.tenantId, { ...window, channel: "website" })).some((event) => event.kind === "social_draft"), false);
+
+    await prisma.socialContent.update({ where: { id: thread.id }, data: { editorialStatus: "approved" } });
+    const publication = await prisma.publication.create({
+      data: { tenantId: f.tenantId, projectId: project.id, versionId: version.id, channel: "x", siteId: f.siteId, socialContentId: thread.id, status: "scheduled", scheduledFor: initial[0].scheduledFor },
+    });
+    const timeline = await listCalendarEvents(f.tenantId, { ...window, channel: "x" });
+    assert.equal(timeline.length, 1);
+    const [scheduled] = timeline;
+    assert.equal(scheduled.kind, "publication");
+    if (scheduled.kind === "publication") {
+      assert.deepEqual([scheduled.id, scheduled.socialContentId, scheduled.chip], [publication.id, thread.id, "queued"]);
+    }
   } finally {
     await cleanup(f.tenantId);
   }

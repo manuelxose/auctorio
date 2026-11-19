@@ -30,7 +30,7 @@ export const AUTOMATION_DEFAULTS = {
   socialTimingMinutesX: 5,
   socialTimingMinutesInstagram: 60,
   imageRequired: true,
-  socialRequired: true,
+  socialRequired: false,
   ...MODE_FLAGS[DEFAULT_AUTOMATION_MODE],
   mode: DEFAULT_AUTOMATION_MODE,
   maxRepairAttempts: 4,

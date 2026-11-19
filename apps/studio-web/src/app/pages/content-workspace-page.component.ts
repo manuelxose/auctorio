@@ -243,7 +243,6 @@ function hostOf(url: string): string {
                   <div class="art-actions art-actions--top">
                     <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X</label>
                     <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
-                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.facebook" /> Facebook</label>
                     <select class="au-select art-select" [(ngModel)]="socialThreadLength" [disabled]="!socialChannels.x" aria-label="X thread length">
                       <option [ngValue]="1">Single post</option><option [ngValue]="2">2 posts</option><option [ngValue]="3">3 posts</option><option [ngValue]="5">5 posts</option>
                     </select>
@@ -420,7 +419,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Social tab state.
-  socialChannels = { x: true, instagram: true, facebook: false };
+  socialChannels = { x: true, instagram: true };
   socialThreadLength = 1;
   socialGenerating = false;
   socialDrafts: Record<string, string> = {};
@@ -431,7 +430,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   get publications(): ProjectPublication[] {
     const list = this.project?.publications ?? [];
-    return list.filter((publication) => publication.status !== 'deleted') as ProjectPublication[];
+    return list.filter((publication) => publication.channel === 'website' && publication.status !== 'deleted') as ProjectPublication[];
   }
 
   draftTitle = '';
@@ -1016,7 +1015,6 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
     const channels = [
       ...(this.socialChannels.x ? (['x'] as const) : []),
       ...(this.socialChannels.instagram ? (['instagram'] as const) : []),
-      ...(this.socialChannels.facebook ? (['facebook'] as const) : []),
     ];
     if (channels.length === 0) {
       this.error = 'Select at least one channel.';

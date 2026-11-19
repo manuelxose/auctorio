@@ -15,6 +15,11 @@ export type StudioNavItem = {
   sections?: StudioNavSection[];
 };
 export type StudioNavSection = { id: string; label: string };
+export const SOCIAL_SECTIONS = [
+  { id: 'instagram', label: 'Instagram' },
+  { id: 'x', label: 'X' },
+] satisfies Array<{ id: 'instagram' | 'x'; label: string }>;
+
 /** A primary area (horizontal nav). Its items are the contextual sidebar's tools. */
 export type StudioNavGroup = {
   id: string;
@@ -28,7 +33,7 @@ export type StudioNavGroup = {
 };
 
 /**
- * Studio information architecture (M5): Home · Calendar · Articles · Results ·
+ * Studio information architecture: Home · Calendar · Publicaciones · Results ·
  * Settings, with the specialist tools under Advanced. Each route appears
  * exactly once and every capability has a single home; other pages link to
  * it. Profile lives in the account menu.
@@ -51,9 +56,12 @@ export const STUDIO_NAV: StudioNavGroup[] = [
   },
   {
     id: 'articles',
-    label: 'Articles',
+    label: 'Publicaciones',
     icon: 'content',
-    items: [{ label: 'Articles', path: '/studio/content', icon: 'content', hint: 'Read, approve and publish each article.' }],
+    items: [
+      { label: 'Artículos', path: '/studio/content', icon: 'content', hint: 'Consulta, aprueba y publica los artículos de la web.' },
+      { label: 'Redes', path: '/studio/social', icon: 'share', sections: SOCIAL_SECTIONS, hint: 'Consulta y programa publicaciones de Instagram y X.' },
+    ],
   },
   {
     id: 'results',
@@ -129,7 +137,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
       { label: 'Writing', path: '/studio/settings/writing', icon: 'edit', heading: 'Articles', hint: 'Instructions, length and blocks of every future article.' },
       { label: 'Mode & rhythm', path: '/studio/automation', icon: 'automation' },
       { label: 'Connections', path: '/studio/connections', icon: 'connections', heading: 'Integrations' },
-      { label: 'Social', path: '/studio/settings/social', icon: 'send' },
+      { label: 'Ajustes de redes', path: '/studio/settings/social', icon: 'share' },
       { label: 'Web discovery', path: '/studio/settings/discovery', icon: 'sources' },
       { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },
       { label: 'People', path: '/studio/settings/team', icon: 'user', heading: 'Workspace', adminOnly: true },
@@ -163,11 +171,12 @@ export function canSeeNavItem(item: StudioNavItem, role: string, isPlatformAdmin
 
 /** Longest nav path that prefixes the URL, so /studio/content/new still lights up Articles. */
 export function activeNavItem(url: string): { group: StudioNavGroup; item: StudioNavItem } | null {
+  const path = url.split(/[?#]/, 1)[0];
   let best: { group: StudioNavGroup; item: StudioNavItem } | null = null;
   for (const group of STUDIO_NAV) {
     for (const item of group.items) {
       const base = item.path;
-      if ((url === base || url.startsWith(base + '/')) && (!best || base.length > best.item.path.length)) {
+      if ((path === base || path.startsWith(base + '/')) && (!best || base.length > best.item.path.length)) {
         best = { group, item };
       }
     }

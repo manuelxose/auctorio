@@ -2,7 +2,7 @@
  * Phase 6 — AUTOPILOT golden path E2E (live, opt-in).
  *
  * Requires a running deployment (E2E_BASE_URL) and operator credentials:
- *   E2E_EMAIL, E2E_PASSWORD
+ *   E2E_EMAIL, E2E_PASSWORD, E2E_AUTOPILOT_SITE_ID (dedicated test site)
  *
  * Zero-touch by design: the spec never clicks — it only drives the API, and
  * the automation pipeline must advance the project without any manual step.
@@ -17,6 +17,7 @@ import { test, expect, type APIRequestContext } from "@playwright/test";
 
 const EMAIL = process.env.E2E_EMAIL || "";
 const PASSWORD = process.env.E2E_PASSWORD || "";
+const TEST_SITE_ID = process.env.E2E_AUTOPILOT_SITE_ID || "";
 // On-topic for the GuíaTV test site (Spanish TV news); an off-topic feed only proves the relevance filter.
 const FEED_URL = process.env.E2E_RSS_FEED_URL || "https://www.vertele.com/rss/";
 const ALLOW_REAL_PUBLISH = process.env.E2E_ALLOW_REAL_PUBLISH === "1";
@@ -75,7 +76,8 @@ async function loginAndPickSite(): Promise<string> {
   const sites = ((await sitesResponse.json()) as { items: Site[] }).items;
   expect(sites.length).toBeGreaterThanOrEqual(1);
 
-  const preferred = sites.find((site) => site.key === "guiatv-editorial") ?? sites[0]!;
+  const preferred = sites.find((site) => site.id === TEST_SITE_ID);
+  if (!preferred) throw new Error("E2E_AUTOPILOT_SITE_ID must identify an accessible test site");
   const switchResponse = await api.post("/studio/api/session/active-site", {
     data: { siteId: preferred.id },
   });
@@ -94,6 +96,8 @@ async function getProject(projectId: string): Promise<ProjectSummary> {
 }
 
 test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
+  test.skip(!TEST_SITE_ID || !process.env.E2E_BASE_URL, "Set a deployment URL and a dedicated autopilot test site.");
+
   test.beforeAll(async ({ playwright }) => {
     expect(EMAIL, "E2E_EMAIL required").toBeTruthy();
     expect(PASSWORD, "E2E_PASSWORD required").toBeTruthy();
@@ -103,38 +107,44 @@ test.describe("Phase 6 autopilot golden path (live, opt-in)", () => {
     siteId = await loginAndPickSite();
 
     const current = await api.get(`/studio/api/backend/v2/automation?siteId=${siteId}`);
-    previousPolicy = current.status() === 200 ? ((await current.json()) as AutomationPolicy) : null;
+    expect(current.ok(), "load the original automation policy before changing the test site").toBe(true);
+    previousPolicy = (await current.json()) as AutomationPolicy;
   });
 
   test.afterAll(async () => {
-    // Restore the previous policy so the live site never stays in autopilot
-    // because of a test run.
-    if (previousPolicy) {
-      await api
-        .patch("/studio/api/backend/v2/automation", {
-          data: {
-            siteId,
-            enabled: previousPolicy.enabled,
-            mode: previousPolicy.mode ?? "manual",
-            autoGenerate: previousPolicy.autoGenerate,
-            autoApprove: previousPolicy.autoApprove,
-            autoSchedule: previousPolicy.autoSchedule,
-            autoPublish: previousPolicy.autoPublish,
-            autoRepair: previousPolicy.autoRepair,
-            socialRequired: previousPolicy.socialRequired,
-            articlesPerDay: previousPolicy.articlesPerDay,
-            maxArticlesPerDay: previousPolicy.maxArticlesPerDay,
-            maximumQueueSize: previousPolicy.maximumQueueSize,
-            minimumStoryScore: previousPolicy.minimumStoryScore,
-            publishingWindows: previousPolicy.publishingWindows,
-          },
-        })
-        .catch(() => undefined);
+    try {
+      if (createdSourceId) {
+        const archived = await api.post(`/studio/api/backend/v2/sites/${siteId}/sources/${createdSourceId}/state`, { data: { action: "archive" } });
+        expect(archived.ok(), "E2E source must be disabled after the run").toBe(true);
+      }
+    } finally {
+      try {
+        if (previousPolicy) {
+          const restored = await api.patch("/studio/api/backend/v2/automation", {
+            data: {
+              siteId,
+              enabled: previousPolicy.enabled,
+              mode: previousPolicy.mode ?? "manual",
+              autoGenerate: previousPolicy.autoGenerate,
+              autoApprove: previousPolicy.autoApprove,
+              autoSchedule: previousPolicy.autoSchedule,
+              autoPublish: previousPolicy.autoPublish,
+              autoRepair: previousPolicy.autoRepair,
+              socialRequired: previousPolicy.socialRequired,
+              articlesPerDay: previousPolicy.articlesPerDay,
+              maxArticlesPerDay: previousPolicy.maxArticlesPerDay,
+              maximumQueueSize: previousPolicy.maximumQueueSize,
+              minimumStoryScore: previousPolicy.minimumStoryScore,
+              maxRepairAttempts: previousPolicy.maxRepairAttempts,
+              publishingWindows: previousPolicy.publishingWindows,
+            },
+          });
+          expect(restored.ok(), "previous automation policy must be restored").toBe(true);
+        }
+      } finally {
+        await api?.dispose();
+      }
     }
-    if (createdSourceId) {
-      await api.delete(`/studio/api/backend/v2/sources/${createdSourceId}`).catch(() => undefined);
-    }
-    await api?.dispose();
   });
 
   test("autopilot: source item → automatic project → strict QA → repair/auto-approval → publication without any manual step", async () => {

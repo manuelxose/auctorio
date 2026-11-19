@@ -956,7 +956,7 @@ export type SiteSocialSettings = {
 
 export type SiteSocialPost = StudioSocialContent & {
   projectTitle: string;
-  publication: { id: string; status: string; scheduledFor: string | null } | null;
+  publication: { id: string; status: string; scheduledFor: string | null; externalUrl?: string | null } | null;
 };
 
 export type PublicationChannel = 'website' | 'x' | 'instagram' | 'facebook';
@@ -1028,11 +1028,12 @@ export type EditorialPlanGenerationAccepted = {
 
 /** One schedule projection: plan items until their content has a publication, then the publication. */
 export type CalendarEvent = {
-  kind: 'plan_item' | 'publication';
+  kind: 'plan_item' | 'publication' | 'social_draft';
   id: string;
   projectId: string | null;
   planId: string | null;
   planItemId: string | null;
+  socialContentId?: string | null;
   priority: number | null;
   contentType: string | null;
   /** Plan items only. Volume/difficulty are null unless a provider measured them (never estimated). */

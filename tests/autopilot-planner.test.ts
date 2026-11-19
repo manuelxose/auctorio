@@ -100,9 +100,12 @@ async function cleanupWorkspace(tenantId: string): Promise<void> {
   await prisma.auditLog.deleteMany({ where: { tenantId } });
   await prisma.notification.deleteMany({ where: { tenantId } });
   await prisma.publication.deleteMany({ where: { tenantId } });
+  await prisma.publishingAccount.deleteMany({ where: { tenantId } });
+  await prisma.socialContent.deleteMany({ where: { tenantId } });
   await prisma.qualityRepairAttempt.deleteMany({ where: { tenantId } });
   await prisma.contentVersion.deleteMany({ where: { tenantId } });
   await prisma.contentProject.deleteMany({ where: { tenantId } });
+  await prisma.contentSource.deleteMany({ where: { tenantId } });
   await prisma.assetVariant.deleteMany({ where: { tenantId } });
   await prisma.contentImage.deleteMany({ where: { tenantId } });
   await prisma.fact.deleteMany({ where: { tenantId } });
@@ -115,6 +118,15 @@ async function cleanupWorkspace(tenantId: string): Promise<void> {
 test("autopilot: qa_passed is auto-approved and scheduled without any manual step", async () => {
   const workspace = await createWorkspace();
   try {
+    await prisma.automationPolicy.update({
+      where: { id: workspace.policyId },
+      data: { xPostsPerDay: 1, instagramPostsPerDay: 1, socialRequired: true },
+    });
+    for (const platform of ["x", "instagram"] as const) {
+      await prisma.publishingAccount.create({
+        data: { tenantId: workspace.tenantId, siteId: workspace.siteId, platform, displayName: platform, enabled: true, status: "active" },
+      });
+    }
     const project = await prisma.contentProject.create({
       data: {
         tenantId: workspace.tenantId,
@@ -178,8 +190,39 @@ test("autopilot: qa_passed is auto-approved and scheduled without any manual ste
     assert.ok(publications.length >= 1);
     assert.ok(publications.every((publication) => publication.channel === "website"));
     assert.ok(publications.every((publication) => publication.scheduledFor !== null));
+    assert.equal(await prisma.socialContent.count({ where: { projectId: project.id } }), 0);
   } finally {
     await cleanupWorkspace(workspace.tenantId);
+  }
+});
+
+test("autopilot ignores candidates from paused and archived sources even when another source is active", async () => {
+  const workspace = await createWorkspace();
+  const scope = { tenantId: workspace.tenantId, siteId: workspace.siteId };
+  try {
+    await prisma.contentSource.create({ data: { ...scope, name: "Active", type: "rss", enabled: true } });
+    for (const [name, enabled, archivedAt] of [
+      ["Paused", false, null],
+      ["Archived", true, new Date()],
+    ] as const) {
+      const source = await prisma.contentSource.create({ data: { ...scope, name, type: "rss", enabled, archivedAt } });
+      await prisma.sourceItem.create({
+        data: {
+          tenantId: scope.tenantId,
+          sourceId: source.id,
+          externalId: name,
+          title: `Candidato de ${name}`,
+          contentHash: sha256(name),
+          processingStatus: "candidate",
+          score: 0.98,
+        },
+      });
+    }
+    const tick = await runAutomationTick();
+    assert.equal(tick.candidatesSelected, 0);
+    assert.equal(await prisma.contentProject.count({ where: scope }), 0);
+  } finally {
+    await cleanupWorkspace(scope.tenantId);
   }
 });
 

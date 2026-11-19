@@ -109,16 +109,22 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
               <div class="cal-cell__head">
                 <button type="button" class="cal-cell__num" (click)="focusDay(day.date)" [attr.aria-label]="'Open ' + dayLabel(day.date)">{{ day.dayNum }}</button>
               </div>
-              @for (event of day.events.slice(0, 3); track event.id) {
-                <button type="button" class="cal-ev" [class.is-proposal]="event.kind === 'plan_item'" [attr.data-chip]="event.chip"
+              @let preview = compactDayEvents(day.events);
+              @for (event of preview; track event.id) {
+                @if (event.channel !== 'website' && (!$index || preview[$index - 1].channel === 'website')) {
+                  <span class="cal-channel-heading">Redes sociales</span>
+                }
+                <button type="button" class="cal-ev" [class.is-proposal]="event.kind !== 'publication'" [attr.data-chip]="event.chip"
                   [draggable]="canDrag(event)" (dragstart)="onDragStart($event, event)" (dragend)="onDragEnd($event)"
                   (click)="openPeek(event)" [title]="event.title" [attr.aria-label]="ariaLabel(event)">
                   <i class="cal-dot" aria-hidden="true"></i>
-                  <span class="cal-ev__text"><span class="cal-ev__time">{{ timeLabel(event.scheduledFor) }}</span> {{ event.title }}</span>
+                  <span class="cal-ev__text"><span class="cal-ev__time">{{ timeLabel(event.scheduledFor) }}</span>
+                    @if (event.channel !== 'website') { {{ channelLabel(event.channel) }} · } {{ event.title }}
+                  </span>
                 </button>
               }
-              @if (day.events.length > 3) {
-                <button type="button" class="cal-cell__more" (click)="focusDay(day.date)">+{{ day.events.length - 3 }} more</button>
+              @if (day.events.length > preview.length) {
+                <button type="button" class="cal-cell__more" (click)="focusDay(day.date)">+{{ day.events.length - preview.length }} more</button>
               }
             </div>
           }
@@ -137,10 +143,13 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
               </button>
               <div class="cal-week__body">
                 @for (event of day.events; track event.id) {
-                  <button type="button" class="cal-card" [class.is-proposal]="event.kind === 'plan_item'" [attr.data-chip]="event.chip"
+                  @if (event.channel !== 'website' && (!$index || day.events[$index - 1].channel === 'website')) {
+                    <span class="cal-channel-heading">Redes sociales</span>
+                  }
+                  <button type="button" class="cal-card" [class.is-proposal]="event.kind !== 'publication'" [attr.data-chip]="event.chip"
                     [draggable]="canDrag(event)" (dragstart)="onDragStart($event, event)" (dragend)="onDragEnd($event)"
                     (dragover)="$event.preventDefault()" (drop)="onDropOnCard($event, event)" (click)="openPeek(event)" [attr.aria-label]="ariaLabel(event)">
-                    <span class="cal-card__top"><i class="cal-dot" aria-hidden="true"></i>{{ timeLabel(event.scheduledFor) }}<span class="cal-card__chan">{{ event.channel }}</span></span>
+                    <span class="cal-card__top"><i class="cal-dot" aria-hidden="true"></i>{{ timeLabel(event.scheduledFor) }}<span class="cal-card__chan">{{ channelLabel(event.channel) }}</span></span>
                     <span class="cal-card__title">{{ event.title }}</span>
                     @if (event.kind === 'plan_item' && event.primaryKeyword) {
                       <ng-container *ngTemplateOutlet="metricsTpl; context: { $implicit: event }"></ng-container>
@@ -165,7 +174,10 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
             <section class="cal-agenda__group">
               <h3 class="cal-agenda__date">{{ group.label }}</h3>
               @for (entry of group.entries; track entry.item.id) {
-                <div class="cal-row" [class.is-proposal]="entry.item.kind === 'plan_item'" [attr.data-chip]="entry.item.chip"
+                @if (entry.item.channel !== 'website' && (!$index || group.entries[$index - 1].item.channel === 'website')) {
+                  <h4 class="cal-channel-heading cal-channel-heading--agenda">Redes sociales</h4>
+                }
+                <div class="cal-row" [class.is-proposal]="entry.item.kind !== 'publication'" [attr.data-chip]="entry.item.chip"
                   role="group" [attr.aria-label]="ariaLabel(entry.item)"
                   [draggable]="canDrag(entry.item)" (dragstart)="onDragStart($event, entry.item)" (dragend)="onDragEnd($event)"
                   (dragover)="$event.preventDefault()" (drop)="onDropOnCard($event, entry.item)">
@@ -174,7 +186,7 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
                   <button type="button" class="cal-row__main" (click)="openPeek(entry.item)">
                     <span class="cal-row__title">{{ entry.item.title }}</span>
                     <span class="cal-row__meta">
-                      {{ entry.item.kind === 'plan_item' ? 'Proposal' : 'Publication' }} · {{ entry.item.channel }} · {{ entry.item.destination }}
+                      {{ kindLabel(entry.item) }} · {{ channelLabel(entry.item.channel) }} · {{ entry.item.destination }}
                       @if (entry.item.contentType) { · {{ typeLabel(entry.item.contentType) }} }
                       @if (entry.item.automated) { · automatic }
                     </span>
@@ -189,7 +201,9 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
                     @if (isQueuedBrief(entry.item)) {
                       <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="openInstructions(entry.item)">Instructions</button>
                     }
-                    @if (entry.item.projectId) {
+                    @if (entry.item.socialContentId) {
+                      <a class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/social" [queryParams]="{ tab: entry.item.channel, post: entry.item.socialContentId }">Ver post</a>
+                    } @else if (entry.item.projectId) {
                       <a class="au-btn au-btn--ghost au-btn--sm" [routerLink]="['/studio/content', entry.item.projectId]">Open</a>
                     }
                     <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" (click)="openPeek(entry.item)" [attr.aria-label]="'More for ' + entry.item.title">
@@ -204,7 +218,7 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
       }
 
       <p class="cal-legend">
-        <span class="cal-legend__item"><i class="cal-legend__swatch is-proposal" aria-hidden="true"></i>Dashed: proposal, not scheduled to publish</span>
+        <span class="cal-legend__item"><i class="cal-legend__swatch is-proposal" aria-hidden="true"></i>Dashed: proposal or social draft</span>
         <span class="cal-legend__item"><i class="cal-legend__swatch" aria-hidden="true"></i>Solid: scheduled publication</span>
         <span class="cal-legend__item">Drag an article to another day to move it</span>
       </p>
@@ -224,13 +238,13 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
       @if (peek; as event) {
         <div class="cal-sheet__inner">
           <header class="cal-sheet__head">
-            <span class="cal-sheet__state" [attr.data-chip]="event.chip"><i class="cal-dot" aria-hidden="true"></i>{{ event.chip ? chipLabel(event.chip) : statusLabel(event) }} · {{ event.kind === 'plan_item' ? 'Proposal' : 'Publication' }}</span>
+            <span class="cal-sheet__state" [attr.data-chip]="event.chip"><i class="cal-dot" aria-hidden="true"></i>{{ event.chip ? chipLabel(event.chip) : statusLabel(event) }} · {{ kindLabel(event) }}</span>
             <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" (click)="closePeek()" aria-label="Close"><app-icon name="close"></app-icon></button>
           </header>
           <h2 class="cal-sheet__title" id="peek-title">{{ event.title }}</h2>
           <dl class="cal-facts">
-            <div><dt>When</dt><dd>{{ peekWhen(event) }}</dd></div>
-            <div><dt>Where</dt><dd>{{ event.channel }} · {{ event.destination }}</dd></div>
+            <div><dt>{{ event.kind === 'social_draft' ? 'Suggested slot' : 'When' }}</dt><dd>{{ peekWhen(event) }}</dd></div>
+            <div><dt>Where</dt><dd>{{ channelLabel(event.channel) }} · {{ event.destination }}</dd></div>
             @if (event.contentType) { <div><dt>Type</dt><dd>{{ typeLabel(event.contentType) }}</dd></div> }
             @if (event.primaryKeyword) {
               <div><dt>Keyword</dt><dd>{{ event.primaryKeyword }}</dd></div>
@@ -242,14 +256,18 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
           @if (event.externalUrl) { <a class="cal-sheet__link" [href]="event.externalUrl" target="_blank" rel="noopener"><app-icon name="external"></app-icon>{{ event.externalUrl }}</a> }
 
           <div class="cal-sheet__actions">
-            @if (event.projectId) {
+            @if (event.socialContentId) {
+              <a class="au-btn au-btn--primary" routerLink="/studio/social" [queryParams]="{ tab: event.channel, post: event.socialContentId }" (click)="closePeek()">
+                {{ event.kind === 'social_draft' ? 'Review social post' : 'View social post' }}
+              </a>
+            } @else if (event.projectId) {
               <a class="au-btn au-btn--primary" [routerLink]="['/studio/content', event.projectId]" (click)="closePeek()">Open article</a>
             }
             @if (event.kind === 'plan_item') {
               <a class="au-btn au-btn--secondary" routerLink="/studio/plan" [queryParams]="{ plan: event.planId, item: event.id }" (click)="closePeek()">
                 {{ event.status === 'proposed' ? 'Review brief' : 'Full brief' }}
               </a>
-            } @else {
+            } @else if (event.kind === 'publication') {
               <a class="au-btn au-btn--secondary" routerLink="/studio/results" [queryParams]="{ id: event.id }" (click)="closePeek()">
                 {{ event.status === 'failed' ? 'Fix in Results' : 'Manage' }}
               </a>
@@ -270,7 +288,7 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
                 </form>
               }
             }
-            @if (event.status !== 'published' && event.status !== 'canceled') {
+            @if (event.kind !== 'social_draft' && event.status !== 'published' && event.status !== 'canceled') {
               <button type="button" class="cal-action" (click)="startMove(event)" [attr.aria-expanded]="movingId === event.id"><app-icon name="clock"></app-icon>Move to another date</button>
               @if (movingId === event.id) {
                 <form class="cal-inline" (ngSubmit)="confirmMove(event)" (keydown.escape)="$event.stopPropagation(); cancelMove()">
@@ -385,6 +403,8 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
     /* Agenda */
     .cal-agenda { border: 1px solid var(--cal-line); border-radius: var(--cal-r); background: var(--cal-cell); overflow: hidden; }
     .cal-agenda__group + .cal-agenda__group { border-top: 1px solid var(--cal-line); }
+    .cal-channel-heading { display: block; margin: 4px 0; padding: 4px 6px; border-top: 1px solid var(--cal-line); color: var(--au-muted); font-size: 12px; font-weight: 600; }
+    .cal-channel-heading--agenda { margin: 0; padding: 8px 12px; }
     .cal-agenda__date { position: sticky; top: 0; z-index: 1; margin: 0; padding: 12px 16px 8px; background: var(--cal-cell); font-size: 13px; font-weight: 500; color: var(--au-text-2); }
     .cal-row { display: grid; grid-template-columns: 56px 112px minmax(0, 1fr) minmax(0, 320px) auto; align-items: center; gap: 16px; padding: 8px 16px; border-top: 1px solid var(--cal-line); transition: background-color .15s ease; }
     .cal-row:hover { background: var(--au-surface-2); }
@@ -587,7 +607,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
       .listCalendar(from.toISOString(), to.toISOString(), this.channelFilter ? (this.channelFilter as PublicationChannel) : undefined, this.siteId || undefined)
       .subscribe({
         next: (response) => {
-          this.events = response.items;
+          this.events = response.items.filter((event) => event.channel !== 'facebook');
           if (response.timeZone) this.timeZone = response.timeZone;
           this.keywordMetrics = response.keywordMetrics !== false;
         },
@@ -627,7 +647,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
       .sort(([a], [b]) => (a === 'unscheduled' ? 1 : b === 'unscheduled' ? -1 : a.localeCompare(b)))
       .map(([key, entries]) => ({
         label: key === 'unscheduled' ? 'Unscheduled' : new Date(`${key}T12:00:00Z`).toLocaleDateString('en-US', { timeZone: 'UTC', weekday: 'long', month: 'long', day: 'numeric' }),
-        entries: entries.sort((a, b) => (a.scheduledFor ?? '').localeCompare(b.scheduledFor ?? '')).map((item) => ({ item })),
+        entries: entries.sort(this.compareDayEvents).map((item) => ({ item })),
       }));
   }
 
@@ -667,7 +687,17 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
     const key = this.dayKey(date);
     return this.visibleEvents
       .filter((event) => event.scheduledFor && localDate(event.scheduledFor, this.timeZone) === key)
-      .sort((a, b) => (a.scheduledFor ?? '').localeCompare(b.scheduledFor ?? ''));
+      .sort(this.compareDayEvents);
+  }
+
+  private compareDayEvents(a: CalendarEvent, b: CalendarEvent): number {
+    return Number(a.channel !== 'website') - Number(b.channel !== 'website')
+      || (a.scheduledFor ?? '').localeCompare(b.scheduledFor ?? '');
+  }
+
+  compactDayEvents(events: CalendarEvent[]): CalendarEvent[] {
+    const firstSocial = events.findIndex((event) => event.channel !== 'website');
+    return firstSocial > 2 ? [...events.slice(0, 2), events[firstSocial]] : events.slice(0, 3);
   }
 
   dayLabel(date: Date): string {
@@ -675,9 +705,17 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ariaLabel(event: CalendarEvent): string {
-    const kind = event.kind === 'plan_item' ? 'Proposal, not scheduled to publish' : 'Scheduled publication';
+    const kind = { social_draft: 'Social draft', plan_item: 'Proposal, not scheduled to publish', publication: 'Scheduled publication' }[event.kind];
     const when = event.scheduledFor ? `${localDate(event.scheduledFor, this.timeZone)} ${localTime(event.scheduledFor, this.timeZone)} ${this.timeZone}` : 'unscheduled';
-    return `${kind}: ${event.title}, ${this.statusLabel(event)}, ${when}`;
+    return `${kind}: ${this.channelLabel(event.channel)}, ${event.title}, ${this.statusLabel(event)}, ${when}`;
+  }
+
+  kindLabel(event: CalendarEvent): string {
+    return { social_draft: 'Social draft', plan_item: 'Proposal', publication: 'Publication' }[event.kind];
+  }
+
+  channelLabel(channel: PublicationChannel): string {
+    return { website: 'Website', x: 'X', instagram: 'Instagram', facebook: 'Facebook' }[channel];
   }
 
   utcLabel(value: string | null): string {
@@ -691,10 +729,11 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   canDrag(event: CalendarEvent): boolean {
-    return !['published', 'generating', 'canceled'].includes(event.status) && !this.reschedulingIds.has(event.id);
+    return event.kind !== 'social_draft' && !['published', 'generating', 'canceled'].includes(event.status) && !this.reschedulingIds.has(event.id);
   }
 
   statusLabel(event: CalendarEvent): string {
+    if (event.kind === 'social_draft') return 'pending approval';
     if (event.kind === 'publication') return event.status;
     return ({ proposed: 'proposal', approved: 'approved brief', generating: 'writing draft', content_ready: 'draft ready', review_required: 'in review' } as Record<string, string>)[event.status] ?? event.status.replace(/_/g, ' ');
   }
@@ -737,7 +776,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   typeLabel(contentType: string): string {
-    return ({ explainer: 'Explainer', ranking: 'Listicle', guide: 'Guide', news: 'News', comparison: 'Comparison', tutorial: 'How-to', 'where-to-watch': 'Where to watch' } as Record<string, string>)[contentType] ?? contentType.replace(/-/g, ' ');
+    return ({ explainer: 'Explainer', ranking: 'Listicle', guide: 'Guide', news: 'News', comparison: 'Comparison', tutorial: 'How-to', 'where-to-watch': 'Where to watch', x_thread: 'Thread', instagram_carousel: 'Carousel', instagram_story: 'Story', x_post: 'Post', instagram_caption: 'Post', facebook_post: 'Post' } as Record<string, string>)[contentType] ?? contentType.replace(/[-_]/g, ' ');
   }
 
   // ── Peek sheet ──
@@ -935,7 +974,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private reschedule(eventItem: CalendarEvent, target: Date): void {
-    if (this.reschedulingIds.has(eventItem.id)) return;
+    if (eventItem.kind === 'social_draft' || this.reschedulingIds.has(eventItem.id)) return;
     if (eventItem.status === 'published') {
       this.error = 'Published items cannot be rescheduled.';
       return;

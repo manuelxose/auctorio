@@ -351,7 +351,7 @@ export async function listProjects(
           },
         },
         publications: {
-          where: { status: { not: "deleted" } },
+          where: { channel: "website", status: { not: "deleted" } },
           select: { ...WEBSITE_DELIVERY_SELECT, scheduledFor: true },
           orderBy: { scheduledFor: "desc" },
           take: 10,

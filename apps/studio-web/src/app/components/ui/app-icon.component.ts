@@ -257,6 +257,12 @@ const ICONS: Record<string, IconElement[]> = {
   ],
   message: [{ kind: 'path', d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' }],
   send: [{ kind: 'path', d: 'm22 2-7 20-4-9-9-4Z' }, { kind: 'path', d: 'M22 2 11 13' }],
+  share: [
+    { kind: 'path', d: 'm8.6 10.5 6.8-4M8.6 13.5l6.8 4' },
+    { kind: 'circle', cx: 6, cy: 12, r: 3 },
+    { kind: 'circle', cx: 18, cy: 5, r: 3 },
+    { kind: 'circle', cx: 18, cy: 19, r: 3 },
+  ],
   stop: [{ kind: 'rect', x: 6, y: 6, width: 12, height: 12, rx: 2 }],
   expand: [
     { kind: 'path', d: 'M15 3h6v6' },

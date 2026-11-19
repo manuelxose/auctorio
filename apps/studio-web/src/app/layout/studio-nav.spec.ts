@@ -6,9 +6,10 @@ describe('studio nav (M5)', () => {
     expect(new Set(paths).size).toBe(paths.length);
   });
 
-  it('shows Home, Calendar, Articles, Results, then Advanced and Settings at the end', () => {
+  it('groups Artículos and Redes under Publicaciones', () => {
     const bar = STUDIO_NAV.filter((group) => !group.hidden);
-    expect(bar.map((group) => group.label)).toEqual(['Home', 'Calendar', 'Articles', 'Results', 'Advanced', 'Settings']);
+    expect(bar.map((group) => group.label)).toEqual(['Home', 'Calendar', 'Publicaciones', 'Results', 'Advanced', 'Settings']);
+    expect(bar.find((group) => group.id === 'articles')?.items.map((item) => item.label)).toEqual(['Artículos', 'Redes']);
     expect(bar.filter((group) => group.end).map((group) => group.id)).toEqual(['advanced', 'settings']);
   });
 
@@ -23,6 +24,8 @@ describe('studio nav (M5)', () => {
     expect(activeNavItem('/studio/content/abc')?.group.id).toBe('articles');
     expect(activeNavItem('/studio/content/new')?.group.id).toBe('articles');
     expect(activeNavItem('/studio/results')?.group.id).toBe('results');
+    expect(activeNavItem('/studio/social?tab=x')?.group.id).toBe('articles');
+    expect(activeNavItem('/studio/settings/social')?.group.id).toBe('settings');
   });
 
   it('groups settings as business, articles and integrations; team and system only for admins', () => {
@@ -31,9 +34,9 @@ describe('studio nav (M5)', () => {
     const visible = (role: string, platform = false) =>
       settings.items.filter((item) => canSeeNavItem(item, role, platform)).map((item) => item.label);
     for (const role of ['viewer', 'editor']) {
-      expect(visible(role)).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Social', 'Web discovery', 'Assistant tools']);
+      expect(visible(role)).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Ajustes de redes', 'Web discovery', 'Assistant tools']);
     }
-    expect(visible('admin')).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Social', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
+    expect(visible('admin')).toEqual(['Sites', 'Writing', 'Mode & rhythm', 'Connections', 'Ajustes de redes', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
     expect(visible('admin', true)).toContain('AI providers');
   });
 });

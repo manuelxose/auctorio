@@ -21,17 +21,17 @@ export const routes: Routes = [
       {
         path: 'content',
         loadComponent: () => import('./pages/content-list-page.component').then((m) => m.ContentListPageComponent),
-        data: { studioMeta: { section: 'Content', title: 'Content' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'Artículos' } },
       },
       {
         path: 'content/new',
         loadComponent: () => import('./pages/content-new-page.component').then((m) => m.ContentNewPageComponent),
-        data: { studioMeta: { section: 'Content', title: 'New content' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'New content' } },
       },
       {
         path: 'content/:id',
         loadComponent: () => import('./pages/content-workspace-page.component').then((m) => m.ContentWorkspacePageComponent),
-        data: { studioMeta: { section: 'Content', title: 'Article' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'Artículo' } },
       },
       {
         path: 'calendar',
@@ -52,6 +52,11 @@ export const routes: Routes = [
         path: 'site-intelligence',
         loadComponent: () => import('./pages/site-intelligence-page.component').then((m) => m.SiteIntelligencePageComponent),
         data: { studioMeta: { section: 'Site Intelligence', title: 'Site Intelligence' } },
+      },
+      {
+        path: 'social',
+        loadComponent: () => import('./pages/social-page.component').then((m) => m.SocialPageComponent),
+        data: { studioMeta: { section: 'Publicaciones', title: 'Redes' } },
       },
       {
         path: 'results',
@@ -86,8 +91,8 @@ export const routes: Routes = [
       },
       {
         path: 'settings/social',
-        loadComponent: () => import('./pages/social-page.component').then((m) => m.SocialPageComponent),
-        data: { studioMeta: { section: 'Settings', title: 'Social' } },
+        loadComponent: () => import('./pages/social-settings-page.component').then((m) => m.SocialSettingsPageComponent),
+        data: { studioMeta: { section: 'Settings', title: 'Ajustes de redes' } },
       },
       {
         path: 'connections',
