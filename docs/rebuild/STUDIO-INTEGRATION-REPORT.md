@@ -14,3 +14,9 @@ El paquete adjunto contiene dos prototipos HTML/CSS/JS, tres documentos y cuatro
 Se reutilizaron el shell, el router, los servicios Angular, los modelos de persistencia, la verificación de destinos, las confirmaciones y las notificaciones existentes. Este incremento no requiere cambios de esquema. La matriz de paridad recoge las funciones heredadas y su nivel de verificación.
 
 El commit `3f9ab7a` contiene el incremento de API, sesión y pruebas de seguridad. Los archivos Angular compartidos con modificaciones locales previas conservan los cambios en el árbol de trabajo.
+
+## Fase C · Escritura (§7.2)
+
+El formulario sigue el sitio activo. Mantiene separados los borradores de cada sitio mientras la página está abierta y descarta las respuestas de carga obsoletas. La escritura de planificación actualiza solo los campos enviados y registra la auditoría en la misma transacción.
+
+Los valores guardados llegan al redactor y a QA. El rango explícito de un artículo planificado tiene prioridad sobre el valor del sitio y se conserva para la reevaluación tras las imágenes. Las guías respetan las opciones de resumen, tarjetas, enlaces y FAQ según su plantilla. Las reglas, el aviso, el contexto de marca y la longitud se transmiten a la generación. La prueba de producción comprobó que guardar los ajustes conserva intactas las versiones anteriores.

@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
+import Fastify from "fastify";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
 import { setArticleWriterFactory } from "../src/studio/editorial-engine/writer-provider";
@@ -20,6 +21,8 @@ import { listOperations } from "../src/studio/operations";
 import { listCalendarEvents } from "../src/studio/calendar";
 import { archiveProject } from "../src/studio/projects";
 import { listSiteSocialContent } from "../src/studio/social";
+import { registerStudioRoutes } from "../src/studio/routes";
+import { runVersionQaV2 } from "../src/studio/qa";
 import { FakeWriter } from "./support/fake-editorial-writer";
 
 const prisma = getPrismaClient();
@@ -37,7 +40,7 @@ async function fixture() {
       scheduledFor: new Date("2026-11-20T10:00:00Z"), primaryKeyword: "series de misterio", outline: ["Que ver primero", "Para quien es"],
     },
   });
-  return { tenantId: tenant.id, siteId: site.id, planId: plan.id, itemId: item.id };
+  return { tenantId: tenant.id, siteId: site.id, planId: plan.id, itemId: item.id, apiKey: `${seed}-k` };
 }
 
 async function cleanup(tenantId: string) {
@@ -52,6 +55,79 @@ async function cleanup(tenantId: string) {
 function fakeImageQueue() {
   setProductionStageOverrides({ requestImage: async () => undefined, requestInlineImages: async () => undefined });
 }
+
+test("saved writing defaults reach new drafts and preserve explicit length and existing versions", async () => {
+  const f = await fixture();
+  const api = Fastify();
+  registerStudioRoutes(api);
+  fakeImageQueue();
+  const prompts: string[] = [];
+  setArticleWriterFactory(() => ({
+    generate: (request) => {
+      prompts.push(request.prompt);
+      return new FakeWriter().generate(request);
+    },
+  }));
+  try {
+    const manualRequest = { kind: "manual" as const, siteId: f.siteId, title: "Guía editorial", brief: "Explica términos del cine" };
+    const previous = await startProduction(f.tenantId, manualRequest, { wait: true });
+    const priorVersion = await prisma.contentVersion.findFirstOrThrow({ where: { projectId: previous.job.projectId! } });
+
+    const url = `/v2/sites/${f.siteId}/planning-settings`;
+    const headers = { authorization: `Bearer ${f.apiKey}` };
+    const payload = {
+      articleTargets: {
+        sections: { summary: false, faq: false, linkCard: false, promo: false },
+        brand: { positioning: "Explain cinema clearly", linkCard: { headline: "Promo card off" }, promo: "Promo block off" },
+        writing: { length: "short", instructions: ["Use concrete examples"], summaryVariant: "key_takeaways",
+          internalLinks: { enabled: false }, disclaimer: "Consulta la fecha de actualización." },
+      },
+    };
+    const [saved, calendar] = await Promise.all([
+      api.inject({ method: "PUT", url, headers, payload }),
+      api.inject({ method: "PUT", url, headers, payload: { articlesPerDay: 3 } }),
+    ]);
+    assert.equal(saved.statusCode, 200, saved.body);
+    assert.equal(calendar.statusCode, 200, calendar.body);
+    const reloaded = (await api.inject({ method: "GET", url, headers })).json();
+    assert.equal(reloaded.articlesPerDay, 3);
+    assert.equal(reloaded.articleTargets.writing.length, "short");
+
+    prompts.length = 0;
+    const manual = await startProduction(f.tenantId, { ...manualRequest, title: "Nueva guía editorial" }, { wait: true });
+    assert.ok(manual.job.projectId, manual.job.error ?? undefined);
+    assert.match(prompts[0], /Target length: 1218–1582 words/);
+    assert.match(prompts[0], /Use concrete examples/);
+    assert.match(prompts[0], /Explain cinema clearly/);
+    assert.match(prompts[0], /Consulta la fecha de actualización/);
+
+    await prisma.editorialPlanItem.update({
+      where: { id: f.itemId }, data: { recommendedWordCountMin: 1000, recommendedWordCountMax: 1150 },
+    });
+    prompts.length = 0;
+    const guide = await startProduction(f.tenantId, { kind: "plan_item", planItemId: f.itemId }, { wait: true });
+    assert.ok(guide.job.projectId, guide.job.error ?? undefined);
+    assert.match(prompts[0], /Target length: 1000–1150 words/);
+    assert.match(prompts[0], /Targets: about 1150 words/);
+    assert.match(prompts[0], /AT LEAST 0 internal links/);
+    assert.doesNotMatch(prompts[0], /Summary block:|Promo card off|Promo block off|\[required\]:.*two-column table/);
+    const version = await prisma.contentVersion.findFirstOrThrow({ where: { projectId: guide.job.projectId! } });
+    const findings = (version.qaReport as { findings: Array<{ key: string; passed: boolean }> }).findings;
+    assert.ok(!findings.some((finding) => !finding.passed && ["faq_section", "internal_links"].includes(finding.key)));
+    const project = await prisma.contentProject.findUniqueOrThrow({ where: { id: guide.job.projectId! } });
+    const metadata = project.metadata as { recommendedWordCountMin: number; recommendedWordCountMax: number };
+    assert.equal(metadata.recommendedWordCountMin, 1000);
+    assert.equal(metadata.recommendedWordCountMax, 1150);
+    const afterImages = runVersionQaV2(version, { imageReady: true, metadata, ...metadata });
+    assert.ok(!afterImages.findings.some((finding) => !finding.passed && ["faq_section", "internal_links"].includes(finding.key)));
+
+    const previousVersions = await prisma.contentVersion.findMany({ where: { projectId: priorVersion.projectId } });
+    assert.deepEqual(previousVersions.map(({ id, bodyHtml }) => ({ id, bodyHtml })), [{ id: priorVersion.id, bodyHtml: priorVersion.bodyHtml }]);
+  } finally {
+    await api.close();
+    await cleanup(f.tenantId);
+  }
+});
 
 test("ENG-01: plan item and manual requests run the same shared QA/gates stage functions", async () => {
   const f = await fixture();

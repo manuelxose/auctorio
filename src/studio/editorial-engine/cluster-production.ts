@@ -10,7 +10,8 @@ import { suggestInternalLinks } from "../internal-linking";
 import { getClassifiedStory, type ClassificationInput } from "./classifier";
 import { resolveSiteValueBlocks, type SiteValueConfig } from "./site-value";
 import { buildStoryBrief } from "./brief-builder";
-import { formatInternalUrl, renderWritingGuidance, resolveWritingSettings } from "./structure";
+import { renderBrandGuidance, resolveBrand } from "./brand";
+import { formatInternalUrl, LENGTH_MODES, renderWritingGuidance, resolveBrandSettings, resolveWritingSettings, wordTargetRange } from "./structure";
 import type { FactSafetyReport } from "./fact-safety";
 import type { DuplicateCheckResult } from "./duplicate-check";
 import type { ArticleType, EngineEnrichment, EngineEntity, FactLicense, LedgerFact, SearchIntent } from "./types";
@@ -237,7 +238,10 @@ export async function prepareClusterInput(
     language,
     headline,
     summary,
-    siteGuidance: renderWritingGuidance(writing, language, { summary: false }),
+    siteGuidance: [
+      ...renderBrandGuidance(resolveBrand(resolveBrandSettings(planning?.articleTargets), site), null),
+      ...renderWritingGuidance(writing, language, { summary: false }),
+    ],
     entities,
     enrichments,
     ledgerFacts,
@@ -248,6 +252,7 @@ export async function prepareClusterInput(
     indexedPageTitles: indexedPages.map((page) => page.title ?? ""),
     siteFitScore: cluster.siteFitScore,
     primaryEntityNames: primaryEntityNames.length > 0 ? primaryEntityNames : entities.slice(0, 2).map((entity) => entity.name),
+    siteArticleTargets: planning?.articleTargets ?? null,
     ownProjectId: null,
     cluster: {
       id: cluster.id,
@@ -384,5 +389,7 @@ export async function buildClusterBrief(
     updateDelta = await computeUpdateDelta(tenantId, duplicate.targetProjectId, factSafety.licenses);
   }
 
+  const words = LENGTH_MODES[resolveWritingSettings(input.siteArticleTargets).length];
+  if (words) brief.targetLengthRange = wordTargetRange(words);
   return { brief, siteValueBlocks, previousArticle, updateDelta, guidance: input.siteGuidance ?? [] };
 }

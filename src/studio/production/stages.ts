@@ -26,6 +26,7 @@ import { runEditorialQa } from "../editorial-engine/editorial-qa";
 import { evaluatePublicationGates } from "../editorial-engine/publication-gates";
 import { buildClusterBrief, enrichmentKnowledgeOf, prepareClusterInput } from "../editorial-engine/cluster-production";
 import type { SeoPackage } from "../editorial-engine/types";
+import { resolveWritingSettings } from "../editorial-engine/structure";
 import { buildPlanBrief, outlineHeadings, prepareManualInput, preparePlanItemInput, slotOrNow } from "./plan-item";
 import { approveVersion } from "../repository";
 import {
@@ -253,6 +254,7 @@ async function qa(ctx: StageContext): Promise<QaArtifact> {
         outline: record.outline ?? [],
         secondaryKeywords: briefArtifact.brief.secondaryKeywords,
         siteUrl: input.site.baseUrl ?? null,
+        internalLinksEnabled: resolveWritingSettings(input.siteArticleTargets).internalLinks.enabled,
         ...(briefArtifact.brief.articleTargets ? { articleTargets: briefArtifact.brief.articleTargets } : {}),
       },
       siteType: input.site.type,
@@ -324,7 +326,11 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   if (!existing) projectId = null;
   // Registry items that fed this draft (plan evidence), kept on the project that owns every version.
   // Guide targets + inventory size: QA v2 re-runs rebuild the checklist from project metadata; publishers read the JSON-LD switch.
-  const articleTargets = need(ctx.artifacts.brief, "brief").brief.articleTargets;
+  const brief = need(ctx.artifacts.brief, "brief").brief;
+  const articleTargets = brief.articleTargets;
+  const internalLinksEnabled = resolveWritingSettings(input.siteArticleTargets).internalLinks.enabled;
+  const recommendedWordCountMin = brief.targetLengthRange.min;
+  const recommendedWordCountMax = brief.targetLengthRange.max;
   const guideMetadata = articleTargets
     ? { articleTargets, internalLinkInventorySize: input.internalLinks.length, externalSourceInventorySize: externalSourceCount(input.ledgerFacts) }
     : {};
@@ -353,6 +359,9 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
           ...guideMetadata,
+          internalLinksEnabled,
+          recommendedWordCountMin,
+          recommendedWordCountMax,
           siteUrl: input.site.baseUrl ?? null,
           slug: seoPackage.slug,
         } as Prisma.InputJsonValue,
@@ -372,6 +381,9 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
           provenance: gate.provenance.slice(0, 40),
           ...(sourceOrigins.length ? { sourceOrigins } : {}),
           ...guideMetadata,
+          internalLinksEnabled,
+          recommendedWordCountMin,
+          recommendedWordCountMax,
           siteUrl: input.site.baseUrl ?? null,
           slug: asRecord(existing.metadata).suggestedSlug ?? seoPackage.slug,
           ...(input.cluster ? { updatedByEditorialEngine: true } : {}),

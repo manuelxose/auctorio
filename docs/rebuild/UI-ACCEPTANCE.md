@@ -20,3 +20,7 @@ Playwright comprobó Sitios y Roles a 1600, 1440, 1024, 768 y 390 px sin desbord
 - [Roles · 1600 px](../../test-results/studio-integration-accepta-56dc7-out-page-overflow-at-1600px/roles-1600.png) y [Roles · 390 px](../../test-results/studio-integration-accepta-58708-hout-page-overflow-at-390px/roles-390.png)
 
 Las capturas son resultados locales regenerables de Playwright. Las imágenes adjuntas aportan la referencia visual previa. Falta una captura del checkout anterior al cambio y una revisión con lector de pantalla, además de la comparación integral de los estados restantes.
+
+## Escritura
+
+Playwright verificó la separación de borradores y la persistencia de reglas al cambiar de sitio desde el shell. La página mantuvo el ancho de la ventana a 1440 y 390 px. [Escritura · 1440 px](../../test-results/studio-writing/studio-integration-accepta-bd8db-witching-sites-in-the-shell/writing-1440.png) · [Escritura · 390 px](../../test-results/studio-writing/studio-integration-accepta-bd8db-witching-sites-in-the-shell/writing-390.png)

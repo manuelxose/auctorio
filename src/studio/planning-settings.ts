@@ -187,9 +187,9 @@ export async function putSitePlanningSettings(tenantId: string, siteId: string, 
   }
   const current = await getSitePlanningSettings(tenantId, siteId);
   const merged = { ...current, ...next };
-  await prisma.$transaction([
-    ...(next.timezone ? [prisma.site.update({ where: { id: siteId }, data: { timezone: next.timezone } })] : []),
-    prisma.sitePlanningSettings.upsert({
+  await prisma.$transaction(async (tx) => {
+    if (next.timezone) await tx.site.update({ where: { id: siteId }, data: { timezone: next.timezone } });
+    await tx.sitePlanningSettings.upsert({
       where: { siteId },
       create: {
         tenantId,
@@ -202,16 +202,16 @@ export async function putSitePlanningSettings(tenantId: string, siteId: string, 
         articleTargets: merged.articleTargets ?? Prisma.DbNull,
       },
       update: {
-        articlesPerDay: merged.articlesPerDay,
-        weekdays: merged.weekdays as Prisma.InputJsonArray,
-        publishTimes: merged.publishTimes as Prisma.InputJsonArray,
-        channels: merged.channels as Prisma.InputJsonArray,
-        defaultPresetId: merged.defaultPresetId,
-        articleTargets: merged.articleTargets ?? Prisma.DbNull,
+        articlesPerDay: next.articlesPerDay,
+        weekdays: next.weekdays as Prisma.InputJsonArray | undefined,
+        publishTimes: next.publishTimes as Prisma.InputJsonArray | undefined,
+        channels: next.channels as Prisma.InputJsonArray | undefined,
+        defaultPresetId: next.defaultPresetId,
+        articleTargets: next.articleTargets === null ? Prisma.DbNull : next.articleTargets,
       },
-    }),
-  ]);
-  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "site.planning_settings_updated", entityType: "site", entityId: siteId, metadata: next as Prisma.InputJsonObject });
+    });
+    await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "site.planning_settings_updated", entityType: "site", entityId: siteId, metadata: next as Prisma.InputJsonObject }, tx);
+  });
   return getSitePlanningSettings(tenantId, siteId);
 }
 

@@ -4,6 +4,7 @@
 // (semantic HTML, inline brand colours, no JS) so publishers get the same block.
 
 import { load } from "cheerio";
+import type { ArticleSections } from "./structure";
 
 export type BrandOffer = { name: string; price: string; url: string };
 
@@ -122,9 +123,9 @@ export const hasContactCard = (brand: BrandSettings) => Boolean(brand.contactCar
 export const hasMapCard = (brand: BrandSettings) => Boolean(brand.mapCard.address);
 
 /** Writer guidance: the business facts, offers and CTA wording. */
-export function renderBrandGuidance(brand: ResolvedBrand): string[] {
+export function renderBrandGuidance(brand: ResolvedBrand, sections: Pick<ArticleSections, "linkCard" | "promo"> | null = { linkCard: true, promo: true }): string[] {
   const lines = [brand.domain ? `Site name: ${brand.siteName} — domain: ${brand.domain} — home URL (allowed link): ${brand.homeUrl}` : `Site name: ${brand.siteName}`];
-  if (brand.positioning) lines.push(`Brand positioning (use it for the intro's value proposition and the promo block): ${brand.positioning}`);
+  if (brand.positioning) lines.push(`Brand positioning: ${brand.positioning}`);
   if (brand.audience.length) lines.push(`Target audience: ${brand.audience.join("; ")}`);
   const place = [brand.location.cities.join(", "), brand.location.country].filter(Boolean).join(" — ");
   if (place) lines.push(`Business location: ${place}`);
@@ -133,8 +134,8 @@ export function renderBrandGuidance(brand: ResolvedBrand): string[] {
   }
   if (brand.blogPath) lines.push(`The site's blog lives under ${brand.blogPath}.`);
   const card = brand.linkCard;
-  if (card.headline || card.text) lines.push(`Link card wording (use verbatim): headline «${card.headline || "(write one)"}», sentence «${card.text || "(write one)"}».`);
-  if (brand.promo) lines.push(`The brand promo block must convey: ${brand.promo}`);
+  if (sections?.linkCard && (card.headline || card.text)) lines.push(`Link card wording (use verbatim): headline «${card.headline || "(write one)"}», sentence «${card.text || "(write one)"}».`);
+  if (sections?.promo && brand.promo) lines.push(`The brand promo block must convey: ${brand.promo}`);
   return lines;
 }
 
