@@ -28,3 +28,7 @@ Playwright verificó la separación de borradores y la persistencia de reglas al
 ## Automatización
 
 Chrome comprobó la selección pendiente de modo, su persistencia tras guardar, la pausa conservada y la coincidencia del estado confirmado en Inicio y Calendario. Modo y ritmo mantuvo el ancho de la ventana a 1440 y 390 px. [Automatización · 1440 px](../../test-results/studio-automation/studio-integration-accepta-61da5--Settings-Home-and-Calendar/automation-1440.png) · [Automatización · 390 px](../../test-results/studio-automation/studio-integration-accepta-61da5--Settings-Home-and-Calendar/automation-390.png)
+
+## Conexiones
+
+Chrome comprobó el estado de verificación, la confirmación para desconectar, la persistencia al recargar y el acceso al asistente de recuperación. La vista se mantuvo dentro de la ventana a 1440 y 390 px. [Conexiones · 1440 px](../../test-results/studio-connections/studio-integration-accepta-264f4-website-without-deleting-it/connections-1440.png) · [Conexiones · 390 px](../../test-results/studio-connections/studio-integration-accepta-264f4-website-without-deleting-it/connections-390.png)

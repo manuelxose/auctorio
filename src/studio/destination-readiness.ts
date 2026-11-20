@@ -138,18 +138,21 @@ export async function loadWebsiteDestinations(tenantId: string) {
   const prisma = getPrismaClient();
   const [rows, sites] = await Promise.all([
     prisma.connectorInstallation.findMany({
-      where: { tenantId, kind: "website", state: "active" },
+      where: { tenantId, kind: "website", state: { in: ["active", "disabled"] } },
       orderBy: { activatedAt: "desc" },
       select: {
         id: true, displayName: true, verifiedAt: true, lastError: true, siteId: true,
-        config: true, capabilities: true, credentialsRef: true, credentialsCiphertext: true,
+        config: true, capabilities: true, credentialsRef: true, credentialsCiphertext: true, state: true,
       },
     }),
     prisma.site.findMany({ where: { tenantId }, select: { id: true, name: true, baseUrl: true, publishingCredentialsRef: true } }),
   ]);
-  const resolved = rows.map((row) => ({
+  const resolveSiteId = (row: { siteId: string | null; config: unknown }) =>
+    row.siteId ?? resolveSiteIdByOrigin((row.config as { baseUrl?: unknown } | null)?.baseUrl, sites);
+  const disabledSiteIds = new Set(rows.filter((row) => row.state === "disabled").map(resolveSiteId));
+  const resolved = rows.filter((row) => row.state === "active").map((row) => ({
     ...row,
-    siteId: row.siteId ?? resolveSiteIdByOrigin((row.config as { baseUrl?: unknown } | null)?.baseUrl, sites),
+    siteId: resolveSiteId(row),
   }));
   const siteIds = [...new Set(resolved.map((r) => r.siteId).filter((s): s is string => !!s))];
   const published = siteIds.length
@@ -161,7 +164,7 @@ export async function loadWebsiteDestinations(tenantId: string) {
     : [];
   const lastBySite = new Map(published.map((p) => [p.siteId, p._max.publishedAt]));
   const legacy = sites
-    .filter((site) => !siteIds.includes(site.id) && site.publishingCredentialsRef && getEnv(site.publishingCredentialsRef, "").trim())
+    .filter((site) => !siteIds.includes(site.id) && !disabledSiteIds.has(site.id) && site.publishingCredentialsRef && getEnv(site.publishingCredentialsRef, "").trim())
     .map(legacySiteToConnection);
   return [...legacy, ...resolved.map((row) =>
     installationToConnection({

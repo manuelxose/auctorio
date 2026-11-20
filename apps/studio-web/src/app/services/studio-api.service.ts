@@ -1129,6 +1129,10 @@ export class StudioApiService {
     let params = new HttpParams().set('page', filters.page ?? 1).set('pageSize', filters.pageSize ?? 20);
     if (filters.status) {
       params = params.set('status', filters.status);
+  disconnectConnectorInstallation(id: string): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/disconnect`, {});
+  }
+
     }
     if (filters.type) {
       params = params.set('type', filters.type);

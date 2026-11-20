@@ -35,3 +35,14 @@ El caso de producción guardó ajustes por API, comprobó la convivencia con una
 La API verificó inicialización concurrente, aislamiento entre sitios y tenants, Manual deshabilitado, pausa persistente, bloqueo y rearme del circuito. Los casos de franjas cubrieron un día de 23 horas y varias ventanas. El navegador comprobó que un modo sin guardar conserva el estado confirmado y que el cambio confirmado se refleja en Inicio y Calendario.
 
 En la pasada final, backend tardó 22,3 s, Playwright 29,8 s con un trabajador y la compilación Angular 33,0 s. Dos agentes participaron en implementación y revisión.
+
+## Fase C · Conexiones
+
+| Comprobación | Resultado |
+| --- | --- |
+| `npm run typecheck` y `npm run build:studio` | Aprobados. |
+| `rtk bypass node --env-file=.env --require ts-node/register/transpile-only --test tests/connector-routes.test.ts tests/connector-registry.test.ts tests/connection-discovery.test.ts tests/destination-readiness.test.ts tests/social-connections.test.ts tests/social-connections-routes.test.ts tests/worker-publishing.test.ts tests/studio-routes.test.ts` | 77 aprobadas en PostgreSQL local con `DATAFORSEO_LOGIN` vacío. |
+| `npx ng test --watch=false --browsers=ChromeHeadless --include=src/app/pages/connections-page.component.spec.ts` | 2 aprobadas desde `apps/studio-web`. |
+| `rtk bypass node --env-file=.env node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --output test-results/studio-connections e2e/specs/studio-integration-acceptance.spec.ts` | 11 aprobadas con un workspace temporal, SSR en `127.0.0.1:4422` y API en `127.0.0.1:4311`. |
+
+Se comprobó el aislamiento entre tenants, la respuesta sin secretos, la nueva verificación tras el cambio de credenciales, la actualización del adaptador y el bloqueo de entregas tras desconectar. Queda pendiente una prueba con credenciales reales para OAuth social y publicación externa.

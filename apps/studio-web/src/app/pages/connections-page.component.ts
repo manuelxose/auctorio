@@ -1,7 +1,9 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
-import { Component, OnInit, PLATFORM_ID, inject } from '@angular/core';
+import { Component, DestroyRef, OnInit, PLATFORM_ID, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { catchError, filter, forkJoin, of, switchMap, take, timeout, timer, type Observable } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ConfirmService } from '../services/confirm.service';
@@ -48,7 +50,8 @@ type ConnectionRow = {
         </div>
       </header>
 
-      <app-connect-box title="Connect a site or account"></app-connect-box>
+      <app-connect-box *ngIf="canManage" title="Connect a site or account"></app-connect-box>
+      <div class="au-banner" *ngIf="!canManage">You need integrations.manage to manage connections.</div>
 
       <div class="au-banner au-banner--error" *ngIf="loadError">
         <app-icon name="warning"></app-icon>
@@ -103,7 +106,7 @@ type ConnectionRow = {
         title="No destinations yet"
         text="Connect a website, X or Instagram destination to start publishing."
       >
-        <a class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">Connect destination</a>
+        <a *ngIf="canManage" class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">Connect destination</a>
       </app-empty-state>
 
       <div class="au-empty-note" *ngIf="!loading && !loadError && rows.length > 0 && filteredRows.length === 0">
@@ -138,24 +141,27 @@ type ConnectionRow = {
               <td data-label="Type">{{ kindLabel(row.kind) }}</td>
               <td data-label="Site">{{ row.siteName || 'Workspace default' }}</td>
               <td data-label="Status">
-                <span class="au-badge" [class]="badgeClass(row)">
-                  {{ stateLabel(row) }}
-                </span>
+                <span class="au-badge" [class]="badgeClass(row)">{{ stateLabel(row) }}</span>
+                <div *ngIf="row.installation">Lifecycle: {{ row.installation.state }}<span *ngIf="row.installation.kind === 'website'"> · Verification: {{ row.installation.verificationStage || 'unknown' }}</span></div>
+                <div *ngIf="row.installation">{{ row.installation.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}</div>
+                <div *ngIf="row.website">{{ row.website.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}</div>
+                <div *ngIf="row.lastError">{{ row.lastError }}</div>
+                <div *ngIf="row.social">{{ row.social.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}<span *ngIf="row.social.connectionState === 'permissions_required'"> · Permissions required</span></div>
               </td>
               <td data-label="Last checked">
                 {{ row.verifiedAt ? (row.verifiedAt | date: 'medium') : 'Not checked yet' }}
               </td>
               <td class="au-table__actions">
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website" (click)="verifyLegacy(row.website)" [disabled]="busyId === row.id">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.website" (click)="verifyLegacy(row.website)" [disabled]="busyId === row.id">
                   Test
                 </button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.social" (click)="verifySocial(row.social)" [disabled]="busyId === row.id">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.social" (click)="verifySocial(row.social)" [disabled]="busyId === row.id">
                   Test
                 </button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.installation && resumable(row.installation)" (click)="resume(row.installation)">
-                  {{ row.installation.state === 'ready' ? 'Activate' : row.installation.state === 'active' ? 'Verify' : 'Resume' }}
-                </button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="row.website || row.social || (row.installation && !isActive(row.installation))" (click)="remove(row)" [disabled]="busyId === row.id" [attr.aria-label]="'Remove ' + row.displayName">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation?.kind === 'website' && row.installation?.state === 'active' && row.installation?.hasCredentials" (click)="verifyWebsite(row.installation!)" [disabled]="busyId === row.id">Test website</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.social && row.social.connectionState !== 'connected'" (click)="reconnect(row.social)" [disabled]="busyId === row.id">Reconnect</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation && resumable(row.installation)" (click)="resume(row.installation)">Open setup</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && (row.website || row.social || (row.installation && row.installation.state !== 'disabled' && (row.installation.kind === 'website' || !isActive(row.installation))))" (click)="remove(row)" [disabled]="busyId === row.id" [attr.aria-label]="(row.installation?.state === 'active' ? 'Disconnect ' : 'Remove ') + row.displayName">
                   <app-icon name="trash"></app-icon>
                 </button>
               </td>
@@ -169,6 +175,7 @@ type ConnectionRow = {
 export class ConnectionsPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
@@ -184,6 +191,9 @@ export class ConnectionsPageComponent implements OnInit {
   ];
 
   activeTab: TabId = 'all';
+  get canManage(): boolean { return this.appContext.permissions().includes('integrations.manage'); }
+  private loadVersion = 0;
+
   search = '';
   loading = true;
   loadError = '';
@@ -229,54 +239,39 @@ export class ConnectionsPageComponent implements OnInit {
   load(): void {
     this.loading = true;
     this.loadError = '';
-    this.api.listSocialConnections().subscribe({
-      next: (response) => {
-        this.socialConnections = response.items.filter((item) => item.platform === 'x' || item.platform === 'instagram');
-        this.rebuildRows();
-        this.loading = false;
-      },
-      error: () => {
-        this.loading = false;
-        this.loadError = 'Connections could not be loaded. Try again.';
-      },
-    });
-    this.api.listPublishingAccounts().subscribe({
-      next: (response) => {
-        this.websiteAccounts = response.items.filter((item) => !this.socialConnections.some((social) => social.id === item.id));
-        this.rebuildRows();
-      },
-      error: () => undefined,
-    });
-    this.api.listConnectorInstallations().subscribe({
-      next: (response) => {
-        this.installations = response.items;
-        this.rebuildRows();
-      },
-      error: () => undefined,
-    });
-    this.api.getSocialSetup().subscribe({
-      next: (setup) => {
-        this.setup = setup;
-      },
-      error: () => {
-        this.setup = null;
-      },
+    const version = ++this.loadVersion;
+    forkJoin({
+      social: this.api.listSocialConnections().pipe(catchError(() => of(null))),
+      accounts: this.api.listPublishingAccounts().pipe(catchError(() => of(null))),
+      installations: this.api.listConnectorInstallations().pipe(catchError(() => of(null))),
+      setup: this.api.getSocialSetup().pipe(catchError(() => of(null))),
+    }).subscribe(({ social, accounts, installations, setup }) => {
+      if (version !== this.loadVersion) return;
+      this.socialConnections = social?.items.filter((item) => ['x', 'instagram', 'facebook'].includes(item.platform)) ?? [];
+      this.websiteAccounts = accounts?.items ?? [];
+      this.installations = installations?.items ?? [];
+      this.setup = setup;
+      const failed = [!social && 'social connections', !accounts && 'publishing accounts', !installations && 'installations', !setup && 'social setup'].filter(Boolean);
+      this.loadError = failed.length ? `Could not load: ${failed.join(', ')}. Other results are shown below.` : '';
+      this.loading = false;
+      this.rebuildRows();
     });
   }
 
   private rebuildRows(): void {
     const merged = new Map<string, ConnectionRow>();
     // An installation is the canonical record: hide a legacy website account of the same site.
-    const covered = new Set(this.installations.filter((i) => i.kind === 'website' && i.state === 'active' && i.siteId).map((i) => i.siteId));
+    const covered = new Set(this.installations.filter((i) => i.kind === 'website' && (i.state === 'active' || i.state === 'disabled') && i.siteId).map((i) => i.siteId));
     for (const account of this.websiteAccounts) {
       if (account.platform === 'website' && account.site?.id && covered.has(account.site.id)) continue;
+      if (this.socialConnections.some((social) => social.id === account.id)) continue;
       merged.set(`website:${account.id}`, {
         id: account.id,
-        kind: account.platform === 'x' ? 'x' : account.platform === 'instagram' ? 'instagram' : 'website',
+        kind: account.platform,
         provider: account.provider || 'legacy',
         displayName: account.displayName,
-        state: !account.enabled ? 'disabled' : account.status === 'active' ? 'connected' : account.status === 'error' ? 'error' : account.status,
-        needsAttention: !account.enabled || account.status === 'error',
+        state: !account.enabled ? 'disabled' : account.status === 'active' ? (account.lastVerifiedAt ? 'connected' : 'not_verified') : account.status === 'error' ? 'error' : account.status,
+        needsAttention: !account.enabled || account.status === 'error' || (account.status === 'active' && !account.lastVerifiedAt),
         lastError: null,
         verifiedAt: account.lastVerifiedAt,
         activatedAt: account.connectedAt ?? null,
@@ -301,13 +296,14 @@ export class ConnectionsPageComponent implements OnInit {
     }
     for (const installation of this.installations) {
       merged.set(`installation:${installation.id}`, {
+      if (installation.kind !== 'website' && installation.externalAccountId && this.socialConnections.some((social) => social.id === installation.externalAccountId)) continue;
         id: installation.id,
         kind: installation.kind,
         provider: installation.provider,
         displayName: installation.displayName ?? installation.provider,
         // Active alone is not proof: it must also carry a recorded verification and no last error.
         state: this.installationState(installation),
-        needsAttention: ['failed', 'expired', 'credentials_required', 'not_verified', 'error'].includes(this.installationState(installation)),
+        needsAttention: ['failed', 'expired', 'credentials_required', 'not_verified', 'error', 'stale', 'read_only', 'unconfigured', 'stored', 'authenticated'].includes(this.installationState(installation)),
         lastError: installation.lastError,
         verifiedAt: installation.verifiedAt,
         activatedAt: installation.activatedAt,
@@ -367,16 +363,18 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   mark(kind: string): string {
-    return kind === 'x' ? 'X' : kind === 'instagram' ? 'IG' : 'WEB';
+    return kind === 'x' ? 'X' : kind === 'instagram' ? 'IG' : kind === 'facebook' ? 'FB' : 'WEB';
   }
 
   kindLabel(kind: string): string {
-    return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : 'Website';
+    return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : kind === 'facebook' ? 'Facebook' : 'Website';
   }
 
   installationState(installation: ConnectorInstallation): string {
     if (installation.state !== 'active') return installation.state;
-    return installation.lastError ? 'error' : installation.verifiedAt ? 'active' : 'not_verified';
+    if (installation.lastError) return 'error';
+    if (installation.kind !== 'website') return installation.verifiedAt ? 'active' : 'not_verified';
+    return installation.verificationStage === 'ready' ? 'active' : installation.verificationStage || 'not_verified';
   }
 
   stateLabel(row: ConnectionRow): string {
@@ -384,6 +382,11 @@ export class ConnectionsPageComponent implements OnInit {
       case 'not_verified':
         return 'Not verified';
       case 'connected':
+      case 'unconfigured': return 'Not configured';
+      case 'stored': return 'Credentials stored';
+      case 'authenticated': return 'Authenticated';
+      case 'read_only': return 'Read-only access';
+      case 'stale': return 'Verification stale';
         return 'Connected';
       case 'active':
         return 'Active';
@@ -424,6 +427,11 @@ export class ConnectionsPageComponent implements OnInit {
       case 'ready':
       case 'not_verified':
       case 'verifying':
+      case 'unconfigured':
+      case 'stored':
+      case 'authenticated':
+      case 'read_only':
+      case 'stale':
       case 'discovering':
       case 'draft':
         return 'au-badge--warning';
@@ -440,7 +448,8 @@ export class ConnectionsPageComponent implements OnInit {
 
   resumable(installation: ConnectorInstallation): boolean {
     if (installation.state === 'active') return this.installationState(installation) !== 'active';
-    return ['draft', 'credentials_required', 'failed', 'ready', 'cancelled'].includes(installation.state);
+    if (installation.kind !== 'website' && installation.state === 'active') return false;
+    return ['draft', 'credentials_required', 'failed', 'ready', 'cancelled', 'disabled', 'expired'].includes(installation.state);
   }
 
   isActive(installation: ConnectorInstallation): boolean {
@@ -448,21 +457,27 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   resume(installation: ConnectorInstallation): void {
-    if (installation.state === 'ready') {
-      this.api.activateInstallation(installation.id).subscribe({
-        next: () => {
-          this.toast.success('Destination activated.');
-          this.load();
-        },
-        error: (err) => this.toast.error(err?.error?.error?.message || 'Activation failed.'),
-      });
+    if (!this.canManage) return;
+    if (installation.kind === 'website' && installation.state === 'disabled') {
+      const target = this.appContext.sites().find((site) => site.id === installation.siteId)?.baseUrl;
+      void this.router.navigate(['/studio/connections/wizard'], { queryParams: target ? { target } : {} });
       return;
     }
     void this.router.navigate(['/studio/connections/wizard', installation.id]);
   }
 
   verifySocial(connection: SocialConnection): void {
+  reconnect(connection: SocialConnection): void {
+    if (!this.canManage || !this.isBrowser) return;
     this.busyId = connection.id;
+    this.api.reconnectSocialConnection(connection.id).subscribe({
+      next: (session) => { this.busyId = ''; window.location.assign(session.url); },
+      error: (error) => { this.busyId = ''; this.toast.error(error?.error?.message || 'Could not reconnect.'); },
+    });
+  }
+
+    this.busyId = connection.id;
+    if (!this.canManage) return;
     this.api.verifySocialConnection(connection.id).subscribe({
       next: (result) => {
         this.busyId = '';
@@ -482,6 +497,7 @@ export class ConnectionsPageComponent implements OnInit {
 
   verifyLegacy(account: PublishingAccount): void {
     this.busyId = account.id;
+    if (!this.canManage) return;
     this.api.verifyPublishingAccount(account.id).subscribe({
       next: (result) => {
         this.busyId = '';
@@ -501,14 +517,19 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   async remove(row: ConnectionRow): Promise<void> {
-    const label = row.kind === 'website' ? 'website destination' : 'social connection';
+    if (!this.canManage) return;
+    const activeWebsite = row.installation?.kind === 'website' && row.installation.state === 'active';
+    const action = activeWebsite ? 'Disconnect' : 'Remove';
+    const siteId = this.appContext.activeSite()?.id;
     const confirmed = await this.confirm.confirm({
-      title: `Remove ${row.displayName}?`,
-      message: `Existing publication history will remain. Publishing to this ${label} stops immediately.`,
-      confirmLabel: 'Remove',
+      title: `${action} ${row.displayName}?`,
+      message: activeWebsite ? 'New deliveries to this website will be blocked. Publication history stays available.'
+        : row.website ? 'Remove this account record? Other destination credentials may still be configured.'
+        : 'Publication history stays available.',
+      confirmLabel: action,
       danger: true,
     });
-    if (!confirmed) {
+    if (!confirmed || !this.canManage || siteId !== this.appContext.activeSite()?.id) {
       return;
     }
     this.busyId = row.id;
@@ -537,10 +558,11 @@ export class ConnectionsPageComponent implements OnInit {
         },
       });
     } else if (row.installation) {
-      this.api.deleteConnectorInstallation(row.installation.id).subscribe({
+      const request: Observable<unknown> = activeWebsite ? this.api.disconnectConnectorInstallation(row.installation.id) : this.api.deleteConnectorInstallation(row.installation.id);
+      request.subscribe({
         next: () => {
           this.busyId = '';
-          this.toast.success('Draft removed.');
+          this.toast.success(activeWebsite ? 'Connection disconnected.' : 'Draft removed.');
           this.load();
         },
         error: (err) => {
@@ -551,3 +573,28 @@ export class ConnectionsPageComponent implements OnInit {
     }
   }
 }
+
+  verifyWebsite(installation: ConnectorInstallation): void {
+    if (!this.canManage || this.busyId) return;
+    this.busyId = installation.id;
+    this.api.startInstallationVerification(installation.id).pipe(
+      switchMap(({ operationId }) => timer(0, 2000).pipe(
+        switchMap(() => this.api.getOperation(operationId)),
+        filter((operation) => ['succeeded', 'failed', 'cancelled'].includes(operation.status)),
+        take(1),
+        timeout(120_000),
+      )),
+      takeUntilDestroyed(this.destroyRef),
+    ).subscribe({
+      next: (operation) => {
+        this.busyId = '';
+        if (operation.status === 'succeeded') this.toast.success('Website verified.');
+        else this.toast.error('The website did not pass its latest check.');
+        this.load();
+      },
+      error: () => {
+        this.busyId = '';
+        this.toast.error('No verification result yet. Check Background jobs or try again.');
+      },
+    });
+  }

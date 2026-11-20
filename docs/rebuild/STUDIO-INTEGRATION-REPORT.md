@@ -30,3 +30,11 @@ Guardar el modo conserva una pausa. Manual desactiva la automatización. Un circ
 Los huecos de política respetan la zona horaria, los días y varias ventanas. La previsión social aplica los cupos y ventanas de cada canal. El planificador comprueba los límites del sitio antes de crear publicaciones automáticas y deja la pieza pendiente si no encuentra una franja válida. Los huecos de previsión y las publicaciones efectivamente programadas se muestran en sus pantallas respectivas.
 
 La recuperación respeta el estado pausado y el circuito. El resultado distingue una publicación previa de una pieza sin franja disponible. La prueba local cubrió ambas situaciones con registros temporales.
+
+## Fase C · Conexiones (§7.4)
+
+Conexiones reúne destinos web e identidades sociales en una sola vista. Distingue el estado de la instalación, la presencia de credenciales y la verificación vigente. La interfaz muestra los errores por fuente, aplica los permisos de gestión y enlaza la recuperación de instalaciones con el asistente.
+
+La comprobación de un destino activo registra su resultado sin sacarlo de servicio. Reemplazar las credenciales de una instalación pendiente exige verificar de nuevo antes de activarla. Al sustituir un conector REST genérico, la activación actualiza el adaptador del sitio en la misma transacción.
+
+Desconectar un sitio conserva su historial y bloquea nuevas entregas, incluidas las que estaban en cola y las que podían recurrir a una credencial heredada. Las llamadas al proveedor ya iniciadas pueden finalizar. Las respuestas de instalaciones omiten credenciales y detalles internos de los errores. La verificación local utilizó proveedores simulados.

@@ -1671,6 +1671,7 @@ export type ConnectorInstallation = {
   activatedAt: string | null;
   version: number;
   createdAt: string;
+  verificationStage?: NonNullable<StudioOverview['connections'][number]['stage']>;
   updatedAt: string;
 };
 
