@@ -25,3 +25,5 @@ Un miembro activo recibe la unión de permisos de sus roles. La API consulta de 
 ## Evidencia y pendientes
 
 `tests/studio-access-mutations.test.ts` comprueba denegaciones por delegación y tenant, roles inmutables, autosuspensión, último Owner, concurrencia y reducción o revocación. `tests/studio-ssr.test.ts` comprueba que el proxy propaga permisos vigentes y rechaza sesiones revocadas. Playwright verificó que una suspensión desde Personas revocó una sesión abierta de Editor. La validación de todos los caminos de aprovisionamiento OIDC, límites de plataforma, migraciones heredadas, entrega SMTP y revisión de acceso a credenciales debe completarse antes del lanzamiento.
+
+En Automatización, la matriz de API confirma que editar, pausar, reanudar y recuperar requieren `workspace.manage`. Las rutas rechazan sitios de otro tenant. Un circuito abierto devuelve HTTP 409 al intentar reanudar o activar la autopublicación.

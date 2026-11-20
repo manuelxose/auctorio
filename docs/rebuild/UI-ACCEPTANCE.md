@@ -24,3 +24,7 @@ Las capturas son resultados locales regenerables de Playwright. Las imágenes ad
 ## Escritura
 
 Playwright verificó la separación de borradores y la persistencia de reglas al cambiar de sitio desde el shell. La página mantuvo el ancho de la ventana a 1440 y 390 px. [Escritura · 1440 px](../../test-results/studio-writing/studio-integration-accepta-bd8db-witching-sites-in-the-shell/writing-1440.png) · [Escritura · 390 px](../../test-results/studio-writing/studio-integration-accepta-bd8db-witching-sites-in-the-shell/writing-390.png)
+
+## Automatización
+
+Chrome comprobó la selección pendiente de modo, su persistencia tras guardar, la pausa conservada y la coincidencia del estado confirmado en Inicio y Calendario. Modo y ritmo mantuvo el ancho de la ventana a 1440 y 390 px. [Automatización · 1440 px](../../test-results/studio-automation/studio-integration-accepta-61da5--Settings-Home-and-Calendar/automation-1440.png) · [Automatización · 390 px](../../test-results/studio-automation/studio-integration-accepta-61da5--Settings-Home-and-Calendar/automation-390.png)

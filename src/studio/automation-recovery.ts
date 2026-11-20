@@ -117,6 +117,10 @@ export async function recoverStuckAutoProjects(input: RecoveryInput): Promise<Re
       pushItem(report, project.id, "skip", `mode_${mode}`);
       continue;
     }
+    if (policy.circuitOpen || !policy.enabled || policy.state !== "active") {
+      pushItem(report, project.id, "skip", policy.circuitOpen ? "circuit_open" : "automation_inactive");
+      continue;
+    }
     report.eligible += 1;
 
     const latestVersion = project.versions[0] ?? null;
@@ -176,13 +180,15 @@ export async function recoverStuckAutoProjects(input: RecoveryInput): Promise<Re
       }
 
       if (project.status === "approved") {
+        if (!policy.autoSchedule) {
+          pushItem(report, project.id, "skip", "scheduling_disabled");
+          continue;
+        }
         if (dryRun) {
           pushItem(report, project.id, "schedule", "dry_run", "would create missing publications");
           continue;
         }
-        const created = await ensureAutoPublications(policy, project.tenantId, project.id, latestVersion.id);
-        report.acted += 1;
-        pushItem(report, project.id, "schedule", created > 0 ? `created_${created}` : "already_scheduled");
+        await scheduleRecoveredPublication(report, project.tenantId, project.id, latestVersion.id, policy);
       }
     } catch (error) {
       pushItem(report, project.id, "skip", "error", error instanceof Error ? error.message : String(error));
@@ -219,10 +225,19 @@ async function approveAndSchedule(
     pushItem(report, project.id, "approve", "approved");
   }
   if (policy.autoSchedule) {
-    const created = await ensureAutoPublications(policy, tenantId, project.id, versionId);
-    report.acted += 1;
-    pushItem(report, project.id, "schedule", created > 0 ? `created_${created}` : "already_scheduled");
+    await scheduleRecoveredPublication(report, tenantId, project.id, versionId, policy);
   }
+}
+
+async function scheduleRecoveredPublication(
+  report: RecoveryReport, tenantId: string, projectId: string, versionId: string, policy: AutomationPolicy,
+): Promise<void> {
+  const created = await ensureAutoPublications(policy, tenantId, projectId, versionId);
+  report.acted += created;
+  const exists = created === 0 && await prisma.publication.count({
+    where: { tenantId, projectId, versionId, channel: "website", status: { not: "deleted" } },
+  }) > 0;
+  pushItem(report, projectId, "schedule", created > 0 ? `created_${created}` : exists ? "already_scheduled" : "no_available_window");
 }
 
 type RecoveryPublication = Pick<Publication, "id" | "status" | "failureClass" | "failureReason" | "retryCount">;

@@ -1,6 +1,6 @@
 # Preparación de lanzamiento
 
-**NO-GO para producción.** El incremento cuenta con 65 pruebas dirigidas aprobadas. Falta la cobertura necesaria para aceptar la reconstrucción completa de Studio.
+**NO-GO para producción.** Las pruebas dirigidas cubren los incrementos de Settings, Escritura y Automatización. Falta la cobertura necesaria para aceptar la reconstrucción completa de Studio.
 
 ## Migración y configuración
 

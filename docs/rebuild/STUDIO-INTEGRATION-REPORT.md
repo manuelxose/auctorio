@@ -20,3 +20,13 @@ El commit `3f9ab7a` contiene el incremento de API, sesión y pruebas de segurida
 El formulario sigue el sitio activo. Mantiene separados los borradores de cada sitio mientras la página está abierta y descarta las respuestas de carga obsoletas. La escritura de planificación actualiza solo los campos enviados y registra la auditoría en la misma transacción.
 
 Los valores guardados llegan al redactor y a QA. El rango explícito de un artículo planificado tiene prioridad sobre el valor del sitio y se conserva para la reevaluación tras las imágenes. Las guías respetan las opciones de resumen, tarjetas, enlaces y FAQ según su plantilla. Las reglas, el aviso, el contexto de marca y la longitud se transmiten a la generación. La prueba de producción comprobó que guardar los ajustes conserva intactas las versiones anteriores.
+
+## Fase C · Automatización y publicación (§7.3)
+
+Modo y ritmo muestra el modo confirmado, la selección pendiente, la cadencia y las ventanas. Los controles avanzados agrupan QA, recuperación y seguridad. Inicio y Calendario muestran el modo y el estado de ejecución que devuelve la política del sitio.
+
+Guardar el modo conserva una pausa. Manual desactiva la automatización. Un circuito abierto bloquea reanudación y autopublicación. Tras cerrarse el circuito, reanudar restaura las capacidades de Autopilot y conserva el límite de reparaciones. Los endpoints comprueban que el sitio pertenece al workspace.
+
+Los huecos de política respetan la zona horaria, los días y varias ventanas. La previsión social aplica los cupos y ventanas de cada canal. El planificador comprueba los límites del sitio antes de crear publicaciones automáticas y deja la pieza pendiente si no encuentra una franja válida. Los huecos de previsión y las publicaciones efectivamente programadas se muestran en sus pantallas respectivas.
+
+La recuperación respeta el estado pausado y el circuito. El resultado distingue una publicación previa de una pieza sin franja disponible. La prueba local cubrió ambas situaciones con registros temporales.
