@@ -10,7 +10,7 @@ import {
   countChannelPublicationsToday,
   generateEditorialSlots,
   getOrCreatePolicy,
-  isDayActive,
+  nextPolicyDay,
   startOfLocalDay,
 } from "./automation";
 import { countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
@@ -655,13 +655,15 @@ export async function ensureAutoPublications(
   });
   if (existing) return 0;
 
+  const scheduledFor = await nextFreeSlot(policy, tenantId, startOfLocalDay(policy));
+  if (!scheduledFor) return 0;
   await createPublication({
     tenantId,
     projectId,
     versionId,
     channel: "website",
     siteId: policy.siteId,
-    scheduledFor: await nextFreeSlot(policy, tenantId, startOfLocalDay(policy)),
+    scheduledFor,
   });
   return 1;
 }
@@ -670,16 +672,14 @@ async function nextFreeSlot(
   policy: AutomationPolicy,
   tenantId: string,
   dayStart: Date,
-): Promise<Date> {
+): Promise<Date | null> {
   const now = new Date();
   const minimumSpacingMs = Math.max(15, policy.minimumMinutesBetweenArticles) * 60_000;
 
-  for (let dayOffset = 0; dayOffset < 3; dayOffset += 1) {
-    const day = new Date(dayStart.getTime() + dayOffset * 24 * 3_600_000);
-    if (!isDayActive(policy, day)) {
-      continue;
-    }
+  let day = dayStart;
+  for (let dayOffset = 0; dayOffset < 8; dayOffset += 1, day = nextPolicyDay(policy, day)) {
     const slots = generateEditorialSlots(policy, day).filter((slot) => slot.channel === "website");
+    if (!slots.length || await countChannelPublicationsToday(tenantId, "website", day, nextPolicyDay(policy, day), policy.siteId) >= policy.maxArticlesPerDay) continue;
     for (const slot of slots) {
       if (slot.at.getTime() <= now.getTime() + 60_000) {
         continue;
@@ -687,6 +687,7 @@ async function nextFreeSlot(
       const conflicts = await prisma.publication.findFirst({
         where: {
           tenantId,
+          ...(policy.siteId ? { siteId: policy.siteId } : {}),
           channel: "website",
           status: { in: ["scheduled", "queued", "publishing"] },
           scheduledFor: {
@@ -702,8 +703,7 @@ async function nextFreeSlot(
     }
   }
 
-  // Fallback: keep planning running even when windows are exhausted.
-  return new Date(now.getTime() + 10 * 60_000);
+  return null;
 }
 
 const PLAN_ITEMS_PER_TICK = 3;
@@ -789,9 +789,9 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
 
     // Safety limits.
     const dayStart = startOfLocalDay(policy);
-    const websitePlanned = await countChannelPublicationsToday(tenantId, "website", dayStart);
+    const websitePlanned = await countChannelPublicationsToday(tenantId, "website", dayStart, nextPolicyDay(policy, dayStart), policy.siteId);
     const pendingQueue = await prisma.publication.count({
-      where: { tenantId, channel: "website", status: { in: ["draft", "ready", "scheduled"] } },
+      where: { tenantId, ...(policy.siteId ? { siteId: policy.siteId } : {}), channel: "website", status: { in: ["draft", "ready", "scheduled"] } },
     });
 
     result.planItemsStarted += await progressDuePlanItems(policy);

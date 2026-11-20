@@ -69,6 +69,7 @@ import {
   updatePolicy,
   type UpdatePolicyInput,
 } from "./automation";
+import { normalizeAutomationMode } from "./automation-mode";
 import {
   appendSocialSlide,
   createSocialGenerationJobs,
@@ -1464,9 +1465,24 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!context) {
       return;
     }
-    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    const siteId = await automationSiteId(context.tenantId, (request.query as { siteId?: string }).siteId, reply);
+    if (siteId === undefined) return;
     const policy = await getOrCreatePolicy(context.tenantId, siteId);
-    return reply.send(policy);
+    return reply.send({ ...policy, mode: normalizeAutomationMode(policy.mode, policy) });
+  async function automationSiteId(tenantId: string, value: unknown, reply: FastifyReply): Promise<string | null | undefined> {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "string" || !isUuid(value.trim())) {
+      badRequest(reply, "invalid site id");
+      return;
+    }
+    const site = await prisma.site.findFirst({ where: { id: value.trim(), tenantId }, select: { id: true } });
+    if (!site) {
+      notFound(reply, "site not found");
+      return;
+    }
+    return site.id;
+  }
+
   });
 
   fastify.patch("/v2/automation", async (request, reply) => {
@@ -1478,11 +1494,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     try {
       const policy = await updatePolicy(
         context.tenantId,
-        parseOptionalString(body.siteId) ?? null,
+        siteId,
         {
           enabled: body.enabled,
           timezone: body.timezone,
           articlesPerDay: body.articlesPerDay,
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
           maxArticlesPerDay: body.maxArticlesPerDay,
           xPostsPerDay: body.xPostsPerDay,
           instagramPostsPerDay: body.instagramPostsPerDay,
@@ -1524,8 +1542,12 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const context = await requireStudioContext(request, reply);
     if (!context) {
       return;
+      if (error instanceof Error && error.message === "publication_circuit_open") {
+        return reply.code(409).send({ error: "conflict", message: error.message });
+      }
     }
-    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    const siteId = await automationSiteId(context.tenantId, (request.query as { siteId?: string }).siteId, reply);
+    if (siteId === undefined) return;
     return reply.send(await getAutomationStatus(context.tenantId, siteId));
   });
 
@@ -1537,12 +1559,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const body = parseBody<{ siteId?: string; reason?: string }>(request);
     const policy = await pauseAutomation(
       context.tenantId,
-      parseOptionalString(body.siteId) ?? null,
+      siteId,
       parseOptionalString(body.reason) ?? "paused_manually",
       context.userId,
     );
     return reply.send(policy);
   });
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
 
   fastify.post("/v2/automation/resume", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "workspace.manage");
@@ -1550,8 +1574,16 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const body = parseBody<{ siteId?: string }>(request);
-    const policy = await resumeAutomation(context.tenantId, parseOptionalString(body.siteId) ?? null, context.userId);
-    return reply.send(policy);
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
+    try {
+      return reply.send(await resumeAutomation(context.tenantId, siteId, context.userId));
+    } catch (error) {
+      if (error instanceof Error && error.message === "publication_circuit_open") {
+        return reply.code(409).send({ error: "conflict", message: error.message });
+      }
+      throw error;
+    }
   });
 
   fastify.get("/v2/automation/health", async (request, reply) => {
@@ -1591,12 +1623,14 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const body = parseBody<{ siteId?: string; dryRun?: boolean; statuses?: string[] }>(request);
     const report = await recoverStuckAutoProjects({
       tenantId: context.tenantId,
-      siteId: parseOptionalString(body.siteId) ?? null,
+      siteId,
       dryRun: body.dryRun === true,
       statuses: Array.isArray(body.statuses) ? body.statuses : undefined,
     });
     return reply.send(report);
   });
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
 
   // ──────────────────────────────────────────────────────────── Editorial plans
 
@@ -2523,6 +2557,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
           website: weekPlanItems.filter((item) => item.channel === "website").length,
           x: weekPlanItems.filter((item) => item.channel === "x").length,
           instagram: weekPlanItems.filter((item) => item.channel === "instagram").length,
+        mode: automation.mode,
         },
       },
       recentPublications: recentPublications.map((publication) => ({

@@ -9,9 +9,11 @@ import {
   DEFAULT_AUTOMATION_MODE,
   isAutomationMode,
   MODE_FLAGS,
+  normalizeAutomationMode,
   type AutomationMode,
 } from "./automation-mode";
 import { notifyOperators } from "./notifications";
+import { localDateInZone, nextLocalDate, zonedTimeToUtc } from "./plan-slots";
 
 const prisma = getPrismaClient();
 
@@ -50,45 +52,51 @@ export async function getOrCreatePolicy(tenantId: string, siteId: string | null)
   if (existing) {
     return existing;
   }
-  return prisma.automationPolicy.create({
-    data: {
-      tenantId,
-      siteId,
-      enabled: AUTOMATION_DEFAULTS.enabled,
-      state: "active",
-      timezone: AUTOMATION_DEFAULTS.timezone,
-      articlesPerDay: AUTOMATION_DEFAULTS.articlesPerDay,
-      maxArticlesPerDay: AUTOMATION_DEFAULTS.maxArticlesPerDay,
-      xPostsPerDay: AUTOMATION_DEFAULTS.xPostsPerDay,
-      instagramPostsPerDay: AUTOMATION_DEFAULTS.instagramPostsPerDay,
-      minimumMinutesBetweenArticles: AUTOMATION_DEFAULTS.minimumMinutesBetweenArticles,
-      minimumStoryScore: AUTOMATION_DEFAULTS.minimumStoryScore,
-      maximumQueueSize: AUTOMATION_DEFAULTS.maximumQueueSize,
-      articlesPerHour: AUTOMATION_DEFAULTS.articlesPerHour,
-      socialPostsPerHour: AUTOMATION_DEFAULTS.socialPostsPerHour,
-      maximumDailySocial: AUTOMATION_DEFAULTS.maximumDailySocial,
-      socialTimingMinutesX: AUTOMATION_DEFAULTS.socialTimingMinutesX,
-      socialTimingMinutesInstagram: AUTOMATION_DEFAULTS.socialTimingMinutesInstagram,
-      imageRequired: AUTOMATION_DEFAULTS.imageRequired,
-      socialRequired: AUTOMATION_DEFAULTS.socialRequired,
-      autoGenerate: AUTOMATION_DEFAULTS.autoGenerate,
-      autoApprove: AUTOMATION_DEFAULTS.autoApprove,
-      autoSchedule: AUTOMATION_DEFAULTS.autoSchedule,
-      autoPublish: AUTOMATION_DEFAULTS.autoPublish,
-      mode: AUTOMATION_DEFAULTS.mode,
-      autoRepair: AUTOMATION_DEFAULTS.autoRepair,
-      maxRepairAttempts: AUTOMATION_DEFAULTS.maxRepairAttempts,
-      activeDaysOfWeek: [0, 1, 2, 3, 4, 5, 6] as unknown as Prisma.InputJsonValue,
-      publishingWindows: [
-        { channel: "website", days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "20:00" },
-        { channel: "x", days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "22:00" },
-        { channel: "instagram", days: [0, 1, 2, 3, 4, 5, 6], from: "09:00", to: "21:00" },
-      ] as unknown as Prisma.InputJsonValue,
-      categories: Prisma.JsonNull,
-      excludedCategories: Prisma.JsonNull,
-      priorityTopics: Prisma.JsonNull,
-      sourceSelectionRules: Prisma.JsonNull,
-    },
+  return prisma.$transaction(async (db) => {
+    // The workspace-wide policy has a nullable site id; a unique index alone cannot serialize its creation.
+    await db.$queryRaw`SELECT id FROM tenants WHERE id = ${tenantId}::uuid FOR NO KEY UPDATE`;
+    const initialized = await db.automationPolicy.findFirst({ where: { tenantId, siteId } });
+    if (initialized) return initialized;
+    return db.automationPolicy.create({
+      data: {
+        tenantId,
+        siteId,
+        enabled: AUTOMATION_DEFAULTS.enabled,
+        state: "active",
+        timezone: AUTOMATION_DEFAULTS.timezone,
+        articlesPerDay: AUTOMATION_DEFAULTS.articlesPerDay,
+        maxArticlesPerDay: AUTOMATION_DEFAULTS.maxArticlesPerDay,
+        xPostsPerDay: AUTOMATION_DEFAULTS.xPostsPerDay,
+        instagramPostsPerDay: AUTOMATION_DEFAULTS.instagramPostsPerDay,
+        minimumMinutesBetweenArticles: AUTOMATION_DEFAULTS.minimumMinutesBetweenArticles,
+        minimumStoryScore: AUTOMATION_DEFAULTS.minimumStoryScore,
+        maximumQueueSize: AUTOMATION_DEFAULTS.maximumQueueSize,
+        articlesPerHour: AUTOMATION_DEFAULTS.articlesPerHour,
+        socialPostsPerHour: AUTOMATION_DEFAULTS.socialPostsPerHour,
+        maximumDailySocial: AUTOMATION_DEFAULTS.maximumDailySocial,
+        socialTimingMinutesX: AUTOMATION_DEFAULTS.socialTimingMinutesX,
+        socialTimingMinutesInstagram: AUTOMATION_DEFAULTS.socialTimingMinutesInstagram,
+        imageRequired: AUTOMATION_DEFAULTS.imageRequired,
+        socialRequired: AUTOMATION_DEFAULTS.socialRequired,
+        autoGenerate: AUTOMATION_DEFAULTS.autoGenerate,
+        autoApprove: AUTOMATION_DEFAULTS.autoApprove,
+        autoSchedule: AUTOMATION_DEFAULTS.autoSchedule,
+        autoPublish: AUTOMATION_DEFAULTS.autoPublish,
+        mode: AUTOMATION_DEFAULTS.mode,
+        autoRepair: AUTOMATION_DEFAULTS.autoRepair,
+        maxRepairAttempts: AUTOMATION_DEFAULTS.maxRepairAttempts,
+        activeDaysOfWeek: [0, 1, 2, 3, 4, 5, 6] as unknown as Prisma.InputJsonValue,
+        publishingWindows: [
+          { channel: "website", days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "20:00" },
+          { channel: "x", days: [0, 1, 2, 3, 4, 5, 6], from: "08:00", to: "22:00" },
+          { channel: "instagram", days: [0, 1, 2, 3, 4, 5, 6], from: "09:00", to: "21:00" },
+        ] as unknown as Prisma.InputJsonValue,
+        categories: Prisma.JsonNull,
+        excludedCategories: Prisma.JsonNull,
+        priorityTopics: Prisma.JsonNull,
+        sourceSelectionRules: Prisma.JsonNull,
+      },
+    });
   });
 }
 
@@ -196,10 +204,31 @@ export async function updatePolicy(
   input: UpdatePolicyInput,
   actorUserId?: string | null,
 ): Promise<AutomationPolicy> {
-  const policy = await getOrCreatePolicy(tenantId, siteId);
+  if (input.mode !== undefined && !isAutomationMode(input.mode)) throw new Error("invalid_automation_mode");
+  if (input.timezone !== undefined) {
+    if (typeof input.timezone !== "string" || !input.timezone.trim()) throw new Error("invalid_automation_timezone");
+    try {
+      new Intl.DateTimeFormat("en", { timeZone: input.timezone });
+    } catch {
+      throw new Error("invalid_automation_timezone");
+    }
+  }
+  const validDays = (days: unknown): days is number[] => Array.isArray(days) &&
+    days.every((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+  if (input.activeDaysOfWeek !== undefined && !validDays(input.activeDaysOfWeek)) throw new Error("invalid_automation_days");
+  if (input.publishingWindows !== undefined && (!Array.isArray(input.publishingWindows) ||
+    input.publishingWindows.some((window) => {
+      if (!window || !["website", "x", "instagram", "facebook"].includes(window.channel) || !validDays(window.days)) return true;
+      const from = parseTimeMinutes(window.from);
+      const to = parseTimeMinutes(window.to);
+      return from === null || to === null || from >= to;
+    }))) throw new Error("invalid_automation_window");
   const resolved = resolveModeUpdate(input);
   const sanitized = sanitizePolicyInput(resolved);
   assertSafeAutomationPolicy(sanitized);
+  const policy = await getOrCreatePolicy(tenantId, siteId);
+  const requiresClosedCircuit = Boolean(sanitized.autoPublish || sanitized.state === "active");
+  if (requiresClosedCircuit && policy.circuitOpen) throw new Error("publication_circuit_open");
   const previous = {
     articlesPerDay: policy.articlesPerDay,
     xPostsPerDay: policy.xPostsPerDay,
@@ -211,14 +240,11 @@ export async function updatePolicy(
     autoRepair: policy.autoRepair,
   };
 
-  // Selecting autopilot atomically produces an internally consistent policy:
-  // enabled, active, all automation flags on. Never a partial state.
-  const modeApplied = sanitized.mode !== undefined && isAutomationMode(sanitized.mode);
   const updated = await prisma.automationPolicy.update({
-    where: { id: policy.id },
+    where: { id: policy.id, ...(requiresClosedCircuit ? { circuitOpen: false } : {}) },
     data: {
-      enabled: modeApplied ? true : sanitized.enabled,
-      state: modeApplied && sanitized.mode !== "manual" ? "active" : sanitized.state,
+      enabled: sanitized.enabled,
+      state: sanitized.state,
       pausedReason: sanitized.pausedReason === undefined ? undefined : sanitized.pausedReason,
       timezone: sanitized.timezone,
       articlesPerDay: sanitized.articlesPerDay,
@@ -252,6 +278,11 @@ export async function updatePolicy(
       sourceSelectionRules: sanitized.sourceSelectionRules === undefined ? undefined : sanitized.sourceSelectionRules ? (sanitized.sourceSelectionRules as Prisma.InputJsonObject) : Prisma.JsonNull,
       updatedByStudioUserId: actorUserId ?? null,
     },
+  }).catch((error: unknown) => {
+    if (requiresClosedCircuit && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2025") {
+      throw new Error("publication_circuit_open");
+    }
+    throw error;
   });
 
   await writeAudit({
@@ -282,7 +313,12 @@ export async function pauseAutomation(tenantId: string, siteId: string | null, r
 }
 
 export async function resumeAutomation(tenantId: string, siteId: string | null, actorUserId?: string | null) {
-  const policy = await updatePolicy(tenantId, siteId, { state: "active", pausedReason: null }, actorUserId);
+  const current = await getOrCreatePolicy(tenantId, siteId);
+  const mode = current.mode === "autopilot" && !current.autoPublish ? "autopilot" : undefined;
+  const policy = await updatePolicy(tenantId, siteId, {
+    state: "active", pausedReason: null,
+    ...(mode ? { mode, maxRepairAttempts: current.maxRepairAttempts } : {}),
+  }, actorUserId);
   await writeAudit({
     tenantId,
     action: "automation.resumed",
@@ -313,13 +349,9 @@ export function readPublishingWindows(policy: AutomationPolicy): PublishingWindo
     .filter((entry): entry is PublishingWindow => Boolean(entry && entry.from && entry.to && Array.isArray(entry.days)));
 }
 
-export function getChannelWindow(policy: AutomationPolicy, channel: string): PublishingWindow | null {
-  return readPublishingWindows(policy).find((window) => window.channel === channel) ?? null;
-}
-
 export function isDayActive(policy: AutomationPolicy, date: Date): boolean {
   const days = policy.activeDaysOfWeek;
-  const weekDay = date.getDay();
+  const weekDay = new Date(localDateInZone(date, policyTimezone(policy))).getUTCDay();
   if (Array.isArray(days)) {
     return days.map(Number).includes(weekDay);
   }
@@ -333,56 +365,71 @@ export type EditorialSlot = {
 };
 
 export function generateEditorialSlots(policy: AutomationPolicy, dayStart: Date): EditorialSlot[] {
+  if (!isDayActive(policy, dayStart)) return [];
+  const timezone = policyTimezone(policy);
+  const localDate = localDateInZone(dayStart, timezone);
+  const weekday = new Date(localDate).getUTCDay();
+  const windows = readPublishingWindows(policy).filter((window) => window.days.map(Number).includes(weekday));
+  const minutesIn = (channel: string) => {
+    const minutes = new Set<number>();
+    for (const window of windows.filter((entry) => entry.channel === channel)) {
+      const from = parseTimeMinutes(window.from);
+      const to = parseTimeMinutes(window.to);
+      if (from === null || to === null || to <= from) continue;
+      for (let minute = from; minute <= to; minute += 1) minutes.add(minute);
+    }
+    return minutes;
+  };
+  const website = [...minutesIn("website")].sort((a, b) => a - b);
+  const count = Math.max(0, Math.min(website.length, policy.articlesPerDay, policy.maxArticlesPerDay ?? policy.articlesPerDay));
+  const social = [
+    { channel: "x" as const, limit: policy.xPostsPerDay, delay: policy.socialTimingMinutesX, minutes: minutesIn("x"), used: 0 },
+    { channel: "instagram" as const, limit: policy.instagramPostsPerDay, delay: policy.socialTimingMinutesInstagram, minutes: minutesIn("instagram"), used: 0 },
+  ];
+  const socialLimit = policy.maximumDailySocial ?? Infinity;
+  let socialUsed = 0;
+  const atMinute = (minute: number) => zonedTimeToUtc(localDate, `${Math.floor(minute / 60)}:${minute % 60}`, timezone);
   const slots: EditorialSlot[] = [];
-  const websiteWindow = getChannelWindow(policy, "website");
-  if (!websiteWindow || !isDayActive(policy, dayStart)) {
-    return slots;
-  }
-
-  const fromMinutes = parseTimeMinutes(websiteWindow.from);
-  const toMinutes = parseTimeMinutes(websiteWindow.to);
-  const spanMinutes = Math.max(60, toMinutes - fromMinutes);
-  const count = Math.max(0, policy.articlesPerDay);
 
   for (let index = 0; index < count; index += 1) {
     const fraction = count === 1 ? 0.5 : index / (count - 1);
-    const minutesOffset = Math.round(spanMinutes * fraction);
-    const at = new Date(dayStart);
-    at.setHours(0, 0, 0, 0);
-    at.setMinutes(fromMinutes + minutesOffset);
-    slots.push({ channel: "website", at, source: "policy" });
-
-    if (policy.xPostsPerDay > 0) {
-      const xAt = new Date(at.getTime() + Math.max(0, policy.socialTimingMinutesX) * 60_000);
-      slots.push({ channel: "x", at: xAt, source: "social_offset" });
-    }
-    if (policy.instagramPostsPerDay > 0) {
-      const igAt = new Date(at.getTime() + Math.max(0, policy.socialTimingMinutesInstagram) * 60_000);
-      slots.push({ channel: "instagram", at: igAt, source: "social_offset" });
+    const minute = website[Math.round((website.length - 1) * fraction)];
+    slots.push({ channel: "website", at: atMinute(minute), source: "policy" });
+    for (const channel of social) {
+      const socialMinute = minute + Math.max(0, channel.delay);
+      if (channel.used >= channel.limit || socialUsed >= socialLimit || !channel.minutes.has(socialMinute)) continue;
+      slots.push({ channel: channel.channel, at: atMinute(socialMinute), source: "social_offset" });
+      channel.used += 1;
+      socialUsed += 1;
     }
   }
 
   return slots.sort((a, b) => a.at.getTime() - b.at.getTime());
 }
 
-function parseTimeMinutes(value: string): number {
+function parseTimeMinutes(value: string): number | null {
+  if (typeof value !== "string" || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
   const [hours, minutes] = value.split(":").map(Number);
-  if (Number.isNaN(hours) || Number.isNaN(minutes)) {
-    return 0;
-  }
   return hours * 60 + minutes;
 }
 
 export function startOfLocalDay(policy: AutomationPolicy, now: Date = new Date()): Date {
-  const local = toTimezone(now, policy.timezone);
-  return new Date(local.getFullYear(), local.getMonth(), local.getDate(), 0, 0, 0, 0);
+  const timezone = policyTimezone(policy);
+  return zonedTimeToUtc(localDateInZone(now, timezone), "00:00", timezone);
 }
 
-function toTimezone(date: Date, timezone: string): Date {
+export function nextPolicyDay(policy: AutomationPolicy, day: Date): Date {
+  const timezone = policyTimezone(policy);
+  return zonedTimeToUtc(nextLocalDate(localDateInZone(day, timezone)), "00:00", timezone);
+}
+
+function policyTimezone(policy: AutomationPolicy): string {
+  const timezone = policy.timezone || "UTC";
   try {
-    return new Date(date.toLocaleString("en-US", { timeZone: timezone }));
+    new Intl.DateTimeFormat("en", { timeZone: timezone });
+    return timezone;
   } catch {
-    return date;
+    return "UTC";
   }
 }
 
@@ -392,15 +439,18 @@ export async function countChannelPublicationsToday(
   tenantId: string,
   channel: string,
   dayStart: Date,
+  dayEnd: Date,
+  siteId: string | null,
 ): Promise<number> {
   return prisma.publication.count({
     where: {
       tenantId,
+      ...(siteId ? { siteId } : {}),
       channel: channel as PublicationChannel,
       status: { in: ["draft", "ready", "scheduled", "queued", "publishing", "published", "failed"] },
       OR: [
-        { scheduledFor: { gte: dayStart, lt: new Date(dayStart.getTime() + 24 * 3_600_000) } },
-        { publishedAt: { gte: dayStart, lt: new Date(dayStart.getTime() + 24 * 3_600_000) } },
+        { scheduledFor: { gte: dayStart, lt: dayEnd } },
+        { publishedAt: { gte: dayStart, lt: dayEnd } },
       ],
     },
   });
@@ -438,24 +488,26 @@ export type AutomationStatus = {
   warnings: string[];
 };
 
-export async function getAutomationStatus(tenantId: string, siteId: string | null): Promise<AutomationStatus> {
+export async function getAutomationStatus(tenantId: string, siteId: string | null, now = new Date()): Promise<AutomationStatus> {
   const policy = await getOrCreatePolicy(tenantId, siteId);
-  const dayStart = startOfLocalDay(policy);
-  const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
+  const dayStart = startOfLocalDay(policy, now);
+  const dayEnd = nextPolicyDay(policy, dayStart);
+  const siteScope = siteId ? { siteId } : {};
 
   const [articlesPlanned, articlesPublished, xPlanned, igPlanned, pendingQueue] = await Promise.all([
-    countChannelPublicationsToday(tenantId, "website", dayStart),
+    countChannelPublicationsToday(tenantId, "website", dayStart, dayEnd, siteId),
     prisma.publication.count({
       where: {
         tenantId,
+        ...siteScope,
         channel: "website",
         status: "published",
         publishedAt: { gte: dayStart, lt: dayEnd },
       },
     }),
-    countChannelPublicationsToday(tenantId, "x", dayStart),
-    countChannelPublicationsToday(tenantId, "instagram", dayStart),
-    prisma.publication.count({ where: { tenantId, status: { in: ["draft", "ready", "scheduled"] } } }),
+    countChannelPublicationsToday(tenantId, "x", dayStart, dayEnd, siteId),
+    countChannelPublicationsToday(tenantId, "instagram", dayStart, dayEnd, siteId),
+    prisma.publication.count({ where: { tenantId, ...siteScope, status: { in: ["draft", "ready", "scheduled"] } } }),
   ]);
 
   const warnings: string[] = [];
@@ -469,11 +521,16 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
     warnings.push("website autopublishing is paused by the circuit breaker after consecutive publication failures");
   }
 
-  const slots = generateEditorialSlots(policy, dayStart);
-  const now = new Date();
-  const nextSlots = slots
-    .filter((slot) => slot.at > now)
-    .slice(0, 10)
+  const slots: EditorialSlot[] = [];
+  const mode = normalizeAutomationMode(policy.mode, policy);
+  if (policy.enabled && mode !== "manual" && policy.state === "active" && !policy.circuitOpen) {
+    let day = dayStart;
+    for (let offset = 0; offset < 8 && slots.length < 10; offset += 1) {
+      slots.push(...generateEditorialSlots(policy, day).filter((slot) => slot.at > now));
+      day = nextPolicyDay(policy, day);
+    }
+  }
+  const nextSlots = slots.sort((a, b) => a.at.getTime() - b.at.getTime()).slice(0, 10)
     .map((slot) => ({ channel: slot.channel, at: slot.at.toISOString() }));
 
   return {
@@ -481,8 +538,8 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
     enabled: policy.enabled,
     state: policy.state,
     pausedReason: policy.pausedReason,
-    timezone: policy.timezone,
-    mode: policy.mode,
+    timezone: policyTimezone(policy),
+    mode,
     autoRepair: policy.autoRepair,
     maxRepairAttempts: policy.maxRepairAttempts,
     circuit: {
