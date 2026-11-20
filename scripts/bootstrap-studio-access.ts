@@ -59,7 +59,7 @@ async function main(): Promise<void> {
     console.log(`[bootstrap] ${tenant.slug} (${tenant.id})`);
 
     for (const user of workspace.users) {
-      const invitation = await inviteStudioUser(tenant.id, null, {
+      const invitation = await inviteStudioUser(tenant.id, { userId: null, sessionId: null }, {
         email: user.email,
         displayName: user.displayName,
         roleKeys: [...user.roleKeys],

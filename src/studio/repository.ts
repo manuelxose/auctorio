@@ -35,9 +35,10 @@ import type {
   UpdateProjectInput,
   UpdateSiteInput,
 } from "./types";
-import { getPrismaClient } from "../infrastructure/db/prisma";
+import { getPrismaClient, readAcrossWorkspaceSites } from "../infrastructure/db/prisma";
 import { buildReviewGate, countQaFailures, countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
 import { STUDIO_PERMISSIONS } from "./security";
+import { loadWebsiteDestinations } from "./destination-readiness";
 
 const prisma = getPrismaClient();
 
@@ -167,6 +168,12 @@ export async function listSites(
     }),
   ]);
 
+  // The inventory spans the workspace, even when the request comes from an active site.
+  const connections = sites.length ? await readAcrossWorkspaceSites(() => loadWebsiteDestinations(tenantId)) : [];
+  const bySite = new Map(connections.slice().reverse().map((connection) => [
+    connection.siteId, { stage: connection.stage, lastVerifiedAt: connection.lastVerifiedAt },
+  ]));
+
   return {
     items: sites.map((site) => ({
       id: site.id,
@@ -181,6 +188,7 @@ export async function listSites(
       projectCount: site._count.projects,
       publishedProjectCount: site.projects.length,
       latestPublicationJob: site.publications[0] ? mapWebsiteDelivery(site.publications[0]) : null,
+      websiteConnection: bySite.get(site.id) ?? null,
     })),
     page,
     pageSize,

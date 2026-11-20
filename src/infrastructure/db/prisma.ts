@@ -12,6 +12,10 @@ export function siteRequestContextHook(request: { headers: Record<string, unknow
   siteContext.run({ siteId: UUID.test(value) ? value : null }, done);
 }
 
+export function readAcrossWorkspaceSites<T>(read: () => Promise<T>): Promise<T> {
+  return siteContext.run({ siteId: null }, read);
+}
+
 // Models whose null siteId means "workspace-wide default": still visible from every site.
 const SITE_OR_DEFAULT = new Set([
   "StudioPromptPreset", "StudioPromptAssignment", "AutomationPolicy", "EditorialPlanPreset",
