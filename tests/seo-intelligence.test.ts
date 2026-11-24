@@ -55,6 +55,16 @@ test("new long-tail queries expand the page that covers them, or propose one whe
   const found = detect(data({ current: rows }), { inventory: pages });
   assert.deepEqual(found.map((draft) => [draft.kind, draft.action]).sort(), [["new_query", "create_content"], ["new_query", "expand_existing"]]);
   assert.equal(found.find((draft) => draft.action === "expand_existing")!.targetUrl, `${site}/trenes`);
+  // A page Google or the sitemap knows by its address exists even if nobody read its title.
+  const unread = inventory([["/a", ""], ["/b", ""], ["/c", ""], ["/d", ""], ["/programas/lo-sabe-no-lo-sabe", ""]]);
+  const named = (query: string, page: string) => detect(data({ current: [row(query, page, 60, 1, 15)] }), { inventory: unread }).map((draft) => [draft.action, draft.targetUrl]);
+  assert.deepEqual(named("lo sabe no lo sabe horario", "/otra"), [["expand_existing", `${site}/programas/lo-sabe-no-lo-sabe`]]);
+  assert.deepEqual(named("el mal padre donde ver", "/peliculas/el-mal-padre"), [["expand_existing", `${site}/peliculas/el-mal-padre`]]);
+  assert.deepEqual(named("plataformas para ver el mal padre gratis en streaming legal", "/streaming"), [["create_content", null]], "a one-word address does not cover a long query");
+  // Words every title carries single no page out.
+  const branded = inventory(["/x", "/y", "/z", "/w", "/v"].map((path) => [path, `Ficha ${path.slice(1).repeat(4)} | Guía TV`] as [string, string]));
+  assert.deepEqual(detect(data({ current: [row("la guia de tv", "/x", 60, 1, 15)] }), { inventory: branded }), []);
+  assert.deepEqual(detect(data({ current: [row("que echan hoy tele", "/", 60, 1, 15)] }), { inventory: inventory([["/", "Qué echan hoy en la tele"], ["/a", "A"], ["/b", "B"], ["/c", "C"], ["/d", "D"]]) }), [], "the home page already answers");
   // Seen before, or without the previous window stored: not new.
   const seen = new Map(rows.map((entry) => [`${queryKey(entry.query)}\n${pageKey(entry.page)}`, 40]));
   assert.equal(detect(data({ current: rows, previousQueries: seen }), { inventory: pages }).length, 0);
@@ -89,6 +99,16 @@ test("cannibalization, clusters, links, seasons, growing pages and indexing", ()
 
   const lonely = inventory(Array.from({ length: 10 }, (_, index) => [`/p${index}`, `Página ${index}`] as [string, string]), { inbound: 0 });
   assert.ok(kinds(detect(data({ current: [row("algo concreto aqui", "/p1", 300, 3, 9)] }), { inventory: lonely })).includes("internal_linking"));
+  const twice = detect(data({ current: [row("algo concreto aqui", "/p1", 300, 3, 9), row("otra cosa distinta", "/p1", 500, 5, 9)] }), { inventory: lonely }).filter((entry) => entry.kind === "internal_linking");
+  assert.deepEqual(twice.map((entry) => entry.query), ["otra cosa distinta"], "one page is one piece of work, whatever the queries");
+
+  const growing = (path: string) => {
+    const before = new Map(Array.from({ length: 5 }, (_, index) => [`${queryKey(`tema viejo ${index}`)}\n${pageKey(`${site}${path}`)}`, 10] as [string, number]));
+    const current = Array.from({ length: 20 }, (_, index) => row(`tema crece ${index}`, path, 10, 0, 30));
+    return kinds(detect(data({ current, previousQueries: before, pages: pageMap({ [path]: totals(0, 200, 30) }) })));
+  };
+  assert.deepEqual(growing("/lista"), ["expanding_relevance"]);
+  assert.deepEqual(growing("/"), [], "the home page is not made longer");
 
   assert.ok(!kinds(detect(data({ current: [row("algo concreto aqui", "/p1", 300, 3, 9)] }), { inventory: lonely.map((page) => ({ ...page, inbound: null })) })).includes("internal_linking"), "unknown links are not missing links");
 

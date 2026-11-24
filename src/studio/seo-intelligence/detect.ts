@@ -7,7 +7,7 @@ import { queryIntent, type DataKind, type SeoAction } from "./scoring";
 /** One query on one page, aggregated over a window. `days` = days with data. */
 export type QueryRow = { query: string; page: string; device: string; country: string; clicks: number; impressions: number; positionSum: number; days: number };
 export type PageTotals = { clicks: number; impressions: number; positionSum: number; days: number };
-export type Inventory = { url: string; title: string; h1: string; modifiedAt: Date | null; publishedAt: Date | null; /** null: the site's links were never crawled. */ inbound: number | null };
+export type Inventory = { url: string; title: string; h1: string; modifiedAt: Date | null; publishedAt: Date | null; /** null: the links of most of the site were not read. */ inbound: number | null };
 export type IndexState = { url: string; verdict: string | null; coverageState: string | null; indexingState: string | null; robotsState: string | null; fetchState: string | null; googleCanonical: string | null; userCanonical: string | null; inspectedAt: Date };
 
 /** 28-day windows that end on the last stored day; the year-ago ones are shifted 364 days to keep weekdays. */
@@ -77,7 +77,7 @@ export const THRESHOLDS = {
   linkImpressions: 200, linkInbound: 1, linkInventory: 10,
   commercialImpressions: 50,
   seasonalImpressions: 300, seasonalLift: 2,
-  perKind: 25, minInventory: 5,
+  perKind: 25, minInventory: 5, sharedTitle: 3,
 } as const;
 
 const DAY_MS = 86_400_000;
@@ -88,6 +88,16 @@ export function pageKey(url: string): string {
     return `${parsed.hostname.toLowerCase().replace(/^www\./, "")}${parsed.pathname.replace(/\/+$/, "")}${parsed.search}`;
   } catch {
     return url;
+  }
+}
+const isHome = (url: string) => !pageKey(url).includes("/");
+/** Words of the last part of the address; none for the home page. */
+function slugTokens(url: string): string[] {
+  try {
+    const last = new URL(url).pathname.replace(/\/+$/, "").split("/").pop() ?? "";
+    return [...new Set(keywordTokens(decodeURIComponent(last).replace(/\.\w+$/, "")))];
+  } catch {
+    return [];
   }
 }
 const average = (row: { positionSum: number; impressions: number }) => (row.impressions ? row.positionSum / row.impressions : null);
@@ -167,10 +177,15 @@ export function detectOpportunities(input: {
   const drafts = [...indexDrafts(input.index, input.inventory)];
   if (input.data) drafts.push(...searchDrafts({ ...input, data: input.data }));
   const counts = new Map<string, number>();
+  const keys = new Set<string>();
   // The biggest of each kind: a list nobody can read is not a decision.
   return drafts
     .sort((a, b) => (b.impressions ?? 0) - (a.impressions ?? 0))
     .filter((draft) => {
+      // Two queries of a page can raise the same work; the key is stored with 500 characters and is unique.
+      const key = draft.dedupeKey.slice(0, 500);
+      if (keys.has(key)) return false;
+      keys.add(key);
       const seen = (counts.get(draft.kind) ?? 0) + 1;
       counts.set(draft.kind, seen);
       return seen <= THRESHOLDS.perKind;
@@ -226,17 +241,34 @@ function searchDrafts(input: Parameters<typeof detectOpportunities>[0] & { data:
   const benchmark = ctrBenchmark(rows);
   const byQueryPage = group(rows, (row) => `${queryKey(row.query)}\n${pageKey(row.page)}`);
   const byQuery = group(rows, (row) => queryKey(row.query));
-  const inventoryTokens = inventory.map((page) => ({ page, tokens: new Set(keywordTokens(`${page.title} ${page.h1}`)) }));
-  /** The page written for this query, if the inventory has one: 70 % of its words in the title or H1. */
-  const dedicated = (query: string): Inventory | null => {
-    const words = keywordTokens(query);
+  const inventoryTokens = inventory.map((page) => ({ page, tokens: new Set(keywordTokens(`${page.title} ${page.h1}`)), slug: slugTokens(page.url) }));
+  const shownFor = new Map<string, Map<string, string>>();
+  for (const row of byQueryPage.values()) {
+    const key = queryKey(row.query);
+    shownFor.set(key, (shownFor.get(key) ?? new Map<string, string>()).set(pageKey(row.page), row.page));
+  }
+  /**
+   * The page written for this query. Its address names it, even if the page was never read; otherwise its title or H1
+   * carries 70 % of the words. Words that many titles share ("guía", "tv") single no page out: "several".
+   */
+  const dedicated = (query: string): string | "several" | null => {
+    const words = [...new Set(keywordTokens(query))];
     if (!words.length) return null;
-    let best: { page: Inventory; share: number } | null = null;
-    for (const entry of inventoryTokens) {
-      const share = words.filter((word) => entry.tokens.has(word)).length / words.length;
-      if (share >= 0.7 && (!best || share > best.share)) best = { page: entry.page, share };
+    const names = (slug: string[], least: number) => slug.length >= least && slug.length >= words.length / 3 && slug.every((word) => words.includes(word));
+    const candidates = [...(shownFor.get(queryKey(query)) ?? new Map<string, string>()).values()].map((url) => ({ url, slug: slugTokens(url), least: 1 }));
+    // A one-word address is too little unless Google already shows that page for the query.
+    for (const { page, slug } of inventoryTokens) candidates.push({ url: page.url, slug, least: 2 });
+    const named = candidates.filter((entry) => names(entry.slug, entry.least)).sort((a, b) => b.slug.length - a.slug.length)[0];
+    if (named) return named.url;
+    let best = 0;
+    let found: Inventory[] = [];
+    for (const { page, tokens } of inventoryTokens) {
+      const share = words.filter((word) => tokens.has(word)).length / words.length;
+      if (share < 0.7 || share < best) continue;
+      found = share > best ? [page] : [...found, page];
+      best = share;
     }
-    return best?.page ?? null;
+    return found.length === 0 ? null : found.length < T.sharedTitle ? found[0].url : "several";
   };
   const observed = (row: PageTotals, extra: Evidence[] = []): Evidence[] => [
     { metric: "Impresiones", value: row.impressions, kind: "observed", source: "search_console", period, note: "Visibilidad propia, no volumen de mercado." },
@@ -319,7 +351,7 @@ function searchDrafts(input: Parameters<typeof detectOpportunities>[0] & { data:
     if (page && page.inbound !== null && page.inbound <= T.linkInbound && inventory.length >= T.linkInventory && row.impressions >= T.linkImpressions) {
       drafts.push(base({
         kind: "internal_linking", topic: titleOf(row.page), query: row.query, targetUrl: row.page, action: "improve_internal_linking", intent, ...figures(row),
-        why: `La página recibe ${page.inbound} enlace(s) internos en las ${inventory.length} páginas rastreadas y compite por «${row.query}» con posición media ${pos(position)}.`,
+        why: `La página recibe ${page.inbound} enlace(s) internos desde las páginas leídas del sitio y compite por «${row.query}» con posición media ${pos(position)}.`,
         actionReason: "Enlazarla desde páginas relacionadas es reversible y no toca su contenido.",
         evidence: observed(row, [{ metric: "Enlaces internos recibidos", value: page.inbound, kind: "observed", source: "crawl" }]),
         risks: ["El rastreo puede no haber visto todas las páginas."], caveats: [partial], dedupeKey: `seo:internal_linking:${pageKey(row.page)}`,
@@ -336,7 +368,10 @@ function searchDrafts(input: Parameters<typeof detectOpportunities>[0] & { data:
       const key = queryKey(row.query);
       const previous = previousByQuery.get(key) ?? 0;
       const fresh = data.hasPrevious && previous === 0 && row.impressions >= T.newImpressions && row.days >= T.newDays && row.query.trim().split(/\s+/).length >= T.newWords;
+      if (row.impressions < T.newImpressions) continue;
       const page = dedicated(row.query);
+      // Many pages share those words, or the home page answers: nothing is missing and there is no page to expand.
+      if (page === "several" || (page && isHome(page))) continue;
       const uncovered = !page && row.impressions >= T.uncoveredImpressions && row.days >= T.uncoveredDays && (average(row) ?? 0) > 10;
       if ((!fresh && !uncovered) || picked.some((other) => isKeywordVariant(other, row.query))) continue;
       picked.push(row.query);
@@ -344,10 +379,10 @@ function searchDrafts(input: Parameters<typeof detectOpportunities>[0] & { data:
       const intent = queryIntent(row.query);
       const create = !page;
       drafts.push(base({
-        kind, topic: row.query, query: row.query, targetUrl: page?.url ?? null, relatedUrls: page ? [] : [row.page], action: create ? "create_content" : "expand_existing", intent, ...figures(row),
+        kind, topic: row.query, query: row.query, targetUrl: page, relatedUrls: page ? [] : [row.page], action: create ? "create_content" : "expand_existing", intent, ...figures(row),
         why: fresh
-          ? `«${row.query}» empezó a mostrar tu sitio en este periodo${create ? " y ninguna página rastreada trata exactamente eso" : ""}.`
-          : `Tu sitio aparece para «${row.query}» con posición media ${pos(average(row))}, y ninguna página rastreada está dedicada a ello.`,
+          ? `«${row.query}» empezó a mostrar tu sitio en este periodo${create ? " y ninguna página conocida trata exactamente eso" : ""}.`
+          : `Tu sitio aparece para «${row.query}» con posición media ${pos(average(row))}, y ninguna página conocida está dedicada a ello.`,
         actionReason: create ? "No hay página dedicada: la que aparece responde a otra cosa." : "Ya hay una página sobre el tema: ampliarla evita duplicarlo.",
         evidence: observed(row, data.hasPrevious ? [{ metric: "Impresiones en los 28 días anteriores", value: previous, kind: "observed", source: "search_console" }] : []),
         risks: create ? ["Si la página que ya aparece es la adecuada, crear otra dividiría la relevancia."] : [],
@@ -363,6 +398,8 @@ function searchDrafts(input: Parameters<typeof detectOpportunities>[0] & { data:
     const after = new Map<string, Group[]>();
     for (const row of byQueryPage.values()) after.set(pageKey(row.page), [...(after.get(pageKey(row.page)) ?? []), row]);
     for (const [key, queries] of after) {
+      // The home page answers for the whole site: growing queries there do not ask for a longer home page.
+      if (isHome(queries[0].page)) continue;
       const was = before.get(key) ?? 0;
       if (was < 5 || queries.length - was < T.expandQueries || queries.length < was * T.expandRatio) continue;
       const totals = data.pages.get(key);

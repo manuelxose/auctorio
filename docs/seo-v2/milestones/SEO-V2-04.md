@@ -4,8 +4,9 @@ Fecha: 2026-11-24. Rama: `feat/seo-v2-04-first-party-intelligence`, creada desde
 
 ## Veredicto: PARTIAL
 
-El motor, la sincronización, la puntuación y la atribución funcionan y están probados sobre PostgreSQL real, pero **Google no se ha llamado en vivo**: no hay
-secreto del cliente OAuth ni cuenta autorizada. El contrato impide dar PASS solo con respuestas simuladas.
+El motor, la sincronización, la puntuación y la atribución funcionan y están probados sobre PostgreSQL real, y la lectura de Search Console
+está probada **en vivo** (`guiaprogramaciontv.com`, token temporal de solo lectura). Falta en vivo la conexión de la persona: consentimiento OAuth, renovación
+y retirada del permiso, porque no hay secreto del cliente OAuth. Hasta probarla no es PASS.
 
 Dos hechos que condicionan el hito:
 
@@ -75,11 +76,40 @@ Dos hechos que condicionan el hito:
 Defectos encontrados y corregidos durante el hito: un sitio sin temas se trataba como irrelevante en lugar de desconocido; el motor proponía contenido que el plan después
 rechazaba por relevancia; sin enlaces rastreados se afirmaba «0 enlaces»; un 403 se mostraba como lista vacía.
 
+## Prueba en vivo con Search Console (2026-11-24)
+
+Con el código del hito sobre una base local; lo único sustituido fue el canje del token de renovación. Los datos y el token se borraron al terminar.
+
+| Comprobación | Resultado |
+|---|---|
+| Propiedades | Al sitio solo se le ofreció la de su dominio |
+| Historia | 485 días en 467 s y 13 tandas, sin errores ni límites de cuota |
+| Exactitud | Clics, impresiones y posición iguales a los de Google en todos los días con datos, y mismos totales |
+| Incremental | La segunda pasada descargó 0 días |
+| Retraso | 2 días |
+| Cobertura por consulta | Parcial: Google oculta una parte grande de las consultas |
+| Filas por día | Muy por debajo del tope de 5.000 |
+| Indexación | 10 páginas inspeccionadas sin errores |
+| Análisis, sin inventario ni perfil del sitio | 10 oportunidades: 8 abiertas y 2 aplazadas por las protecciones |
+| Análisis con el inventario y el perfil reales | 37 oportunidades: 21 abiertas, 7 en espera y 9 rechazadas |
+
+Con el inventario real apareció un fallo que abortaba el análisis (dos consultas de una página generaban la misma clave): corregido, con prueba.
+
+**Defectos de calidad que mostraron los datos reales, corregidos con prueba** (suite en serie 722 de 722; Karma 46 de 46):
+
+1. Proponía crear contenido cuando el sitio ya tenía la página: ahora la reconoce también por su dirección, aunque no se haya leído.
+2. Afirmaba «0 enlaces» y temas débiles habiendo leído una parte pequeña del sitio: sin el 80 % leído, los enlaces y los temas son desconocidos.
+3. Asignaba consultas genéricas a fichas sin relación: si tres o más páginas coinciden igual, ninguna es la dedicada. La portada no se propone ampliar.
+
+Queda a criterio de la persona: sin sinónimos (`televisión` y `tv`), puede proponer contenido para una consulta genérica.
+
+La cabecera global ya no se oculta en Advanced.
+
 ## Aceptación
 
 | Criterio | Estado |
 |---|---|
-| Oportunidades con Search Console sin depender de investigación de pago | Cumplido con datos simulados; falta en vivo |
+| Oportunidades con Search Console sin depender de investigación de pago | Cumplido en vivo |
 | Palabras posicionadas producen optimizaciones | Cumplido |
 | Volumen externo desconocido no invalida la evidencia propia | Cumplido |
 | La puntuación se adapta al negocio | Cumplido |
@@ -90,7 +120,7 @@ rechazaba por relevancia; sin enlaces rastreados se afirmaba «0 enlaces»; un 4
 
 ## Peticiones y gasto
 
-Peticiones a Google: **0**. A proveedores SEO: **0**. Gasto: **0 USD**.
+Peticiones a Google: **1.484** (1.470 de rendimiento, 10 de indexación, 3 de propiedades, 1 de validez del token), gratuitas. A proveedores SEO: **0**. Gasto: **0 USD**.
 
 ## Seguridad y licencias
 
@@ -100,7 +130,7 @@ Peticiones a Google: **0**. A proveedores SEO: **0**. Gasto: **0 USD**.
 
 ## Pendiente
 
-1. `GOOGLE_CLIENT_SECRET`, API activada, URI de redirección y verificación de la aplicación; después, prueba en vivo.
+1. `GOOGLE_CLIENT_SECRET`, API activada, URI de redirección y verificación de la aplicación; después, probar en vivo conexión, renovación y retirada.
 2. Que el plan sepa actualizar un artículo publicado: hoy «actualizar» (también en Competidores) redacta uno nuevo.
 3. Los umbrales y pesos son supuestos razonados, sin calibrar con datos reales.
 4. El detalle por consulta guarda las 5.000 filas con más clics al día.

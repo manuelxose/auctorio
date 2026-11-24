@@ -190,7 +190,7 @@ export function decideOpportunities(drafts: Draft[], ctx: DecisionContext): Deci
     const target = draft.targetUrl ? pageKey(draft.targetUrl) : null;
     if (!target) continue;
     const winner = pages.get(target);
-    if (winner) settle(decision, "deferred", "defer", "conflict", `La misma página ya tiene una acción prioritaria: ${winner.action} (${winner.draft.topic}).`);
+    if (winner) settle(decision, "deferred", "defer", "conflict", `La misma página ya tiene una acción prioritaria, por «${winner.draft.topic}».`);
     else pages.set(target, decision);
   }
   return decisions;

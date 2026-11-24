@@ -102,7 +102,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
     prisma.site.findFirstOrThrow({ where: { id: siteId, tenantId }, select: { id: true, type: true, name: true, baseUrl: true } }),
     loadSearchData(tenantId, siteId),
     prisma.searchConsoleConnection.findFirst({ where: { tenantId, siteId }, select: { syncedThrough: true } }),
-    prisma.siteIndexedPage.findMany({ where: { tenantId, siteId }, select: { url: true, title: true, h1: true, modifiedAt: true, publishedAt: true }, take: 20_000 }),
+    prisma.siteIndexedPage.findMany({ where: { tenantId, siteId }, select: { url: true, title: true, h1: true, modifiedAt: true, publishedAt: true, crawlState: true }, take: 20_000 }),
     prisma.siteInternalLink.groupBy({ by: ["targetUrl"], where: { tenantId, siteId }, _count: { _all: true } }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId }, select: { name: true, slug: true, pagesCount: true } }),
     prisma.searchIndexStatus.findMany({ where: { tenantId, siteId } }),
@@ -114,9 +114,12 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
   ]);
   const scoring = await keywordScoringFor(tenantId, site, context.profile?.detectedSiteType ?? null);
   const profile = context.profile ?? syntheticProfileForSiteType(site.type);
+  // Most addresses come from sitemaps unread: what few read pages link to or talk about says nothing of the whole site.
+  const wellRead = pages.filter((page) => page.crawlState === "extracted" || page.crawlState === "stale").length >= pages.length * 0.8;
+  const readClusters = wellRead ? clusters : [];
   const links = new Map<string, number>();
   for (const row of inbound) links.set(pageKey(row.targetUrl), (links.get(pageKey(row.targetUrl)) ?? 0) + row._count._all);
-  const inventory = pages.map((page) => ({ url: page.url, title: page.title ?? "", h1: page.h1 ?? "", modifiedAt: page.modifiedAt, publishedAt: page.publishedAt, inbound: links.size ? links.get(pageKey(page.url)) ?? 0 : null }));
+  const inventory = pages.map((page) => ({ url: page.url, title: page.title ?? "", h1: page.h1 ?? "", modifiedAt: page.modifiedAt, publishedAt: page.publishedAt, inbound: wellRead && links.size ? links.get(pageKey(page.url)) ?? 0 : null }));
 
   const touched = new Map<string, Date>();
   const touch = (url: string | null, at: Date | null) => {
@@ -148,7 +151,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
     cannibalization: (query) => classifyCannibalization({ targetQuery: query, primaryKeyword: query, suggestedSlug: undefined } as never, query, {
       queries: [...context.searchTargets, ...context.existingPlanQueries], keywords: context.existingPlanQueries, indexedUrls: context.indexedUrlInventory, plannedTitles: context.existingPlanTitles,
     }).risk,
-    clusters,
+    clusters: readClusters,
     plannedQueries: plannedItems.flatMap((item) => [item.primaryKeyword, item.targetQuery]).filter((value): value is string => Boolean(value)),
     touched,
     dataAgeDays: connection?.syncedThrough ? Math.max(0, Math.round((now.getTime() - connection.syncedThrough.getTime()) / DAY_MS)) : null,
@@ -156,7 +159,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
     now,
   };
   const brandTokens = [...(site.baseUrl && URL.canParse(site.baseUrl) ? [new URL(site.baseUrl).hostname.replace(/^www\./, "").split(".")[0]] : []), site.name.toLowerCase().replace(/\s+/g, "")];
-  const decisions = decideOpportunities([...detectOpportunities({ data, inventory, clusters, index, brandTokens, now }), ...storedDrafts(stored)], decisionContext);
+  const decisions = decideOpportunities([...detectOpportunities({ data, inventory, clusters: readClusters, index, brandTokens, now }), ...storedDrafts(stored)], decisionContext);
 
   const summary: AnalysisSummary = { analyzed: decisions.length, open: 0, monitoring: 0, deferred: 0, rejected: 0, expired: 0, firstPartyData: data !== null };
   await prisma.$transaction(async (tx) => {

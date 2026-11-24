@@ -10,7 +10,7 @@
 | AnyAPI storage and upstream licensing | Pending (written confirmation) |
 | Hard budgets, reservations, single flight, emergency stop | Done |
 | Maximum price of DataForSEO `serp_organic` | Pending: an administrator must record it (invoice or tariff) |
-| Search Console live authorization and synchronization | Pending: `GOOGLE_CLIENT_SECRET`, the API and the consent screen of the Google project |
+| Search Console live authorization | Synchronization checked live on 2026-11-24. Authorization, refresh and revocation pending: `GOOGLE_CLIENT_SECRET`, the API and the consent screen of the Google project |
 | Google verification of the OAuth app | Pending: `webmasters.readonly` is a sensitive scope; until verified, only test users can connect |
 | Lifting `SEO_LOCKS` | Pending: licensing, DataForSEO live verification and owner approval |
 
