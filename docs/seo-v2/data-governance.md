@@ -6,9 +6,14 @@
   between tenants: no licence has been found that explicitly permits it.
 - What leaves Auctorio: keywords, public domains, country and language. Never tenant, user or site identifiers.
 - Every metric keeps its source (`keywordMetricsSource`, `KeywordMetrics.source`). Values the provider did not return are null.
-- Retention: keyword data 30 days, SERP and YouTube 7 days (cache TTL). Metrics copied to plan items stay with the item.
+- Each value keeps its provenance: operation, date, kind, upstream. A value is replaced by a newer one, never by "not returned".
+- Retention follows the licence: nothing where storing is prohibited, 90 days where it is not established (both providers today), 730 where
+  permitted. Expired cache and history (`seo_snapshots`) are deleted after a purchase, at most hourly. Metrics copied to plan items stay with the item.
+- A provider whose licence prohibits commercial use is never called.
 - Credentials: encrypted at rest (AES-256-GCM), server-side only, never in responses, audits, logs or error messages.
-- Audited actions: `seo.control.updated`, `seo.provider.updated`, `seo.credential.set`, `seo.credential.cleared`, `seo.provider.live_test`.
+- Audited actions: `seo.control.updated`, `seo.provider.updated`, `seo.credential.set`, `seo.credential.cleared`, `seo.provider.live_test`,
+  `seo.budget.updated`, `seo.budget.authorized`, `seo.budget.authorization_revoked`, `seo.reservation.resolved`, `seo.pricing.updated`, `seo.policy.updated`,
+  `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`.
 
 ## Licensing (2026-11-24)
 
@@ -25,7 +30,7 @@
 
 1. Written confirmation from AnyAPI Labs about storing results, and about the rights of the SEO upstream.
 2. Live verification of each capability in each market in use (es-ES done), and a comparison of its numbers with a known source.
-3. Hard budgets (SEO-V2-02).
+3. Hard budgets: done in SEO-V2-02.
 
 Until then AnyAPI stays disabled by default and its automation locked. DataForSEO's terms must be reviewed too before any data is shared
 between tenants or stored in a global dataset.

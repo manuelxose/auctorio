@@ -389,7 +389,16 @@ async function governed(run: (ws: Workspace) => Promise<void>): Promise<void> {
 test("hundreds of simultaneous reservations never exceed a budget", () => governed(async (ws) => {
   await setPolicy({ maxRequestsPerMinute: 100_000 });
   await limitTo("tenant", ws.tenantId, "daily", 0.1);
-  const outcomes = await Promise.all(Array.from({ length: 300 }, (_, i) => codeOf(reserveSeoSpend(reserveInput(ws, [`k${i}`])))));
+  // The rest of the application keeps getting connections meanwhile.
+  const [outcomes, waited] = await Promise.all([
+    Promise.all(Array.from({ length: 300 }, (_, i) => codeOf(reserveSeoSpend(reserveInput(ws, [`k${i}`]))))),
+    (async () => {
+      const start = Date.now();
+      await prisma.tenant.findUnique({ where: { id: ws.tenantId } });
+      return Date.now() - start;
+    })(),
+  ]);
+  assert.ok(waited < 5_000, `another query waited ${waited} ms`);
   const count = (code: string) => outcomes.filter((outcome) => outcome === code).length;
   assert.deepEqual([count("none"), count("budget_exhausted")], [10, 290]);
   assert.ok(Math.abs((await held(ws)) - 0.1) < 1e-9);
@@ -487,6 +496,11 @@ test("worker processes asking for the same data buy it once, overlapping batches
     const reservations = await ws.reservations();
     assert.ok(reservations.every((row) => row.state === "settled" || (row.state === "released" && row.resolution === "already_acquired")));
     assert.equal((await ws.spend()).length, reservations.filter((row) => row.state === "settled").length);
+    // Different data, one budget: across processes only what fits is sent.
+    requested.length = 0;
+    await limitTo("tenant", ws.tenantId, "daily", (await ws.spend()).reduce((sum, row) => sum + row.costUsd, 0) + 0.0245);
+    const outcomes = await Promise.all(Array.from({ length: 8 }, (_, i) => work(`solo${i}`).then(() => "bought", (error: { stderr?: string }) => (error.stderr?.includes("budget") ? "refused" : String(error.stderr)))));
+    assert.deepEqual([requested.length, outcomes.filter((outcome) => outcome === "bought").length, outcomes.filter((outcome) => outcome === "refused").length], [2, 2, 6]);
   } finally {
     server.close();
   }

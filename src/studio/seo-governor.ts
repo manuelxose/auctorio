@@ -153,11 +153,20 @@ class BudgetExhausted extends SeoProviderError {
   }
 }
 
+let lastReservation: Promise<unknown> = Promise.resolve();
+
 /**
  * Reserves the maximum price of one request, or throws the reason it must not be sent. Nothing is reserved on a throw.
- * Waits its turn on the lock, so any number of workers see consistent budgets.
+ * Waits its turn on the lock, so any number of workers see consistent budgets. One at a time per process: waiting
+ * for the database lock must not hold more than one connection of the pool.
  */
-export async function reserveSeoSpend(input: ReserveInput): Promise<ReserveResult> {
+export function reserveSeoSpend(input: ReserveInput): Promise<ReserveResult> {
+  const turn = lastReservation.then(() => reserveNow(input));
+  lastReservation = turn.catch(() => undefined);
+  return turn;
+}
+
+async function reserveNow(input: ReserveInput): Promise<ReserveResult> {
   const { provider, capability, tenantId, siteId } = input;
   const refuse = (code: SeoErrorCode, message: string) => new SeoProviderError(code, `${provider.id}: ${message}`, provider.id, 0);
   // The tenant's general spending limits (AI included) also apply; SEO charges are part of that ledger.
