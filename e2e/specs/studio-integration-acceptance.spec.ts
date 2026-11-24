@@ -153,12 +153,8 @@ test('Site Intelligence displays real profile evidence and reflows on mobile', a
   await expect(history.getByText('Estrategia de aceptación', { exact: true })).toBeVisible();
   await history.getByRole('button', { name: 'Restaurar', exact: true }).click();
   await expect(history.getByText('Versión 2', { exact: true })).toBeVisible();
-  const globalControls = page.getByRole('button', { name: 'Controles de Studio' });
-  await expect(page.locator('#studio-global-toolbar')).toBeHidden();
-  await globalControls.click();
-  await expect(page.locator('#studio-global-toolbar')).toBeVisible();
-  await globalControls.click();
-  await expect(page.locator('#studio-global-toolbar')).toBeHidden();
+  await expect(page.locator('.au-top')).toBeVisible();
+  await expect(page.getByRole('navigation', { name: 'Areas' })).toBeVisible();
   expect((await evidence.boundingBox())!.x).toBeGreaterThan((await identity.boundingBox())!.x);
   await expect(page.locator('.au-toast')).toHaveCount(0);
   await page.evaluate(() => window.scrollTo(0, 0));
@@ -426,7 +422,7 @@ test('six Advanced screens render reference sections at desktop and mobile width
         const path = tool.path + '?tab=' + tab.id;
         await open(page, path.slice('/studio/'.length));
         await expect(page.getByRole('heading', { name: new RegExp('^' + headings[path]) })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Controles de Studio' })).toBeVisible();
+        await expect(page.locator('.au-top')).toBeVisible();
         const nav = width === 390
           ? page.getByRole('group', { name: 'Opciones de ' + tool.label })
           : page.getByRole('list', { name: tool.label + ' sections' });

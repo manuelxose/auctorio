@@ -374,29 +374,6 @@ html:not([data-theme="dark"]) .au-shell--workspace {
   min-height: 26px;
 }
 .au-shell--profile-reference .workspace-location > span { margin: 0; }
-.profile-toolbar-toggle {
-  margin-left: auto;
-  padding: 4px 9px;
-  border: 1px solid #eae1fe;
-  border-radius: 99px;
-  background: #f8f3ff;
-  color: #655181;
-  font-size: 10px;
-  font-weight: 750;
-  cursor: pointer;
-}
-.au-shell--profile-reference:not(.shows-studio-toolbar) {
-  --au-workspace-height: calc(100dvh - 2 * var(--au-gap));
-  grid-template-areas: 'side main';
-  grid-template-rows: minmax(0, 1fr);
-}
-.au-shell--profile-reference:not(.shows-studio-toolbar) > :is(.au-top, .au-areas) { display: none; }
-@media (min-width: 861px) {
-  .au-shell--profile-reference:not(.shows-studio-toolbar) .au-sb { top: var(--au-gap); }
-}
-@media (max-width: 860px) {
-  .au-shell--profile-reference:not(.shows-studio-toolbar) { grid-template-areas: 'main'; }
-}
 .au-shell--profile-reference .au-sb__nav > .au-sb__heading { padding: 3px 12px 9px; border: 0; }
 .au-shell--profile-reference .au-sb__heading--sub {
   min-height: 0;
@@ -423,13 +400,6 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 .au-shell--profile-reference .au-sb__nav .au-sb__item--sub { padding: 8px 9px; font-size: 11px; font-weight: 520; }
 .au-shell--profile-reference .au-sb__nav .au-sb__item--sub.is-active { color: #583bda; background: #f7f3ff; border-color: transparent; font-weight: 770; }
 .au-shell--profile-reference .au-sb__nav .au-sb__item--sub.is-active::before { content: none; }
-@media (min-width: 861px) {
-  .au-shell--profile-reference:not(.shows-studio-toolbar) { --au-gap: 14px; }
-}
-@media (max-width: 860px) {
-  .au-shell--profile-reference:not(.shows-studio-toolbar) { --au-gap: 11px; }
-  .au-shell--profile-reference:not(.shows-studio-toolbar) .workspace-mobile-nav { margin-top: 0; }
-}
 /* Reference cards and detail rows used by the remaining Advanced tools. */
 .au-shell--profile-reference .advanced-page {
   color: #201d39;
