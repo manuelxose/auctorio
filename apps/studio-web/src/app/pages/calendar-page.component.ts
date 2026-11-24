@@ -94,7 +94,7 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
         </div>
       }
       @if (!keywordMetrics) {
-        <p class="cal-note"><app-icon name="info"></app-icon> Volume and difficulty show "—" until DataForSEO is connected. Until then the AI picks plan keywords</p>
+        <p class="cal-note"><app-icon name="info"></app-icon> Volume and difficulty show "—" until a keyword data provider is connected. Until then the AI picks plan keywords</p>
       }
       <p class="au-sr-only" role="status" aria-live="polite">{{ moveResult }}</p>
 
@@ -720,7 +720,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
     return event.kind === 'plan_item' && event.chip === 'queued' && !event.projectId;
   }
 
-  /** BLG-style bucket of the 0–100 provider difficulty (mirrors dataforseo.ts difficultyLabel). */
+  /** BLG-style bucket of the 0–100 provider difficulty (mirrors difficultyLabel in infrastructure/seo/contract.ts). */
   difficultyText(difficulty: number | null | undefined): string {
     if (difficulty == null) return '';
     return difficulty < 30 ? ' (Easy)' : difficulty < 50 ? ' (Medium)' : difficulty < 70 ? ' (Hard)' : ' (Very hard)';

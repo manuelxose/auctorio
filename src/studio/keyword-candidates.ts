@@ -1,27 +1,18 @@
-// Data first, AI second: the plan's keywords come from DataForSEO (ideas around the site's own
+// Data first, AI second: the plan's keywords come from the SEO provider (ideas around the site's own
 // topics + keywords accepted competitors rank for), filtered and scored by the app. The model only
 // writes the brief for a keyword it is handed.
 
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import {
-  dataForSeoConfigured,
-  dataForSeoLocation,
-  fetchKeywordIdeas,
-  fetchRankedKeywords,
-  normalizeKeyword,
-  type DataForSeoLocation,
-  type KeywordMetrics,
-} from "../infrastructure/seo/dataforseo";
+import { normalizeKeyword, type KeywordMetrics } from "../infrastructure/seo/contract";
 import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
-import { recordAiSpend } from "./cost-budgets";
+import { acquireSeo, seoRoute, type SeoRoute } from "./seo-manager";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import type { EditorialPlanningContext } from "./editorial-plan-context";
 import { structuredEvent } from "../shared/utils/logger";
 
 const prisma = getPrismaClient();
-const PROVIDER = "dataforseo";
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
-// Cost caps per plan: ≤5 seeds + ≤3 competitors → ≤8 Labs calls (~0.012 USD each), cached 30 days.
+// Cost caps per plan: ≤5 seeds + ≤3 competitors → ≤9 calls of ≤100 rows (docs/seo-v2/cost-model.md), cached 30 days.
 const MAX_SEEDS = 5;
 const MAX_COMPETITORS = 3;
 const ROWS_PER_CALL = 100;
@@ -111,20 +102,22 @@ export function rankKeywordCandidates(
   return out.slice(0, limit);
 }
 
-type Fetchers = { ideas: typeof fetchKeywordIdeas; ranked: typeof fetchRankedKeywords };
-
 async function cachedCall(
   tenantId: string,
   siteId: string,
+  route: SeoRoute,
   resource: "keyword_ideas" | "ranked_keywords",
-  key: string,
-  call: () => Promise<{ items: KeywordMetrics[]; costUsd: number }>,
+  subject: string,
+  fetchImpl: typeof fetch,
 ): Promise<KeywordMetrics[]> {
-  const cached = await lookupProviderCache(tenantId, PROVIDER, resource, key);
+  const key = `${route.marketKey}|${subject}`;
+  const cached = await lookupProviderCache(tenantId, route.provider.id, resource, key);
   if (cached.hit && !cached.stale) return cached.negative ? [] : (cached.payload as KeywordMetrics[]);
-  const { items, costUsd } = await call();
-  if (costUsd > 0) await recordAiSpend({ tenantId, siteId, kind: "keyword_metrics", provider: PROVIDER, model: resource, costUsd });
-  await storeProviderCache(tenantId, PROVIDER, resource, key, items.length ? items : undefined, { ttlMs: TTL_MS, negative: items.length === 0 });
+  const scope = { tenantId, siteId, kind: "keyword_metrics", resource, fetchImpl };
+  const { data: items, meta } = resource === "keyword_ideas"
+    ? await acquireSeo(route, "keyword_suggestions", { seed: subject, limit: ROWS_PER_CALL }, scope)
+    : await acquireSeo(route, "ranked_keywords", { domain: subject, limit: ROWS_PER_CALL }, scope);
+  if (items.length || !meta.partial) await storeProviderCache(tenantId, route.provider.id, resource, key, items.length ? items : undefined, { ttlMs: TTL_MS, negative: items.length === 0 });
   return items;
 }
 
@@ -137,7 +130,7 @@ export function keywordSeeds(context: Pick<EditorialPlanningContext, "profile" |
 }
 
 /**
- * Measured keyword candidates for a plan, best first. Empty when DataForSEO is not configured,
+ * Measured keyword candidates for a plan, best first. Empty when no SEO provider may be used,
  * the market is unsupported or every call fails: the caller then keeps the model-picked flow.
  */
 export async function collectKeywordCandidates(
@@ -145,12 +138,11 @@ export async function collectKeywordCandidates(
   siteId: string,
   context: EditorialPlanningContext,
   limit: number,
-  fetchers: Fetchers = { ideas: fetchKeywordIdeas, ranked: fetchRankedKeywords },
+  fetchImpl: typeof fetch = fetch,
 ): Promise<KeywordCandidate[]> {
-  if (!dataForSeoConfigured()) return [];
-  const location: DataForSeoLocation | null = dataForSeoLocation(context.site.locale);
-  if (!location) return [];
-  const market = `${location.locationCode}|${location.languageCode}`;
+  // A capability without a provider is skipped: the other one still yields candidates.
+  const [ideas, rankings] = await Promise.all([seoRoute("keyword_suggestions", context.site.locale), seoRoute("ranked_keywords", context.site.locale)]);
+  if (!ideas.provider && !rankings.provider) return [];
   const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId, status: "accepted" }, select: { domain: true }, orderBy: { overlapScore: "desc" }, take: MAX_COMPETITORS });
   const opportunities = await prisma.contentOpportunity.findMany({ where: { tenantId, siteId, status: "open" }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 5 });
   // The site's own ranking keywords (1 cached call): skip what it already ranks for and set its reachable difficulty.
@@ -162,16 +154,16 @@ export async function collectKeywordCandidates(
     }
   })();
   let ownKeywords: KeywordMetrics[] = [];
-  if (ownDomain) {
+  if (ownDomain && rankings.provider) {
     try {
-      ownKeywords = await cachedCall(tenantId, siteId, "ranked_keywords", `${market}|${ownDomain}`, () => fetchers.ranked(ownDomain, location, ROWS_PER_CALL));
+      ownKeywords = await cachedCall(tenantId, siteId, rankings, "ranked_keywords", ownDomain, fetchImpl);
     } catch (error) {
       structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
     }
   }
   const calls = [
-    ...keywordSeeds(context, opportunities.map((entry) => entry.topic)).map((seed) => () => cachedCall(tenantId, siteId, "keyword_ideas", `${market}|${seed}`, () => fetchers.ideas(seed, location, ROWS_PER_CALL))),
-    ...competitors.map(({ domain }) => () => cachedCall(tenantId, siteId, "ranked_keywords", `${market}|${domain}`, () => fetchers.ranked(domain, location, ROWS_PER_CALL))),
+    ...(ideas.provider ? keywordSeeds(context, opportunities.map((entry) => entry.topic)).map((seed) => () => cachedCall(tenantId, siteId, ideas, "keyword_ideas", seed, fetchImpl)) : []),
+    ...(rankings.provider ? competitors.map(({ domain }) => () => cachedCall(tenantId, siteId, rankings, "ranked_keywords", domain, fetchImpl)) : []),
   ];
   const metrics: KeywordMetrics[] = [];
   for (const call of calls) {
@@ -183,6 +175,6 @@ export async function collectKeywordCandidates(
   }
   const reachableDifficulty = reachableDifficultyFor(ownKeywords);
   const ranked = rankKeywordCandidates(metrics, context, limit, { keywords: ownKeywords.map((item) => item.keyword), reachableDifficulty });
-  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain ? 1 : 0), rows: metrics.length, candidates: ranked.length, reachableDifficulty });
+  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain && rankings.provider ? 1 : 0), rows: metrics.length, candidates: ranked.length, reachableDifficulty });
   return ranked;
 }

@@ -35,5 +35,6 @@ describe('studio nav (M5)', () => {
     }
     expect(visible('admin')).toEqual(['Sites', 'Mode & rhythm', 'Connections', 'Web discovery', 'Assistant tools', 'People', 'Roles', 'System health']);
     expect(visible('admin', true)).toContain('AI providers');
+    expect(visible('admin', true)).toContain('SEO providers');
   });
 });

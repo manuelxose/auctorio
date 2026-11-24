@@ -1998,7 +1998,7 @@ model EditorialPlanItem {
   searchVolume                   Int?                    @map("search_volume")
   /// Provider keyword difficulty 0–100 (unlike the 1–10 model estimate above).
   keywordDifficulty              Int?                    @map("keyword_difficulty")
-  /// Provider that was queried (e.g. "dataforseo"); null = never checked.
+  /// Source of the metrics (SEO provider source tag, e.g. "dataforseo", "anyapi"); null = never checked.
   keywordMetricsSource           String?                 @map("keyword_metrics_source")
   keywordMetricsAt               DateTime?               @map("keyword_metrics_at")
   opportunityScore              Float?                  @map("opportunity_score")
@@ -3029,4 +3029,35 @@ model AiProviderKey {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("ai_provider_keys")
+}
+
+/// SEO provider switch, priority, health and live-verification record (SEO-V2). No row = code default. No secrets here.
+model SeoProviderState {
+  providerId       String    @id @map("provider_id")
+  enabled          Boolean
+  priority         Int
+  lastSuccessAt    DateTime? @map("last_success_at")
+  lastErrorAt      DateTime? @map("last_error_at")
+  lastErrorCode    String?   @map("last_error_code")
+  lastErrorMessage String?   @map("last_error_message")
+  /// capability -> { at, market, costUsd } of each live call an admin authorized.
+  verifications    Json?
+  updatedByUserId  String?   @map("updated_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("seo_provider_states")
+}
+
+/// Platform-wide SEO operating mode; one row, id "global" (SEO-V2). No row = DataForSEO only.
+model SeoControlSetting {
+  id              String   @id @default("global")
+  mode            String
+  /// Manual mode: capability -> provider id.
+  routing         Json?
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("seo_control_settings")
 }

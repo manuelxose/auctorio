@@ -151,6 +151,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
       { label: 'Usage', path: '/studio/admin/overview', icon: 'overview', heading: 'All workspaces', platformAdminOnly: true },
       { label: 'Workspaces', path: '/studio/admin/workspaces', icon: 'globe', platformAdminOnly: true },
       { label: 'AI providers', path: '/studio/admin/ai', icon: 'sparkles', platformAdminOnly: true },
+      { label: 'SEO providers', path: '/studio/admin/seo', icon: 'search', platformAdminOnly: true },
     ],
   },
 ];

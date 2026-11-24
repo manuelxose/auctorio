@@ -1,82 +1,71 @@
-// Real search demand for plan items: DataForSEO volume + difficulty, cached per keyword.
-// Best effort: no credentials, unknown market or provider error → fields stay null, planning never blocks.
+// Real search demand for plan items: provider volume + difficulty, cached per keyword and provider.
+// Best effort: no provider, unknown market or provider error → fields stay null, planning never blocks.
 
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import {
-  dataForSeoConfigured,
-  dataForSeoLocation,
-  fetchGoogleAdsVolume,
-  fetchKeywordOverview,
-  normalizeKeyword,
-  type DataForSeoLocation,
-  type KeywordMetrics,
-} from "../infrastructure/seo/dataforseo";
+import { normalizeKeyword, type KeywordMetrics } from "../infrastructure/seo/contract";
 import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
-import { recordAiSpend } from "./cost-budgets";
+import { acquireSeo, seoRoute, type SeoRoute } from "./seo-manager";
 import { structuredEvent } from "../shared/utils/logger";
 
 const prisma = getPrismaClient();
-const PROVIDER = "dataforseo";
 const RESOURCE = "keyword_overview";
-const TTL_MS = 30 * 24 * 60 * 60 * 1000; // DataForSEO refreshes keyword data monthly
-
-type Fetcher = typeof fetchKeywordOverview;
+const VOLUME_RESOURCE = "google_ads_volume"; // name of the entries already cached
+const TTL_MS = 30 * 24 * 60 * 60 * 1000; // keyword data is refreshed monthly
 
 /** Metrics per normalized keyword; a keyword the provider has no data for maps to null. */
 export async function getKeywordMetrics(
   tenantId: string,
   siteId: string | null,
   keywords: string[],
-  location: DataForSeoLocation,
-  fetcher: Fetcher = fetchKeywordOverview,
+  route: SeoRoute,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<Map<string, KeywordMetrics | null>> {
   const wanted = [...new Set(keywords.map(normalizeKeyword).filter(Boolean))];
   const result = new Map<string, KeywordMetrics | null>();
-  const cacheKey = (keyword: string) => `${location.locationCode}|${location.languageCode}|${keyword}`;
+  const cacheKey = (keyword: string) => `${route.marketKey}|${keyword}`;
   const missing: string[] = [];
   for (const keyword of wanted) {
-    const cached = await lookupProviderCache(tenantId, PROVIDER, RESOURCE, cacheKey(keyword));
+    const cached = await lookupProviderCache(tenantId, route.provider.id, RESOURCE, cacheKey(keyword));
     if (cached.hit) result.set(keyword, cached.negative ? null : (cached.payload as KeywordMetrics));
     else missing.push(keyword);
   }
   if (missing.length === 0) return result;
 
-  const { items, costUsd } = await fetcher(missing, location);
-  if (costUsd > 0) await recordAiSpend({ tenantId, siteId, kind: "keyword_metrics", provider: PROVIDER, model: RESOURCE, costUsd });
-  const byKeyword = new Map(items.map((item) => [item.keyword, item]));
+  const { data, meta } = await acquireSeo(route, "keyword_metrics", { keywords: missing }, { tenantId, siteId, kind: "keyword_metrics", resource: RESOURCE, fetchImpl });
+  const byKeyword = new Map(data.map((item) => [item.keyword, item]));
   for (const keyword of missing) {
     const metrics = byKeyword.get(keyword) ?? null;
-    await storeProviderCache(tenantId, PROVIDER, RESOURCE, cacheKey(keyword), metrics ?? undefined, { ttlMs: TTL_MS, negative: !metrics });
+    // Missing from a partial answer is unknown, not "no data": it is neither cached nor returned.
+    if (!metrics && meta.partial) continue;
+    await storeProviderCache(tenantId, route.provider.id, RESOURCE, cacheKey(keyword), metrics ?? undefined, { ttlMs: TTL_MS, negative: !metrics });
     result.set(keyword, metrics);
   }
   return result;
 }
 
-const ADS_SOURCE = "dataforseo_google_ads";
-
-/** Google Ads volume for keywords Labs has no data for (cached 30 days); a keyword without volume maps to null. */
-export async function getGoogleAdsVolumes(
+/** Search volume alone, for keywords without metrics (cached 30 days); a keyword without volume maps to null. */
+export async function getSearchVolumes(
   tenantId: string,
   siteId: string | null,
   keywords: string[],
-  location: DataForSeoLocation,
-  fetcher: typeof fetchGoogleAdsVolume = fetchGoogleAdsVolume,
+  route: SeoRoute,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<Map<string, number | null>> {
   const result = new Map<string, number | null>();
-  const cacheKey = (keyword: string) => `${location.locationCode}|${location.languageCode}|${keyword}`;
+  const cacheKey = (keyword: string) => `${route.marketKey}|${keyword}`;
   const missing: string[] = [];
   for (const keyword of [...new Set(keywords.map(normalizeKeyword).filter(Boolean))]) {
-    const cached = await lookupProviderCache(tenantId, PROVIDER, "google_ads_volume", cacheKey(keyword));
+    const cached = await lookupProviderCache(tenantId, route.provider.id, VOLUME_RESOURCE, cacheKey(keyword));
     if (cached.hit) result.set(keyword, cached.negative ? null : Number(cached.payload));
     else missing.push(keyword);
   }
   if (!missing.length) return result;
-  const { items, costUsd } = await fetcher(missing, location);
-  if (costUsd > 0) await recordAiSpend({ tenantId, siteId, kind: "keyword_metrics", provider: PROVIDER, model: "google_ads_volume", costUsd });
-  const byKeyword = new Map(items.map((item) => [item.keyword, item.volume]));
+  const { data, meta } = await acquireSeo(route, "search_volume", { keywords: missing }, { tenantId, siteId, kind: "keyword_metrics", resource: VOLUME_RESOURCE, fetchImpl });
+  const byKeyword = new Map(data.map((item) => [item.keyword, item.volume]));
   for (const keyword of missing) {
     const volume = byKeyword.get(keyword) ?? null;
-    await storeProviderCache(tenantId, PROVIDER, "google_ads_volume", cacheKey(keyword), volume ?? undefined, { ttlMs: TTL_MS, negative: volume === null });
+    if (volume === null && meta.partial) continue;
+    await storeProviderCache(tenantId, route.provider.id, VOLUME_RESOURCE, cacheKey(keyword), volume ?? undefined, { ttlMs: TTL_MS, negative: volume === null });
     result.set(keyword, volume);
   }
   return result;
@@ -86,40 +75,41 @@ export async function getGoogleAdsVolumes(
 export async function enrichPlanItemsWithKeywordMetrics(
   tenantId: string,
   planId: string,
-  fetcher: Fetcher = fetchKeywordOverview,
-  adsFetcher: typeof fetchGoogleAdsVolume = fetchGoogleAdsVolume,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<number> {
-  if (!dataForSeoConfigured()) return 0;
   const items = await prisma.editorialPlanItem.findMany({
     where: { tenantId, planId, primaryKeyword: { not: null }, keywordMetricsSource: null },
     select: { id: true, siteId: true, primaryKeyword: true, site: { select: { locale: true } } },
   });
   if (items.length === 0) return 0;
-  const location = dataForSeoLocation(items[0].site?.locale);
-  if (!location) {
-    structuredEvent("keyword_metrics.skipped", { tenantId, planId, reason: "unsupported_locale", locale: items[0].site?.locale ?? null }, "warn");
-    return 0;
-  }
   try {
-    const metrics = await getKeywordMetrics(tenantId, items[0].siteId, items.map((item) => item.primaryKeyword!), location, fetcher);
-    // Keywords Labs does not know (typically added by hand): Google Ads volume only, never a difficulty.
+    const [route, volumeRoute] = await Promise.all([seoRoute("keyword_metrics", items[0].site?.locale), seoRoute("search_volume", items[0].site?.locale)]);
+    if (!route.provider) {
+      structuredEvent("keyword_metrics.skipped", { tenantId, planId, reason: route.reason, locale: items[0].site?.locale ?? null }, route.reason === "unsupported_market" ? "warn" : "info");
+      return 0;
+    }
+    const metrics = await getKeywordMetrics(tenantId, items[0].siteId, items.map((item) => item.primaryKeyword!), route, fetchImpl);
+    // Keywords without metrics (typically added by hand): search volume only, never a difficulty.
     const unknown = items.map((item) => item.primaryKeyword!).filter((keyword) => metrics.get(normalizeKeyword(keyword))?.volume == null);
-    const ads = unknown.length ? await getGoogleAdsVolumes(tenantId, items[0].siteId, unknown, location, adsFetcher).catch(() => new Map<string, number | null>()) : new Map<string, number | null>();
+    const ads = unknown.length && volumeRoute.provider ? await getSearchVolumes(tenantId, items[0].siteId, unknown, volumeRoute, fetchImpl).catch(() => new Map<string, number | null>()) : new Map<string, number | null>();
     const now = new Date();
+    let checked = 0;
     for (const item of items) {
       const key = normalizeKeyword(item.primaryKeyword!);
       const found = metrics.get(key);
       const adsVolume = found?.volume == null ? ads.get(key) ?? null : null;
+      if (!metrics.has(key) && adsVolume === null) continue; // not answered: stays "never checked"
+      checked += 1;
       await prisma.editorialPlanItem.update({
         where: { id: item.id },
         // Source is set even when the provider has no data: "checked, unknown" is not "never checked".
-        data: adsVolume !== null
-          ? { searchVolume: adsVolume, keywordDifficulty: null, keywordMetricsSource: ADS_SOURCE, keywordMetricsAt: now }
-          : { searchVolume: found?.volume ?? null, keywordDifficulty: found?.difficulty ?? null, keywordMetricsSource: PROVIDER, keywordMetricsAt: now },
+        data: adsVolume !== null && volumeRoute.provider
+          ? { searchVolume: adsVolume, keywordDifficulty: null, keywordMetricsSource: volumeRoute.sourceTag, keywordMetricsAt: now }
+          : { searchVolume: found?.volume ?? null, keywordDifficulty: found?.difficulty ?? null, keywordMetricsSource: route.sourceTag, keywordMetricsAt: now },
       });
     }
-    structuredEvent("keyword_metrics.enriched", { tenantId, planId, items: items.length });
-    return items.length;
+    structuredEvent("keyword_metrics.enriched", { tenantId, planId, items: checked });
+    return checked;
   } catch (error) {
     structuredEvent("keyword_metrics.failed", { tenantId, planId, error: error instanceof Error ? error.message : String(error) }, "warn");
     return 0;

@@ -5,15 +5,16 @@ import { ActivatedRoute } from '@angular/router';
 import { AdminAi, AdminApiService, AdminOverview, AdminTenant } from '../services/admin-api.service';
 import { ToastService } from '../services/toast.service';
 import { AiProviderSettingsComponent } from '../components/ai-provider-settings.component';
+import { SeoProviderSettingsComponent } from '../components/seo-provider-settings.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 
-type AdminSection = 'overview' | 'workspaces' | 'ai';
+type AdminSection = 'overview' | 'workspaces' | 'ai' | 'seo';
 
 /** Platform admin area: first approximation of SaaS control (health, workspaces, AI keys and spend). */
 @Component({
   selector: 'app-admin-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppEmptyStateComponent, AiProviderSettingsComponent],
+  imports: [CommonModule, FormsModule, AppEmptyStateComponent, AiProviderSettingsComponent, SeoProviderSettingsComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
@@ -27,6 +28,8 @@ type AdminSection = 'overview' | 'workspaces' | 'ai';
       <app-empty-state *ngIf="denied" icon="lock" title="Platform admins only" text="Your account is not on the platform admin list (PLATFORM_ADMIN_EMAILS)."></app-empty-state>
 
       <div class="au-admin" *ngIf="!denied">
+        <app-seo-provider-settings *ngIf="section === 'seo'" (forbidden)="denied = true"></app-seo-provider-settings>
+
         <div class="au-stats" *ngIf="section === 'overview' && overview">
           <div class="au-stat"><span class="au-stat__label">Workspaces</span><span class="au-stat__value">{{ overview.tenants }}</span><span class="au-stat__note">{{ overview.suspended }} suspended</span></div>
           <div class="au-stat"><span class="au-stat__label">Sites</span><span class="au-stat__value">{{ overview.sites }}</span></div>
@@ -95,7 +98,7 @@ export class AdminPageComponent implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly toast = inject(ToastService);
 
-  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers' };
+  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers', seo: 'SEO providers' };
   section: AdminSection = 'overview';
   denied = false;
   overview: AdminOverview | null = null;
@@ -107,7 +110,7 @@ export class AdminPageComponent implements OnInit {
   ngOnInit(): void {
     this.route.paramMap.subscribe((params) => {
       const s = params.get('section');
-      this.section = s === 'workspaces' || s === 'ai' ? s : 'overview';
+      this.section = s === 'workspaces' || s === 'ai' || s === 'seo' ? s : 'overview';
       this.load();
     });
   }

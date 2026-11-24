@@ -1,32 +1,32 @@
 // One YouTube video per guide (BLG parity M6): the top YouTube result for the keyword, optionally only from the
-// site's own channel. Best effort like serp-sources: no credentials, no market or provider error → no video.
+// site's own channel. Best effort like serp-sources: no provider, no market or provider error → no video.
 
-import { dataForSeoConfigured, dataForSeoLocation, fetchYoutubeOrganic, normalizeKeyword, type YoutubeResult } from "../infrastructure/seo/dataforseo";
+import { normalizeKeyword, type YoutubeResult } from "../infrastructure/seo/contract";
 import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
-import { recordAiSpend } from "./cost-budgets";
+import { acquireSeo, seoRoute } from "./seo-manager";
 import { structuredEvent } from "../shared/utils/logger";
 import { pickYoutubeVideo, type VisualSettings, type YoutubeVideo } from "./editorial-engine/visuals";
 
-const PROVIDER = "dataforseo";
 const RESOURCE = "youtube_organic";
 const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export async function youtubeVideoFor(
   input: { tenantId: string; siteId: string; locale: string | null; keyword: string; youtube: VisualSettings["youtube"] },
-  fetcher: typeof fetchYoutubeOrganic = fetchYoutubeOrganic,
+  fetchImpl: typeof fetch = fetch,
 ): Promise<YoutubeVideo | null> {
-  const location = dataForSeoLocation(input.locale);
   const keyword = normalizeKeyword(input.keyword);
-  if (!input.youtube.enabled || !dataForSeoConfigured() || !location || !keyword) return null;
-  const key = `${location.locationCode}|${location.languageCode}|${keyword}`;
+  if (!input.youtube.enabled || !keyword) return null;
   try {
-    const cached = await lookupProviderCache(input.tenantId, PROVIDER, RESOURCE, key);
+    const route = await seoRoute("youtube_search", input.locale);
+    if (!route.provider) return null;
+    const key = `${route.marketKey}|${keyword}`;
+    const cached = await lookupProviderCache(input.tenantId, route.provider.id, RESOURCE, key);
     let videos = cached.hit ? (cached.negative ? [] : (cached.payload as YoutubeResult[])) : null;
     if (!videos) {
-      const fetched = await fetcher(keyword, location);
-      if (fetched.costUsd > 0) await recordAiSpend({ tenantId: input.tenantId, siteId: input.siteId, kind: "youtube_video", provider: PROVIDER, model: RESOURCE, costUsd: fetched.costUsd });
-      videos = fetched.videos;
-      await storeProviderCache(input.tenantId, PROVIDER, RESOURCE, key, videos, { ttlMs: TTL_MS, negative: videos.length === 0 });
+      const { data, meta } = await acquireSeo(route, "youtube_search", { keyword }, { tenantId: input.tenantId, siteId: input.siteId, kind: "youtube_video", resource: RESOURCE, fetchImpl });
+      videos = data;
+      // Nothing left of a partial answer is not "no videos": ask again next time.
+      if (videos.length || !meta.partial) await storeProviderCache(input.tenantId, route.provider.id, RESOURCE, key, videos, { ttlMs: TTL_MS, negative: videos.length === 0 });
     }
     return pickYoutubeVideo(videos, input.youtube);
   } catch (error) {

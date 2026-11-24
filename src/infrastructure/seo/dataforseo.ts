@@ -1,57 +1,56 @@
-// DataForSEO Labs keyword metrics (search volume + keyword difficulty).
+// DataForSEO client: endpoints, response parsing and (at the end) the adapter behind the provider contract.
 // The engine never estimates volume: every number here comes from the provider, or is null.
 
-import { getEnv } from "../../shared/utils/env";
+import { secretOf } from "../ai/ai-settings";
+import {
+  GOOGLE_LOCATION_CODES,
+  SeoProviderError,
+  assertNetworkAllowed,
+  normalizeKeyword,
+  num,
+  seoMarket,
+  text,
+  type KeywordMetrics,
+  type KeywordVolume,
+  type SeoAdapterResult,
+  type SeoCapability,
+  type SeoData,
+  type SeoErrorCode,
+  type SeoMarket,
+  type SeoProvider,
+  type SeoQuote,
+  type SeoRequests,
+  type SerpResult,
+  type YoutubeResult,
+} from "./contract";
 
-export type KeywordMetrics = {
-  keyword: string;
-  volume: number | null;
-  difficulty: number | null; // 0–100, DataForSEO keyword_difficulty
-  cpc: number | null;
-  intent: string | null;
-  source: "dataforseo";
-};
+export { difficultyLabel, normalizeKeyword } from "./contract";
+export type { KeywordMetrics, SerpResult, YoutubeResult } from "./contract";
 
 export type DataForSeoLocation = { locationCode: number; languageCode: string };
 
 const LABS = "https://api.dataforseo.com/v3/dataforseo_labs/google";
 const MAX_KEYWORDS_PER_TASK = 700;
+const MAX_ADS_KEYWORDS = 1000;
 const TIMEOUT_MS = 30_000;
 
-// shortcut: only the markets we publish in; add a row when a site targets another country.
-const LOCATION_CODES: Record<string, number> = { ES: 2724, US: 2840, GB: 2826, MX: 2484, AR: 2032, FR: 2250, DE: 2276, IT: 2380, PT: 2620 };
-const DEFAULT_COUNTRY: Record<string, string> = { es: "ES", en: "US", fr: "FR", de: "DE", it: "IT", pt: "PT" };
-
+/** Panel credentials win over the server env (the manager loads them first). */
 export function dataForSeoConfigured(): boolean {
-  return Boolean(getEnv("DATAFORSEO_LOGIN") && getEnv("DATAFORSEO_PASSWORD"));
+  return Boolean(secretOf("DATAFORSEO_LOGIN") && secretOf("DATAFORSEO_PASSWORD"));
 }
 
 /** "es", "es-ES", "es_MX" → DataForSEO location/language; null when the market is unknown. */
 export function dataForSeoLocation(locale: string | null | undefined): DataForSeoLocation | null {
-  const [lang, country] = (locale ?? "").trim().replace("_", "-").split("-");
-  const languageCode = lang?.toLowerCase();
-  if (!languageCode) return null;
-  const locationCode = LOCATION_CODES[(country ?? DEFAULT_COUNTRY[languageCode] ?? "").toUpperCase()];
-  return locationCode ? { locationCode, languageCode } : null;
+  return locationOf(seoMarket(locale));
 }
 
-/** BLG-style label derived from the 0–100 difficulty (never stored). */
-export function difficultyLabel(difficulty: number | null | undefined): "easy" | "medium" | "hard" | "very_hard" | null {
-  if (typeof difficulty !== "number") return null;
-  if (difficulty < 30) return "easy";
-  if (difficulty < 50) return "medium";
-  if (difficulty < 70) return "hard";
-  return "very_hard";
+function locationOf(market: SeoMarket | null): DataForSeoLocation | null {
+  const locationCode = market && !market.location ? GOOGLE_LOCATION_CODES[market.country] : undefined;
+  return market && locationCode ? { locationCode, languageCode: market.language } : null;
 }
 
-export function normalizeKeyword(keyword: string): string {
-  return keyword.trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-const num = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
-
-/** Every item of every task result, after DataForSEO's own status checks. */
-function resultItems(body: unknown): { raws: unknown[]; costUsd: number } {
+/** Every item of every task result, after DataForSEO's own status checks. costUsd is null when the response omits it. */
+function resultItems(body: unknown): { raws: unknown[]; costUsd: number | null } {
   const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ items?: unknown[] | null }> | null }> };
   if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
   const raws: unknown[] = [];
@@ -59,17 +58,25 @@ function resultItems(body: unknown): { raws: unknown[]; costUsd: number } {
     if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
     for (const result of task.result ?? []) raws.push(...(result.items ?? []));
   }
-  return { raws, costUsd: num(root.cost) ?? 0 };
+  return { raws, costUsd: num(root.cost) };
+}
+
+/** "2026-11-01 05:12:53 +00:00" → ISO; null when absent or unreadable. */
+function isoTime(value: unknown): string | null {
+  const time = typeof value === "string" ? Date.parse(value.replace(" ", "T").replace(" ", "")) : Number.NaN;
+  return Number.isNaN(time) ? null : new Date(time).toISOString();
 }
 
 /** Parse a keyword_overview/live response. Throws when the API reports a failure. */
-export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; costUsd: number } {
+export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; costUsd: number | null } {
   const { raws, costUsd } = resultItems(body);
   const items: KeywordMetrics[] = [];
   for (const raw of raws) {
     // ranked_keywords nests the keyword under keyword_data; overview/ideas items are flat.
-    const item = ((raw as { keyword_data?: unknown })?.keyword_data ?? raw) as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
-    if (typeof item.keyword !== "string") continue;
+    const item = ((raw as { keyword_data?: unknown })?.keyword_data ?? raw) as { keyword?: string; keyword_info?: { search_volume?: unknown; cpc?: unknown; competition?: unknown; competition_level?: unknown; last_updated_time?: unknown }; keyword_properties?: { keyword_difficulty?: unknown }; search_intent_info?: { main_intent?: unknown } };
+    if (typeof item?.keyword !== "string") continue;
+    const serp = (raw as { ranked_serp_element?: { serp_item?: { rank_absolute?: unknown; url?: unknown; etv?: unknown } } }).ranked_serp_element?.serp_item;
+    const competition = { index: num(item.keyword_info?.competition), level: text(item.keyword_info?.competition_level) };
     items.push({
       keyword: normalizeKeyword(item.keyword),
       volume: num(item.keyword_info?.search_volume),
@@ -77,18 +84,20 @@ export function parseKeywordOverview(body: unknown): { items: KeywordMetrics[]; 
       cpc: num(item.keyword_info?.cpc),
       intent: typeof item.search_intent_info?.main_intent === "string" ? item.search_intent_info.main_intent : null,
       source: "dataforseo",
+      adsCompetition: competition.index === null && competition.level === null ? null : competition,
+      asOf: isoTime(item.keyword_info?.last_updated_time),
+      rank: serp ? { position: num(serp.rank_absolute), url: text(serp.url) } : null,
+      estimatedTraffic: num(serp?.etv),
     });
   }
   return { items, costUsd };
 }
 
-export type SerpResult = { url: string; title: string; domain: string; description: string };
-
 /**
  * Organic results (no ads, maps, videos) of the most recent stored SERP snapshot, in ranking order.
  * Live Google SERPs now wrap most URLs in google.com/goto redirects behind a bot check; Labs snapshots keep the real URLs.
  */
-export function parseSerpOrganic(body: unknown): { results: SerpResult[]; costUsd: number } {
+export function parseSerpOrganic(body: unknown): { results: SerpResult[]; costUsd: number | null; asOf: string | null } {
   const { raws, costUsd } = resultItems(body);
   const snapshots = raws as Array<{ datetime?: string; items?: unknown[] | null }>;
   const latest = snapshots.reduce<(typeof snapshots)[number] | null>((best, snap) => (!best || String(snap?.datetime ?? "") > String(best.datetime ?? "") ? snap : best), null);
@@ -98,16 +107,11 @@ export function parseSerpOrganic(body: unknown): { results: SerpResult[]; costUs
     const domain = typeof raw.domain === "string" ? raw.domain.replace(/^www\./, "") : "";
     results.push({ url: raw.url, title: raw.title, domain, description: typeof raw.description === "string" ? raw.description : "" });
   }
-  return { results, costUsd };
+  return { results, costUsd, asOf: isoTime(latest?.datetime) };
 }
 
 /** One Labs live task; every Labs keyword endpoint returns items in the keyword_overview shape. */
-async function postLabsTask(
-  path: string,
-  task: Record<string, unknown>,
-  location: DataForSeoLocation,
-  fetchImpl: typeof fetch,
-): Promise<{ items: KeywordMetrics[]; costUsd: number }> {
+async function postLabsTask(path: string, task: Record<string, unknown>, location: DataForSeoLocation, fetchImpl: typeof fetch) {
   return parseKeywordOverview(await postLive(`${LABS}/${path}/live`, task, location, fetchImpl));
 }
 
@@ -117,7 +121,8 @@ export async function fetchSerpOrganic(keyword: string, location: DataForSeoLoca
 }
 
 async function postLive(url: string, task: Record<string, unknown>, location: DataForSeoLocation, fetchImpl: typeof fetch): Promise<unknown> {
-  const auth = Buffer.from(`${getEnv("DATAFORSEO_LOGIN")}:${getEnv("DATAFORSEO_PASSWORD")}`).toString("base64");
+  assertNetworkAllowed(fetchImpl, "dataforseo");
+  const auth = Buffer.from(`${secretOf("DATAFORSEO_LOGIN")}:${secretOf("DATAFORSEO_PASSWORD")}`).toString("base64");
   const response = await fetchImpl(url, {
     method: "POST",
     headers: { Authorization: `Basic ${auth}`, "Content-Type": "application/json" },
@@ -130,19 +135,9 @@ async function postLive(url: string, task: Record<string, unknown>, location: Da
   return body;
 }
 
-/** One live call per ≤700 keywords. Keywords without data are simply absent from the result. */
-export async function fetchKeywordOverview(
-  keywords: string[],
-  location: DataForSeoLocation,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ items: KeywordMetrics[]; costUsd: number }> {
-  const out = { items: [] as KeywordMetrics[], costUsd: 0 };
-  for (let i = 0; i < keywords.length; i += MAX_KEYWORDS_PER_TASK) {
-    const parsed = await postLabsTask("keyword_overview", { keywords: keywords.slice(i, i + MAX_KEYWORDS_PER_TASK) }, location, fetchImpl);
-    out.items.push(...parsed.items);
-    out.costUsd += parsed.costUsd;
-  }
-  return out;
+/** One live call (≤700 keywords; the manager splits larger batches). Keywords without data are absent from the result. */
+export function fetchKeywordOverview(keywords: string[], location: DataForSeoLocation, fetchImpl: typeof fetch = fetch) {
+  return postLabsTask("keyword_overview", { keywords }, location, fetchImpl);
 }
 
 /** Real keyword candidates around a seed (keyword_ideas), highest volume first. */
@@ -155,10 +150,8 @@ export function fetchRankedKeywords(domain: string, location: DataForSeoLocation
   return postLabsTask("ranked_keywords", { target: domain, limit, order_by: ["keyword_data.keyword_info.search_volume,desc"] }, location, fetchImpl);
 }
 
-export type YoutubeResult = { id: string; title: string; channel: string; channelUrl: string };
-
 /** Video results of a YouTube organic SERP, in ranking order (M6 «one YouTube video per article»). */
-export function parseYoutubeOrganic(body: unknown): { videos: YoutubeResult[]; costUsd: number } {
+export function parseYoutubeOrganic(body: unknown): { videos: YoutubeResult[]; costUsd: number | null } {
   const { raws, costUsd } = resultItems(body);
   const videos: YoutubeResult[] = [];
   for (const raw of raws as Array<{ type?: string; video_id?: unknown; title?: unknown; channel_name?: unknown; channel_url?: unknown }>) {
@@ -176,19 +169,138 @@ export async function fetchYoutubeOrganic(keyword: string, location: DataForSeoL
  * Google Ads search volume (keywords_data) for keywords Labs has no data for (M2 fallback). Volume only, in the
  * bucketed values Google Ads reports (10, 50, 140…); keywords Google returns no volume for are absent.
  */
-export function parseGoogleAdsVolume(body: unknown): { items: Array<{ keyword: string; volume: number }>; costUsd: number } {
+export function parseGoogleAdsVolume(body: unknown): { items: KeywordVolume[]; costUsd: number | null } {
   const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ keyword?: unknown; search_volume?: unknown }> | null }> };
   if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
-  const items: Array<{ keyword: string; volume: number }> = [];
+  const items: KeywordVolume[] = [];
   for (const task of root.tasks ?? []) {
     if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
     for (const row of task.result ?? []) {
       if (typeof row.keyword === "string" && typeof row.search_volume === "number") items.push({ keyword: normalizeKeyword(row.keyword), volume: row.search_volume });
     }
   }
-  return { items, costUsd: num(root.cost) ?? 0 };
+  return { items, costUsd: num(root.cost) };
 }
 
 export async function fetchGoogleAdsVolume(keywords: string[], location: DataForSeoLocation, fetchImpl: typeof fetch = fetch) {
-  return parseGoogleAdsVolume(await postLive("https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live", { keywords: keywords.slice(0, 1000) }, location, fetchImpl));
+  return parseGoogleAdsVolume(await postLive("https://api.dataforseo.com/v3/keywords_data/google_ads/search_volume/live", { keywords }, location, fetchImpl));
 }
+
+// ---- Adapter behind the provider contract ----
+
+const ID = "dataforseo";
+// Official live prices checked 2026-11-24 (docs/seo-v2/cost-model.md). historical_serps bills per stored snapshot
+// and how many there are is not known beforehand, so its maximum stays unknown.
+const LABS_TASK_USD = 0.012;
+const LABS_ITEM_USD = 0.00012;
+const ADS_TASK_USD = 0.09;
+const YOUTUBE_BLOCK_USD = 0.002; // per block of 20 results; we ask for 20
+
+/** DataForSEO failures as contract errors; the original message (status, DataForSEO code and reason) is kept. */
+function toSeoError(error: unknown): SeoProviderError {
+  if (error instanceof SeoProviderError) return error;
+  const name = error instanceof Error ? error.name : "";
+  const message = (error instanceof Error ? error.message : String(error)).slice(0, 300);
+  const match = /^dataforseo_(?:http_(\d+)|error|task_error): ?(\d+)?/.exec(message);
+  const status = match?.[1] ?? "";
+  const detail = match?.[2] ?? "";
+  let code: SeoErrorCode = "upstream_error";
+  if (name === "TimeoutError" || name === "AbortError") code = "timeout";
+  else if (status === "401" || status === "403" || detail.startsWith("401")) code = "invalid_credentials";
+  else if (status === "402" || detail === "40200" || detail === "40210") code = "insufficient_balance";
+  else if (status === "429" || detail === "40202") code = "rate_limited";
+  else if (match && !status && !detail) code = "malformed_response"; // 200 without DataForSEO's envelope
+  else if (status.startsWith("4") || detail.startsWith("4")) code = "bad_request";
+  else if (!match && error instanceof TypeError && name === "TypeError" && !/fetch/i.test(message)) code = "malformed_response";
+  return new SeoProviderError(code, message, ID);
+}
+
+const result = <C extends SeoCapability>(data: SeoData[C], billedUsd: number | null, asOf: string | null = null): SeoAdapterResult<C> => ({
+  data, billedUsd, asOf, upstream: null, partial: false, nextCursor: null, notes: [],
+});
+
+type Handlers = { [C in SeoCapability]: (request: SeoRequests[C], location: DataForSeoLocation, fetchImpl: typeof fetch) => Promise<SeoAdapterResult<C>> };
+
+const handlers: Handlers = {
+  keyword_metrics: async ({ keywords }, location, fetchImpl) => {
+    const { items, costUsd } = await fetchKeywordOverview(keywords, location, fetchImpl);
+    return result<"keyword_metrics">(items, costUsd);
+  },
+  keyword_suggestions: async ({ seed, limit }, location, fetchImpl) => {
+    const { items, costUsd } = await fetchKeywordIdeas(seed, location, limit, fetchImpl);
+    return result<"keyword_suggestions">(items, costUsd);
+  },
+  ranked_keywords: async ({ domain, limit }, location, fetchImpl) => {
+    const { items, costUsd } = await fetchRankedKeywords(domain, location, limit, fetchImpl);
+    return result<"ranked_keywords">(items, costUsd);
+  },
+  serp_organic: async ({ keyword }, location, fetchImpl) => {
+    const { results, costUsd, asOf } = await fetchSerpOrganic(keyword, location, fetchImpl);
+    return result<"serp_organic">(results, costUsd, asOf);
+  },
+  search_volume: async ({ keywords }, location, fetchImpl) => {
+    const { items, costUsd } = await fetchGoogleAdsVolume(keywords, location, fetchImpl);
+    return result<"search_volume">(items, costUsd);
+  },
+  youtube_search: async ({ keyword }, location, fetchImpl) => {
+    const { videos, costUsd } = await fetchYoutubeOrganic(keyword, location, fetchImpl);
+    return result<"youtube_search">(videos, costUsd);
+  },
+};
+
+const labs = (units: number): SeoQuote => {
+  const usd = LABS_TASK_USD + LABS_ITEM_USD * units;
+  return { estimatedUsd: usd, maxUsd: usd, unit: "task + item", units };
+};
+
+const METRIC_KINDS = { volume: "provider_reported", cpc: "provider_reported", adsCompetition: "provider_reported", difficulty: "estimated", intent: "estimated" } as const;
+const NO_OPTIONS = { devices: [], pagination: false, degraded: null };
+
+export const dataForSeoProvider: SeoProvider = {
+  id: ID,
+  label: "DataForSEO",
+  credentials: [{ envName: "DATAFORSEO_LOGIN", label: "API login" }, { envName: "DATAFORSEO_PASSWORD", label: "API password" }],
+  capabilities: {
+    keyword_metrics: { supported: true, sourceTag: ID, dataKind: "provider_reported", fieldKinds: METRIC_KINDS, methodology: "DataForSEO Labs keyword_overview (monthly refresh); difficulty is DataForSEO's own 0–100 model", engine: "google", maxBatch: MAX_KEYWORDS_PER_TASK, maxResults: null, ...NO_OPTIONS },
+    keyword_suggestions: { supported: true, sourceTag: ID, dataKind: "provider_reported", fieldKinds: METRIC_KINDS, methodology: "DataForSEO Labs keyword_ideas, by search volume", engine: "google", maxBatch: 1, maxResults: 1000, ...NO_OPTIONS },
+    ranked_keywords: { supported: true, sourceTag: ID, dataKind: "historical", fieldKinds: { ...METRIC_KINDS, rank: "historical", estimatedTraffic: "estimated" }, methodology: "DataForSEO Labs ranked_keywords: positions from stored SERPs", engine: "google", maxBatch: 1, maxResults: 1000, ...NO_OPTIONS },
+    serp_organic: { supported: true, sourceTag: ID, dataKind: "historical", methodology: "Latest stored Google SERP snapshot (Labs historical_serps), not a live search", engine: "google", maxBatch: 1, maxResults: 100, ...NO_OPTIONS },
+    search_volume: { supported: true, sourceTag: "dataforseo_google_ads", dataKind: "provider_reported", methodology: "Google Ads search volume in Google's buckets", engine: "google", maxBatch: MAX_ADS_KEYWORDS, maxResults: null, ...NO_OPTIONS },
+    youtube_search: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "Live YouTube organic results", engine: "youtube", maxBatch: 1, maxResults: 20, ...NO_OPTIONS },
+  },
+  licensing: {
+    termsUrl: "https://dataforseo.com/terms-of-service",
+    checkedAt: "2026-11-24",
+    commercialUse: "unverified",
+    storage: "unverified",
+    crossTenantSharing: "unverified",
+    upstream: "first_party",
+    notes: ["Existing accepted integration; its resale, storage and sharing clauses were not established in SEO-V2-01, so cached data stays per tenant."],
+  },
+  rateLimit: null,
+  verifiedMarkets: [],
+  configured: dataForSeoConfigured,
+  marketKey(_capability, market) {
+    const location = locationOf(market);
+    return location ? `${location.locationCode}|${location.languageCode}` : null; // format of the keys already cached
+  },
+  quote(capability, request) {
+    switch (capability) {
+      case "keyword_metrics": return labs((request as SeoRequests["keyword_metrics"]).keywords.length);
+      case "keyword_suggestions": return labs((request as SeoRequests["keyword_suggestions"]).limit);
+      case "ranked_keywords": return labs((request as SeoRequests["ranked_keywords"]).limit);
+      case "search_volume": return { estimatedUsd: ADS_TASK_USD, maxUsd: ADS_TASK_USD, unit: "task", units: 1 };
+      case "youtube_search": return { estimatedUsd: YOUTUBE_BLOCK_USD, maxUsd: YOUTUBE_BLOCK_USD, unit: "20 results", units: 1 };
+      default: return { estimatedUsd: null, maxUsd: null, unit: "stored SERP", units: null };
+    }
+  },
+  async run(capability, request, fetchImpl) {
+    const location = locationOf(request.market);
+    if (!location) throw new SeoProviderError("unsupported_market", `${ID}: market ${request.market.locale} is not supported`, ID);
+    try {
+      return await handlers[capability](request, location, fetchImpl);
+    } catch (error) {
+      throw toSeoError(error);
+    }
+  },
+};

@@ -22,7 +22,7 @@ import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileFor
 import { registerSearchTargets } from "./site-intelligence";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
 import { collectKeywordCandidates, type KeywordCandidate } from "./keyword-candidates";
-import { normalizeKeyword } from "../infrastructure/seo/dataforseo";
+import { normalizeKeyword } from "../infrastructure/seo/contract";
 import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
@@ -537,7 +537,7 @@ ${SOURCE_DATA_RULES}`;
     let lastProvider = "unknown";
     let lastModel = "unknown";
 
-    // Measured keywords (DataForSEO) are handed out to calls in score order; none → the model picks (previous flow).
+    // Measured keywords (SEO provider) are handed out to calls in score order; none → the model picks (previous flow).
     const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, input.publicationCount * 2).catch(() => [] as KeywordCandidate[]);
     const measured = new Map(keywordPool.map((candidate) => [candidate.keyword, candidate]));
     let keywordCursor = 0;
@@ -851,7 +851,7 @@ ${SOURCE_DATA_RULES}`;
             warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
             requestedCount: requestedTotal,
             filledCount: filledTotal,
-            keywordSource: keywordPool.length ? "dataforseo" : "model",
+            keywordSource: keywordPool[0]?.source ?? "model",
             unfilledSlots,
           } as unknown as Prisma.InputJsonObject,
           error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
