@@ -11,6 +11,8 @@ import { localDateInZone, zonedTimeToUtc } from "../plan-slots";
 import { enqueueFillMissingSlots, enqueueRegeneratePlanItem, titleTokenOverlap, updateEditorialPlanItem } from "../editorial-plan";
 import type { StudioPermission } from "../security";
 import { updateOpportunity, type EngagementPlatform } from "../engagement";
+import { listSeoOpportunities } from "../seo-intelligence";
+import type { OpportunityExplanation } from "../seo-intelligence/select";
 import { type AssistantContext, evidenceCount, strings, unfilledSlotsOf } from "./assistant-context";
 import { CopilotError } from "./errors";
 
@@ -603,7 +605,28 @@ const markEngagementReplied: WriteTool = {
   },
 };
 
+const seoOpportunities: ReadTool = {
+  kind: "read",
+  label: "SEO opportunities",
+  description: "Lists the site's best open SEO opportunities with the proposed action, the observed data behind it, its confidence and its risks.",
+  permission: "analytics.read",
+  needs: "site",
+  async run(ctx) {
+    if (!ctx.site) throw new CopilotError(400, "Select a site to read its SEO opportunities.");
+    const rows = await listSeoOpportunities(ctx.tenantId, ctx.site.id, { status: "open", take: 10 });
+    const link = { label: "SEO opportunities", path: "/studio/seo-opportunities" };
+    if (!rows.length) return { content: "There are no open SEO opportunities for this site. Connect Search Console or analyse the site first.", sources: [link] };
+    const lines = rows.map((row) => {
+      const detail = row.explanation as unknown as OpportunityExplanation | null;
+      const observed = (detail?.evidence ?? []).filter((entry) => entry.kind === "observed").slice(0, 4).map((entry) => `${entry.metric}: ${entry.value ?? "unknown"}`);
+      return `- **${row.topic}** → ${row.action} (score ${row.score ?? "unknown"}, confidence ${row.confidence ?? "unknown"}, effort ${detail?.effort ?? "unknown"}). ${row.rationale}${observed.length ? ` Observed: ${observed.join("; ")}.` : ""}${detail?.risks.length ? ` Risk: ${detail.risks[0]}` : ""}`;
+    });
+    return { content: ["The score orders work; it is not a probability of ranking.", ...lines].join("\n"), sources: [link] };
+  },
+};
+
 export const READ_TOOLS = {
+  seo_opportunities: seoOpportunities,
   pending_engagement: pendingEngagement,
   explain_strategy: explainStrategy,
   explain_proposal_relevance: explainProposalRelevance,

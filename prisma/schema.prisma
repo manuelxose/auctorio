@@ -402,6 +402,11 @@ model Tenant {
   competitors                    Competitor[]
   competitorCoverageSnapshots    CompetitorCoverageSnapshot[]
   contentOpportunities           ContentOpportunity[]
+  searchConsoleConnections SearchConsoleConnection[]
+  searchPerformance        SearchPerformance[]
+  searchIndexStatus        SearchIndexStatus[]
+  siteSeoProfiles          SiteSeoProfile[]
+  seoActions               SeoAction[]
   // production (agent D)
   productionJobs                 ProductionJob[]
   // assistant (agent E)
@@ -615,6 +620,12 @@ model Site {
   competitors                 Competitor[]
   competitorCoverageSnapshots CompetitorCoverageSnapshot[]
   contentOpportunities        ContentOpportunity[]
+  // first-party SEO intelligence (SEO-V2-04)
+  searchConsole               SearchConsoleConnection?
+  searchPerformance           SearchPerformance[]
+  searchIndexStatus           SearchIndexStatus[]
+  seoProfile                  SiteSeoProfile?
+  seoActions                  SeoAction[]
   // production (agent D)
   productionJobs         ProductionJob[]
 
@@ -2662,15 +2673,31 @@ model ContentOpportunity {
   targetUrl       String?   @map("target_url")
   status          String    @default("open")
   planItemId      String?   @map("plan_item_id") @db.Uuid
+  /// competitor | search_console | crawl | provider
+  source          String    @default("competitor")
+  query           String?
+  /// One of SEO_ACTIONS (src/studio/seo-intelligence/scoring.ts); null = not scored yet.
+  action          String?
+  /// Heuristic 0-100, never a ranking probability; null = not enough known factors.
+  score           Int?
+  confidence      Int?
+  priority        Float?
+  /// Machine-readable decision (OpportunityExplanation).
+  explanation     Json?
+  /// Set when a person decided: the engine stops changing the status.
+  decidedAt       DateTime? @map("decided_at")
+  analyzedAt      DateTime? @map("analyzed_at")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
   tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site       Site        @relation(fields: [siteId], references: [id], onDelete: Cascade)
   competitor Competitor? @relation(fields: [competitorId], references: [id], onDelete: SetNull)
+  actions    SeoAction[]
 
   @@unique([siteId, dedupeKey])
   @@index([tenantId, siteId, status])
+  @@index([tenantId, siteId, source])
   @@map("content_opportunities")
 }
 
@@ -3268,4 +3295,132 @@ model SeoSnapshot {
   @@index([tenantId, providerId, operation, fetchedAt])
   @@index([retainUntil])
   @@map("seo_snapshots")
+}
+
+/// Authorized Search Console access of one site. Tokens never leave the server.
+model SearchConsoleConnection {
+  id                     String    @id @default(uuid()) @db.Uuid
+  tenantId               String    @map("tenant_id") @db.Uuid
+  siteId                 String    @unique @map("site_id") @db.Uuid
+  /// "sc-domain:example.com" or "https://example.com/"; null until a property is chosen.
+  property               String?
+  permissionLevel        String?   @map("permission_level")
+  refreshTokenCiphertext String?   @map("refresh_token_ciphertext") @db.Text
+  /// pending_property | active | revoked | forbidden | disconnected
+  status                 String
+  /// Newest and oldest day already stored; days in between are never requested again.
+  syncedThrough          DateTime? @map("synced_through") @db.Date
+  syncedFrom             DateTime? @map("synced_from") @db.Date
+  backfillComplete       Boolean   @default(false) @map("backfill_complete")
+  lastSyncAt             DateTime? @map("last_sync_at")
+  lastSuccessAt          DateTime? @map("last_success_at")
+  lastError              String?   @map("last_error") @db.Text
+  failureCount           Int       @default(0) @map("failure_count")
+  nextSyncAt             DateTime? @map("next_sync_at")
+  leaseUntil             DateTime? @map("lease_until")
+  connectedByUserId      String?   @map("connected_by_user_id") @db.Uuid
+  createdAt              DateTime  @default(now()) @map("created_at")
+  updatedAt              DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextSyncAt])
+  @@map("search_console_connections")
+}
+
+/// Observed Search Console performance of one day. Private to the tenant.
+model SearchPerformance {
+  id          BigInt   @id @default(autoincrement())
+  tenantId    String   @map("tenant_id") @db.Uuid
+  siteId      String   @map("site_id") @db.Uuid
+  /// site (country, device) | page | query (query, page, country, device; incomplete by design)
+  dataset     String
+  date        DateTime @db.Date
+  page        String   @default("")
+  query       String   @default("")
+  country     String   @default("")
+  device      String   @default("")
+  clicks      Int
+  impressions Int
+  /// average position x impressions, so positions can be averaged again
+  positionSum Float    @map("position_sum")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, siteId, dataset, date])
+  @@index([siteId])
+  @@map("search_performance")
+}
+
+/// Last URL Inspection answer for a page.
+model SearchIndexStatus {
+  id              String    @id @default(uuid()) @db.Uuid
+  tenantId        String    @map("tenant_id") @db.Uuid
+  siteId          String    @map("site_id") @db.Uuid
+  url             String
+  verdict         String?
+  coverageState   String?   @map("coverage_state")
+  indexingState   String?   @map("indexing_state")
+  robotsState     String?   @map("robots_state")
+  fetchState      String?   @map("fetch_state")
+  googleCanonical String?   @map("google_canonical")
+  userCanonical   String?   @map("user_canonical")
+  lastCrawlAt     DateTime? @map("last_crawl_at")
+  inspectedAt     DateTime  @map("inspected_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, url])
+  @@index([tenantId, siteId, inspectedAt])
+  @@map("search_index_status")
+}
+
+/// How a site values opportunities.
+model SiteSeoProfile {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  siteId         String   @unique @map("site_id") @db.Uuid
+  profile        String
+  /// Factor -> weight; only the factors the owner changed.
+  weights        Json?
+  priorityTopics Json?    @map("priority_topics")
+  /// Share of optimizable pages left untouched to compare with (0 = no experiment).
+  holdoutPercent Int      @default(0) @map("holdout_percent")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@map("site_seo_profiles")
+}
+
+/// An action taken on an opportunity, its starting point and what was observed later.
+model SeoAction {
+  id             String    @id @default(uuid()) @db.Uuid
+  tenantId       String    @map("tenant_id") @db.Uuid
+  siteId         String    @map("site_id") @db.Uuid
+  opportunityId  String    @unique @map("opportunity_id") @db.Uuid
+  action         String
+  url            String?
+  query          String?
+  planItemId     String?   @map("plan_item_id") @db.Uuid
+  publicationId  String?   @map("publication_id") @db.Uuid
+  actedAt        DateTime  @map("acted_at")
+  baseline       Json?
+  evaluations    Json?
+  /// null = unknown, never zero by default
+  seoCostUsd     Float?    @map("seo_cost_usd")
+  contentCostUsd Float?    @map("content_cost_usd")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site        Site               @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  opportunity ContentOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, siteId, actedAt])
+  @@map("seo_actions")
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // Autopilot's rolling month: free slots, guards, stored reasons and keyword changes. No network, no LLM.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -65,7 +66,9 @@ test("every candidate keeps its score factors and origin; every drop keeps its r
   );
   assert.deepEqual(best.origin, { kind: "competitor", value: "rival.test" });
   const { demand, winnability, relevance, intentFit } = best.parts!;
-  assert.equal(Math.round(100 * demand * winnability * relevance * intentFit), best.score);
+  // Publisher weights: demand 1.2, reachability 0.8, relevance 1, intent 0.5.
+  const logs = 1.2 * Math.log(demand!) + 0.8 * Math.log(winnability!) + Math.log(relevance!) + 0.5 * Math.log(intentFit!);
+  assert.equal(Math.round(100 * Math.exp(logs / 3.5)), best.score);
   const reasons = Object.fromEntries(rejects.map((entry) => [entry.keyword, entry.reason]));
   assert.equal(reasons["programacion la 1"], "cannibalization");
   assert.equal(reasons["qué echan ahora"], "no_volume");
@@ -74,7 +77,7 @@ test("every candidate keeps its score factors and origin; every drop keeps its r
 
 test("without a keyword provider the research says so", async () => {
   const research = emptyKeywordResearch();
-  assert.deepEqual(await collectKeywordCandidates("t", "s", { site: { locale: "es-ES" } } as never, 10, undefined, research), []);
+  assert.deepEqual(await collectKeywordCandidates(randomUUID(), randomUUID(), { site: { locale: "es-ES" } } as never, 10, undefined, research), []);
   // "disabled" only while seo-manager.test.ts holds the platform-wide switch; each reason is asserted there.
   assert.equal(research.provider, null);
   assert.ok(["not_configured", "disabled"].includes(research.skipped!));
