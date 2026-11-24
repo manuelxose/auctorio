@@ -1,6 +1,6 @@
 # SEO V2 production readiness
 
-| Gate | State after SEO-V2-02 |
+| Gate | State after SEO-V2-04 |
 |---|---|
 | Provider contract, registry and adapters | Done |
 | Kill switch and per-provider switch, effective on the next call in every process | Done |
@@ -10,10 +10,14 @@
 | AnyAPI storage and upstream licensing | Pending (written confirmation) |
 | Hard budgets, reservations, single flight, emergency stop | Done |
 | Maximum price of DataForSEO `serp_organic` | Pending: an administrator must record it (invoice or tariff) |
+| Search Console live authorization and synchronization | Pending: `GOOGLE_CLIENT_SECRET`, the API and the consent screen of the Google project |
+| Google verification of the OAuth app | Pending: `webmasters.readonly` is a sensitive scope; until verified, only test users can connect |
 | Lifting `SEO_LOCKS` | Pending: licensing, DataForSEO live verification and owner approval |
 
 ## Deploying
 
+- SEO-V2-04 (`20261124220000_first_party_seo`) is additive: five tables and new nullable or defaulted columns in `content_opportunities`. Set
+  `GOOGLE_CLIENT_SECRET` for the API and the automation worker; without it Search Console is not offered and everything else works.
 0. SEO-V2-02 (`20261124180000_seo_cost_governor`) is additive: five tables and new nullable or defaulted columns. Deploy API and workers together: an
    older worker spends without reserving. Review the default budgets and record the `serp_organic` ceiling if guides need SERP sources.
 1. `npx prisma migrate deploy` adds `seo_provider_states` and `seo_control_settings` (additive; nothing existing changes).
@@ -30,7 +34,7 @@
 - Circuit breaker: 30 min after refused credentials or balance, 1 min after a rate limit, 5–60 min after three failures in a row. Saving credentials or **Reintentar ya** resets it.
 - Health: last success and last error per provider on the same page.
 - Log events: `seo.cost_unreported`, `seo.cost_unknown_after_error`, `seo.billed_over_quote`, `seo.spend_not_recorded`, `seo.notes`, `seo.health_not_recorded`,
-  `seo.budget_exhausted`, `seo.circuit_open`, `seo.reservation_uncertain`, `seo.cache_not_written`, `keyword_metrics.skipped`.
+  `search_console.synced`, `search_console.sync_failed`, `seo_intelligence.analyzed`, `seo_intelligence.analysis_failed`, `seo.budget_exhausted`, `seo.circuit_open`, `seo.reservation_uncertain`, `seo.cache_not_written`, `keyword_metrics.skipped`.
 - Live test: enable the provider, then **Autorizar y probar** with a ceiling. Automation stays locked while doing it.
 
 ## Unified with the Studio redesign

@@ -97,8 +97,9 @@ export const STUDIO_NAV: StudioNavGroup[] = [
           { id: 'crawl', label: 'Páginas y rastreo' },
         ],
       },
+      { label: 'Oportunidades SEO', path: '/studio/seo-opportunities', icon: 'search', heading: 'Investigación', hint: 'Qué mejorar o crear, con los datos de Search Console y del sitio.' },
       {
-        label: 'Competidores', path: '/studio/competitors', icon: 'globe', heading: 'Investigación',
+        label: 'Competidores', path: '/studio/competitors', icon: 'globe',
         sections: [
           { id: 'shortlist', label: 'Competidores' },
           { id: 'coverage', label: 'Cobertura temática' },

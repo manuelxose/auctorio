@@ -1,6 +1,6 @@
 # SEO V2 architecture
 
-State after SEO-V2-02. Sections marked *(later)* are not built.
+State after SEO-V2-04 (SEO-V2-03 has not been built). Sections marked *(later)* are not built.
 
 ## Layers
 
@@ -16,7 +16,10 @@ State after SEO-V2-02. Sections marked *(later)* are not built.
 | Adapters | `src/infrastructure/seo/dataforseo.ts`, `anyapi.ts` | Everything provider-specific |
 | Control plane | `src/studio/routes-admin-seo.ts`, Studio → Ajustes → Administración global → Proveedores SEO (`/studio/admin/seo`) | Platform administrators only |
 
-The Knowledge & Opportunity Repository of the owner's diagram is *(later)*.
+| First-party data | `src/infrastructure/google/search-console.ts`, `src/studio/search-console.ts` | Authorized Search Console access, incremental synchronization |
+| Intelligence engine | `src/studio/seo-intelligence/` | Detection, scoring, action selection, explanation, attribution |
+
+The opportunity repository of the owner's diagram is `content_opportunities`. A shared keyword knowledge repository is *(later)*.
 
 ## A call, step by step
 
@@ -88,3 +91,30 @@ Implement `SeoProvider`, append it to `SEO_PROVIDERS`, add its defaults to `DEFA
   providers are never merged.
 - **Ordinary editing never buys** (changing the keyword of a plan item): it uses what is stored; the next planning run measures the rest together.
 - **No consumer asks two providers for the same data**, and a failed purchase never goes on to another provider.
+
+## First-party intelligence
+
+1. **Connection.** OAuth with `webmasters.readonly`, PKCE and a single-use state in `social_connection_sessions`, bound to the person who starts it and completed
+   by that signed-in person. Only properties of the site's own domain. One refresh token per site, AES-256-GCM.
+2. **Synchronization** (`search-console` interval of the control worker). One request lists the final days; each day is then stored once, newest first, then
+   forward, then back to 16 months. At most 10 days a run, under a lease per site that fences every write. Retention 500 days.
+3. **Datasets.** `site` and `page` are complete; `query` is not (Google hides rare queries, and 5,000 rows a day are kept). Detection of declines and all
+   measurements use the complete ones.
+4. **Detection** (`detect.ts`, pure). 28-day windows ending on the newest stored day, compared with the previous one, the one before and the year before
+   (364 days). Thresholds are in `THRESHOLDS`. Click-through is compared with the site's own other pages by position, device, intent and market.
+5. **Scoring** (`scoring.ts`, pure). Weighted geometric mean of the **known** factors; unknown ones leave the formula. `confidence` is separate.
+   The same function scores the planner's keywords. Weights by business profile, editable per site (`site_seo_profiles`).
+6. **Safeguards** (`select.ts`, pure). One open action per page, technical and cannibalization first, 28-day cooldown, planned duplicates, minimum confidence, holdout.
+7. **Explanation** (`OpportunityExplanation`, version 1) is stored with the opportunity and read by Studio, the planner and the assistant (`seo_opportunities`).
+8. **Attribution** (`attribution.ts`). Frozen baseline, windows of 28, 56 and 90 days, compared with untouched pages or the holdout. `causal` is always `false`.
+
+Decisions:
+
+- **Search Console does not pass through the cost governor**: it is free and authorized, and it is not a purchase. The emergency stop does stop it; the
+  mode *disabled* (paid providers) does not.
+- **The engine never calls a provider.** It reads stored data only.
+- **Nothing is executed.** Actions on existing pages are tasks for people; only new content goes to the plan, because the plan writes new articles.
+  Merging, redirecting, deleting or changing a canonical has no code path; approving a cannibalization needs `review.approve` and `publishing.manage`.
+- **Competitor opportunities keep their status**; the engine adds action, score, confidence and explanation.
+- **Weights never change on their own.**
+- **Google Ads API is not implemented** (optional; no approved credentials). Conversions are reported as unavailable: there is no authorized source.

@@ -136,8 +136,8 @@ export type PlanningInventory = {
 
 // ── Plan del mes (mirrors keyword-candidates.ts KeywordResearch, autopilot-plan.ts getMonthPlan, plan-item-keyword.ts) ──
 
-export type KeywordOrigin = { kind: 'opportunity' | 'site_topic' | 'cluster' | 'competitor'; value: string };
-export type KeywordScoreParts = { demand: number; winnability: number; relevance: number; intentFit: number };
+export type KeywordOrigin = { kind: 'opportunity' | 'site_topic' | 'cluster' | 'competitor' | 'search_console'; value: string };
+export type KeywordScoreParts = { demand: number | null; winnability: number | null; relevance: number | null; intentFit: number | null };
 export type KeywordRejectReason = 'no_volume' | 'already_ranking' | 'off_topic' | 'low_relevance' | 'cannibalization' | 'no_score';
 export type KeywordCandidate = { keyword: string; volume: number | null; difficulty: number | null; intent: string | null; score: number; variants: string[]; origin: KeywordOrigin | null; parts: KeywordScoreParts | null; rank: number };
 export type PlanResearch = {
