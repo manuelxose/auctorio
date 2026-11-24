@@ -102,3 +102,15 @@ A petición del responsable, `feat/studio-settings-advanced-integration` (16 com
 Autopilot) está fusionada en esta rama. Conflictos resueltos en seis archivos: navegación y su spec, página de administración, `editorial-plan.ts`,
 `keyword-candidates.ts` y `routes-editorial.ts`. Además, `automation.ts`, `autopilot-plan.ts`, `plan-item-keyword.ts` y el plan del mes
 pasan a usar el gestor SEO, y la página de proveedores queda en español dentro de «Administración global».
+
+| Comprobación de la rama unificada | Resultado |
+|---|---|
+| 44 migraciones en base limpia y `migrate diff` | Sin diferencias |
+| Typecheck, build y build de Studio | Correctos |
+| Suite completa de backend | 674 de 676 |
+| Specs de Studio (Karma) | 46 de 46 |
+| 31 pantallas en navegador | Sin desbordes ni errores, salvo tres 400 en `/studio/competitors` con un tenant vacío |
+
+Los dos fallos de la suite (`autopilot-planner` y `editorial-engine`) son choques de clave foránea entre archivos que comparten base
+en paralelo; cada archivo pasó entero en tres repeticiones aisladas. Corregido al unificar: una llave CSS sin cerrar en Fuentes, que dejaba las tarjetas
+sin estilo en escritorio (no comprobado con tarjetas reales), y pruebas desfasadas de onboarding y de escritura.
