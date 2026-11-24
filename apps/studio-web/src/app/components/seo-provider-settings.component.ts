@@ -35,7 +35,7 @@ const REASONS: Record<string, string> = {
   selector: 'app-seo-provider-settings',
   standalone: true,
   imports: [CommonModule, FormsModule],
-  styles: ['.au-row { flex-wrap: wrap; } .au-row__title { min-width: 160px; } .seo-select { width: 200px; }'],
+  styles: ['.au-row { flex-wrap: wrap; } .au-row__title { min-width: 160px; } .seo-select { width: 200px; } .au-row__meta { white-space: normal; }'],
   template: `
     <section class="au-panel au-panel--padded" *ngIf="seo as s">
       <h2 class="au-panel__title">Operating mode</h2>
