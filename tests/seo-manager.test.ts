@@ -242,7 +242,7 @@ test("a live test needs a known maximum price within the authorized ceiling", as
     assert.equal(await codeOf(verify({ maxSpendUsd: 100 })), "spend_limit");
     assert.equal(await codeOf(verify({ providerId: "dataforseo", capability: "serp_organic" })), "unknown_price");
     assert.equal(calls.length, 0);
-    assert.deepEqual(await verify(), { rows: 1, costUsd: 0.01454, partial: false, notes: ["market_unverified:ES|es"], market: "ES|es" });
+    assert.deepEqual(await verify(), { rows: 1, costUsd: 0.01454, partial: false, notes: [], market: "ES|es" });
     const state = await prisma.seoProviderState.findUniqueOrThrow({ where: { providerId: "anyapi" } });
     assert.ok((state.verifications as Record<string, unknown>).keyword_metrics);
     assert.deepEqual((await ws.spend()).map((row) => [row.kind, row.costUsd]), [["seo_live_test", 0.01454]]);

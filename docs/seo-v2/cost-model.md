@@ -26,8 +26,9 @@ deduplication, or from using each provider where it is cheaper.
 Sources: dataforseo.com/pricing (`dataforseo-labs/dataforseo-google-api`, `keywords-data/google-ads`, `serp/youtube-serp-api`);
 api.getanyapi.com/catalog; getanyapi.com/terms.
 
-AnyAPI prices were confirmed by its own quote endpoint on 2026-11-24 for all six operations. One live test of each, together, costs at most
-0.15598 USD.
+AnyAPI prices were confirmed by its own quote endpoint on 2026-11-24 for all six operations. The live
+test billed 0.15378 USD, equal in the wallet (0.16 → 0.00622) and in `ai_spend_events`. YouTube was billed 0.0005, not its 0.00034
+list price: another lane served it, within the quoted maximum.
 
 ## Accounting rules
 

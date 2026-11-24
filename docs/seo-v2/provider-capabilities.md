@@ -32,8 +32,8 @@ Organic difficulty (`difficulty`) and paid competition (`adsCompetition`) are se
 ## Markets
 
 Both adapters serve ES, US, GB, MX, AR, FR, DE, IT and PT through Google's location codes. Sub-national targets are refused.
-AnyAPI documents US/`en` as its default; its OpenAPI file lists no supported codes, so every AnyAPI market is **unverified**
-and its results carry the note `market_unverified:<market>` until a live test confirms it.
+AnyAPI documents US/`en` as its default and its OpenAPI file lists no supported codes. **ES/es is verified** by live calls; every
+other market carries the note `market_unverified:<market>`.
 
 ## AnyAPI identity
 
@@ -48,7 +48,21 @@ and its results carry the note `market_unverified:<market>` until a live test co
 - Documentation discrepancy: the docs say quotes need no key; `POST /v1/apis/{sku}/quote` answered 401 without one.
 - Verified with a key on 2026-11-24, free of charge: authentication, `GET /v1/balance`, and a quote of each of the six requests the adapter
   sends (accepted, with the prices the adapter uses; the balance did not change). A quote does not validate the market:
-  language `zz` with location `999999` was quoted as well. No operation has been run yet.
+  language `zz` with location `999999` was quoted as well.
+
+### Live test (2026-11-24, es-ES, one call each, authorized up to 0.156 USD)
+
+| Capability | Rows | Billed USD | Lane | Finding |
+|---|---|---|---|---|
+| `keyword_metrics` | 1 | 0.01454 | Owl | Spanish market; monthly history identical to `search_volume` |
+| `keyword_suggestions` | 1 | 0.01512 | Owl | As documented |
+| `ranked_keywords` | 1 | 0.01512 | Owl | "marca", es.wikipedia.org, position 6: Spanish market |
+| `serp_organic` | 4 of 10 | 0.0005 | Chameleon | Localized in Spain; **6 of 10 links hidden by google.com/goto** |
+| `search_volume` | 1 | 0.108 | Owl | As documented |
+| `youtube_search` | 20 | 0.0005 | Lynx | Results are not localized, as declared |
+
+All six matched the documented schema. This checks shape, market and billing, not the accuracy of the numbers: no comparison
+with an independent source has been made.
 
 ### Error and billing semantics
 

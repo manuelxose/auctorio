@@ -1,5 +1,5 @@
 // AnyAPI (getanyapi.com, AnyAPI Labs, Inc.) adapter, written against https://api.getanyapi.com/openapi.json and /catalog
-// as read on 2026-11-24 (docs/seo-v2/provider-capabilities.md). Not live-verified: no call was made with a key.
+// as read on 2026-11-24 (docs/seo-v2/provider-capabilities.md). Each operation was called once for es-ES on that date and answered as documented.
 
 import { secretOf } from "../ai/ai-settings";
 import {
@@ -217,7 +217,7 @@ async function call<C extends SeoCapability>(capability: C, request: SeoRequests
   const hint = text(payload?.hint);
   const notes = [...(parsed.notes ?? []), ...(hint ? [`hint:${hint.slice(0, 120)}`] : [])];
   const market = `${request.market.country}|${request.market.language}`;
-  if (!anyApiProvider.verifiedMarkets.includes(market)) notes.push(`market_unverified:${market}`);
+  if (capability !== "youtube_search" && !anyApiProvider.verifiedMarkets.includes(market)) notes.push(`market_unverified:${market}`);
   return { ...base, data: parsed.data, partial: parsed.dropped > 0, nextCursor: parsed.nextCursor ?? null, notes };
 }
 
@@ -231,7 +231,7 @@ export const anyApiProvider: SeoProvider = {
     keyword_metrics: { supported: true, sourceTag: ID, dataKind: "provider_reported", fieldKinds: METRIC_KINDS, methodology: "AnyAPI seo.keyword_overview; upstream undisclosed", engine: "google", devices: [], maxBatch: 700, maxResults: null, pagination: false, degraded: "Paid competition is a level, not an index" },
     keyword_suggestions: { supported: true, sourceTag: ID, dataKind: "provider_reported", fieldKinds: METRIC_KINDS, methodology: "AnyAPI seo.keyword_ideas by volume; upstream undisclosed", engine: "google", devices: [], maxBatch: 1, maxResults: 1000, pagination: false, degraded: null },
     ranked_keywords: { supported: true, sourceTag: ID, dataKind: "historical", fieldKinds: { ...METRIC_KINDS, rank: "historical", estimatedTraffic: "estimated" }, methodology: "AnyAPI seo.ranked_keywords: provider's stored rankings; upstream undisclosed", engine: "google", devices: [], maxBatch: 1, maxResults: 1000, pagination: true, degraded: null },
-    serp_organic: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "AnyAPI google.search: live Google results at request time", engine: "google", devices: [], maxBatch: 1, maxResults: 10, pagination: true, degraded: "About 10 results per request; results Google hides behind redirect links are dropped" },
+    serp_organic: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "AnyAPI google.search: live Google results at request time", engine: "google", devices: [], maxBatch: 1, maxResults: 10, pagination: true, degraded: "About 10 results per request; those Google hides behind redirect links are dropped (6 of 10 in the live test)" },
     search_volume: { supported: true, sourceTag: "anyapi_search_volume", dataKind: "provider_reported", methodology: "AnyAPI seo.search_volume; upstream undisclosed", engine: "google", devices: [], maxBatch: 1000, maxResults: null, pagination: false, degraded: "Flat 0.108 USD per request, whatever the number of keywords" },
     youtube_search: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "AnyAPI youtube.search: live YouTube results", engine: "youtube", devices: [], maxBatch: 1, maxResults: null, pagination: true, degraded: "No country or language targeting" },
   },
@@ -249,7 +249,7 @@ export const anyApiProvider: SeoProvider = {
     ],
   },
   rateLimit: "500 new requests per minute, per account and API (Retry-After on 429)",
-  verifiedMarkets: [],
+  verifiedMarkets: ["ES|es"],
   configured: () => Boolean(secretOf(KEY_ENV)),
   marketKey(capability, market) {
     if (market.location) return null;

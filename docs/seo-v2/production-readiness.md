@@ -6,7 +6,7 @@
 | Kill switch and per-provider switch, effective on the next call in every process | Done |
 | Encrypted credentials, permissions, audit | Done |
 | DataForSEO live verification through the new path | Pending (paid) |
-| AnyAPI live verification | Pending (paid; needs a key and an authorized budget) |
+| AnyAPI live verification | Done for es-ES, one call per operation; accuracy not compared. Each environment records its own |
 | AnyAPI storage and upstream licensing | Pending (written confirmation) |
 | Hard global, tenant and site budgets | SEO-V2-02 |
 | Lifting `SEO_LOCKS` | SEO-V2-02, after the three gates above |

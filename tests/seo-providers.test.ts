@@ -128,7 +128,11 @@ test("AnyAPI sends documented requests with a price ceiling and normalizes defen
   assert.deepEqual(sent[0].body, { query: "guia tv", gl: "es", hl: "es", page: 1 });
   assert.equal(sent[0].headers.Authorization, "Bearer aa_test");
   assert.deepEqual([serp.data.map((r) => r.domain), serp.partial, serp.upstream], [["a.test"], true, "Owl"]);
-  assert.ok(serp.notes.includes("redirect_links_dropped:1") && serp.notes.includes("market_unverified:ES|es"));
+  assert.deepEqual(serp.notes, ["redirect_links_dropped:1"]);
+  const mexico = await anyApiProvider.run("serp_organic", { market: seoMarket("es-MX")!, keyword: "guia tv" }, fakeFetch(anyFixtures.serp_organic));
+  assert.deepEqual(mexico.notes, ["market_unverified:MX|es"], "only markets a live call confirmed are verified");
+  const video = await anyApiProvider.run("youtube_search", { market: seoMarket("es-MX")!, keyword: "guia tv" }, fakeFetch(anyFixtures.youtube_search));
+  assert.deepEqual(video.notes, [], "youtube.search has no market to verify");
   const serpDeclaration = anyApiProvider.capabilities.serp_organic;
   assert.ok(serpDeclaration.supported && serpDeclaration.dataKind === "observed");
 

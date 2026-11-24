@@ -24,7 +24,7 @@
 ## Before activating AnyAPI in production
 
 1. Written confirmation from AnyAPI Labs about storing results, and about the rights of the SEO upstream.
-2. Live verification of each capability in each market in use (es-ES first), compared against a known source.
+2. Live verification of each capability in each market in use (es-ES done), and a comparison of its numbers with a known source.
 3. Hard budgets (SEO-V2-02).
 
 Until then AnyAPI stays disabled by default and its automation locked. DataForSEO's terms must be reviewed too before any data is shared

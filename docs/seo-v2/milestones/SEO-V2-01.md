@@ -2,11 +2,11 @@
 
 Fecha: 2026-11-24. Rama: `feat/seo-v2-01-provider-foundation`, creada desde `origin/main` (`84bed81`).
 
-## Veredicto: PARTIAL
+## Veredicto: PASS, con restricciones
 
-Todos los criterios de implementación se cumplen. Falta lo que exige una integración externa real: hay clave de AnyAPI, pero no
-presupuesto autorizado: solo se han hecho comprobaciones gratuitas (saldo y cotizaciones), ninguna operación. Tampoco está aclarada su licencia de
-almacenamiento ni la de su proveedor de origen.
+Se cumplen los criterios de aceptación, incluida la validación real: las seis operaciones de AnyAPI se llamaron una vez en es-ES, con
+presupuesto autorizado, y respondieron según su documentación. AnyAPI **no** queda aprobada para producción: faltan los presupuestos
+duros (SEO-V2-02), la confirmación de licencias y contrastar la exactitud de sus cifras. Su automatización sigue bloqueada.
 
 ## Qué se ha implementado
 
@@ -75,13 +75,15 @@ SEO-V2-02: un timeout que el proveedor sí factura no se registra como gasto.
 | Controles mínimos de administración | Cumplido |
 | Automatización de pago de AnyAPI desactivada | Cumplido |
 | Pruebas existentes y nuevas | Cumplido, salvo la carrera preexistente |
-| Validación real | **Pendiente** |
+| Validación real de AnyAPI | Cumplido: seis operaciones, es-ES |
 
 ## Peticiones y gasto
 
-- Peticiones facturables: **0**. Gasto: **0,00 USD**.
-- A la API de AnyAPI: 5 cotizaciones sin clave (401, sin coste) y lecturas públicas de `openapi.json` y `/catalog`. Además, páginas públicas
-  de documentación y precios de AnyAPI y DataForSEO.
+- Peticiones facturadas: **6**, todas a AnyAPI. Gasto: **0,15378 USD**, de 0,156 autorizados. Coincide en el saldo de AnyAPI y en el registro de Auctorio.
+- Gratuitas a AnyAPI: 5 cotizaciones sin clave (401), 7 con clave, consultas de saldo y lecturas públicas de `openapi.json` y `/catalog`.
+- A DataForSEO: ninguna llamada a su API; solo páginas públicas de precios.
+- Hallazgo: en `google.search`, 6 de 10 enlaces venían ocultos tras redirecciones de Google y se descartan. No sustituye bien al SERP actual como fuente
+  de citas. YouTube no está localizado.
 
 ## Seguridad y licencias
 
@@ -90,12 +92,13 @@ SEO-V2-02: un timeout que el proveedor sí factura no se registra como gasto.
 - Los términos de DataForSEO sobre reventa y almacenamiento no se han podido establecer.
 - Discrepancia: la documentación de AnyAPI dice que las cotizaciones no necesitan clave; el servidor exige una.
 
-## Bloqueos restantes
+## Pendiente antes de activar AnyAPI
 
-1. Presupuesto autorizado para la prueba real: las seis capacidades cuestan como máximo 0,156 USD. Ya hay clave (saldo 0,16 USD, guardada fuera de git);
-   la autenticación y las seis cotizaciones, gratuitas, se han comprobado y coinciden con los precios del adaptador.
-2. Confirmación escrita de AnyAPI sobre almacenamiento y licencia de origen.
-3. Mercado es-ES de AnyAPI sin verificar.
+1. Confirmación escrita de AnyAPI sobre almacenamiento y licencia de origen.
+2. Presupuestos duros (SEO-V2-02).
+3. Comparar sus cifras con una fuente conocida; otros mercados distintos de es-ES están sin verificar.
+4. Renovar la clave de prueba: se escribió en una conversación.
+5. DataForSEO no se ha llamado en vivo por el camino nuevo.
 
 ## Unificación con el rediseño de Studio
 
