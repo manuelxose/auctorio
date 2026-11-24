@@ -4,8 +4,8 @@ Fecha: 2026-11-24. Rama: `feat/seo-v2-01-provider-foundation`, creada desde `ori
 
 ## Veredicto: PARTIAL
 
-Todos los criterios de implementación se cumplen. Falta lo que exige una integración externa real: no hay clave de AnyAPI ni
-presupuesto autorizado, y AnyAPI no ha sido llamada con éxito ni una vez. Tampoco está aclarada su licencia de
+Todos los criterios de implementación se cumplen. Falta lo que exige una integración externa real: hay clave de AnyAPI, pero no
+presupuesto autorizado: solo se han hecho comprobaciones gratuitas (saldo y cotizaciones), ninguna operación. Tampoco está aclarada su licencia de
 almacenamiento ni la de su proveedor de origen.
 
 ## Qué se ha implementado
@@ -92,7 +92,8 @@ SEO-V2-02: un timeout que el proveedor sí factura no se registra como gasto.
 
 ## Bloqueos restantes
 
-1. Clave de AnyAPI y presupuesto autorizado (una pasada completa de las seis capacidades cuesta como máximo unos 0,16 USD).
+1. Presupuesto autorizado para la prueba real: las seis capacidades cuestan como máximo 0,156 USD. Ya hay clave (saldo 0,16 USD, guardada fuera de git);
+   la autenticación y las seis cotizaciones, gratuitas, se han comprobado y coinciden con los precios del adaptador.
 2. Confirmación escrita de AnyAPI sobre almacenamiento y licencia de origen.
 3. Mercado es-ES de AnyAPI sin verificar.
 

@@ -46,6 +46,9 @@ and its results carry the note `market_unverified:<market>` until a live test co
   98.3 % (ranked), 87.8 % (search volume). `google.search` has 5 lanes and `youtube.search` 6.
 - Upstream provider: anonymous by design. Its identity is not established.
 - Documentation discrepancy: the docs say quotes need no key; `POST /v1/apis/{sku}/quote` answered 401 without one.
+- Verified with a key on 2026-11-24, free of charge: authentication, `GET /v1/balance`, and a quote of each of the six requests the adapter
+  sends (accepted, with the prices the adapter uses; the balance did not change). A quote does not validate the market:
+  language `zz` with location `999999` was quoted as well. No operation has been run yet.
 
 ### Error and billing semantics
 

@@ -26,6 +26,9 @@ deduplication, or from using each provider where it is cheaper.
 Sources: dataforseo.com/pricing (`dataforseo-labs/dataforseo-google-api`, `keywords-data/google-ads`, `serp/youtube-serp-api`);
 api.getanyapi.com/catalog; getanyapi.com/terms.
 
+AnyAPI prices were confirmed by its own quote endpoint on 2026-11-24 for all six operations. One live test of each, together, costs at most
+0.15598 USD.
+
 ## Accounting rules
 
 - `quote()` gives an estimate and a maximum. `null` means unknown: such a provider cannot win automatic routing and cannot be
