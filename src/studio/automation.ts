@@ -13,6 +13,9 @@ import {
   type AutomationMode,
 } from "./automation-mode";
 import { notifyOperators } from "./notifications";
+import { readGateConfig } from "./quality-gate";
+import { dataForSeoConfigured } from "../infrastructure/seo/dataforseo";
+import { PLAN_LEAD_TIME_MINUTES } from "./automation-mode";
 import { localDateInZone, nextLocalDate, zonedTimeToUtc } from "./plan-slots";
 
 const prisma = getPrismaClient();
@@ -485,6 +488,22 @@ export type AutomationStatus = {
     maximumQueueSize: number;
   };
   nextSlots: Array<{ channel: string; at: string }>;
+  /** Why the pipeline is (not) producing: what is waiting for the automation and what it already left for a human. */
+  pipeline: {
+    /** Website plan items still to be written whose slot is inside the lead window (they start on the next tick). */
+    planDueNow: number;
+    /** Website plan items still to be written with a later slot. */
+    planUpcoming: number;
+    /** Articles written by the plan that the quality gate did not release: a person has to review them. */
+    awaitingReview: number;
+    activeSources: number;
+    /** Source stories (last 72 h) above the site's minimum score that are not yet an article. */
+    candidateStories: number;
+    minQaScore: number;
+    leadMinutes: number;
+    /** The keyword plan (main flow): the next website plan items with their primary keyword and measured volume. */
+    keywordPlan: { upcoming: Array<{ id: string; keyword: string; scheduledFor: string | null; status: string; searchVolume: number | null }>; withVolume: number; metricsProvider: boolean };
+  };
   warnings: string[];
 };
 
@@ -509,6 +528,23 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
     countChannelPublicationsToday(tenantId, "instagram", dayStart, dayEnd, siteId),
     prisma.publication.count({ where: { tenantId, ...siteScope, status: { in: ["draft", "ready", "scheduled"] } } }),
   ]);
+
+  const planScope = { tenantId, ...siteScope, channel: "website" as const };
+  const [planDueNow, planUpcoming, awaitingReview, activeSources, candidateStories] = await Promise.all([
+    prisma.editorialPlanItem.count({ where: { ...planScope, status: { in: ["proposed", "approved"] }, projectId: null, scheduledFor: { lte: new Date(now.getTime() + PLAN_LEAD_TIME_MINUTES * 60_000) } } }),
+    prisma.editorialPlanItem.count({ where: { ...planScope, status: { in: ["proposed", "approved"] }, projectId: null, scheduledFor: { gt: new Date(now.getTime() + PLAN_LEAD_TIME_MINUTES * 60_000) } } }),
+    prisma.editorialPlanItem.count({ where: { ...planScope, status: "review_required" } }),
+    prisma.contentSource.count({ where: { tenantId, ...siteScope, enabled: true, archivedAt: null } }),
+    prisma.sourceItem.count({ where: { tenantId, processingStatus: "candidate", score: { gte: policy.minimumStoryScore }, discoveredAt: { gte: new Date(now.getTime() - 72 * 3_600_000) }, source: { ...siteScope, enabled: true, archivedAt: null }, projects: { none: {} } } }),
+  ]);
+
+  const upcomingItems = await prisma.editorialPlanItem.findMany({
+    where: { ...planScope, status: { notIn: ["rejected", "canceled"] }, scheduledFor: { gte: now } },
+    orderBy: { scheduledFor: "asc" },
+    take: 6,
+    select: { id: true, title: true, primaryKeyword: true, scheduledFor: true, status: true, searchVolume: true },
+  });
+  const withVolume = await prisma.editorialPlanItem.count({ where: { ...planScope, status: { notIn: ["rejected", "canceled"] }, scheduledFor: { gte: now }, searchVolume: { not: null } } });
 
   const warnings: string[] = [];
   if (articlesPlanned > policy.maxArticlesPerDay) {
@@ -562,6 +598,7 @@ export async function getAutomationStatus(tenantId: string, siteId: string | nul
       maximumQueueSize: policy.maximumQueueSize,
     },
     nextSlots,
+    pipeline: { planDueNow, planUpcoming, awaitingReview, activeSources, candidateStories, minQaScore: readGateConfig(policy).overallQualityScore, leadMinutes: PLAN_LEAD_TIME_MINUTES, keywordPlan: { upcoming: upcomingItems.map((item) => ({ id: item.id, keyword: item.primaryKeyword ?? item.title, scheduledFor: item.scheduledFor?.toISOString() ?? null, status: item.status, searchVolume: item.searchVolume })), withVolume, metricsProvider: dataForSeoConfigured() } },
     warnings,
   };
 }

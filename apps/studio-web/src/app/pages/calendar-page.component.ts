@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Observable, Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
+import { keywordError } from '../components/planning/month-plan.component';
 import { PlanningApiService } from '../services/planning-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
@@ -31,6 +32,7 @@ const COMPACT = new Intl.NumberFormat('en', { notation: 'compact', maximumFracti
         <div>
           <h1 class="cal-head__title">Calendar</h1>
           <p class="cal-head__sub">{{ siteName }} · Times in {{ timeZone }}</p>
+          <a *ngIf="automationLabel" class="au-badge au-badge--neutral" routerLink="/studio/automation" aria-label="Automation policy">{{ automationLabel }}</a>
         </div>
         <div class="cal-head__actions">
           <button class="au-btn au-btn--secondary" type="button" (click)="openSchedule()">
@@ -523,6 +525,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   moveResult = '';
   error = '';
   notice = '';
+  automationLabel = '';
   creating = false;
   projects: StudioProjectSummary[] = [];
   accounts: PublishingAccount[] = [];
@@ -548,6 +551,14 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
 
   ngOnInit(): void {
     this.context.update({ area: 'calendar' });
+    const date = this.route?.snapshot.queryParamMap.get('date');
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const anchor = new Date(date + 'T12:00:00');
+      if (!Number.isNaN(anchor.getTime()) && this.dayKey(anchor) === date) {
+        this.anchor = anchor;
+        this.viewMode = 'day';
+      }
+    }
     const chip = this.route?.snapshot.queryParamMap.get('chip');
     if (this.chipFilters.some((filter) => filter.key === chip)) this.chipFilter = chip as ChipFilter;
     // ?projectId= comes from an article's "Schedule in Calendar": open the form with it preselected.
@@ -565,8 +576,12 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
       error: () => (this.accounts = []),
     });
     this.load();
+    this.loadAutomation();
     this.refreshSubscription = timer(30_000, 30_000).subscribe(() => {
-      if (!document.hidden) this.load(true);
+      if (!document.hidden) {
+        this.load(true);
+        this.loadAutomation();
+      }
     });
   }
 
@@ -615,6 +630,19 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
           if (!silent) this.error = 'Calendar could not be loaded. Try again.';
         },
       });
+  }
+
+  private loadAutomation(): void {
+    this.api.getAutomationPolicy(this.siteId || undefined).subscribe({
+      next: (policy) => {
+        const mode = { manual: 'Manual', assisted: 'Assisted', autopilot: 'Autopilot' }[policy.mode ?? 'manual'];
+        const state = policy.state === 'paused' ? 'Paused'
+          : policy.state === 'degraded' ? 'Degraded'
+          : policy.enabled ? 'Enabled' : 'Disabled';
+        this.automationLabel = `${mode} · ${state}`;
+      },
+      error: () => (this.automationLabel = ''),
+    });
   }
 
   setView(view: CalendarView): void {
@@ -806,10 +834,9 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
   confirmTopic(event: CalendarEvent): void {
     const keyword = this.topicText.replace(/\s+/g, ' ').trim();
     if (!keyword) return;
-    const title = keyword.charAt(0).toUpperCase() + keyword.slice(1);
     this.topicSaving = true;
-    // The server clears the old keyword's metrics and measures the new one.
-    this.planning.updateItem(event.id, { primaryKeyword: keyword, targetQuery: keyword, topic: keyword, title, workingTitle: title, finalSuggestedTitle: null }).subscribe({
+    // The server drops the old keyword's brief and measures the new one.
+    this.planning.changeItemKeyword(event.id, keyword).subscribe({
       next: () => {
         this.topicSaving = false;
         this.topicId = '';
@@ -819,7 +846,7 @@ export class CalendarPageComponent implements OnInit, AfterViewInit, OnDestroy {
       },
       error: (err) => {
         this.topicSaving = false;
-        this.toast.error(err?.error?.error?.message || 'The topic could not be changed.');
+        this.toast.error(keywordError(err));
       },
     });
   }

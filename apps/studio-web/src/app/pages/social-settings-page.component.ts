@@ -27,10 +27,12 @@ const CATEGORIES = [
   standalone: true,
   imports: [FormsModule, RouterLink, SocialSetupGuideComponent],
   template: `
+    <section class="au-page soc-settings">
     <header class="au-page__header">
+      <div><p class="au-page__eyebrow">Configuración · Redes</p>
       <h1 class="au-page__title">Ajustes de redes</h1>
       <p class="au-page__subtitle">Flujo, horarios y estilo de las publicaciones de este sitio.</p>
-      <a class="au-btn au-btn--secondary" routerLink="/studio/social">Ver publicaciones</a>
+      </div><a class="au-btn au-btn--secondary" routerLink="/studio/social">Ver publicaciones</a>
     </header>
 
     <label class="au-field">
@@ -107,8 +109,12 @@ const CATEGORIES = [
         </div>
       </section>
     }
+    </section>
   `,
   styles: [`
+    .soc-settings { display: grid; gap: 16px; }
+    .soc-settings > .au-field { max-width: 360px; margin: 0; }
+    .soc-preview { flex-wrap: wrap; }
     .soc-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
     .soc-card { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; white-space: normal; height: auto; padding: 12px; }
     .soc-days { display: flex; flex-wrap: wrap; gap: 12px; border: 0; padding: 0; margin: 0 0 12px; }

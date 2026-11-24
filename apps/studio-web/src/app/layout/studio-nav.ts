@@ -5,8 +5,9 @@ export type StudioNavItem = {
   path: string;
   icon: StudioIconName;
   platformAdminOnly?: boolean;
-  /** Workspace admins only: team, roles and system internals. The API enforces the same rule. */
-  adminOnly?: boolean;
+  sidebar?: false;
+  /** At least one of these effective workspace permissions is required. */
+  permissions?: readonly string[];
   /** Small label shown above this item in the sidebar. */
   heading?: string;
   /** One line: what the user does here. Shown as the item's tooltip. */
@@ -14,7 +15,7 @@ export type StudioNavItem = {
   /** Sections of the page listed under the item. The first is the default. */
   sections?: StudioNavSection[];
 };
-export type StudioNavSection = { id: string; label: string; queryParam?: 'view' };
+export type StudioNavSection = { id: string; label: string; queryParam?: 'view'; path?: string; aliases?: readonly string[] };
 export const SOCIAL_SECTIONS = [
   { id: 'instagram', label: 'Instagram' },
   { id: 'x', label: 'X' },
@@ -88,48 +89,52 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     end: true,
     items: [
       {
-        label: 'Site intelligence',
-        path: '/studio/site-intelligence',
-        icon: 'scan',
-        heading: 'Site',
-        hint: 'Read the site, set its audience, pillars and clusters.',
+        label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan', heading: 'Conocimiento del sitio',
         sections: [
-          { id: 'profile', label: 'Profile & strategy' },
-          { id: 'pillars', label: 'Pillars & gaps' },
-          { id: 'seo', label: 'SEO signals' },
-          { id: 'crawl', label: 'Pages & crawl' },
+          { id: 'profile', label: 'Perfil y estrategia' },
+          { id: 'pillars', label: 'Pilares y brechas' },
+          { id: 'seo', label: 'Señales SEO' },
+          { id: 'crawl', label: 'Páginas y rastreo' },
         ],
       },
-      { label: 'Competitors', path: '/studio/competitors', icon: 'globe', hint: 'Compare coverage and send gaps to the plan.' },
       {
-        label: 'Sources',
-        path: '/studio/sources',
-        icon: 'sources',
-        heading: 'News',
-        hint: 'Choose where stories and evidence come from.',
+        label: 'Competidores', path: '/studio/competitors', icon: 'globe', heading: 'Investigación',
         sections: [
-          { id: 'sources', label: 'Active sources' },
-          { id: 'recommendations', label: 'Suggested for you' },
-          { id: 'add', label: 'Add a source' },
-          { id: 'evidence', label: 'Evidence' },
-          { id: 'settings', label: 'Technical settings' },
+          { id: 'shortlist', label: 'Competidores' },
+          { id: 'coverage', label: 'Cobertura temática' },
+          { id: 'opportunities', label: 'Oportunidades' },
         ],
       },
-      { label: 'Inbox', path: '/studio/inbox', icon: 'inbox', hint: 'Triage the stories your sources found.' },
       {
-        label: 'Plan backlog',
-        path: '/studio/plan',
-        icon: 'plan',
-        heading: 'Production',
-        hint: 'Generate plans and edit every brief in full.',
+        label: 'Fuentes', path: '/studio/sources', icon: 'sources',
         sections: [
-          { id: 'backlog', label: 'Backlog' },
-          { id: 'pipeline', label: 'Pipeline' },
+          { id: 'sources', label: 'Fuentes activas', aliases: ['active'] },
+          { id: 'recommendations', label: 'Recomendadas', aliases: ['recommended'] },
+          { id: 'add', label: 'Añadir fuente' },
+          { id: 'evidence', label: 'Evidencias' },
+          { id: 'settings', label: 'Diagnósticos y paquetes', aliases: ['technical'] },
         ],
       },
-      { label: 'Review queue', path: '/studio/review-queue', icon: 'sparkles', hint: 'Check what autopilot generated before it goes out.' },
-      { label: 'Media', path: '/studio/media', icon: 'media', hint: 'Review and fix the images of your articles.' },
-      { label: 'Background jobs', path: '/studio/activity', icon: 'activity', hint: 'Follow running, queued and failed work.' },
+      {
+        label: 'Inbox', path: '/studio/inbox', icon: 'inbox',
+        sections: [{ id: 'inbox', label: 'Historias', aliases: ['stories'] }, { id: 'clusters', label: 'Clústeres' }],
+      },
+      {
+        label: 'Plan editorial', path: '/studio/plan', icon: 'plan', heading: 'Producción',
+        sections: [{ id: 'backlog', label: 'Backlog' }, { id: 'pipeline', label: 'Pipeline' }],
+      },
+      {
+        label: 'Cola de revisión', path: '/studio/review-queue', icon: 'sparkles',
+        sections: [{ id: 'pending', label: 'Pendientes' }, { id: 'history', label: 'Historial' }],
+      },
+      {
+        label: 'Biblioteca multimedia', path: '/studio/media', icon: 'media',
+        sections: [{ id: 'all', label: 'Todos los recursos' }, { id: 'failed', label: 'Con errores' }, { id: 'unused', label: 'Sin utilizar' }],
+      },
+      {
+        label: 'Trabajos en segundo plano', path: '/studio/activity', icon: 'activity', heading: 'Operaciones',
+        sections: [{ id: 'active', label: 'En curso' }, { id: 'history', label: 'Historial' }, { id: 'failed', label: 'Fallidos' }],
+      },
     ],
   },
   {
@@ -141,44 +146,73 @@ export const STUDIO_NAV: StudioNavGroup[] = [
   },
   {
     id: 'settings',
-    label: 'Settings',
+    label: 'Configuración',
     icon: 'settings',
     end: true,
     items: [
-      { label: 'Sites', path: '/studio/settings/sites', icon: 'globe', heading: 'Business & brand' },
-      { label: 'Writing', path: '/studio/settings/writing', icon: 'edit', heading: 'Articles', hint: 'Instructions, length and blocks of every future article.' },
-      { label: 'Mode & rhythm', path: '/studio/automation', icon: 'automation' },
-      { label: 'Connections', path: '/studio/connections', icon: 'connections', heading: 'Integrations' },
-      { label: 'Ajustes de redes', path: '/studio/settings/social', icon: 'share' },
-      { label: 'Web discovery', path: '/studio/settings/discovery', icon: 'sources' },
-      { label: 'Assistant tools', path: '/studio/competencies', icon: 'competency' },
-      { label: 'People', path: '/studio/settings/team', icon: 'user', heading: 'Workspace', adminOnly: true },
-      { label: 'Roles', path: '/studio/settings/roles', icon: 'lock', adminOnly: true },
       {
-        label: 'System health',
-        path: '/studio/operations',
-        icon: 'operations',
-        heading: 'System',
-        adminOnly: true,
+        label: 'Sitios', path: '/studio/settings/sites', icon: 'globe', heading: 'Negocio y contenido',
+        sections: [{ id: 'list', label: 'Sitios y destinos' }, { id: 'defaults', label: 'Identidad del sitio' }],
+      },
+      {
+        label: 'Escritura', path: '/studio/settings/writing', icon: 'edit',
         sections: [
-          { id: 'overview', label: 'Overview' },
-          { id: 'workers', label: 'Workers' },
-          { id: 'queues', label: 'Queues' },
-          { id: 'production', label: 'Production jobs' },
-          { id: 'failures', label: 'Failures' },
-          { id: 'cost', label: 'Cost controls' },
+          { id: 'rules', label: 'Instrucciones' },
+          { id: 'structure', label: 'Estructura y enlaces' },
+          { id: 'visuals', label: 'Visuales' },
+          { id: 'ctas', label: 'Llamadas a la acción' },
+          { id: 'business', label: 'Negocio y ofertas' },
+          { id: 'brand', label: 'Marca y aviso' },
         ],
       },
-      { label: 'Usage', path: '/studio/admin/overview', icon: 'overview', heading: 'All workspaces', platformAdminOnly: true },
-      { label: 'Workspaces', path: '/studio/admin/workspaces', icon: 'globe', platformAdminOnly: true },
-      { label: 'AI providers', path: '/studio/admin/ai', icon: 'sparkles', platformAdminOnly: true },
+      {
+        label: 'Modo y ritmo', path: '/studio/automation', icon: 'automation', heading: 'Automatización e integraciones',
+        sections: [{ id: 'mode', label: 'Modos de trabajo' }, { id: 'plan', label: 'Plan del mes' }, { id: 'schedule', label: 'Calendario y volumen' }, { id: 'safety', label: 'Seguridad y recuperación' }],
+      },
+      {
+        label: 'Conexiones', path: '/studio/connections', icon: 'connections',
+        sections: [{ id: 'dest', label: 'Destinos' }, { id: 'status', label: 'Verificación y credenciales' }],
+      },
+      {
+        label: 'Descubrimiento web', path: '/studio/settings/discovery', icon: 'sources',
+        sections: [{ id: 'policy', label: 'Política' }, { id: 'quality', label: 'Calidad y límites' }],
+      },
+      {
+        label: 'Herramientas del asistente', path: '/studio/competencies', icon: 'competency',
+        sections: [{ id: 'tools', label: 'Competencias' }, { id: 'runs', label: 'Ejecuciones' }],
+      },
+      {
+        label: 'Personas', path: '/studio/settings/team', icon: 'user', heading: 'Equipo y seguridad', permissions: ['users.manage'],
+        sections: [{ id: 'members', label: 'Miembros' }, { id: 'invites', label: 'Invitaciones' }],
+      },
+      {
+        label: 'Roles y permisos', path: '/studio/settings/roles', icon: 'lock', heading: 'Equipo y seguridad', permissions: ['roles.manage', 'users.manage'],
+        sections: [{ id: 'library', label: 'Roles del workspace' }, { id: 'matrix', label: 'Matriz de permisos' }, { id: 'simulate', label: 'Simular acceso' }],
+      },
+      {
+        label: 'Salud del sistema', path: '/studio/operations', icon: 'operations', heading: 'Administración', permissions: ['workspace.manage'],
+        sections: [
+          { id: 'overview', label: 'Estado general', aliases: ['production', 'failures', 'audit'] },
+          { id: 'queues', label: 'Workers y colas', aliases: ['workers'] },
+          { id: 'costs', label: 'Presupuestos y costes', aliases: ['cost'] },
+        ],
+      },
+      {
+        label: 'Administración global', path: '/studio/admin', icon: 'settings', heading: 'Administración', platformAdminOnly: true,
+        sections: [
+          { id: 'tenants', label: 'Workspaces', path: '/studio/admin/workspaces' },
+          { id: 'providers', label: 'Proveedores IA', path: '/studio/admin/ai' },
+          { id: 'usage', label: 'Uso global', path: '/studio/admin/overview' },
+        ],
+      },
+      { label: 'Ajustes de redes', path: '/studio/settings/social', icon: 'share', sidebar: false },
     ],
   },
 ];
 
-/** Whether a member with this workspace role (and platform flag) sees the item. */
-export function canSeeNavItem(item: StudioNavItem, role: string, isPlatformAdmin = false): boolean {
-  return (!item.adminOnly || role === 'admin') && (!item.platformAdminOnly || isPlatformAdmin);
+export function canSeeNavItem(item: StudioNavItem, permissions: readonly string[], isPlatformAdmin = false): boolean {
+  return (!item.permissions || item.permissions.some((permission) => permissions.includes(permission))) &&
+    (!item.platformAdminOnly || isPlatformAdmin);
 }
 
 /** Longest nav path that prefixes the URL, so /studio/content/new still lights up Articles. */
@@ -199,6 +233,6 @@ export function activeNavItem(url: string): { group: StudioNavGroup; item: Studi
 export function sectionFor(path: string, tab: string | null | undefined, view?: string | null): string {
   const sections = STUDIO_NAV.flatMap((group) => group.items).find((item) => item.path === path)?.sections ?? [];
   return sections.find((section) => section.queryParam === 'view' && section.id === view)?.id
-    ?? sections.find((section) => !section.queryParam && section.id === tab)?.id
+    ?? sections.find((section) => !section.queryParam && (section.id === tab || (tab && section.aliases?.includes(tab))))?.id
     ?? sections.find((section) => !section.queryParam)?.id ?? '';
 }

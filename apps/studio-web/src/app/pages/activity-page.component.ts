@@ -11,12 +11,14 @@ import { AppEmptyStateComponent } from '../components/ui/app-empty-state.compone
 import type { OperationItem, OperationStatus } from '../models/studio.models';
 
 const STATUS_TABS: Array<{ id: OperationStatus | 'all'; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'running', label: 'Running' },
-  { id: 'queued', label: 'Queued' },
-  { id: 'succeeded', label: 'Succeeded' },
-  { id: 'failed', label: 'Failed' },
-  { id: 'cancelled', label: 'Cancelled' },
+  { id: 'all', label: 'Todos' },
+  { id: 'running', label: 'En curso' },
+  { id: 'retrying', label: 'En reintento' },
+  { id: 'queued', label: 'En espera' },
+  { id: 'succeeded', label: 'Completados' },
+  { id: 'failed', label: 'Fallidos' },
+  { id: 'partial', label: 'Parciales' },
+  { id: 'cancelled', label: 'Cancelados' },
 ];
 
 @Component({
@@ -24,100 +26,139 @@ const STATUS_TABS: Array<{ id: OperationStatus | 'all'; label: string }> = [
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
-    <section class="au-page">
+    <section class="au-page advanced-page advanced-jobs">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Background operations</p>
-          <h1 class="au-page__title">Activity</h1>
-          <p class="au-page__subtitle">Every indexing, generation, publication and installation job with live progress.</p>
+          <p class="au-page__eyebrow">Auctorio / Herramientas avanzadas</p>
+          <h1 class="au-page__title">Trabajos en segundo plano</h1>
+          <p class="au-page__subtitle">Seguimiento de indexaciones, generación, importaciones y distribución.</p>
         </div>
+        <div class="au-page__actions"><button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="load()" [disabled]="loading"><app-icon name="refresh"></app-icon>Actualizar</button></div>
       </header>
 
       <div class="au-banner au-banner--error" *ngIf="loadError">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
-        <button class="au-banner__action" type="button" (click)="load()">Retry</button>
+        <button class="au-banner__action" type="button" (click)="load()">Reintentar</button>
       </div>
 
-      <div class="au-tabs" role="tablist" aria-label="Operation status">
-        <button
-          class="au-tab"
-          type="button"
-          role="tab"
-          *ngFor="let tab of statusTabs"
-          [class.is-active]="activeStatus === tab.id"
-          [attr.aria-selected]="activeStatus === tab.id"
-          (click)="selectStatus(tab.id)"
-        >
-          {{ tab.label }}
-          <span class="au-tab__count" *ngIf="counts[tab.id]">{{ counts[tab.id] }}</span>
-        </button>
-      </div>
+      <dl class="advanced-kpis" aria-label="Resumen de trabajos" *ngIf="!loading && !loadError">
+        <div class="au-stat">
+          <dt class="au-stat__label">Ejecutándose</dt>
+          <dd class="au-stat__value">{{ counts['running'] ?? 0 }}</dd>
+          <dd class="au-stat__note">Con progreso registrado</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">En espera</dt>
+          <dd class="au-stat__value">{{ counts['queued'] ?? 0 }}</dd>
+          <dd class="au-stat__note">Pendientes de ejecución</dd>
+        </div>
+        <div class="au-stat advanced-stat--warning">
+          <dt class="au-stat__label">Fallidos</dt>
+          <dd class="au-stat__value">{{ counts['failed'] ?? 0 }}</dd>
+          <dd class="au-stat__note">Requieren atención</dd>
+        </div>
+        <div class="au-stat advanced-stat--good">
+          <dt class="au-stat__label">Completados</dt>
+          <dd class="au-stat__value">{{ counts['succeeded'] ?? 0 }}</dd>
+          <dd class="au-stat__note">Finalizados correctamente</dd>
+        </div>
+      </dl>
 
-      <div class="au-toolbar au-mb-2">
-        <label class="au-search au-flex-1">
-          <app-icon name="search"></app-icon>
-          <input class="au-search__input" type="search" placeholder="Search operations…" [(ngModel)]="search" (input)="debouncedLoad()" aria-label="Search operations" />
-        </label>
-      </div>
+      <section class="au-panel au-panel--padded" aria-labelledby="job-progress">
+        <div class="advanced-card-header">
+          <h2 class="au-panel__title" id="job-progress">Operaciones y progreso</h2>
+          <p>Consulta la fase, la duración y las acciones disponibles para cada trabajo.</p>
+        </div>
+        <div class="au-tabs" role="group" aria-label="Operation status">
+          <button
+            class="au-tab"
+            type="button"
+            *ngFor="let tab of statusTabs"
+            [class.is-active]="activeStatus === tab.id"
+            [attr.aria-pressed]="activeStatus === tab.id"
+            (click)="selectStatus(tab.id)"
+          >
+            {{ tab.label }}
+            <span class="au-tab__count" *ngIf="counts[tab.id]">{{ counts[tab.id] }}</span>
+          </button>
+        </div>
 
-      <div class="au-skeleton-list" *ngIf="loading" aria-label="Loading operations">
-        <div class="au-skeleton" *ngFor="let _ of [1, 2, 3]" style="height: 64px"></div>
-      </div>
+        <div class="au-toolbar advanced-filter-bar" role="search">
+          <label class="au-search au-flex-1">
+            <app-icon name="search"></app-icon>
+            <input class="au-search__input" type="search" placeholder="Buscar trabajo, tipo o sitio…" [(ngModel)]="search" (input)="debouncedLoad()" aria-label="Search operations" />
+          </label>
+          <a class="au-btn au-btn--ghost au-btn--sm" routerLink="." [queryParams]="{ tab: 'failed' }" *ngIf="view !== 'failed'">Ver fallidos</a>
+        </div>
 
-      <app-empty-state *ngIf="!loading && !loadError && items.length === 0" icon="activity" title="No operations yet" text="Start an indexing, generation or publication job and it will appear here."></app-empty-state>
+        <div class="au-skeleton-list" *ngIf="loading" aria-label="Loading operations">
+          <div class="au-skeleton" *ngFor="let _ of [1, 2, 3]" style="height: 64px"></div>
+        </div>
 
-      <div class="au-table-wrap au-table-wrap--scrollable" *ngIf="items.length > 0">
-        <table class="au-table au-table--hover">
-          <thead>
-            <tr>
-              <th scope="col">Operation</th>
-              <th scope="col">Status</th>
-              <th scope="col">Progress</th>
-              <th scope="col">Started</th>
-              <th scope="col">Duration</th>
-              <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Actions</span></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr *ngFor="let item of items" [class.is-row-error]="item.status === 'failed'">
-              <td data-label="Operation">
-                <div class="au-cell-title">
-                  <div>
-                    <button class="au-cell-title__name au-link-button" type="button" (click)="openDetail(item)">{{ typeLabel(item.type) }}</button>
-                    <div class="au-cell-title__meta">
-                      {{ item.phase || '—' }} · retries: {{ item.retryCount }}
-                      <ng-container *ngIf="item.entityType"> · {{ item.entityType }}</ng-container>
+        <app-empty-state *ngIf="!loading && !loadError && items.length === 0" icon="activity" title="Ninguna operación coincide" text="Ajusta el estado o la búsqueda para consultar otros trabajos."></app-empty-state>
+
+        <div class="au-panel au-table-wrap au-table-wrap--scrollable" *ngIf="items.length > 0" role="region" aria-label="Background job results" tabindex="0">
+          <table class="au-table au-table--hover au-table--keep-columns">
+            <thead>
+              <tr>
+                <th scope="col">Operación</th>
+                <th scope="col">Estado</th>
+                <th scope="col">Progreso</th>
+                <th scope="col">Inicio</th>
+                <th scope="col">Duración</th>
+                <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Actions</span></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr *ngFor="let item of items" [class.is-row-error]="item.status === 'failed'">
+                <td data-label="Operation">
+                  <div class="au-cell-title">
+                    <div>
+                      <button class="au-cell-title__name au-link-button" type="button" (click)="openDetail(item)">{{ typeLabel(item.type) }}</button>
+                      <div class="au-cell-title__meta">
+                        {{ item.phase || '—' }} · Reintentos: {{ item.retryCount }}
+                        <ng-container *ngIf="item.entityType"> · {{ item.entityType }}</ng-container>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </td>
-              <td data-label="Status">
-                <span class="au-badge" [class]="badgeClass(item.status)">{{ statusLabel(item.status) }}</span>
-              </td>
-              <td data-label="Progress">
-                <div class="au-progress" role="progressbar" [attr.aria-valuenow]="item.progress" aria-valuemin="0" aria-valuemax="100">
-                  <span class="au-progress__bar" [style.width.%]="item.progress"></span>
-                </div>
-                <span class="au-table__meta">{{ item.progress }}%<ng-container *ngIf="item.totalSteps > 0"> · {{ item.completedSteps }}/{{ item.totalSteps }}</ng-container></span>
-              </td>
-              <td data-label="Started">{{ item.startedAt ? (item.startedAt | date: 'short') : 'Queued' }}</td>
-              <td data-label="Duration">{{ durationLabel(item) }}</td>
-              <td class="au-table__actions">
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="openDetail(item)">Details</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canRetry(item)" (click)="retry(item)">Retry</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canCancel(item)" (click)="cancel(item)">Cancel</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+                </td>
+                <td data-label="Status">
+                  <span class="au-badge" [class]="badgeClass(item.status)">{{ statusLabel(item.status) }}</span>
+                </td>
+                <td data-label="Progress">
+                  <div class="au-progress" role="progressbar" [attr.aria-valuenow]="item.progress" aria-valuemin="0" aria-valuemax="100">
+                    <span class="au-progress__bar" [style.width.%]="item.progress"></span>
+                  </div>
+                  <span class="au-table__meta">{{ item.progress }}%<ng-container *ngIf="item.totalSteps > 0"> · {{ item.completedSteps }}/{{ item.totalSteps }}</ng-container></span>
+                </td>
+                <td data-label="Started">{{ item.startedAt ? (item.startedAt | date: 'short') : 'Queued' }}</td>
+                <td data-label="Duration">{{ durationLabel(item) }}</td>
+                <td class="au-table__actions">
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="openDetail(item)">Ver detalle</button>
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canRetry(item)" (click)="retry(item)">Reintentar</button>
+                  <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canCancel(item)" (click)="cancel(item)">Cancelar</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
-      <div class="au-pagination" *ngIf="totalPages > 1">
-        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="goPage(page - 1)" [disabled]="page <= 1">Previous</button>
-        <span class="au-pagination__meta">Page {{ page }} of {{ totalPages }} · {{ total }} operations</span>
-        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="goPage(page + 1)" [disabled]="page >= totalPages">Next</button>
-      </div>
+        <div class="au-pagination" *ngIf="totalPages > 1">
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="goPage(page - 1)" [disabled]="page <= 1">Anterior</button>
+          <span class="au-pagination__meta">Page {{ page }} of {{ totalPages }} · {{ total }} operations</span>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="goPage(page + 1)" [disabled]="page >= totalPages">Siguiente</button>
+        </div>
+
+      </section>
+
+      <section class="au-panel au-panel--padded advanced-followup" aria-labelledby="job-information">
+        <div class="advanced-card-header"><h2 class="au-panel__title" id="job-information">Información adecuada para usuarios</h2><p>Diagnostica el progreso y consulta las acciones disponibles.</p></div>
+        <div class="advanced-grid-2">
+          <div class="advanced-callout"><strong>Progreso de la operación</strong><p>El detalle muestra la fase y los pasos registrados por Studio.</p></div>
+          <div class="advanced-callout"><strong>Fallos y reintentos</strong><p>Abre una operación fallida para ver el diagnóstico y las opciones de reintento.</p></div>
+        </div>
+      </section>
 
       <!-- Detail drawer -->
       <div class="au-drawer-backdrop" *ngIf="detail" (click)="detail = null"></div>
@@ -144,8 +185,8 @@ const STATUS_TABS: Array<{ id: OperationStatus | 'all'; label: string }> = [
           <span class="au-banner__text">{{ detail.errorSummary }}</span>
         </div>
         <div class="au-form__actions">
-          <button class="au-btn au-btn--primary au-btn--sm" type="button" *ngIf="canRetry(detail)" (click)="retry(detail)">Retry</button>
-          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canCancel(detail)" (click)="cancel(detail)">Cancel</button>
+          <button class="au-btn au-btn--primary au-btn--sm" type="button" *ngIf="canRetry(detail)" (click)="retry(detail)">Reintentar</button>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canCancel(detail)" (click)="cancel(detail)">Cancelar</button>
           <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="detail = null">Close</button>
         </div>
       </aside>
@@ -158,17 +199,23 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
   private readonly sse = inject(SseService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
+  private requestVersion = 0;
   private searchTimer: ReturnType<typeof setTimeout> | null = null;
   private sseUnsubscribe: (() => void) | null = null;
   private sseSubscription: Subscription | null = null;
+  private tabSubscription: Subscription | null = null;
+  view: 'active' | 'history' | 'failed' | 'all' = 'all';
 
-  readonly statusTabs = STATUS_TABS;
+  get statusTabs(): typeof STATUS_TABS {
+    const allowed = this.view === 'active' ? ['queued', 'running', 'retrying'] : this.view === 'failed' ? ['failed'] : this.view === 'history' ? ['succeeded', 'partial', 'failed', 'cancelled'] : STATUS_TABS.map((tab) => tab.id);
+    return STATUS_TABS.filter((tab) => tab.id === 'all' || allowed.includes(tab.id));
+  }
   activeStatus: OperationStatus | 'all' = 'all';
   search = '';
   page = 1;
   pageSize = 20;
   total = 0;
-  counts: Record<string, number> = {};
+  counts: Partial<Record<string, number>> = {};
   items: OperationItem[] = [];
   loading = true;
   loadError = '';
@@ -179,11 +226,15 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    const status = this.route.snapshot.queryParamMap.get('status');
-    if (status && STATUS_TABS.some((tab) => tab.id === status)) {
-      this.activeStatus = status as OperationStatus | 'all';
-    }
-    this.load();
+    this.tabSubscription = this.route.queryParamMap.subscribe((params) => {
+      const tab = params.get('tab');
+      this.view = tab === 'active' || tab === 'history' || tab === 'failed' ? tab : 'all';
+      const status = params.get('status');
+      const allowed = this.view === 'active' ? ['queued', 'running', 'retrying'] : this.view === 'failed' ? ['failed'] : this.view === 'history' ? ['succeeded', 'partial', 'failed', 'cancelled'] : STATUS_TABS.map((tab) => tab.id);
+      this.activeStatus = status && allowed.includes(status) ? status as OperationStatus : this.view === 'failed' ? 'failed' : 'all';
+      this.page = 1;
+      this.load();
+    });
     this.sseUnsubscribe = this.sse.subscribe((event) => {
       if (event.type.startsWith('operation.')) {
         this.refreshSilently();
@@ -193,6 +244,7 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.tabSubscription?.unsubscribe();
     this.sseUnsubscribe?.();
     this.sseSubscription?.unsubscribe();
     if (this.searchTimer) {
@@ -201,15 +253,17 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
   }
 
   load(): void {
+    const version = ++this.requestVersion;
     this.loading = true;
     this.loadError = '';
     this.api.listOperations({
       page: this.page,
       pageSize: this.pageSize,
-      status: this.activeStatus,
+      status: this.activeStatus === 'all' ? this.view : this.activeStatus,
       search: this.search || undefined,
     }).subscribe({
       next: (response) => {
+        if (version !== this.requestVersion) return;
         this.items = response.items;
         this.total = response.total;
         this.counts = response.counts;
@@ -219,6 +273,7 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
         }
       },
       error: () => {
+        if (version !== this.requestVersion) return;
         this.loading = false;
         this.loadError = 'Operations could not be loaded. Try again.';
       },
@@ -226,13 +281,16 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
   }
 
   private refreshSilently(): void {
+    const version = ++this.requestVersion;
     this.api.listOperations({
       page: this.page,
       pageSize: this.pageSize,
-      status: this.activeStatus,
+      status: this.activeStatus === 'all' ? this.view : this.activeStatus,
       search: this.search || undefined,
     }).subscribe({
       next: (response) => {
+        if (version !== this.requestVersion) return;
+        this.loading = false;
         this.items = response.items;
         this.total = response.total;
         this.counts = response.counts;
@@ -240,7 +298,7 @@ export class ActivityPageComponent implements OnInit, OnDestroy {
           this.detail = response.items.find((item) => item.id === this.detail?.id) ?? this.detail;
         }
       },
-      error: () => undefined,
+      error: () => { if (version === this.requestVersion) this.loading = false; },
     });
   }
 

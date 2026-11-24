@@ -19,9 +19,9 @@ const STAGES: Array<{ key: string; label: string; statuses: string[] }> = [
   imports: [CommonModule],
   styles: [
     `
-      .pp { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); gap: var(--au-s3); overflow-x: auto; padding-bottom: var(--au-s2); scroll-snap-type: x mandatory; }
-      .pp__col { scroll-snap-align: start; min-width: 0; border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface-2); padding: var(--au-s2); display: flex; flex-direction: column; gap: var(--au-s2); max-height: 70vh; }
-      .pp__col h3 { margin: 0; display: flex; justify-content: space-between; font-size: var(--au-fs-body-sm); padding: 2px 4px; }
+      .pp { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(190px, 1fr); gap: 9px; overflow-x: auto; padding: 1px 0 8px; scroll-snap-type: x mandatory; }
+      .pp__col { scroll-snap-align: start; min-width: 0; border: 1px solid var(--au-border); border-radius: 12px; background: var(--au-surface-2); min-height: 220px; padding: 10px; display: flex; flex-direction: column; gap: var(--au-s2); max-height: 70vh; }
+      .pp__col h3 { margin: 0; display: flex; justify-content: space-between; font-size: 11px; padding: 3px 2px 4px; }
       .pp__col h3 span { color: var(--au-muted); font-variant-numeric: tabular-nums; }
       .pp__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--au-s2); overflow-y: auto; }
       .pp__card { width: 100%; text-align: left; border: 1px solid var(--au-border); border-left: 3px solid var(--pp-tone, var(--au-border-strong)); border-radius: var(--au-r-sm); background: var(--au-surface); padding: 8px; font: inherit; color: var(--au-text); cursor: pointer; display: grid; gap: 2px; }
@@ -31,11 +31,10 @@ const STAGES: Array<{ key: string; label: string; statuses: string[] }> = [
       .pp__empty { color: var(--au-muted); font-size: var(--au-fs-caption); padding: 4px; }
       .tone-success { --pp-tone: var(--au-success); } .tone-warning { --pp-tone: var(--au-warning); } .tone-danger { --pp-tone: var(--au-danger); }
       .tone-brand { --pp-tone: var(--au-brand); } .tone-info { --pp-tone: var(--au-info); }
-      @media (min-width: 1280px) { .pp { grid-auto-columns: minmax(0, 1fr); } }
     `,
   ],
   template: `
-    <div class="pp" role="list" aria-label="Pipeline by stage">
+    <div class="pp" role="list" aria-label="Pipeline de producción" tabindex="0">
       <section class="pp__col" *ngFor="let column of columns" role="listitem" [attr.aria-label]="column.label + ', ' + column.items.length">
         <h3>{{ column.label }} <span>{{ column.items.length }}</span></h3>
         <ul class="pp__list">

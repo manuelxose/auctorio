@@ -56,7 +56,7 @@ export function registerEngagementRoutes(fastify: FastifyInstance) {
   fastify.post(`${root}/:id/draft`, async (request, reply) => {
     const context = await engagementRequest(request, reply, true);
     if (!context?.id) return;
-    try { return await draftOpportunity(context.scope, context.site, context.id); }
+    try { return await draftOpportunity(context.scope, context.site, context.id, parseBody<Record<string, unknown>>(request)); }
     catch (error) { return reportError(reply, error); }
   });
   fastify.patch(`${root}/:id`, async (request, reply) => {

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { dedupeLegacyWebsiteAccounts, installationToConnection } from "../src/studio/destination-readiness";
 
 const base = { id: "i1", displayName: "GuiaTV", verifiedAt: null, lastError: null, siteId: "s1", site: { name: "GuiaTV" } };
@@ -125,6 +126,9 @@ test("HTTP: overview dedupes legacy account, hides disabled/revoked, isolates te
     const list = await a.inject({ method: "GET", url: "/v2/connector-installations" });
     assert.equal(list.json().items[0].siteId, site.id);
     assert.ok(!JSON.stringify(list.json()).includes("credentialsCiphertext"));
+    const inventory = await a.inject({ method: "GET", url: "/v2/sites" });
+    assert.equal(inventory.statusCode, 200);
+    assert.equal(inventory.json().items.find((item: { id: string }) => item.id === site.id).websiteConnection.stage, "unconfigured");
   } finally {
     const ids = [ta.id, tb.id];
     await prisma.connectorInstallation.deleteMany({ where: { tenantId: { in: ids } } });
@@ -159,6 +163,46 @@ test("HTTP: legacy account only and Site only (no installation)", async () => {
     await prisma.publishingAccount.deleteMany({ where: { tenantId: t.id } });
     await prisma.site.deleteMany({ where: { tenantId: t.id } });
     await prisma.tenant.deleteMany({ where: { id: t.id } });
+  }
+});
+
+test("a verified publishing account verifies only its matching legacy website", async () => {
+  const prisma = getPrismaClient();
+  const seed = `dest-proof-${randomUUID()}`;
+  const credentialsRef = "AUCTORIO_TEST_DESTINATION_PROOF";
+  const previous = process.env[credentialsRef];
+  process.env[credentialsRef] = "test credential";
+  const tenant = await prisma.tenant.create({ data: { name: seed, apiKeyHash: sha256(seed), status: "active" } });
+  try {
+    const sites = await Promise.all(["checked", "unchecked"].map((key) => prisma.site.create({
+      data: { tenantId: tenant.id, key, name: key, type: "guiatv", publishingCredentialsRef: credentialsRef },
+    })));
+    await prisma.publishingAccount.create({
+      data: { tenantId: tenant.id, siteId: sites[0].id, platform: "website", displayName: "Checked website", enabled: true, status: "active", lastVerifiedAt: new Date() },
+    });
+    const logoUrl = "https://only.example/site.svg";
+    await prisma.sitePlanningSettings.create({
+      data: { tenantId: tenant.id, siteId: sites[0].id, weekdays: [], publishTimes: [], channels: [], articleTargets: { brand: { logoUrl } } },
+    });
+    const studio = server(tenant.id);
+    const logo = await studio.inject({ method: "GET", url: `/v2/sites/${sites[0].id}/logo` });
+    assert.deepEqual(logo.json(), { logoUrl });
+    const unbranded = await studio.inject({ method: "GET", url: `/v2/sites/${sites[1].id}/logo` });
+    assert.deepEqual(unbranded.json(), { logoUrl: null });
+    const response = await studio.inject({ method: "GET", url: "/v2/overview" });
+    assert.equal(response.statusCode, 200);
+    const connections = response.json().connections as Array<{ siteId: string; stage: string; lastVerifiedAt: string | null }>;
+    const rows = new Map(connections.map((row) => [row.siteId, row]));
+    assert.equal(rows.get(sites[0].id)?.stage, "ready");
+    assert.ok(rows.get(sites[0].id)?.lastVerifiedAt);
+    assert.equal(rows.get(sites[1].id)?.stage, "stored");
+    assert.equal(rows.get(sites[1].id)?.lastVerifiedAt, null);
+  } finally {
+    if (previous === undefined) delete process.env[credentialsRef];
+    else process.env[credentialsRef] = previous;
+    await prisma.publishingAccount.deleteMany({ where: { tenantId: tenant.id } });
+    await prisma.site.deleteMany({ where: { tenantId: tenant.id } });
+    await prisma.tenant.deleteMany({ where: { id: tenant.id } });
   }
 });
 
@@ -201,5 +245,17 @@ test("a site with stored publishing credentials shows as connected, without clai
   assert.equal(connection.connectionState, "connected");
   assert.equal(connection.lastVerifiedAt, null);
   assert.equal(connection.checks.capabilitiesVerified, false);
+  assert.ok(connection.reason);
   assert.match(connection.reason, /not been checked/);
+});
+
+test("a legacy destination carries real website delivery or publishing-account verification evidence", async () => {
+  const { legacySiteToConnection } = await import("../src/studio/destination-readiness");
+  const site = { id: "site-1", name: "Guia" };
+  const recent = new Date();
+  const stale = new Date(Date.now() - 31 * 24 * 3_600_000);
+  assert.equal(legacySiteToConnection(site, null, recent).stage, "ready");
+  assert.equal(legacySiteToConnection(site, recent).lastSuccessfulPublicationAt, recent);
+  assert.equal(legacySiteToConnection(site, recent).checks.canPublish, true);
+  assert.equal(legacySiteToConnection(site, stale).stage, "stale");
 });

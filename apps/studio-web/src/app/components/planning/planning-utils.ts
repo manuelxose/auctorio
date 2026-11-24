@@ -1,13 +1,13 @@
 import type { PlanEvidenceEntry, PlanItem, PlanOutlineEntry } from '../../models/planning.models';
 
 export const WEEKDAYS = [
-  { value: 1, short: 'Mon', long: 'Monday' },
-  { value: 2, short: 'Tue', long: 'Tuesday' },
-  { value: 3, short: 'Wed', long: 'Wednesday' },
-  { value: 4, short: 'Thu', long: 'Thursday' },
-  { value: 5, short: 'Fri', long: 'Friday' },
-  { value: 6, short: 'Sat', long: 'Saturday' },
-  { value: 0, short: 'Sun', long: 'Sunday' },
+  { value: 1, short: 'Lun', long: 'Lunes' },
+  { value: 2, short: 'Mar', long: 'Martes' },
+  { value: 3, short: 'Mié', long: 'Miércoles' },
+  { value: 4, short: 'Jue', long: 'Jueves' },
+  { value: 5, short: 'Vie', long: 'Viernes' },
+  { value: 6, short: 'Sáb', long: 'Sábado' },
+  { value: 0, short: 'Dom', long: 'Domingo' },
 ];
 
 /** Pipeline order of plan item states. */

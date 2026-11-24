@@ -285,6 +285,8 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    const status = this.stateFilters.find((state) => state.key === this.queryParams?.get('status'));
+    if (status) this.stateKey = status.key;
     this.refresh();
     const id = this.queryParams?.get('id');
     if (id) this.inspect({ id } as StudioPublication);

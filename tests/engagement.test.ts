@@ -89,6 +89,8 @@ test("refreshes Quora over HTTP, deduplicates, drafts and confirms the reply", a
     assert.match(String(options.body), /Voz cercana/);
     assert.match(String(options.body), /Tono editorial/);
     assert.match(String(options.body), /Breve y claro/);
+    assert.match(String(options.body), /draft reply in en/);
+    assert.match(String(options.body), /expert/);
     return Response.json({ choices: [{ message: { content: "Empieza por el género que más te guste." } }] });
   });
   try {
@@ -117,7 +119,9 @@ test("refreshes Quora over HTTP, deduplicates, drafts and confirms the reply", a
     const [item, ...duplicates] = listed.json().items;
     assert.ok(item.score > 0);
     assert.deepEqual(duplicates, []);
-    const drafted = await server.inject({ method: "POST", url: endpoint(`/${item.id}/draft`) });
+    const invalidDraft = await server.inject({ method: "POST", url: endpoint(`/${item.id}/draft`), payload: { language: "unknown" } });
+    assert.equal(invalidDraft.statusCode, 400);
+    const drafted = await server.inject({ method: "POST", url: endpoint(`/${item.id}/draft`), payload: { language: "en", tone: "expert" } });
     assert.equal(drafted.statusCode, 200, drafted.body);
     assert.equal(drafted.json().draft, "Empieza por el género que más te guste.");
     const ctx = await loadEditorialContext(tenant.id, { siteId: site.id });

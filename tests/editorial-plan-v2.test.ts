@@ -282,7 +282,7 @@ test("postValidatePlanItems strips invented internal links and unverified eviden
 test("postValidatePlanItems rejects off-topic rows and trims excess quantity", () => {
   const items = [
     brief({ topic: "tv", workingTitle: "Guía de TV hoy" }),
-    brief({ topic: "tv", workingTitle: "Dónde ver La Isla en streaming", targetQuery: "donde ver la isla en streaming" }),
+    brief({ topic: "tv", workingTitle: "Dónde ver La Isla en streaming", targetQuery: "donde ver la isla en streaming", primaryKeyword: "la isla en streaming" }),
     brief({ topic: "welding", workingTitle: "Equipos de soldadura industrial" }),
   ];
   const result = postValidatePlanItems(items, { ...planInput, publicationCount: 1 }, planningContext());
@@ -303,6 +303,14 @@ test("postValidatePlanItems applies word targets from content format", () => {
   assert.equal(result.kept.length, 1);
   assert.equal(result.kept[0].recommendedWordCountMin, 600);
   assert.equal(result.kept[0].recommendedWordCountMax, 1000);
+});
+
+test("postValidatePlanItems drops a keyword another plan already holds", () => {
+  const item = brief({ topic: "tv", workingTitle: "Dónde ver La Isla en streaming", targetQuery: "donde ver la isla en streaming", primaryKeyword: "La Isla en streaming" });
+  assert.equal(postValidatePlanItems([item], planInput, planningContext()).kept.length, 1);
+  const held = postValidatePlanItems([item], planInput, { ...planningContext(), existingPlanQueries: ["la isla en streaming"] });
+  assert.equal(held.kept.length, 0);
+  assert.match(held.dropped[0].reason, /duplicate target query/);
 });
 
 test("postValidatePlanItems drops duplicate target queries within a batch", () => {

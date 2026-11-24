@@ -14,11 +14,11 @@ import { detectConnectTarget, type ConnectTarget } from '../utils/connect-target
       @if (title()) {
         <div class="au-magic__head">
           <h2 class="au-panel__title">{{ title() }}</h2>
-          <p class="au-muted">Paste a website, an Instagram or X profile link, or an &#64;handle</p>
+          <p class="au-muted">Pega un sitio web, el enlace de un perfil de Instagram o X, o un &#64;usuario</p>
         </div>
       }
       <label class="au-magic__field">
-        <span class="au-sr-only">Website, profile link or handle</span>
+        <span class="au-sr-only">Sitio web, enlace de perfil o usuario</span>
         <app-icon name="plug"></app-icon>
         <input
           class="au-magic__input"
@@ -28,10 +28,10 @@ import { detectConnectTarget, type ConnectTarget } from '../utils/connect-target
           spellcheck="false"
           [(ngModel)]="value"
           (ngModelChange)="detected = detect($event)"
-          placeholder="example.com or @yourbrand"
+          placeholder="ejemplo.com o @tumarca"
         />
         <button class="au-btn au-btn--primary" type="submit" [disabled]="!detected">
-          Connect
+          Conectar
           <app-icon name="arrow-right"></app-icon>
         </button>
       </label>
@@ -39,7 +39,7 @@ import { detectConnectTarget, type ConnectTarget } from '../utils/connect-target
         @if (detected) {
           <span class="au-magic__chip" [attr.data-kind]="detected.kind">
             <app-icon [name]="detected.kind === 'website' ? 'globe' : 'user'"></app-icon>
-            {{ detected.kind === 'website' ? 'Website · ' + detected.label : detected.kind === 'handle' ? detected.label + ' · choose the network next' : detected.label }}
+            {{ detected.kind === 'website' ? 'Sitio web · ' + detected.label : detected.kind === 'handle' ? detected.label + ' · elige la red a continuación' : detected.label }}
           </span>
         }
       </div>

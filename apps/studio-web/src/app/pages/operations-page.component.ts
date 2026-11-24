@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { sectionFor } from '../layout/studio-nav';
 import { lastValueFrom, Subscription, timer } from 'rxjs';
-import { StudioApiService } from '../services/studio-api.service';
+import { StudioApiService, type WorkspaceAuditPage } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
@@ -12,7 +12,7 @@ import { ProductionApiService } from '../services/production-api.service';
 import type { ProductionJob } from '../models/production.models';
 import type { CostBudgetView, CostControlsView, OperationsHealth } from '../models/studio.models';
 
-type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'cost';
+type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'costs' | 'audit';
 
 
 @Component({
@@ -49,17 +49,34 @@ type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'co
         </div>
       </ng-container>
 
-      <ng-container *ngIf="health">
-        <!-- ── Overview ─────────────────────────────────────────────── -->
-        <div class="au-row" *ngIf="activeTab === 'overview'">
-          <div class="au-row__item au-row__item--third" *ngFor="let card of overviewCards">
-            <div class="au-panel au-panel--padded">
-              <p class="au-panel__subtitle">{{ card.label }}</p>
-              <p class="au-mono au-mt-1" [class.au-badge--danger]="card.bad" style="font-size: 1.5rem; margin: 0">{{ card.value }}</p>
-            </div>
-          </div>
+      <section class="au-panel au-panel--padded" *ngIf="activeTab === 'audit'">
+        <h2 class="au-panel__title">Auditoría</h2>
+        <p class="au-muted" role="status" *ngIf="auditLoading">Cargando auditoría…</p>
+        <p class="au-error" role="alert" *ngIf="auditError">No se pudo cargar la auditoría. <button class="au-btn" type="button" (click)="loadAudit(auditPage)">Reintentar</button></p>
+        <p *ngIf="audit && !audit.items.length">No hay cambios registrados.</p>
+        <div class="au-table-wrap" role="region" aria-label="Historial de auditoría" tabindex="0" *ngIf="audit?.items?.length">
+          <table class="au-table">
+            <thead><tr><th scope="col">Fecha</th><th scope="col">Acción</th><th scope="col">Tipo</th><th scope="col">Autor</th></tr></thead>
+            <tbody><tr *ngFor="let entry of audit?.items">
+              <td>{{ entry.createdAt | date:'medium' }}</td><td>{{ entry.action }}</td><td>{{ entry.entityType }}</td><td>{{ entry.actorUser?.displayName || entry.actorType }}</td>
+            </tr></tbody>
+          </table>
         </div>
+        <div class="au-pagination" *ngIf="audit && audit.total > audit.pageSize">
+          <button class="au-btn" type="button" [disabled]="auditLoading || auditPage === 1" (click)="loadAudit(auditPage - 1)">Anterior</button>
+          <span>Página {{ auditPage }}</span>
+          <button class="au-btn" type="button" [disabled]="auditLoading || auditPage * audit.pageSize >= audit.total" (click)="loadAudit(auditPage + 1)">Siguiente</button>
+        </div>
+      </section>
 
+      <ng-container *ngIf="health && activeTab !== 'audit'">
+        <!-- ── Overview ─────────────────────────────────────────────── -->
+        <dl class="workspace-metrics" *ngIf="activeTab === 'overview'">
+          <div class="workspace-card" *ngFor="let card of overviewCards">
+            <dt>{{ card.label }}</dt>
+            <dd [class.au-badge--danger]="card.bad">{{ card.value }}</dd>
+          </div>
+        </dl>
         <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'overview' && health.automation.length > 0">
           <div class="au-panel__header"><h2 class="au-panel__title">Automation state</h2></div>
           <table class="au-table au-table--compact">
@@ -94,7 +111,7 @@ type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'co
         </div>
 
         <!-- ── Workers ─────────────────────────────────────────────── -->
-        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'workers'">
+        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'workers' || activeTab === 'queues'">
           <div class="au-panel__header">
             <h2 class="au-panel__title">Worker heartbeats</h2>
             <p class="au-panel__subtitle">{{ staleWorkers }} stale</p>
@@ -144,7 +161,7 @@ type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'co
         </div>
 
         <!-- ── Production jobs ─────────────────────────────────────── -->
-        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'production'">
+        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'production' || activeTab === 'overview'">
           <div class="au-panel__header">
             <h2 class="au-panel__title">Production jobs</h2>
             <select class="au-select au-filter-select" [(ngModel)]="jobStatus" (ngModelChange)="loadJobs()" aria-label="Filter by status">
@@ -181,7 +198,7 @@ type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'co
         </div>
 
         <!-- ── Failures ────────────────────────────────────────────── -->
-        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'failures'">
+        <div class="au-panel au-panel--padded au-mt-3" *ngIf="activeTab === 'failures' || activeTab === 'overview'">
           <div class="au-panel__header">
             <h2 class="au-panel__title">Failures</h2>
             <p class="au-panel__subtitle">
@@ -211,7 +228,7 @@ type TabId = 'overview' | 'workers' | 'queues' | 'production' | 'failures' | 'co
         </div>
 
         <!-- ── Cost ────────────────────────────────────────────────── -->
-        <ng-container *ngIf="activeTab === 'cost'">
+        <ng-container *ngIf="activeTab === 'costs'">
           <div class="au-row au-mt-2">
             <div class="au-row__item au-row__item--third">
               <div class="au-panel au-panel--padded"><p class="au-panel__subtitle">AI cost today</p><p class="au-mono" style="font-size: 1.5rem; margin: 0">\${{ (costControls?.spend?.dailyUsd ?? 0) | number: '1.0-4' }}</p><p class="au-table__meta">{{ costControls?.spend?.dailyEvents ?? 0 }} events</p></div>
@@ -302,7 +319,29 @@ export class OperationsPageComponent implements OnInit, OnDestroy {
   private readonly route = inject(ActivatedRoute);
   /** Section picked in the sidebar (?tab=). */
   activeTab: TabId = 'overview';
-  private readonly tabSub = this.route.queryParamMap.subscribe((params) => (this.activeTab = sectionFor('/studio/operations', params.get('tab')) as TabId));
+  audit: WorkspaceAuditPage | null = null;
+  auditPage = 1;
+  auditLoading = false;
+  auditError = false;
+  private auditSub?: Subscription;
+
+  private readonly tabSub = this.route.queryParamMap.subscribe((params) => {
+    const tab = params.get('tab');
+    this.activeTab = tab === 'workers' || tab === 'production' || tab === 'failures' || tab === 'audit'
+      ? tab : sectionFor('/studio/operations', tab) as TabId;
+    if (this.activeTab === 'audit') this.loadAudit(1);
+    else this.auditSub?.unsubscribe();
+  });
+
+  loadAudit(page: number): void {
+    this.auditSub?.unsubscribe();
+    this.auditLoading = true;
+    this.auditError = false;
+    this.auditSub = this.api.listWorkspaceAudit(page).subscribe({
+      next: (audit) => { this.audit = audit; this.auditPage = page; this.auditLoading = false; },
+      error: () => { this.auditLoading = false; this.auditError = true; },
+    });
+  }
 
   health: OperationsHealth | null = null;
   costControls: CostControlsView | null = null;

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { applyBrandCards, readBrandSettings, readableOn, resolveBrand } from "../src/studio/editorial-engine/brand";
+import { applyBrandCards, previewBrandCards, readBrandSettings, readableOn, resolveBrand } from "../src/studio/editorial-engine/brand";
 import { getStructureSpec, renderStructureSpec, resolveArticleTargets, resolveBrandSettings } from "../src/studio/editorial-engine/structure";
 import { siteGuidance } from "../src/studio/production/plan-item";
 import { cleanStyle, sanitizeEditorialHtml } from "../src/studio/html-sanitizer";
@@ -120,4 +120,30 @@ test("M5 publisher: the rendered link card reaches the GuíaTV payload with its 
   assert.match(content, /<aside data-block="link_card" style="[^"]*border:10px solid #/);
   assert.match(content, /border-top:5px solid #0055aa/);
   assert.match(content, /background-color:#0055aa;color:#ffffff/);
+});
+
+test("CTA card styles: seven looks survive the sanitizer, corners switch, invalid values fall back, preview fills samples", () => {
+  assert.equal(readBrandSettings({ cardStyle: "neon", cardCorners: "triangle" }).cardStyle, "classic");
+  assert.equal(readBrandSettings({ cardStyle: "bold", cardCorners: "square" }).cardCorners, "square");
+  const kinds = ["link_card", "contact_card", "map_card"] as const;
+  const seen = new Set<string>();
+  for (const cardStyle of ["classic", "editorial", "soft", "minimal", "bold", "ink", "frame"] as const) {
+    for (const cardCorners of ["rounded", "square"] as const) {
+      const brand = resolveBrand(readBrandSettings({ primaryColor: "#5540e7", cardStyle, cardCorners }), site);
+      const cards = previewBrandCards(brand, "es");
+      for (const kind of kinds) {
+        const html = sanitizeEditorialHtml(cards[kind]);
+        assert.match(html, new RegExp(`data-block="${kind}"`));
+        assert.match(html, /style="[^"]*background-color/, `${cardStyle} keeps its colours after sanitizing`);
+        assert.ok(!/<script|onclick|var\(/i.test(html));
+        if (kind === "link_card") seen.add(html);
+        if (cardCorners === "square" && cardStyle !== "editorial") assert.match(html, /border-radius:0px/);
+      }
+    }
+  }
+  assert.equal(seen.size, 13, "every style/corner combination renders differently (editorial has no corners)");
+  const preview = previewBrandCards(resolveBrand(readBrandSettings({}), site), "es");
+  assert.match(preview.link_card, /Titular de la llamada a la acción/);
+  assert.match(preview.contact_card, /hola@ejemplo\.com/);
+  assert.match(preview.map_card, /Calle Mayor 1/);
 });

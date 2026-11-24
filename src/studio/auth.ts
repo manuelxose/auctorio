@@ -47,6 +47,8 @@ const prisma = getPrismaClient();
 const DEFAULT_STUDIO_RETURN_TO = "/studio/dashboard";
 const STUDIO_SESSION_TTL_MS = 1000 * 60 * 60 * 12;
 const STUDIO_ACCOUNT_TOKEN_TTL_MS = 1000 * 60 * 60;
+const SCOPED_INVITATION_PREFIX = "workspace:";
+const noScopedInvitation = { invitations: { none: { status: "pending" as const, tokenHash: { startsWith: SCOPED_INVITATION_PREFIX } } } };
 
 function resolveStudioReturnTo(value: string | null | undefined): string {
   const normalized = String(value || "").trim();
@@ -343,6 +345,7 @@ async function getStudioAccountByEmail(email: string): Promise<AccountWithMember
           status: {
             in: ["active", "invited", "suspended"],
           },
+          OR: [{ status: { not: "invited" } }, noScopedInvitation],
         },
         include: {
           tenant: {
@@ -381,6 +384,7 @@ async function getStudioAccountByGoogleSubject(subject: string): Promise<Account
           status: {
             in: ["active", "invited", "suspended"],
           },
+          OR: [{ status: { not: "invited" } }, noScopedInvitation],
         },
         include: {
           tenant: {
@@ -505,6 +509,7 @@ async function activateStudioAccountMemberships(accountId: string): Promise<void
       where: {
         accountId: account.id,
         status: "invited",
+        ...noScopedInvitation,
       },
       data: {
         status: "active",
@@ -516,6 +521,7 @@ async function activateStudioAccountMemberships(accountId: string): Promise<void
       where: {
         email: account.email,
         status: "pending",
+        OR: [{ tokenHash: null }, { NOT: { tokenHash: { startsWith: SCOPED_INVITATION_PREFIX } } }],
       },
       data: {
         status: "accepted",
@@ -1211,6 +1217,7 @@ export async function inviteStudioUser(
   if (!email) throw new Error("email_required");
 
   const roleKeys = Array.from(new Set(input.roleKeys?.length ? input.roleKeys : ["editor"]));
+  const token = SCOPED_INVITATION_PREFIX + generateStudioToken();
   const { invitation, account } = await changeStudioAccess(tenantId, actor, "users.manage", async (db, check) => {
     const roles = await db.studioRole.findMany({
       where: { tenantId, key: { in: roleKeys } },
@@ -1222,7 +1229,10 @@ export async function inviteStudioUser(
       where: { tenantId_email: { tenantId, email } },
       include: ACCESS_ROLES,
     });
-    if (existing && existing.status !== "invited") throw new Error("member_already_exists");
+    const revoked = existing?.status === "suspended" && !existing.lastLoginAt
+      ? await db.studioInvitation.findFirst({ where: { tenantId, studioUserId: existing.id }, orderBy: { createdAt: "desc" } })
+      : null;
+    if (existing && existing.status !== "invited" && !(revoked?.status === "revoked")) throw new Error("member_already_exists");
     if (existing) check(existing.roles.map(({ role }) => role));
 
     const displayName = input.displayName?.trim() || existing?.displayName || email;
@@ -1231,9 +1241,11 @@ export async function inviteStudioUser(
       update: {},
       create: { email, displayName, status: "invited" },
     });
+    await db.$queryRaw`SELECT id FROM studio_accounts WHERE id = ${account.id}::uuid FOR NO KEY UPDATE`;
     const user = existing
-      ? await db.studioUser.update({ where: { id: existing.id }, data: { displayName } })
+      ? await db.studioUser.update({ where: { id: existing.id }, data: { displayName, status: "invited" } })
       : await db.studioUser.create({ data: { tenantId, accountId: account.id, email, displayName, status: "invited" } });
+    if (existing) await db.studioUserRole.deleteMany({ where: { studioUserId: user.id } });
     await setUserRoles(user.id, roles, db);
     await db.studioInvitation.updateMany({
       where: { tenantId, email, status: "pending" },
@@ -1242,7 +1254,7 @@ export async function inviteStudioUser(
     const invitation = await db.studioInvitation.create({
       data: {
         tenantId, studioUserId: user.id, email, displayName: input.displayName?.trim() || null,
-        status: "pending", tokenHash: hashStudioToken(generateStudioToken()), createdByUserId: actor.userId,
+        status: "pending", tokenHash: SCOPED_INVITATION_PREFIX + hashStudioToken(token), createdByUserId: actor.userId,
       },
     });
     await auditAccess(db, tenantId, actor, "studio.user.invited", "studio_user", user.id, { roleKeys });
@@ -1252,9 +1264,8 @@ export async function inviteStudioUser(
   let delivery: StudioInvitationSummary["delivery"] = "not_configured";
   if (isStudioEmailConfigured()) {
     try {
-      const activationToken = await issueStudioAccountToken({ accountId: account.id, kind: "activation" });
       await sendStudioAccountActionEmail({
-        email, displayName: input.displayName?.trim() || null, kind: "activation", token: activationToken,
+        email, displayName: input.displayName?.trim() || null, kind: "activation", token,
       });
       delivery = "sent";
     } catch {
@@ -1276,6 +1287,23 @@ export async function inviteStudioUser(
   };
 }
 
+export async function revokeStudioInvitation(tenantId: string, actor: AccessActor, userId: string): Promise<boolean> {
+  return changeStudioAccess(tenantId, actor, "users.manage", async (db, check) => {
+    const user = await db.studioUser.findFirst({ where: { tenantId, id: userId }, include: ACCESS_ROLES });
+    if (!user) return false;
+    check(user.roles.map(({ role }) => role));
+    if (user.status !== "invited") throw new Error("invitation_not_pending");
+    const revoked = await db.studioInvitation.updateMany({
+      where: { tenantId, studioUserId: userId, status: "pending" }, data: { status: "revoked" },
+    });
+    if (!revoked.count) throw new Error("invitation_not_pending");
+    await db.studioUser.update({ where: { id: userId }, data: { status: "suspended" } });
+    await db.studioUserSession.updateMany({ where: { tenantId, studioUserId: userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    await auditAccess(db, tenantId, actor, "studio.invitation.revoked", "studio_user", userId);
+    return true;
+  });
+}
+
 export async function updateStudioUser(
   tenantId: string, actor: AccessActor, userId: string, input: UpdateStudioUserInput,
 ): Promise<StudioUserSummary | null> {
@@ -1286,8 +1314,22 @@ export async function updateStudioUser(
     });
     if (!existing) return null;
     check(existing.roles.map(({ role }) => role));
+    if (input.status && input.status !== "suspended" && existing.status !== "active") {
+      const invitation = await db.studioInvitation.findFirst({ where: { tenantId, studioUserId: userId }, orderBy: { createdAt: "desc" } });
+      if (invitation?.status === "revoked" || (invitation?.status === "pending" && invitation.tokenHash?.startsWith(SCOPED_INVITATION_PREFIX))) throw new Error("invitation_not_accepted");
+    }
     if (actor.userId === userId && input.status && input.status !== "active") {
       throw new Error("self_suspension_forbidden");
+    }
+    if (input.roleIds !== undefined) {
+      const roleIds = [...new Set(input.roleIds)];
+      const roles = await db.studioRole.findMany({
+        where: { tenantId, id: { in: roleIds } }, include: { permissions: true },
+      });
+      if (roles.length !== roleIds.length) throw new Error("role_not_found");
+      check(roles);
+      await db.studioUserRole.deleteMany({ where: { studioUserId: userId } });
+      await setUserRoles(userId, roles, db);
     }
     const user = await db.studioUser.update({
       where: { id: userId },
@@ -1300,9 +1342,9 @@ export async function updateStudioUser(
         data: { revokedAt: new Date() },
       });
     }
-    await auditAccess(db, tenantId, actor, "studio.user.updated", "studio_user", userId, { status: user.status });
+    await auditAccess(db, tenantId, actor, "studio.user.updated", "studio_user", userId, { status: user.status, ...(input.roleIds !== undefined ? { roleIds: [...new Set(input.roleIds)] } : {}) });
     return mapUserSummary(user);
-  }, Boolean(input.status));
+  }, Boolean(input.status || input.roleIds !== undefined));
 }
 
 export async function changeStudioUserRole(
@@ -1483,6 +1525,7 @@ async function completeLocalAccountLogin(params: {
       where: {
         accountId: params.account.id,
         status: "invited",
+        ...noScopedInvitation,
       },
       data: {
         status: "active",
@@ -1490,7 +1533,7 @@ async function completeLocalAccountLogin(params: {
     });
 
     const membership = await tx.studioUser.updateMany({
-      where: { id: params.membership.id, status: { not: "suspended" } },
+      where: { id: params.membership.id, status: { not: "suspended" }, ...noScopedInvitation },
       data: {
         lastLoginAt,
         status: "active",
@@ -1502,6 +1545,7 @@ async function completeLocalAccountLogin(params: {
       where: {
         email: params.account.email,
         status: "pending",
+        OR: [{ tokenHash: null }, { NOT: { tokenHash: { startsWith: SCOPED_INVITATION_PREFIX } } }],
       },
       data: {
         status: "accepted",
@@ -1760,6 +1804,7 @@ async function completeGlobalAccountLogin(params: {
       where: {
         accountId: params.account.id,
         status: "invited",
+        ...noScopedInvitation,
       },
       data: {
         status: "active",
@@ -1883,13 +1928,43 @@ export async function loginStudioAccountWithGoogleGlobal(
   return completeGlobalAccountLogin({ account: refreshed, authMode: "google" });
 }
 
-export async function sendStudioPasswordReset(email: string): Promise<{ ok: true }> {  const normalizedEmail = normalizeStudioEmail(email);
+export async function sendStudioPasswordReset(email: string): Promise<{ ok: true }> {
+  const normalizedEmail = normalizeStudioEmail(email);
   if (!normalizedEmail) {
     throw new Error("email_required");
   }
 
   const account = await getStudioAccountByEmail(normalizedEmail);
   if (!account || account.status === "suspended") {
+    return { ok: true };
+  }
+
+  if (!account.passwordHash && splitMembershipsByAccess(account).local.length === 0) {
+    const pending = await prisma.studioInvitation.findFirst({
+      where: {
+        status: "pending", tokenHash: { startsWith: SCOPED_INVITATION_PREFIX },
+        user: { accountId: account.id, status: "invited" },
+        tenant: { status: "active", OR: [{ studioIdentityProvider: { is: null } }, { studioIdentityProvider: { is: { enabled: false } } }] },
+      },
+      orderBy: { updatedAt: "desc" },
+    });
+    if (!pending) return { ok: true };
+    if (!isStudioEmailConfigured()) throw new Error("smtp_not_configured");
+    const token = SCOPED_INVITATION_PREFIX + generateStudioToken();
+    const rotated = await prisma.$transaction(async (db) => {
+      const tenants = await db.$queryRaw<Array<{ id: string }>>`SELECT id FROM tenants WHERE id = ${pending.tenantId}::uuid AND status = 'active' FOR NO KEY UPDATE`;
+      if (!tenants.length) return false;
+      const changed = await db.studioInvitation.updateMany({
+        where: {
+          id: pending.id, status: "pending", tokenHash: { startsWith: SCOPED_INVITATION_PREFIX },
+          user: { accountId: account.id, status: "invited", account: { passwordHash: null, status: { not: "suspended" } } },
+          tenant: { status: "active", OR: [{ studioIdentityProvider: { is: null } }, { studioIdentityProvider: { is: { enabled: false } } }] },
+        },
+        data: { tokenHash: SCOPED_INVITATION_PREFIX + hashStudioToken(token) },
+      });
+      return changed.count === 1;
+    });
+    if (rotated) await sendStudioAccountActionEmail({ email: account.email, displayName: account.displayName, kind: "activation", token });
     return { ok: true };
   }
 
@@ -1923,6 +1998,7 @@ async function consumeStudioAccountToken(params: {
               status: {
                 in: ["active", "invited", "suspended"],
               },
+              OR: [{ status: { not: "invited" } }, noScopedInvitation],
             },
             include: {
               tenant: {
@@ -1985,6 +2061,37 @@ export async function acceptStudioInvitation(
 ): Promise<{ sessionToken: string; session: StudioSession }> {
   if (!input.password?.trim()) {
     throw new Error("password_required");
+  }
+
+  if (input.token.startsWith(SCOPED_INVITATION_PREFIX)) {
+    const tokenHash = SCOPED_INVITATION_PREFIX + hashStudioToken(input.token.trim());
+    const found = await prisma.studioInvitation.findUnique({ where: { tokenHash } });
+    if (!found || !found.studioUserId) throw new Error("invite_invalid");
+    const passwordHash = await hashStudioPassword(input.password);
+    const userId = found.studioUserId;
+    await prisma.$transaction(async (db) => {
+      const tenant = await db.$queryRaw<Array<{ id: string }>>`SELECT id FROM tenants WHERE id = ${found.tenantId}::uuid AND status = 'active' FOR NO KEY UPDATE`;
+      if (!tenant.length) throw new Error("invite_invalid");
+      const identityProvider = await db.studioIdentityProvider.findUnique({ where: { tenantId: found.tenantId } });
+      if (identityProvider?.enabled) throw new Error("user_not_authorized");
+      const invitation = await db.studioInvitation.findUnique({ where: { tokenHash } });
+      if (!invitation || invitation.status !== "pending" || invitation.studioUserId !== userId) throw new Error("invite_invalid");
+      if (invitation.updatedAt.getTime() + STUDIO_ACCOUNT_TOKEN_TTL_MS <= Date.now()) throw new Error("invite_expired");
+      if (input.workspaceId && input.workspaceId !== found.tenantId) throw new Error("user_not_authorized");
+      const user = await db.studioUser.findFirst({ where: { id: userId, tenantId: found.tenantId, status: "invited" }, include: { account: true } });
+      if (!user || user.account.status === "suspended") throw new Error("invite_invalid");
+      await db.$queryRaw`SELECT id FROM studio_accounts WHERE id = ${user.accountId}::uuid FOR NO KEY UPDATE`;
+      const account = await db.studioAccount.findUniqueOrThrow({ where: { id: user.accountId } });
+      if (account.status === "suspended") throw new Error("user_suspended");
+      if (account.passwordHash && !(await verifyStudioPassword(input.password, account.passwordHash))) throw new Error("invalid_credentials");
+      await db.studioAccount.update({ where: { id: account.id }, data: { status: "active", emailVerifiedAt: account.emailVerifiedAt ?? new Date(), ...(!account.passwordHash ? { passwordHash } : {}) } });
+      await db.studioUser.update({ where: { id: user.id }, data: { status: "active", lastLoginAt: new Date() } });
+      await db.studioInvitation.update({ where: { id: invitation.id }, data: { status: "accepted", acceptedAt: new Date() } });
+    });
+    const user = await loadFullUser(found.tenantId, userId);
+    if (!user) throw new Error("user_not_found");
+    const sessionToken = await createStudioUserSession(found.tenantId, userId, "password");
+    return { sessionToken, session: await buildHumanSession(user, "password") };
   }
 
   const account = await consumeStudioAccountToken({
@@ -2051,7 +2158,7 @@ export async function completeStudioSsoLogin(params: {
     where: { tenantId: tenant.id },
   });
 
-  if (!provider?.enabled) {
+  if (!provider?.enabled || provider.issuer !== params.issuer) {
     throw new Error("identity_provider_not_configured");
   }
 
@@ -2080,13 +2187,6 @@ export async function completeStudioSsoLogin(params: {
     "avatar_url",
   ]);
   const avatarUrl = typeof avatarValue === "string" && avatarValue.trim() ? avatarValue.trim() : null;
-  const account = await ensureStudioAccountByEmail({
-    email,
-    displayName,
-    avatarUrl,
-    status: "active",
-    emailVerifiedAt: new Date(),
-  });
 
   const invitation = await prisma.studioInvitation.findFirst({
     where: {
@@ -2099,6 +2199,7 @@ export async function completeStudioSsoLogin(params: {
     },
   });
 
+  const scopedInvitation = Boolean(invitation?.tokenHash?.startsWith(SCOPED_INVITATION_PREFIX));
   let user =
     (await prisma.studioUser.findFirst({
       where: {
@@ -2115,65 +2216,99 @@ export async function completeStudioSsoLogin(params: {
       },
     })) ?? null;
 
-  if (!user) {
-    if (provider.provisioningMode === "invite_only" && !invitation) {
+  if (scopedInvitation) {
+    if (params.claims.email_verified !== true || normalizeStudioEmail(String(params.claims.email ?? "")) !== email) {
       throw new Error("user_not_invited");
     }
-
-    user = await prisma.studioUser.create({
-      data: {
-        tenantId: tenant.id,
-        accountId: account.id,
-        email,
-        displayName,
-        avatarUrl,
-        status: "active",
-        oidcIssuer: params.issuer,
-        oidcSubject: params.subject,
-        lastLoginAt: new Date(),
-      },
+    user = await prisma.$transaction(async (db) => {
+      const locked = await db.$queryRaw<Array<{ id: string }>>`SELECT id FROM tenants WHERE id = ${tenant.id}::uuid AND status = 'active' FOR NO KEY UPDATE`;
+      if (!locked.length) throw new Error("user_not_invited");
+      const currentProvider = await db.studioIdentityProvider.findUnique({ where: { tenantId: tenant.id } });
+      if (!currentProvider?.enabled || currentProvider.issuer !== params.issuer) throw new Error("identity_provider_not_configured");
+      const current = await db.studioInvitation.findFirst({ where: { id: invitation!.id, tenantId: tenant.id, email, status: "pending", tokenHash: { startsWith: SCOPED_INVITATION_PREFIX } } });
+      if (!current?.studioUserId) throw new Error("user_not_invited");
+      if (current.updatedAt.getTime() + STUDIO_ACCOUNT_TOKEN_TTL_MS <= Date.now()) throw new Error("invite_expired");
+      const member = await db.studioUser.findFirst({ where: { id: current.studioUserId, tenantId: tenant.id, status: "invited", account: { email, status: { not: "suspended" } } } });
+      if (!member) throw new Error("user_not_invited");
+      const now = new Date();
+      const account = await db.studioAccount.updateMany({
+        where: { id: member.accountId, status: { not: "suspended" } },
+        data: { status: "active", emailVerifiedAt: now },
+      });
+      if (!account.count) throw new Error("user_suspended");
+      const updated = await db.studioUser.update({ where: { id: member.id }, data: { email, displayName, avatarUrl, status: "active", oidcIssuer: params.issuer, oidcSubject: params.subject, lastLoginAt: new Date() } });
+      await db.studioInvitation.update({ where: { id: current.id }, data: { status: "accepted", acceptedAt: new Date() } });
+      return updated;
     });
   } else {
-    if (user.status === "suspended") {
-      throw new Error("user_suspended");
+    const account = await ensureStudioAccountByEmail({
+      email,
+      displayName,
+      avatarUrl,
+      status: "active",
+      emailVerifiedAt: new Date(),
+    });
+
+    if (!user) {
+      if (provider.provisioningMode === "invite_only" && !invitation) {
+        throw new Error("user_not_invited");
+      }
+
+      user = await prisma.studioUser.create({
+        data: {
+          tenantId: tenant.id,
+          accountId: account.id,
+          email,
+          displayName,
+          avatarUrl,
+          status: "active",
+          oidcIssuer: params.issuer,
+          oidcSubject: params.subject,
+          lastLoginAt: new Date(),
+        },
+      });
+    } else {
+      if (user.status === "suspended") {
+        throw new Error("user_suspended");
+      }
+
+      user = await prisma.studioUser.update({
+        where: { id: user.id, status: { not: "suspended" }, ...noScopedInvitation },
+        data: {
+          accountId: account.id,
+          email,
+          displayName,
+          avatarUrl,
+          status: "active",
+          oidcIssuer: params.issuer,
+          oidcSubject: params.subject,
+          lastLoginAt: new Date(),
+        },
+      });
     }
 
-    user = await prisma.studioUser.update({
-      where: { id: user.id, status: { not: "suspended" } },
-      data: {
-        accountId: account.id,
-        email,
-        displayName,
-        avatarUrl,
-        status: "active",
-        oidcIssuer: params.issuer,
-        oidcSubject: params.subject,
-        lastLoginAt: new Date(),
-      },
-    });
-  }
-
-  if (invitation) {
-    await prisma.studioInvitation.update({
-      where: { id: invitation.id },
-      data: {
-        studioUserId: user.id,
-        status: "accepted",
-        acceptedAt: new Date(),
-      },
-    });
-  } else if (provider.provisioningMode === "invite_only") {
-    const existingAcceptedUser = await prisma.studioUser.findFirst({
-      where: {
-        tenantId: tenant.id,
-        id: user.id,
-      },
-      include: {
-        roles: true,
-      },
-    });
-    if (!existingAcceptedUser) {
-      throw new Error("user_not_invited");
+    if (invitation) {
+      await prisma.studioInvitation.update({
+        where: { id: invitation.id },
+        data: {
+          studioUserId: user.id,
+          status: "accepted",
+          acceptedAt: new Date(),
+        },
+      });
+    } else if (provider.provisioningMode === "invite_only") {
+      const existingAcceptedUser = await prisma.studioUser.findFirst({
+        where: {
+          tenantId: tenant.id,
+          id: user.id,
+        },
+        include: {
+          roles: true,
+        },
+      });
+      if (!existingAcceptedUser) {
+        throw new Error("user_not_invited");
+      }
     }
   }
 
@@ -2204,7 +2339,7 @@ export async function completeStudioSsoLogin(params: {
 
   const sessionToken = await createStudioUserSession(tenant.id, hydratedUser.id, "oidc");
   await prisma.studioAccount.update({
-    where: { id: account.id },
+    where: { id: hydratedUser.accountId, status: { not: "suspended" } },
     data: {
       lastWorkspaceId: tenant.id,
       status: "active",

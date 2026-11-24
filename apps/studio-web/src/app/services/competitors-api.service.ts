@@ -11,7 +11,7 @@ export type Competitor = {
   status: 'suggested' | 'accepted' | 'rejected' | 'paused' | 'removed';
   verification: 'verified' | 'speculative';
   evidence: Array<{ kind: string; url: string | null; note: string; observedAt: string }> | null;
-  overlapTopics: string[] | null;
+  overlapTopics: Array<string | { topic: string; sampledPages: number }> | null;
   overlapScore: number | null;
   notes: string | null;
   feedUrl: string | null;

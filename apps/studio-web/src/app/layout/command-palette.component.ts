@@ -63,13 +63,13 @@ export class CommandPaletteComponent {
 
   private readonly appContext = inject(AppContextService);
   // Platform pages are reached from the sidebar; the palette does not know the platform flag.
-  private readonly navCommands: PaletteCommand[] = STUDIO_NAV.flatMap((group) =>
-    group.items.filter((item) => canSeeNavItem(item, this.appContext.role())).map((item) => ({ id: item.path.replace(/\W+/g, '-'), label: item.label, group: group.label, icon: item.icon, run: () => void this.router.navigateByUrl(item.path) })),
-  );
+  private readonly navCommands = computed<PaletteCommand[]>(() => STUDIO_NAV.flatMap((group) =>
+    group.items.filter((item) => canSeeNavItem(item, this.appContext.permissions())).map((item) => ({ id: item.path.replace(/\W+/g, '-'), label: item.label, group: group.label, icon: item.icon, run: () => void this.router.navigateByUrl(item.path) })),
+  ));
 
   readonly results = computed(() => {
     const q = this.query().trim().toLowerCase();
-    const all = [...this.actions(), ...this.navCommands];
+    const all = [...this.actions(), ...this.navCommands()];
     return q ? all.filter((command) => command.label.toLowerCase().includes(q) || command.group.toLowerCase().includes(q)) : all;
   });
 

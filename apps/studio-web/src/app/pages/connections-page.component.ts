@@ -44,30 +44,33 @@ type ConnectionRow = {
     <section class="au-page">
       <header class="au-page__header au-page__header--split">
         <div>
-          <p class="au-page__eyebrow">Publishing destinations</p>
-          <h1 class="au-page__title">Connections</h1>
-          <p class="au-page__subtitle">The websites and social accounts Auctorio publishes to, with their verification status</p>
+          <p class="au-page__eyebrow">Destinos de publicación</p>
+          <h1 class="au-page__title">Conexiones</h1>
+          <p class="au-page__subtitle">Los sitios web y las cuentas sociales en los que publica Auctorio, con su estado de verificación</p>
         </div>
       </header>
 
-      <app-connect-box *ngIf="canManage" title="Connect a site or account"></app-connect-box>
-      <div class="au-banner" *ngIf="!canManage">You need integrations.manage to manage connections.</div>
+      <app-connect-box *ngIf="canManage && !diagnostics" title="Conectar un sitio o una cuenta"></app-connect-box>
+      <p><a routerLink="/studio/settings/social">Ajustes de redes</a></p>
+      <div class="au-banner" *ngIf="!canManage">Necesitas el permiso integrations.manage para gestionar las conexiones.</div>
 
       <div class="au-banner au-banner--error" *ngIf="loadError">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
-        <button class="au-banner__action" type="button" (click)="load()">Retry</button>
+        <button class="au-banner__action" type="button" (click)="load()">Reintentar</button>
       </div>
 
       <div class="au-banner" *ngIf="setup && !setup.provider.configured">
         <app-icon name="info"></app-icon>
         <span class="au-banner__text">
-          One-click social connections need a provider configured server-side (Ayrshare managed API or your own X/Meta developer apps).
-          Until then, website destinations and advanced credential references remain available.
+          Las conexiones sociales con un clic necesitan un proveedor configurado en el servidor (API gestionada de Ayrshare o tus propias apps de desarrollador de X/Meta).
+          Mientras tanto, siguen disponibles los destinos de sitio web y las referencias avanzadas de credenciales.
         </span>
       </div>
 
-      <div class="au-tabs" role="tablist" aria-label="Connection types">
+      <h2 class="au-panel__title" *ngIf="diagnostics">Verificación y credenciales</h2>
+      <p class="workspace-caption" *ngIf="!loading">{{ rows.length }} destinos · {{ filteredRows.length }} mostrados</p>
+      <div class="au-tabs" role="tablist" aria-label="Tipos de conexión">
         <button
           class="au-tab"
           type="button"
@@ -88,46 +91,46 @@ type ConnectionRow = {
           <input
             class="au-search__input"
             type="search"
-            placeholder="Search connections…"
+            placeholder="Buscar conexiones…"
             [(ngModel)]="search"
             (input)="applyFilters()"
-            aria-label="Search connections"
+            aria-label="Buscar conexiones"
           />
         </label>
       </div>
 
-      <div class="au-skeleton-list" *ngIf="loading" aria-label="Loading connections">
+      <div class="au-skeleton-list" *ngIf="loading" aria-label="Cargando conexiones">
         <div class="au-skeleton" *ngFor="let _ of [1, 2, 3]" style="height: 76px"></div>
       </div>
 
       <app-empty-state
         *ngIf="!loading && !loadError && rows.length === 0"
         icon="connections"
-        title="No destinations yet"
-        text="Connect a website, X or Instagram destination to start publishing."
+        title="Aún no hay destinos"
+        text="Conecta un sitio web, X o Instagram para empezar a publicar."
       >
-        <a *ngIf="canManage" class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">Connect destination</a>
+        <a *ngIf="canManage" class="au-btn au-btn--primary" routerLink="/studio/connections/wizard">Conectar destino</a>
       </app-empty-state>
 
       <div class="au-empty-note" *ngIf="!loading && !loadError && rows.length > 0 && filteredRows.length === 0">
-        No connections match this view.
+        Ninguna conexión coincide con esta vista.
       </div>
 
       <div class="au-table-wrap au-table-wrap--scrollable" *ngIf="filteredRows.length > 0">
         <table class="au-table au-table--hover">
           <thead>
             <tr>
-              <th scope="col">Destination</th>
-              <th scope="col">Type</th>
-              <th scope="col">Site</th>
-              <th scope="col">Status</th>
-              <th scope="col">Last checked</th>
-              <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Actions</span></th>
+              <th scope="col">Destino</th>
+              <th scope="col">Tipo</th>
+              <th scope="col">Sitio</th>
+              <th scope="col">Estado</th>
+              <th scope="col">Última comprobación</th>
+              <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Acciones</span></th>
             </tr>
           </thead>
           <tbody>
             <tr *ngFor="let row of filteredRows">
-              <td data-label="Destination">
+              <td data-label="Destino">
                 <div class="au-cell-title">
                   <span class="au-platform-icon au-platform-icon--sm" aria-hidden="true">{{ mark(row.kind) }}</span>
                   <div>
@@ -138,30 +141,30 @@ type ConnectionRow = {
                   </div>
                 </div>
               </td>
-              <td data-label="Type">{{ kindLabel(row.kind) }}</td>
-              <td data-label="Site">{{ row.siteName || 'Workspace default' }}</td>
-              <td data-label="Status">
+              <td data-label="Tipo">{{ kindLabel(row.kind) }}</td>
+              <td data-label="Sitio">{{ row.siteName || 'Workspace por defecto' }}</td>
+              <td data-label="Estado">
                 <span class="au-badge" [class]="badgeClass(row)">{{ stateLabel(row) }}</span>
-                <div *ngIf="row.installation">Lifecycle: {{ row.installation.state }}<span *ngIf="row.installation.kind === 'website'"> · Verification: {{ row.installation.verificationStage || 'unknown' }}</span></div>
-                <div *ngIf="row.installation">{{ row.installation.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}</div>
-                <div *ngIf="row.website">{{ row.website.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}</div>
+                <div *ngIf="row.installation">Ciclo de vida: {{ row.installation.state }}<span *ngIf="row.installation.kind === 'website'"> · Verificación: {{ row.installation.verificationStage || 'desconocida' }}</span></div>
+                <div *ngIf="row.installation">{{ row.installation.hasCredentials ? 'Credenciales guardadas' : 'Sin credenciales guardadas' }}</div>
+                <div *ngIf="row.website">{{ row.website.hasCredentials ? 'Credenciales guardadas' : 'Sin credenciales guardadas' }}</div>
                 <div *ngIf="row.lastError">{{ row.lastError }}</div>
-                <div *ngIf="row.social">{{ row.social.hasCredentials ? 'Credentials stored' : 'No credentials stored' }}<span *ngIf="row.social.connectionState === 'permissions_required'"> · Permissions required</span></div>
+                <div *ngIf="row.social">{{ row.social.hasCredentials ? 'Credenciales guardadas' : 'Sin credenciales guardadas' }}<span *ngIf="row.social.connectionState === 'permissions_required'"> · Permisos necesarios</span></div>
               </td>
-              <td data-label="Last checked">
-                {{ row.verifiedAt ? (row.verifiedAt | date: 'medium') : 'Not checked yet' }}
+              <td data-label="Última comprobación">
+                {{ row.verifiedAt ? (row.verifiedAt | date: 'd MMM y, HH:mm') : 'Aún sin comprobar' }}
               </td>
               <td class="au-table__actions">
                 <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.website" (click)="verifyLegacy(row.website)" [disabled]="busyId === row.id">
-                  Test
+                  Probar
                 </button>
                 <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.social" (click)="verifySocial(row.social)" [disabled]="busyId === row.id">
-                  Test
+                  Probar
                 </button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation?.kind === 'website' && row.installation?.state === 'active' && row.installation?.hasCredentials" (click)="verifyWebsite(row.installation!)" [disabled]="busyId === row.id">Test website</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.social && row.social.connectionState !== 'connected'" (click)="reconnect(row.social)" [disabled]="busyId === row.id">Reconnect</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation && resumable(row.installation)" (click)="resume(row.installation)">Open setup</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && (row.website || row.social || (row.installation && row.installation.state !== 'disabled' && (row.installation.kind === 'website' || !isActive(row.installation))))" (click)="remove(row)" [disabled]="busyId === row.id" [attr.aria-label]="(row.installation?.state === 'active' ? 'Disconnect ' : 'Remove ') + row.displayName">
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation?.kind === 'website' && row.installation?.state === 'active' && row.installation?.hasCredentials" (click)="verifyWebsite(row.installation!)" [disabled]="busyId === row.id">Probar sitio web</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.social && row.social.connectionState !== 'connected'" (click)="reconnect(row.social)" [disabled]="busyId === row.id">Reconectar</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && row.installation && resumable(row.installation)" (click)="resume(row.installation)">Abrir configuración</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngIf="canManage && (row.website || row.social || (row.installation && row.installation.state !== 'disabled' && (row.installation.kind === 'website' || !isActive(row.installation))))" (click)="remove(row)" [disabled]="busyId === row.id" [attr.aria-label]="(row.installation?.state === 'active' ? 'Desconectar ' : 'Quitar ') + row.displayName">
                   <app-icon name="trash"></app-icon>
                 </button>
               </td>
@@ -174,8 +177,8 @@ type ConnectionRow = {
 })
 export class ConnectionsPageComponent implements OnInit {
   private readonly api = inject(StudioApiService);
-  private readonly appContext = inject(AppContextService);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly appContext = inject(AppContextService);
   private readonly confirm = inject(ConfirmService);
   private readonly toast = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
@@ -184,18 +187,19 @@ export class ConnectionsPageComponent implements OnInit {
   private readonly isBrowser = isPlatformBrowser(this.platformId);
 
   readonly tabs: Array<{ id: TabId; label: string }> = [
-    { id: 'all', label: 'All' },
-    { id: 'websites', label: 'Websites' },
-    { id: 'social', label: 'Social' },
-    { id: 'attention', label: 'Needs attention' },
+    { id: 'all', label: 'Todas' },
+    { id: 'websites', label: 'Sitios web' },
+    { id: 'social', label: 'Redes' },
+    { id: 'attention', label: 'Requieren atención' },
   ];
 
-  activeTab: TabId = 'all';
   get canManage(): boolean { return this.appContext.permissions().includes('integrations.manage'); }
   private loadVersion = 0;
 
+  activeTab: TabId = 'all';
   search = '';
   loading = true;
+  diagnostics = false;
   loadError = '';
   busyId = '';
   rows: ConnectionRow[] = [];
@@ -206,10 +210,12 @@ export class ConnectionsPageComponent implements OnInit {
   installations: ConnectorInstallation[] = [];
 
   ngOnInit(): void {
-    const tab = this.route.snapshot.queryParamMap.get('tab');
-    if (tab === 'websites' || tab === 'social' || tab === 'attention') {
-      this.activeTab = tab;
-    }
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.diagnostics = params.get('tab') === 'status';
+      const filter = params.get(this.diagnostics ? 'filter' : 'tab');
+      this.activeTab = filter === 'websites' || filter === 'social' || filter === 'attention' ? filter : 'all';
+      this.applyFilters();
+    });
     const query = this.route.snapshot.queryParamMap.get('q');
     if (query) {
       this.search = query;
@@ -222,11 +228,11 @@ export class ConnectionsPageComponent implements OnInit {
     const status = this.route.snapshot.queryParamMap.get('social');
     const reason = this.route.snapshot.queryParamMap.get('reason') || '';
     if (status === 'success') {
-      this.toast.success('Social account connected.');
+      this.toast.success('Cuenta social conectada.');
     } else if (status === 'error') {
-      this.toast.error(reason ? `Connection failed: ${reason}` : 'Connection failed. Please try again.');
+      this.toast.error(reason ? `Conexión fallida: ${reason}` : 'La conexión ha fallado. Inténtalo de nuevo.');
     } else if (status === 'cancelled') {
-      this.toast.info('Connection cancelled.');
+      this.toast.info('Conexión cancelada.');
     }
     if (this.isBrowser && status) {
       const url = new URL(window.location.href);
@@ -252,7 +258,7 @@ export class ConnectionsPageComponent implements OnInit {
       this.installations = installations?.items ?? [];
       this.setup = setup;
       const failed = [!social && 'social connections', !accounts && 'publishing accounts', !installations && 'installations', !setup && 'social setup'].filter(Boolean);
-      this.loadError = failed.length ? `Could not load: ${failed.join(', ')}. Other results are shown below.` : '';
+      this.loadError = failed.length ? `No se pudo cargar: ${failed.join(', ')}. Debajo se muestran los demás resultados.` : '';
       this.loading = false;
       this.rebuildRows();
     });
@@ -263,8 +269,8 @@ export class ConnectionsPageComponent implements OnInit {
     // An installation is the canonical record: hide a legacy website account of the same site.
     const covered = new Set(this.installations.filter((i) => i.kind === 'website' && (i.state === 'active' || i.state === 'disabled') && i.siteId).map((i) => i.siteId));
     for (const account of this.websiteAccounts) {
-      if (account.platform === 'website' && account.site?.id && covered.has(account.site.id)) continue;
       if (this.socialConnections.some((social) => social.id === account.id)) continue;
+      if (account.platform === 'website' && account.site?.id && covered.has(account.site.id)) continue;
       merged.set(`website:${account.id}`, {
         id: account.id,
         kind: account.platform,
@@ -295,8 +301,8 @@ export class ConnectionsPageComponent implements OnInit {
       });
     }
     for (const installation of this.installations) {
-      merged.set(`installation:${installation.id}`, {
       if (installation.kind !== 'website' && installation.externalAccountId && this.socialConnections.some((social) => social.id === installation.externalAccountId)) continue;
+      merged.set(`installation:${installation.id}`, {
         id: installation.id,
         kind: installation.kind,
         provider: installation.provider,
@@ -343,7 +349,7 @@ export class ConnectionsPageComponent implements OnInit {
     this.applyFilters();
     const query = this.route.snapshot.queryParams;
     void this.router.navigate([], {
-      queryParams: { ...query, tab },
+      queryParams: this.diagnostics ? { filter: tab === 'all' ? null : tab } : { ...query, tab },
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
@@ -367,7 +373,7 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   kindLabel(kind: string): string {
-    return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : kind === 'facebook' ? 'Facebook' : 'Website';
+    return kind === 'x' ? 'X (Twitter)' : kind === 'instagram' ? 'Instagram' : kind === 'facebook' ? 'Facebook' : 'Sitio web';
   }
 
   installationState(installation: ConnectorInstallation): string {
@@ -380,40 +386,40 @@ export class ConnectionsPageComponent implements OnInit {
   stateLabel(row: ConnectionRow): string {
     switch (row.state) {
       case 'not_verified':
-        return 'Not verified';
+        return 'Sin verificar';
+      case 'unconfigured': return 'Sin configurar';
+      case 'stored': return 'Credenciales guardadas';
+      case 'authenticated': return 'Autenticado';
+      case 'read_only': return 'Acceso de solo lectura';
+      case 'stale': return 'Verificación caducada';
       case 'connected':
-      case 'unconfigured': return 'Not configured';
-      case 'stored': return 'Credentials stored';
-      case 'authenticated': return 'Authenticated';
-      case 'read_only': return 'Read-only access';
-      case 'stale': return 'Verification stale';
-        return 'Connected';
+        return 'Conectado';
       case 'active':
-        return 'Active';
+        return 'Activo';
       case 'ready':
-        return 'Ready to activate';
+        return 'Listo para activar';
       case 'verifying':
-        return 'Verifying…';
+        return 'Verificando…';
       case 'discovering':
-        return 'Discovering…';
+        return 'Detectando…';
       case 'credentials_required':
-        return 'Needs credentials';
+        return 'Faltan credenciales';
       case 'failed':
-        return 'Action required';
+        return 'Acción necesaria';
       case 'expired':
-        return 'Reconnect required';
+        return 'Reconexión necesaria';
       case 'permissions_required':
-        return 'Permissions needed';
+        return 'Permisos necesarios';
       case 'provider_error':
-        return 'Provider error';
+        return 'Error del proveedor';
       case 'disabled':
-        return 'Disabled';
+        return 'Deshabilitado';
       case 'error':
-        return 'Action required';
+        return 'Acción necesaria';
       case 'draft':
-        return 'Draft';
+        return 'Borrador';
       case 'cancelled':
-        return 'Cancelled';
+        return 'Cancelado';
       default:
         return row.state;
     }
@@ -426,12 +432,12 @@ export class ConnectionsPageComponent implements OnInit {
         return 'au-badge--success';
       case 'ready':
       case 'not_verified':
-      case 'verifying':
       case 'unconfigured':
       case 'stored':
       case 'authenticated':
       case 'read_only':
       case 'stale':
+      case 'verifying':
       case 'discovering':
       case 'draft':
         return 'au-badge--warning';
@@ -447,8 +453,8 @@ export class ConnectionsPageComponent implements OnInit {
   }
 
   resumable(installation: ConnectorInstallation): boolean {
-    if (installation.state === 'active') return this.installationState(installation) !== 'active';
     if (installation.kind !== 'website' && installation.state === 'active') return false;
+    if (installation.state === 'active') return this.installationState(installation) !== 'active';
     return ['draft', 'credentials_required', 'failed', 'ready', 'cancelled', 'disabled', 'expired'].includes(installation.state);
   }
 
@@ -466,46 +472,46 @@ export class ConnectionsPageComponent implements OnInit {
     void this.router.navigate(['/studio/connections/wizard', installation.id]);
   }
 
-  verifySocial(connection: SocialConnection): void {
   reconnect(connection: SocialConnection): void {
     if (!this.canManage || !this.isBrowser) return;
     this.busyId = connection.id;
     this.api.reconnectSocialConnection(connection.id).subscribe({
       next: (session) => { this.busyId = ''; window.location.assign(session.url); },
-      error: (error) => { this.busyId = ''; this.toast.error(error?.error?.message || 'Could not reconnect.'); },
+      error: (error) => { this.busyId = ''; this.toast.error(error?.error?.message || 'No se pudo reconectar.'); },
     });
   }
 
-    this.busyId = connection.id;
+  verifySocial(connection: SocialConnection): void {
     if (!this.canManage) return;
+    this.busyId = connection.id;
     this.api.verifySocialConnection(connection.id).subscribe({
       next: (result) => {
         this.busyId = '';
         if (result.ok) {
-          this.toast.success('Connection verified.');
+          this.toast.success('Conexión verificada.');
         } else {
-          this.toast.info(result.message || 'Connection needs attention.');
+          this.toast.info(result.message || 'La conexión requiere atención.');
         }
         this.load();
       },
       error: () => {
         this.busyId = '';
-        this.toast.error('Connection check failed.');
+        this.toast.error('La comprobación de la conexión ha fallado.');
       },
     });
   }
 
   verifyLegacy(account: PublishingAccount): void {
-    this.busyId = account.id;
     if (!this.canManage) return;
+    this.busyId = account.id;
     this.api.verifyPublishingAccount(account.id).subscribe({
       next: (result) => {
         this.busyId = '';
         if (result.ok) {
-          this.toast.success('Connection verified.');
+          this.toast.success('Conexión verificada.');
           this.load();
         } else {
-          this.toast.error('Connection needs attention.');
+          this.toast.error('La conexión requiere atención.');
           this.load();
         }
       },
@@ -519,13 +525,13 @@ export class ConnectionsPageComponent implements OnInit {
   async remove(row: ConnectionRow): Promise<void> {
     if (!this.canManage) return;
     const activeWebsite = row.installation?.kind === 'website' && row.installation.state === 'active';
-    const action = activeWebsite ? 'Disconnect' : 'Remove';
+    const action = activeWebsite ? 'Desconectar' : 'Quitar';
     const siteId = this.appContext.activeSite()?.id;
     const confirmed = await this.confirm.confirm({
       title: `${action} ${row.displayName}?`,
-      message: activeWebsite ? 'New deliveries to this website will be blocked. Publication history stays available.'
-        : row.website ? 'Remove this account record? Other destination credentials may still be configured.'
-        : 'Publication history stays available.',
+      message: activeWebsite ? 'Se bloquearán las nuevas entregas a este sitio web. El historial de publicaciones sigue disponible.'
+        : row.website ? '¿Quitar el registro de esta cuenta? Puede que sigan configuradas las credenciales de otros destinos.'
+        : 'El historial de publicaciones sigue disponible.',
       confirmLabel: action,
       danger: true,
     });
@@ -537,24 +543,24 @@ export class ConnectionsPageComponent implements OnInit {
       this.api.deletePublishingAccount(row.website.id).subscribe({
         next: () => {
           this.busyId = '';
-          this.toast.success('Connection removed.');
+          this.toast.success('Conexión eliminada.');
           this.load();
         },
         error: () => {
           this.busyId = '';
-          this.loadError = 'Connection could not be removed.';
+          this.loadError = 'No se pudo eliminar la conexión.';
         },
       });
     } else if (row.social) {
       this.api.disconnectSocialConnection(row.social.id).subscribe({
         next: () => {
           this.busyId = '';
-          this.toast.success('Connection removed.');
+          this.toast.success('Conexión eliminada.');
           this.load();
         },
         error: () => {
           this.busyId = '';
-          this.toast.error('Connection could not be removed.');
+          this.toast.error('No se pudo eliminar la conexión.');
         },
       });
     } else if (row.installation) {
@@ -562,17 +568,16 @@ export class ConnectionsPageComponent implements OnInit {
       request.subscribe({
         next: () => {
           this.busyId = '';
-          this.toast.success(activeWebsite ? 'Connection disconnected.' : 'Draft removed.');
+          this.toast.success(activeWebsite ? 'Conexión desconectada.' : 'Borrador eliminado.');
           this.load();
         },
         error: (err) => {
           this.busyId = '';
-          this.toast.error(err?.error?.error?.message || 'Could not be removed.');
+          this.toast.error(err?.error?.error?.message || 'No se pudo eliminar.');
         },
       });
     }
   }
-}
 
   verifyWebsite(installation: ConnectorInstallation): void {
     if (!this.canManage || this.busyId) return;
@@ -588,13 +593,14 @@ export class ConnectionsPageComponent implements OnInit {
     ).subscribe({
       next: (operation) => {
         this.busyId = '';
-        if (operation.status === 'succeeded') this.toast.success('Website verified.');
-        else this.toast.error('The website did not pass its latest check.');
+        if (operation.status === 'succeeded') this.toast.success('Sitio web verificado.');
+        else this.toast.error('El sitio web no ha superado su última comprobación.');
         this.load();
       },
       error: () => {
         this.busyId = '';
-        this.toast.error('No verification result yet. Check Background jobs or try again.');
+        this.toast.error('Aún no hay resultado de verificación. Revisa los trabajos en segundo plano o inténtalo de nuevo.');
       },
     });
   }
+}

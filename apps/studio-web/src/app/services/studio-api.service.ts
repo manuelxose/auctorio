@@ -82,6 +82,12 @@ import type {
   CostBudgetView,
 } from '../models/studio.models';
 
+export type WorkspaceAuditPage = {
+  items: Array<{ id: string; actorType: string; actorUser: { displayName: string } | null; action: string; entityType: string; createdAt: string }>;
+  total: number;
+  pageSize: number;
+};
+
 @Injectable({ providedIn: 'root' })
 export class StudioApiService {
   private readonly http = inject(HttpClient);
@@ -149,6 +155,12 @@ export class StudioApiService {
           .set('pageSize', pageSize),
       },
     );
+  }
+
+  getSiteLogo(siteId: string): Observable<{ logoUrl: string | null }> {
+    return this.http.get<{ logoUrl: string | null }>(`${this.apiBase}/backend/v2/sites/${siteId}/logo`, {
+      headers: { 'x-studio-site-id': siteId },
+    });
   }
 
   getSite(siteId: string): Observable<StudioSiteDetail> {
@@ -321,6 +333,14 @@ export class StudioApiService {
     );
   }
 
+  createRole(payload: { name: string; description: string; permissions: string[] }): Observable<StudioRoleSummary> {
+    return this.http.post<StudioRoleSummary>(`${this.apiBase}/backend/v2/roles`, payload);
+  }
+
+  updateRole(roleId: string, payload: { name: string; description: string; permissions: string[] }): Observable<StudioRoleSummary> {
+    return this.http.patch<StudioRoleSummary>(`${this.apiBase}/backend/v2/roles/${roleId}`, payload);
+  }
+
   listUsers(): Observable<StudioUserSummary[]> {
     return this.http.get<StudioUserSummary[]>(`${this.apiBase}/backend/v2/users`);
   }
@@ -336,9 +356,13 @@ export class StudioApiService {
     );
   }
 
+  revokeUserInvitation(userId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBase}/backend/v2/users/${userId}/invitation`);
+  }
+
   updateUser(
     userId: string,
-    payload: { displayName?: string; status?: 'invited' | 'active' | 'suspended' },
+    payload: { displayName?: string; status?: 'invited' | 'active' | 'suspended'; roleIds?: string[] },
   ): Observable<StudioUserSummary> {
     return this.http.patch<StudioUserSummary>(
       `${this.apiBase}/backend/v2/users/${userId}`,
@@ -997,6 +1021,10 @@ export class StudioApiService {
 
   // ─── Editorial platform: overview & audit ─────────────────────────────
 
+  listWorkspaceAudit(page: number): Observable<WorkspaceAuditPage> {
+    return this.http.get<WorkspaceAuditPage>(`${this.apiBase}/backend/v2/audit`, { params: { page, pageSize: 25 } });
+  }
+
   getOverview(siteId?: string): Observable<StudioOverview> {
     return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`, { params: siteId ? { siteId } : {} });
   }
@@ -1115,6 +1143,10 @@ export class StudioApiService {
     return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/cancel`, {});
   }
 
+  disconnectConnectorInstallation(id: string): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/disconnect`, {});
+  }
+
   resumeInstallation(id: string): Observable<ConnectorInstallation> {
     return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/resume`, {});
   }
@@ -1129,10 +1161,6 @@ export class StudioApiService {
     let params = new HttpParams().set('page', filters.page ?? 1).set('pageSize', filters.pageSize ?? 20);
     if (filters.status) {
       params = params.set('status', filters.status);
-  disconnectConnectorInstallation(id: string): Observable<ConnectorInstallation> {
-    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/disconnect`, {});
-  }
-
     }
     if (filters.type) {
       params = params.set('type', filters.type);
@@ -1196,7 +1224,7 @@ export class StudioApiService {
 
   // ─── Editorial Engine (Phase 4) ─────────────────────────────────────
 
-  listGenerations(page = 1, pageSize = 20, filters: { siteId?: string; clusterId?: string } = {}): Observable<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }> {
+  listGenerations(page = 1, pageSize = 20, filters: { siteId?: string; clusterId?: string; review?: "pending" | "history"; decision?: string; outcome?: string } = {}): Observable<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (filters.siteId) {
       params = params.set('siteId', filters.siteId);
@@ -1204,6 +1232,9 @@ export class StudioApiService {
     if (filters.clusterId) {
       params = params.set('clusterId', filters.clusterId);
     }
+    if (filters.review) params = params.set('review', filters.review);
+    if (filters.decision) params = params.set('decision', filters.decision);
+    if (filters.outcome) params = params.set('outcome', filters.outcome);
     return this.http.get<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }>(
       `${this.apiBase}/backend/v2/editorial-engine/generations`,
       { params },

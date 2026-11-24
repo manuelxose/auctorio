@@ -46,3 +46,38 @@ En la pasada final, backend tardó 22,3 s, Playwright 29,8 s con un trabajador y
 | `rtk bypass node --env-file=.env node_modules/@playwright/test/cli.js test --config e2e/playwright.config.ts --output test-results/studio-connections e2e/specs/studio-integration-acceptance.spec.ts` | 11 aprobadas con un workspace temporal, SSR en `127.0.0.1:4422` y API en `127.0.0.1:4311`. |
 
 Se comprobó el aislamiento entre tenants, la respuesta sin secretos, la nueva verificación tras el cambio de credenciales, la actualización del adaptador y el bloqueo de entregas tras desconectar. Queda pendiente una prueba con credenciales reales para OAuth social y publicación externa.
+
+## Rediseño de Configuración y Advanced
+
+La compilación de Angular terminó con código 0 y avisos de presupuesto. El paquete inicial quedó en 528,34 kB frente al umbral de 500 kB. Las suites unitarias de navegación y Configuración pasaron 7 de 7 casos. Playwright pasó 12 de 12 escenarios en 32,6 s con Chrome, la API local y un workspace temporal.
+
+La prueba nueva cubre los enlaces entre áreas, los selectores a 390 px y la selección de sección al volver atrás. Las capturas están enlazadas en [aceptación visual](UI-ACCEPTANCE.md).
+
+## Paridad de navegación de Configuración y Advanced
+
+- `npm run typecheck` y `npm run build:studio` aprobados. Angular registró un aviso por el paquete inicial de 529,82 kB frente al umbral de 500 kB.
+- Angular, 11 pruebas aprobadas. Backend, 29 de revisión editorial y operaciones y 10 del planificador con Redis local aislado.
+- Playwright, 13 escenarios de integración aprobados en 36,1 s. Una prueba adicional recorrió las 49 subvistas de workspace desde la barra lateral, comprobó sus URL y verificó el indicador de selección. Usó un workspace temporal y un trabajador.
+- El primer intento del planificador encontró su trabajo temporal bloqueado por un worker de la cola local compartida. El helper de limpieza ahora consulta los identificadores del fixture y retira solo esos trabajos. Se verificó y limpió el fixture afectado. El efecto del primer intento sobre otros trabajos de la cola local quedó sin comprobar.
+
+## Directorio y gestión de acceso
+
+- TypeScript y compilación Angular aprobados. La compilación mantuvo el aviso de presupuesto inicial.
+- Angular, 7 aprobadas. Backend, 9 aprobadas en las suites de mutaciones de acceso y RBAC, con PostgreSQL local.
+- Playwright, 16 aprobadas en 46,9 s, con un trabajador y un workspace temporal. El nombre y los roles se conservaron al recargar, la suspensión revocó la sesión activa y una invitación de prueba conservó sus roles con SMTP desactivado. Los 49 enlaces de las subvistas siguieron funcionando.
+
+## Revocación de invitaciones
+
+Compilación Angular y comprobación de tipos aprobadas. Las suites de acceso y RBAC completaron 14 casos en PostgreSQL local. Los casos de invitación comprobaron aislamiento por workspace, permisos de gestión, enlaces heredados, reinvitación, aceptación concurrente con revocación y reenvío de un enlace caducado con transporte de correo simulado. Las pruebas de SSO usaron los atributos de una identidad simulada.
+
+Pasaron 15 escenarios de Playwright en la pasada general. El escenario de navegación móvil pasó en la repetición focalizada tras corregir su selector. Playwright confirmó la cancelación, la revocación y su persistencia después de recargar. La comprobación de navegación móvil seleccionaba por error el enlace oculto del menú. Se ajustó para comprobar el contador de la vista principal y pasó en la repetición focalizada.
+
+## Advanced · Site Intelligence y Competidores
+
+La primera carga intermitente de Site Intelligence se reprodujo con cuatro lecturas simultáneas en PostgreSQL. La generación inicial de la estrategia ahora usa una inserción idempotente. Después del cambio pasaron las 10 pruebas de estrategia y aislamiento y los 5 escenarios focalizados de Playwright, incluido el recorrido de los 49 enlaces de Configuración y Advanced. TypeScript y compilación Angular aprobados. Se mantiene el aviso de presupuesto inicial.
+
+## Advanced · Fuentes a Trabajos en segundo plano
+
+- `npm run build:studio` compiló Angular y SSR. El paquete inicial supera el presupuesto de 500 kB.
+- La suite local `studio-integration-acceptance.spec.ts` completó 19 pruebas con SMTP desactivado. Se recorrieron las 49 subvistas de Configuración y Advanced y se comprobó el historial de Auditoría con datos propios de la prueba.
+- Las seis pantallas de Advanced se probaron a 1440 y 390 px. En Fuentes se verificaron el detalle, los filtros por estado y categoría y el desplazamiento horizontal de la tabla en móvil. El tablero se comprobó con una propuesta persistida.

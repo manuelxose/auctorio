@@ -1,4 +1,5 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, registerLocaleData } from '@angular/common';
+import localeEs from '@angular/common/locales/es';
 import { Component, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { StudioApiService } from '../services/studio-api.service';
@@ -14,366 +15,415 @@ import { sectionFor } from '../layout/studio-nav';
 import type { ClusterCoverage, Provenance, StrategyConfig, StrategyField, StrategyLayers, StrategyPillar, StrategyVersion } from '../models/intelligence.models';
 import type { SiteIndexedPageRow, SiteIntelligenceOverview, StudioSite } from '../models/studio.models';
 
-const STYLES = `
-  .summary { display: flex; flex-wrap: wrap; gap: 4px 20px; margin: 0 0 var(--au-s4, 16px); color: var(--au-muted); font-size: var(--au-fs-body-sm); }
-  .summary strong { color: var(--au-text); font-variant-numeric: tabular-nums; }
-  .summary a { color: inherit; text-decoration: none; }
-  .summary a:hover { text-decoration: underline; }
-  .summary .is-alert, .summary .is-alert strong { color: var(--au-danger, #b42318); }
-  .summary__live { color: var(--au-accent); font-weight: 600; }
-  .form-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-  .field label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; margin-bottom: 4px; }
-  .field textarea { width: 100%; box-sizing: border-box; }
-  .src { font-size: 0.72rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--au-border); font-weight: 500; }
-  .src--approved { color: var(--au-success, inherit); border-color: currentColor; }
-  .src--suggested { color: var(--au-warning, inherit); border-color: currentColor; }
-  .savebar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding-top: 12px; border-top: 1px solid var(--au-border); margin-top: 16px; }
-  .pillar { border: 1px solid var(--au-border); border-radius: 10px; padding: 14px; display: grid; gap: 10px; }
-  .pillar--off { opacity: 0.65; }
-  .pillar__head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: space-between; }
-  .pill-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-  .pillars { display: grid; gap: 12px; }
-  .howto { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: var(--au-fs-body-sm); color: var(--au-muted); }
-  .howto strong { color: var(--au-text); font-weight: 600; }
-  .sub-label { font-size: var(--au-fs-caption); color: var(--au-muted); margin-bottom: -6px; }
-  .src--none { color: var(--au-muted); }
-  .cov { margin: 0; padding-left: 18px; }
-  .group { border: 0; padding: 0; margin: 0 0 var(--au-s5, 20px); min-width: 0; }
-  .group legend { padding: 0; font-weight: 600; }
-  .group__hint { margin: 2px 0 10px; }
-  .detected { display: grid; gap: 16px 24px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-`;
+registerLocaleData(localeEs);
 
-const FIELD_GROUPS: Array<{ title: string; hint: string; keys: StrategyField[] }> = [
-  { title: 'Identity & audience', hint: 'Who the site is for and where it is read.', keys: ['description', 'primaryAudience', 'languages', 'markets'] },
-  { title: 'Voice & boundaries', hint: 'How articles sound and what they never cover.', keys: ['writingStyle', 'preferredFormats', 'excludedTopics', 'editorialRestrictions'] },
-  { title: 'Search strategy', hint: 'What each article should rank for and how it links.', keys: ['priorityCategories', 'searchIntents', 'seoObjectives', 'internalLinkingRules'] },
-  { title: 'Sources & cadence', hint: 'Where facts come from and how often to publish.', keys: ['sourcePolicy', 'cadenceNotes'] },
-];
+const PROFILE_FIELDS: StrategyField[] = ['description', 'primaryAudience', 'markets', 'languages', 'writingStyle', 'preferredFormats', 'searchIntents', 'sourcePolicy'];
 
 const FIELDS: Array<{ key: StrategyField; label: string; kind: 'text' | 'list' }> = [
-  { key: 'description', label: 'Site description', kind: 'text' },
-  { key: 'primaryAudience', label: 'Audience', kind: 'text' },
-  { key: 'languages', label: 'Languages', kind: 'list' },
-  { key: 'markets', label: 'Markets', kind: 'list' },
-  { key: 'priorityCategories', label: 'Priority categories', kind: 'list' },
-  { key: 'excludedTopics', label: 'Excluded topics', kind: 'list' },
-  { key: 'writingStyle', label: 'Style and tone', kind: 'text' },
-  { key: 'preferredFormats', label: 'Formats', kind: 'list' },
-  { key: 'searchIntents', label: 'Intent strategy', kind: 'list' },
-  { key: 'seoObjectives', label: 'SEO objectives', kind: 'list' },
-  { key: 'sourcePolicy', label: 'Source policy', kind: 'text' },
-  { key: 'cadenceNotes', label: 'Cadence notes', kind: 'text' },
-  { key: 'editorialRestrictions', label: 'Restrictions', kind: 'list' },
-  { key: 'internalLinkingRules', label: 'Internal-linking rules', kind: 'list' },
+  { key: 'description', label: 'Descripción del proyecto', kind: 'text' },
+  { key: 'primaryAudience', label: 'Audiencia principal', kind: 'text' },
+  { key: 'languages', label: 'Idiomas', kind: 'list' },
+  { key: 'markets', label: 'Mercados', kind: 'list' },
+  { key: 'priorityCategories', label: 'Categorías prioritarias', kind: 'list' },
+  { key: 'excludedTopics', label: 'Temas excluidos', kind: 'list' },
+  { key: 'writingStyle', label: 'Estilo y tono', kind: 'text' },
+  { key: 'preferredFormats', label: 'Formatos preferidos', kind: 'list' },
+  { key: 'searchIntents', label: 'Objetivos de búsqueda', kind: 'list' },
+  { key: 'seoObjectives', label: 'Objetivos SEO', kind: 'list' },
+  { key: 'sourcePolicy', label: 'Política de fuentes', kind: 'text' },
+  { key: 'cadenceNotes', label: 'Notas sobre la frecuencia', kind: 'text' },
+  { key: 'editorialRestrictions', label: 'Restricciones', kind: 'list' },
+  { key: 'internalLinkingRules', label: 'Reglas de enlaces internos', kind: 'list' },
 ];
+
+const SEO_LABELS: Record<string, { name: string; type: string; action: string }> = {
+  missing_meta_description: { name: 'Falta la metadescripción', type: 'Metadatos', action: 'Revisa la descripción de cada página afectada.' },
+  missing_h1: { name: 'Falta el encabezado H1', type: 'Estructura', action: 'Comprueba si la plantilla de la página muestra su título principal.' },
+  thin_content: { name: 'Contenido de menos de 300 palabras', type: 'Contenido', action: 'Comprueba si cada página cubre su propósito editorial.' },
+  no_structured_data: { name: 'Sin datos estructurados JSON-LD', type: 'Marcado', action: 'Revisa si la página necesita datos estructurados.' },
+  canonical_differs: { name: 'La canónica apunta a otra URL', type: 'Canonicalización', action: 'Comprueba que la URL de destino es la que quieres consolidar.' },
+};
 
 @Component({
   selector: 'app-site-intelligence-page',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, OnboardingTimelineComponent],
-  styles: [STYLES],
+  styleUrls: ['./site-intelligence-profile.css', './site-intelligence-sections.css'],
   template: `
     <section class="au-page">
-      <header class="au-page__header">
-        <div>
-          <p class="au-page__eyebrow">{{ overview?.site?.name || 'Understand the site' }}<span *ngIf="host"> · {{ host }}</span></p>
-          <h1 class="au-page__title">Site intelligence</h1>
-          <p class="au-page__subtitle">What Auctorio learned from your pages, and the strategy every plan and article follows.</p>
-        </div>
-        <div class="au-page__actions">
-          <button class="au-btn au-btn--ghost" type="button" [disabled]="busy" (click)="crawlChanged()" title="Only pages added or changed since the last read">
-            <app-icon name="refresh"></app-icon>
-            Crawl changes
-          </button>
-          <button class="au-btn au-btn--primary" type="button" [disabled]="busy" (click)="indexSite()">
-            <app-icon name="scan"></app-icon>
-            {{ busy ? 'Reading the site…' : 'Read the whole site' }}
-          </button>
+      <header class="profile-reference">
+        <div class="page-head">
+          <div>
+            <p class="overline">Auctorio / Herramientas avanzadas</p>
+            <h1>Conocimiento del sitio</h1>
+            <p>Qué sabe Auctorio del sitio, con qué evidencia y cómo influye en sus contenidos.</p>
+          </div>
+          <div class="head-actions">
+            <button class="btn small" type="button" [disabled]="loading" (click)="load()"><app-icon name="refresh"></app-icon> Actualizar datos</button>
+            <button class="btn small primary" type="button" [disabled]="busy" (click)="indexSite()"><app-icon name="scan"></app-icon> {{ busy ? 'Leyendo el sitio…' : 'Leer el sitio' }}</button>
+          </div>
         </div>
       </header>
-
       <div class="au-banner au-banner--error" *ngIf="loadError" role="alert">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
         <button class="au-banner__action" type="button" (click)="load()">Retry</button>
       </div>
 
-      <!-- One-line summary, the same in every section; sections are picked in the sidebar -->
-      <ng-container *ngIf="overview">
-        <p class="summary" aria-label="Site summary">
-          <span><strong>{{ overview.extractedPages }}</strong> of {{ overview.totalPages }} pages read</span>
-          <span><strong>{{ overview.profile?.topicClusters?.length ?? 0 }}</strong> topic clusters</span>
-          <a routerLink="." [queryParams]="{ tab: 'crawl' }" [class.is-alert]="healthySitemaps < overview.sitemaps.length"><strong>{{ healthySitemaps }}/{{ overview.sitemaps.length }}</strong> sitemaps healthy</a>
-          <span *ngIf="busy" class="summary__live">Reading the site now…</span>
-          <span *ngIf="!busy">Last read {{ overview.lastRun ? (overview.lastRun | date: 'd MMM, HH:mm') : 'never' }}</span>
-        </p>
-        <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview.profile?.warnings?.length">
-          <app-icon name="warning"></app-icon>
-          <span class="au-banner__text">{{ overview.profile?.warnings?.join(' · ') }}</span>
-        </div>
-      </ng-container>
+      <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview?.profile?.warnings?.length">
+        <app-icon name="warning"></app-icon>
+        <span class="au-banner__text">{{ overview?.profile?.warnings?.join(' · ') }}</span>
+      </div>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'seo'">
-        <h2 class="au-panel__title">On-page signals</h2>
-        <ng-container *ngIf="overview?.seoSignals?.length && overview?.evidence?.extracted; else noSeo">
-          <p class="au-muted">Measured on the {{ overview?.seoSignals?.[0]?.of }} editorial pages we analysed (legal and utility pages excluded), not the whole site. No rankings, traffic or Google indexation data: connect Search Console for that.</p>
-          <table class="au-table">
-            <thead><tr><th>Signal</th><th>Pages affected</th><th>Examples</th></tr></thead>
-            <tbody>
-              <tr *ngFor="let s of overview?.seoSignals">
-                <td>{{ s.label }}</td>
-                <td>{{ s.count }} of {{ s.of }}</td>
-                <td><a *ngFor="let u of s.samples" [href]="u" target="_blank" rel="noopener">{{ u }} </a><span class="au-muted" *ngIf="!s.samples.length">None found</span></td>
-              </tr>
-            </tbody>
-          </table>
-        </ng-container>
-        <ng-template #noSeo><p class="au-muted">No pages analysed yet. Use "Read the whole site" above to see on-page signals.</p></ng-template>
-      </section>
-
-      <!-- Pages & crawl: what was read, sitemaps, the setup run and the page inventory -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'crawl'">
-        <h2 class="au-panel__title">What was actually read</h2>
-        <ng-container *ngIf="overview?.evidence as ev; else noEvidence">
-          <p>{{ ev.discovered }} URLs found in sitemaps · {{ ev.fetched }} fetched · {{ ev.extracted }} analysed · {{ ev.failed }} failed · {{ ev.skipped }} skipped</p>
-          <p class="au-muted">Counts come from sitemap discovery and our own crawl. They say nothing about Google indexation; connect Search Console for that.</p>
-          <table class="au-table">
-            <thead><tr><th>Section</th><th>Analysed</th><th>Found</th></tr></thead>
-            <tbody>
-              <tr *ngFor="let s of ev.sections"><td>/{{ s.family === '/' ? '' : s.family }}</td><td>{{ s.extracted }}</td><td>{{ s.discovered }}</td></tr>
-            </tbody>
-          </table>
-        </ng-container>
-        <ng-template #noEvidence><p class="au-muted">No crawl yet. Use "Read the whole site" above to see coverage.</p></ng-template>
-      </section>
-
-      <!-- Profile: what was detected (read-only) first, then the strategy you approve -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && overview?.profile as p">
-        <h2 class="au-panel__title">What Auctorio detected</h2>
-        <div class="detected au-mt-2">
-          <div>
-            <p>{{ p.brandSummary || 'No summary yet. Read the whole site to build one.' }}</p>
-            <div class="au-chips au-mt-2" aria-label="Main topics">
-              <span class="au-chip au-chip--brand" *ngFor="let topic of p.mainTopics">{{ topic }}</span>
+      <div class="profile-reference" *ngIf="tab === 'seo'">
+        <div class="section-note"><app-icon name="info"></app-icon><span><strong>Señales del inventario propio.</strong> Las cifras corresponden a páginas analizadas por Auctorio. La indexación y las posiciones se consultan en Search Console.</span></div>
+        <dl class="kpis" aria-label="Métricas SEO">
+          <div class="kpi"><dt class="top"><app-icon name="warning"></app-icon>Señales abiertas</dt><dd class="number">{{ seoOpenCount }}</dd><dd class="foot">Agrupadas por causa</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Páginas inventariadas</dt><dd class="number">{{ (overview?.totalPages ?? 0) | number }}</dd><dd class="foot">Inventario del sitio</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="activity"></app-icon>Señales de alcance alto</dt><dd class="number">{{ seoHighCount }}</dd><dd class="foot">Al menos la mitad de la muestra</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Search Console</dt><dd class="number">—</dd><dd class="foot">Datos fuera de este informe</dd></div>
+        </dl>
+        <div class="stack">
+          <section class="card">
+            <div class="card-header"><div><h2>Salud SEO y mejoras</h2><p>Consulta la muestra de páginas afectadas por cada señal</p></div>
+              <button class="btn small primary" type="button" [disabled]="loading" (click)="load()"><app-icon name="refresh"></app-icon>Comprobar señales</button>
             </div>
-            <div class="au-field-grid au-mt-3" *ngIf="topicGroups.length">
-              <div class="au-meta" *ngFor="let g of topicGroups">
-                <strong>{{ g.label }}</strong>
-                <p class="au-muted">{{ g.items.join(', ') }}</p>
+            <form class="filter-bar" (ngSubmit)="seoQuery = seoSearch">
+              <label class="search"><app-icon name="search"></app-icon><input class="input" type="search" name="seoSearch" aria-label="Buscar señal SEO" placeholder="Buscar señal SEO…" [(ngModel)]="seoSearch" /></label>
+              <select class="input filter-select" name="seoImpact" aria-label="Alcance en la muestra" [(ngModel)]="seoImpact">
+                <option value="">Todos los alcances</option><option value="Alto">Alto</option><option value="Medio">Medio</option><option value="Bajo">Bajo</option>
+              </select>
+              <button class="btn small" type="submit">Filtrar</button>
+            </form>
+            <div class="table-wrap" role="region" aria-label="Señales SEO del sitio" tabindex="0" *ngIf="filteredSeoSignals.length; else noSeo">
+              <table class="table">
+                <thead><tr><th>Señal</th><th>Tipo</th><th>Páginas afectadas</th><th>Alcance</th><th><span class="au-visually-hidden">Acción</span></th></tr></thead>
+                <tbody>
+                  <ng-container *ngFor="let signal of filteredSeoSignals; trackBy: seoSignalKey">
+                    <tr>
+                      <td><strong>{{ signal.name }}</strong></td><td>{{ signal.type }}</td><td>{{ signal.count }} / {{ signal.of }}</td>
+                      <td><span class="badge" [class.danger]="signal.reach === 'Alto'" [class.warning]="signal.reach === 'Medio'">{{ signal.reach }}</span></td>
+                      <td class="actions"><button class="btn small" type="button" [attr.aria-expanded]="openSeoSignal === signal.id" (click)="openSeoSignal = openSeoSignal === signal.id ? null : signal.id">Inspeccionar</button></td>
+                    </tr>
+                    <tr *ngIf="openSeoSignal === signal.id"><td colspan="5"><p>{{ signal.action }}</p><ul *ngIf="signal.samples.length"><li *ngFor="let url of signal.samples"><a [href]="url" target="_blank" rel="noopener">{{ url }}</a></li></ul></td></tr>
+                  </ng-container>
+                </tbody>
+              </table>
+            </div>
+            <ng-template #noSeo><p class="profile-muted">{{ overview?.seoSignals?.[0]?.of ? 'Ninguna señal coincide con los filtros.' : 'Lee el sitio para obtener señales SEO.' }}</p></ng-template>
+          </section>
+          <section class="card">
+            <div class="card-header"><div><h2>Qué no debe duplicarse</h2><p>SEO para el contenido frente a SEO técnico</p></div></div>
+            <div class="grid2">
+              <div class="callout"><h3>Señales de sitio</h3><p>Consulta aquí el inventario, las causas y las páginas afectadas.</p></div>
+              <div class="callout"><h3>SEO de un artículo</h3><p>El slug, los metadatos y los enlaces se corrigen en el editor del artículo.</p></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="profile-reference" *ngIf="tab === 'profile' && (overview || draft)">
+        <div class="split">
+          <div class="stack">
+            <section class="card" *ngIf="overview as data" aria-labelledby="site-profile-identity">
+              <div class="card-header">
+                <div><h2 id="site-profile-identity">Identidad detectada</h2><p>Conclusiones del último análisis · solo lectura</p></div>
+                <span class="badge ok" *ngIf="data.profile"><app-icon name="check"></app-icon> Información del sitio</span>
               </div>
-            </div>
-          </div>
-          <dl class="au-detail-grid">
-            <dt>Audience</dt><dd>{{ p.detectedAudience || '—' }}</dd>
-            <dt>Language</dt><dd>{{ p.detectedLanguage || '—' }}</dd>
-            <dt>Tone</dt><dd>{{ p.editorialTone || '—' }}</dd>
-            <dt>Site type</dt><dd>{{ p.detectedSiteType || '—' }}</dd>
-            <dt>Typical article</dt><dd>{{ p.commonArticleLength ? p.commonArticleLength + ' words' : '—' }}</dd>
-            <dt>Confidence</dt><dd>{{ p.confidence !== null ? (p.confidence * 100 | number: '1.0-0') + '%' : '—' }}</dd>
-          </dl>
-        </div>
-      </section>
+              <ng-container *ngIf="data.profile as p; else missingIdentity">
+                <div class="callout success"><h3>{{ data.site.name }}</h3><p>{{ p.brandSummary || 'Aún no hay un resumen del sitio.' }}</p></div>
+                <div class="split-stats">
+                  <div class="split-stat"><b>{{ data.totalPages | number }}</b><small>Páginas inventariadas</small></div>
+                  <div class="split-stat"><b>{{ p.confidence !== null ? (p.confidence * 100 | number:'1.0-0') + '%' : '—' }}</b><small>Confianza de perfil</small></div>
+                  <div class="split-stat"><b>{{ (p.indexedAt || data.lastRun | date:'d MMM':undefined:'es') || '—' }}</b><small>Última lectura</small></div>
+                </div>
+                <dl class="metrics">
+                  <div class="metric-line"><dt class="metric-label">Público detectado</dt><dd>{{ p.detectedAudience || '—' }}</dd></div>
+                  <div class="metric-line"><dt class="metric-label">Idioma principal</dt><dd>{{ p.detectedLanguage || '—' }}</dd></div>
+                  <div class="metric-line"><dt class="metric-label">Temas principales</dt><dd>{{ p.mainTopics.join(', ') || '—' }}</dd></div>
+                </dl>
+                <details class="profile-extra">
+                  <summary>Más datos detectados</summary>
+                  <dl class="metrics">
+                    <div class="metric-line"><dt class="metric-label">Tono</dt><dd>{{ p.editorialTone || '—' }}</dd></div>
+                    <div class="metric-line"><dt class="metric-label">Tipo de sitio</dt><dd>{{ p.detectedSiteType || '—' }}</dd></div>
+                    <div class="metric-line"><dt class="metric-label">Longitud habitual</dt><dd>{{ p.commonArticleLength ? p.commonArticleLength + ' palabras' : '—' }}</dd></div>
+                    <div class="metric-line" *ngFor="let group of topicGroups"><dt class="metric-label">{{ group.label }}</dt><dd>{{ group.items.join(', ') }}</dd></div>
+                  </dl>
+                  <button class="btn small" type="button" [disabled]="busy" (click)="crawlChanged()">Leer cambios</button>
+                </details>
+              </ng-container>
+              <ng-template #missingIdentity>
+                <p>Lee el sitio para obtener un perfil a partir de sus páginas.</p>
+                <button class="btn small" type="button" [disabled]="busy" (click)="crawlChanged()">Leer cambios</button>
+              </ng-template>
+            </section>
 
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'profile' && draft">
-        <h2 class="au-panel__title">Editorial strategy</h2>
-        <p class="au-muted">The rules every plan and article follows. Fields marked <span class="src src--suggested">From your site</span> were filled from what Auctorio read; edit anything and save to approve it. Reading the site again never overwrites approved values.</p>
-        <div class="au-banner au-banner--info au-mt-2" *ngIf="layers && !layers.approved">
-          <app-icon name="info"></app-icon>
-          <span class="au-banner__text">Nothing approved yet. Plans already use these values; review them and save to make them yours.</span>
-        </div>
-        <fieldset class="group au-mt-3" *ngFor="let g of fieldGroups">
-          <legend>{{ g.title }}</legend>
-          <p class="group__hint au-muted">{{ g.hint }}</p>
-          <div class="form-grid">
-            <div class="field" *ngFor="let f of g.fields">
-              <label [attr.for]="'f-' + f.key">{{ f.label }} <span class="src" [ngClass]="'src--' + source(f.key)">{{ sourceLabel(f.key) }}</span></label>
-              <textarea *ngIf="f.kind === 'text'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="$any(draft)[f.key] ?? ''" (ngModelChange)="setText(f.key, $event)"></textarea>
-              <textarea *ngIf="f.kind === 'list'" class="au-input" rows="3" [id]="'f-' + f.key" [ngModel]="csv($any(draft)[f.key])" (ngModelChange)="setList(f.key, $event)" placeholder="Comma or line separated"></textarea>
-            </div>
+            <section class="card" *ngIf="draft" aria-labelledby="site-profile-strategy">
+              <div class="card-header">
+                <div><h2 id="site-profile-strategy">{{ layers?.approved ? 'Estrategia editorial aprobada' : 'Estrategia editorial' }}</h2><p>Campos que guían la planificación y la redacción</p></div>
+                <span class="badge purple">Configurable</span>
+              </div>
+              <form class="stack" (ngSubmit)="save()">
+                <div class="fields">
+                  <label class="profile-field" *ngFor="let field of profileFields">
+                    <span>{{ field.label }}</span>
+                    <input class="input" type="text" [name]="field.key" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)" />
+                  </label>
+                </div>
+                <label class="profile-field">
+                  <span>Restricciones editoriales</span>
+                  <textarea class="textarea" rows="2" name="editorialRestrictions" [ngModel]="csv(draft.editorialRestrictions)" (ngModelChange)="setList('editorialRestrictions', $event)"></textarea>
+                </label>
+                <div class="form-footer">
+                  <span class="badge" [class.ok]="layers?.approved" [class.warning]="!layers?.approved">{{ layers?.approved ? 'Versión ' + layers?.approved?.version : 'Pendiente de aprobación' }}</span>
+                  <button class="btn primary" type="submit" [disabled]="saving"><app-icon name="check"></app-icon>{{ saving ? 'Guardando…' : 'Guardar nueva versión' }}</button>
+                  <button class="btn ghost" type="button" [disabled]="saving" (click)="resetDraft()">Deshacer cambios</button>
+                </div>
+                <details class="profile-extra">
+                  <summary>Más ajustes de estrategia</summary>
+                  <div class="fields">
+                    <label class="profile-field" *ngFor="let field of additionalFields">
+                      <span>{{ field.label }} <small>{{ sourceLabel(field.key) }}</small></span>
+                      <textarea class="textarea" [name]="field.key" rows="2" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)"></textarea>
+                    </label>
+                    <label class="profile-field"><span>Nota de versión</span><input class="input" type="text" name="note" [(ngModel)]="note" /></label>
+                  </div>
+                  <button class="btn small" type="button" [disabled]="saving" (click)="regenerate()">Actualizar sugerencias</button>
+                </details>
+                <p class="au-error" role="alert" *ngIf="strategyError">{{ strategyError }}</p>
+              </form>
+            </section>
           </div>
-        </fieldset>
-        <div class="savebar">
-          <input class="au-input" type="text" [(ngModel)]="note" placeholder="Version note (optional)" aria-label="Version note" />
-          <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save as new version' }}</button>
-          <button class="au-btn au-btn--ghost" type="button" [disabled]="saving" (click)="resetDraft()">Discard edits</button>
-          <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="regenerate()" title="Fill again from the latest read of the site; approved values stay">Refill from site</button>
-          <span class="au-muted" *ngIf="layers?.approved">Approved v{{ layers?.approved?.version }}</span>
-        </div>
-        <p class="au-error" *ngIf="strategyError">{{ strategyError }}</p>
 
-        <details class="au-mt-3" (toggle)="loadVersions()">
-          <summary>Version history</summary>
-          <p class="au-muted" *ngIf="versions.length === 0">No saved versions yet.</p>
-          <ul class="cov au-mt-2">
-            <li *ngFor="let v of versions">
-              v{{ v.version }} · {{ v.createdAt | date: 'medium' }}<span *ngIf="v.note"> · {{ v.note }}</span><span *ngIf="v.restoredFromVersion"> · restored from v{{ v.restoredFromVersion }}</span>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="saving" (click)="restore(v.version)">Restore</button>
+          <aside class="stack" aria-label="Historial y evidencia del sitio">
+            <section class="card" aria-labelledby="site-profile-related">
+              <div class="card-header"><div><h2 id="site-profile-related">Qué conservar aquí</h2><p>Configuración con un único responsable</p></div></div>
+              <dl class="metrics">
+                <div class="metric-line"><dt class="metric-label">Voz y longitud de los artículos</dt><dd><a routerLink="/studio/settings/writing">Ajustes de escritura <app-icon name="external"></app-icon></a></dd></div>
+                <div class="metric-line"><dt class="metric-label">Frecuencia y modos</dt><dd><a routerLink="/studio/automation">Modo y ritmo <app-icon name="external"></app-icon></a></dd></div>
+                <div class="metric-line"><dt class="metric-label">Fuentes individuales</dt><dd><a class="btn small ghost" routerLink="/studio/sources">Fuentes</a></dd></div>
+                <div class="metric-line"><dt class="metric-label">Mercados y audiencia</dt><dd>Esta estrategia</dd></div>
+              </dl>
+              <p class="section-note"><app-icon name="info"></app-icon><span>Los valores detectados no se sobrescriben al guardar. Las ediciones crean una versión aprobada separada.</span></p>
+            </section>
+
+            <section class="card" *ngIf="selectedSiteId" aria-labelledby="site-profile-history">
+              <div class="card-header"><div><h2 id="site-profile-history">Historial de estrategia</h2><p>Control de cambios y restauración</p></div></div>
+              <p class="profile-muted" *ngIf="versionsLoading">Cargando versiones…</p>
+              <p class="profile-muted" *ngIf="!versionsLoading && !versionsError && !versions.length">Aún no hay versiones guardadas.</p>
+              <p class="au-error" role="alert" *ngIf="versionsError">{{ versionsError }}</p>
+              <ul class="timeline">
+                <li *ngFor="let version of versions">
+                  <strong>Versión {{ version.version }}</strong><small>{{ version.createdAt | date:'d MMM y':undefined:'es' }}</small>
+                  {{ version.note }}<span *ngIf="version.restoredFromVersion"> · Restaurada desde v{{ version.restoredFromVersion }}</span>
+                  <details>
+                    <summary class="btn small ghost">Ver o restaurar</summary>
+                    <p *ngIf="version.config.description">{{ version.config.description }}</p>
+                    <button class="btn small" type="button" [disabled]="saving" (click)="restore(version.version)">Restaurar</button>
+                  </details>
+                </li>
+              </ul>
+            </section>
+
+            <section class="card" *ngIf="overview as data" aria-labelledby="site-profile-evidence">
+              <div class="card-header">
+                <div><h2 id="site-profile-evidence">Origen de las conclusiones</h2><p>No ocultar incertidumbre</p></div>
+                <a class="btn small" routerLink="." [queryParams]="{ tab: 'crawl' }">Abrir páginas rastreadas</a>
+              </div>
+              <dl class="metrics">
+                <div class="metric-line"><dt class="metric-label">Evidencia</dt><dd>{{ data.extractedPages }} / {{ data.totalPages }} páginas analizadas</dd></div>
+                <div class="metric-line"><dt class="metric-label">Prueba de indexación Google</dt><dd>Sin datos verificados</dd></div>
+                <div class="metric-line"><dt class="metric-label">Última confirmación humana</dt><dd>{{ layers?.approved ? 'Confirmada' : 'Pendiente' }}</dd></div>
+              </dl>
+              <details class="profile-extra">
+                <summary>Más datos del rastreo</summary>
+                <dl class="metrics">
+                  <div class="metric-line"><dt class="metric-label">Grupos temáticos detectados</dt><dd>{{ data.profile?.topicClusters?.length ?? 0 }}</dd></div>
+                  <div class="metric-line"><dt class="metric-label">Sitemaps leídos</dt><dd>{{ healthySitemaps }} / {{ data.sitemaps.length }}</dd></div>
+                  <div class="metric-line"><dt class="metric-label">Último análisis</dt><dd>{{ (data.lastRun | date:'short') || '—' }}</dd></div>
+                </dl>
+                <a class="btn small ghost" routerLink="." [queryParams]="{ tab: 'pillars' }">Ver brechas</a>
+              </details>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      <div class="profile-reference stack" *ngIf="tab === 'pillars'">
+        <dl class="kpis" aria-label="Métricas de pilares">
+          <div class="kpi"><dt class="top"><app-icon name="layers"></app-icon>Pilares activos</dt><dd class="number">{{ activePillarCount }}</dd><dd class="foot">Guían el plan editorial</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Páginas asignadas</dt><dd class="number">{{ pillarPageTotal | number }}</dd><dd class="foot">Suma por pilares</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="search"></app-icon>Brechas detectadas</dt><dd class="number">{{ overview?.opportunities?.length ?? 0 }}</dd><dd class="foot">Requieren validación humana</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="check"></app-icon>Última estrategia</dt><dd class="number">{{ layers?.approved ? 'v' + layers?.approved?.version : '—' }}</dd><dd class="foot">Versionada y editable</dd></div>
+        </dl>
+        <section class="card" *ngIf="draft as strategy">
+          <div class="card-header">
+            <div><h2>Pilares de contenido</h2><p>Temas e intención editorial que guían el plan</p></div>
+            <button class="btn small primary" type="button" (click)="addPillar()"><app-icon name="plus"></app-icon>Añadir pilar</button>
+          </div>
+          <div class="pillars">
+            <article class="pillar" *ngFor="let p of strategy.pillars; let i = index">
+              <div class="pillar-h">
+                <div><h3>{{ p.name || 'Nuevo pilar' }}</h3><p *ngIf="p.description">{{ p.description }}</p></div>
+                <span class="badge" [class.ok]="p.included" [class.warning]="!p.included">{{ p.included ? 'En el plan' : 'Excluido' }}</span>
+              </div>
+              <div class="meter" role="meter" aria-label="Cuota del plan" aria-valuemin="0" aria-valuemax="100" [attr.aria-valuenow]="p.included ? share(p) : 0"><span [style.width.%]="p.included ? share(p) : 0"></span></div>
+              <div class="pillar-foot"><span>{{ pillarPages(p) }} páginas · {{ p.included ? share(p) : 0 }} % del plan</span><strong>{{ pillarGaps(p) }} brechas</strong></div>
+              <div class="tag-list" *ngIf="p.subtopics.length || p.keywords.length"><span *ngFor="let topic of p.subtopics.length ? p.subtopics : p.keywords">{{ topic }}</span></div>
+              <div class="form-footer">
+                <button class="btn small" type="button" [attr.aria-expanded]="editingPillar === p" (click)="editingPillar = editingPillar === p ? null : p">Editar pilar</button>
+                <button class="btn small ghost" type="button" (click)="p.included = !p.included">{{ p.included ? 'Excluir' : 'Incluir' }}</button>
+                <button class="btn small ghost" type="button" (click)="investigate(p)" [disabled]="!p.clusterSlug">Ver brechas</button>
+              </div>
+              <div class="profile-extra" *ngIf="editingPillar === p">
+                <div class="fields">
+                  <label class="profile-field"><span>Nombre</span><input class="input" type="text" [(ngModel)]="p.name" /></label>
+                  <label class="profile-field"><span>Peso en el plan</span><input class="input" type="number" min="0" max="10" step="0.1" [(ngModel)]="p.weight" [disabled]="!p.included" /></label>
+                  <label class="profile-field"><span>Descripción</span><textarea class="textarea" rows="2" [(ngModel)]="p.description"></textarea></label>
+                  <label class="profile-field"><span>Subtemas separados por comas</span><textarea class="textarea" rows="2" [ngModel]="csv(p.subtopics)" (ngModelChange)="p.subtopics = split($event)"></textarea></label>
+                </div>
+                <div class="form-footer">
+                  <span class="badge">{{ pillarLabel(i) }}</span>
+                  <a class="btn small" routerLink="/studio/plan" [queryParams]="{ pillar: p.name }">Generar propuestas</a>
+                  <button class="btn small ghost" type="button" (click)="removePillar(i)">Eliminar pilar</button>
+                </div>
+              </div>
+              <div class="profile-extra" *ngIf="coverage && coverageFor === p.clusterSlug">
+                <strong>{{ coverage.cluster.pagesCount }} páginas del sitio</strong>
+                <ul><li *ngFor="let c of coverage.coverage">{{ c.subtopic }}: {{ c.pagesCovering }} páginas</li></ul>
+                <p *ngIf="coverage.gaps.length">Brechas: {{ coverage.gaps.join(', ') }}</p>
+                <p *ngIf="!coverage.gaps.length && coverage.coverage.length">No se encontraron brechas en los subtemas.</p>
+                <ul><li *ngFor="let pg of coverage.pages.slice(0, 8)"><a [href]="pg.url" target="_blank" rel="noopener">{{ pg.title || pg.url }}</a></li></ul>
+              </div>
+            </article>
+          </div>
+          <p class="profile-muted" *ngIf="!strategy.pillars.length">Lee el sitio para detectar temas o añade un pilar.</p>
+          <details class="profile-extra" *ngIf="unlinkedClusters.length">
+            <summary>Otros temas detectados</summary>
+            <button class="btn small ghost" type="button" *ngFor="let c of unlinkedClusters" (click)="addPillar(c.name, c.slug, c.keywords)">+ {{ c.name }}</button>
+          </details>
+          <div class="form-footer">
+            <button class="btn primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Guardando…' : 'Guardar nueva versión' }}</button>
+            <button class="btn ghost" type="button" [disabled]="saving" (click)="resetDraft()">Deshacer cambios</button>
+          </div>
+          <p class="au-error" *ngIf="strategyError" role="alert">{{ strategyError }}</p>
+        </section>
+        <section class="card">
+          <div class="card-header"><div><h2>Brechas que merecen investigación</h2><p>Oportunidades inferidas del inventario propio</p></div></div>
+          <ul class="row-list" *ngIf="overview?.opportunities?.length; else noGaps">
+            <li *ngFor="let gap of overview?.opportunities">
+              <div class="row-main"><span class="row-icon"><app-icon name="sparkles"></app-icon></span><div><strong class="row-title">{{ gap.subtopic }}</strong><p class="row-desc">{{ gap.pillar }} · {{ gap.pagesRead }} páginas analizadas · Confianza {{ confidenceLabels[gap.confidence] }}</p></div></div>
+              <a class="btn primary small" routerLink="/studio/plan" [queryParams]="{ pillar: gap.pillar }">Enviar al plan</a>
             </li>
           </ul>
-        </details>
-      </section>
-
-      <!-- Pillars: the main topics plans are built from -->
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'pillars' && draft">
-        <h2 class="au-panel__title">Content pillars</h2>
-        <p class="au-muted">Pillars are the big topics your site writes about. Auctorio found them by grouping your pages by subject. When it generates a plan, it splits the articles between the pillars you include, by their share, and never proposes topics from excluded ones.</p>
-        <ul class="howto au-mt-2">
-          <li><strong>Include or exclude</strong> a pillar to decide whether plans cover it.</li>
-          <li><strong>Share of the plan</strong> sets how many articles each one gets.</li>
-          <li><strong>Subtopics</strong> are what articles inside the pillar can be about; missing ones show up below as gaps.</li>
-        </ul>
-        <div class="pillars au-mt-3">
-          <article class="pillar" *ngFor="let p of draft.pillars; let i = index" [class.pillar--off]="!p.included">
-            <div class="pillar__head">
-              <input class="au-input" type="text" [(ngModel)]="p.name" [attr.aria-label]="'Pillar name ' + (i + 1)" />
-              <span class="src" [ngClass]="'src--' + (layers?.pillarProvenance?.[i] ?? 'approved')">{{ pillarLabel(i) }}</span>
-            </div>
-            <textarea class="au-input" rows="2" [(ngModel)]="p.description" placeholder="What this pillar covers" aria-label="Pillar description"></textarea>
-            <label class="sub-label" [attr.for]="'sub-' + i">Subtopics</label>
-            <textarea class="au-input" rows="2" [id]="'sub-' + i" [ngModel]="csv(p.subtopics)" (ngModelChange)="p.subtopics = split($event)" placeholder="Comma separated, e.g. series de estreno, horarios"></textarea>
-            <div class="pill-row">
-              <label><input type="checkbox" [(ngModel)]="p.included" /> Include in plans</label>
-              <label>Weight <input class="au-input" type="number" min="0" max="10" step="0.1" [(ngModel)]="p.weight" style="width: 80px" [disabled]="!p.included" /></label>
-              <span class="au-muted" *ngIf="p.included">≈ {{ share(p) }}% of the plan</span>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="investigate(p)" [disabled]="!p.clusterSlug" [title]="p.clusterSlug ? 'See which of your pages cover it and which subtopics are missing' : 'Not linked to a group of your pages'">Show my pages</button>
-              <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/plan" [queryParams]="{ pillar: p.name }">Generate proposals</a>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="removePillar(i)">Remove</button>
-            </div>
-            <div *ngIf="coverage && coverageFor === p.clusterSlug" class="au-meta">
-              <strong>{{ coverage.cluster.pagesCount }} site pages · subtopics from {{ coverage.subtopicSource }}</strong>
-              <ul class="cov">
-                <li *ngFor="let c of coverage.coverage">{{ c.subtopic }}: {{ c.pagesCovering }} page(s)</li>
-              </ul>
-              <p class="au-muted" *ngIf="coverage.gaps.length">Gaps: {{ coverage.gaps.join(', ') }}</p>
-              <p class="au-muted" *ngIf="!coverage.gaps.length && coverage.coverage.length">No uncovered subtopics.</p>
-              <ul class="cov"><li *ngFor="let pg of coverage.pages.slice(0, 8)"><a [href]="pg.url" target="_blank" rel="noopener">{{ pg.title || pg.url }}</a></li></ul>
-            </div>
-          </article>
-        </div>
-        <p class="au-muted au-mt-2" *ngIf="draft.pillars.length === 0">No pillars yet. Read the whole site so Auctorio can find them, or add one.</p>
-        <div class="pill-row au-mt-2">
-          <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="addPillar()">Add pillar</button>
-          <ng-container *ngIf="unlinkedClusters.length">
-            <span class="au-muted">Other topics found on your site:</span>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" *ngFor="let c of unlinkedClusters" (click)="addPillar(c.name, c.slug, c.keywords)" [title]="c.pagesCount + ' pages'">+ {{ c.name }}</button>
-          </ng-container>
-        </div>
-        <div class="savebar">
-          <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save as new version' }}</button>
-          <button class="au-btn au-btn--ghost" type="button" [disabled]="saving" (click)="resetDraft()">Discard edits</button>
-        </div>
-        <p class="au-error" *ngIf="strategyError">{{ strategyError }}</p>
-      </section>
-
-      <section class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'pillars'">
-        <h2 class="au-panel__title">Content gaps</h2>
-        <ng-container *ngIf="overview?.opportunities?.length; else noOpp">
-          <p class="au-muted">Approved pillar subtopics that no analysed page title or H1 mentions. A gap in our sample may not be a gap on the site; confidence follows how much of the site was read. No search volume or difficulty is estimated.</p>
-          <table class="au-table">
-            <thead><tr><th>Pillar</th><th>Subtopic</th><th>Why</th><th>Confidence</th><th></th></tr></thead>
-            <tbody>
-              <tr *ngFor="let o of overview?.opportunities">
-                <td>{{ o.pillar }}</td>
-                <td>{{ o.subtopic }}</td>
-                <td>{{ o.reason }}</td>
-                <td>{{ o.confidence }}</td>
-                <td><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/plan" [queryParams]="{ pillar: o.pillar }">Plan it</a></td>
-              </tr>
-            </tbody>
-          </table>
-        </ng-container>
-        <ng-template #noOpp>
-          <p class="au-muted" *ngIf="overview?.opportunitiesBasis === 'detected-keywords'">No pillars with subtopics are defined yet, so gaps cannot be detected. Add subtopics to the pillars above.</p>
-          <p class="au-muted" *ngIf="overview?.opportunitiesBasis !== 'detected-keywords'">No uncovered subtopics found in the pages analysed so far.</p>
-        </ng-template>
-      </section>
-
-      <ng-container *ngIf="overview">
-        <!-- Sitemaps -->
-        <section class="au-panel au-mb-3" *ngIf="tab === 'crawl'">
-          <header class="au-panel__header">
-            <h2 class="au-panel__title">Sitemaps</h2>
-            <span class="au-badge au-badge--neutral">{{ overview.sitemaps.length }}</span>
-          </header>
-          <div class="au-table-wrap au-table-wrap--scrollable">
-            <table class="au-table">
-              <thead>
-                <tr><th>URL</th><th>Kind</th><th>Status</th><th>URLs</th><th>Last fetched</th></tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let sitemap of overview.sitemaps">
-                  <td class="au-muted au-ellipsis">{{ sitemap.url }}</td>
-                  <td><span class="au-channel">{{ sitemap.kind }}</span></td>
-                  <td>
-                    <span class="au-badge" [class.au-badge--success]="sitemap.status === 'fetched'" [class.au-badge--danger]="sitemap.status === 'failed' || sitemap.status === 'blocked'" [class.au-badge--neutral]="sitemap.status !== 'fetched' && sitemap.status !== 'failed' && sitemap.status !== 'blocked'">{{ sitemap.status }}</span>
-                    <span class="au-table__sub" *ngIf="sitemap.error">{{ sitemap.error }}</span>
-                  </td>
-                  <td>{{ sitemap.urlCount ?? '—' }}</td>
-                  <td class="au-muted">{{ sitemap.lastFetchedAt ? (sitemap.lastFetchedAt | date: 'medium') : '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <ng-template #noGaps><p class="profile-muted">{{ overview?.opportunitiesBasis === 'detected-keywords' ? 'Añade subtemas a los pilares para poder detectar brechas.' : 'No se encontraron brechas en las páginas analizadas.' }}</p></ng-template>
         </section>
+      </div>
 
-        <!-- Setup run: the one-off onboarding (read → profile → sources → competitors → strategy) -->
-        <details class="au-panel au-panel--padded au-mb-3" *ngIf="tab === 'crawl' && selectedSiteId">
-          <summary>Setup run</summary>
-          <app-onboarding-timeline class="au-mt-2" [siteId]="selectedSiteId" [allowStart]="true"></app-onboarding-timeline>
-        </details>
+      <div class="profile-reference" *ngIf="tab === 'crawl' && overview as data">
+        <div class="section-note"><app-icon name="info"></app-icon><span>El rastreo descubre y analiza páginas. <strong>La indexación en Google se consulta en Search Console.</strong></span></div>
+        <dl class="kpis" aria-label="Métricas de rastreo">
+          <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Sitemaps</dt><dd class="number">{{ data.sitemaps.length }}</dd><dd class="foot">{{ healthySitemaps }} leídos</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Páginas descubiertas</dt><dd class="number">{{ data.totalPages | number }}</dd><dd class="foot">Inventario del sitio</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="check"></app-icon>Páginas analizadas</dt><dd class="number">{{ data.extractedPages | number }}</dd><dd class="foot">Extracción propia</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="warning"></app-icon>Fallos de lectura</dt><dd class="number">{{ data.evidence?.failed ?? data.pageStates['failed'] ?? 0 }}</dd><dd class="foot">Revisar antes del próximo ciclo</dd></div>
+        </dl>
+        <div class="split">
+          <div class="stack">
+            <section class="card">
+              <div class="card-header">
+                <div><h2>Sitemaps encontrados</h2><p>Estado de lectura e inventario</p></div>
+                <button class="btn small primary" type="button" [disabled]="busy" (click)="indexSite()"><app-icon name="refresh"></app-icon>Nueva lectura</button>
+              </div>
+              <div class="table-wrap" role="region" aria-label="Sitemaps encontrados" tabindex="0" *ngIf="data.sitemaps.length; else noSitemaps">
+                <table class="table sitemap-table">
+                  <thead><tr><th>Sitemap</th><th>Tipo</th><th>URLs</th><th>Estado</th></tr></thead>
+                  <tbody><tr *ngFor="let sitemap of data.sitemaps">
+                    <td><strong>{{ sitemap.url }}</strong><div class="smtext" *ngIf="sitemap.lastFetchedAt">{{ sitemap.lastFetchedAt | date:'d MMM, HH:mm':undefined:'es' }}</div></td>
+                    <td>{{ sitemap.kind === 'index' ? 'Índice' : sitemap.kind }}</td><td>{{ sitemap.urlCount ?? '—' }}</td>
+                    <td><span class="badge" [class.ok]="sitemap.status === 'fetched'" [class.warning]="sitemap.status !== 'fetched'">{{ sitemap.status === 'fetched' ? 'Correcto' : sitemap.status === 'failed' || sitemap.status === 'blocked' ? 'Revisión' : sitemap.status }}</span><div class="smtext" *ngIf="sitemap.error">{{ sitemap.error }}</div></td>
+                  </tr></tbody>
+                </table>
+              </div>
+              <ng-template #noSitemaps><p class="profile-muted">Aún no se han encontrado sitemaps.</p></ng-template>
+            </section>
 
-        <!-- Indexed pages -->
-        <section class="au-panel" *ngIf="tab === 'crawl'">
-          <header class="au-panel__header">
-            <h2 class="au-panel__title">Discovered pages <span class="au-muted">(from sitemap; not Google-indexed)</span></h2>
-            <span class="au-badge au-badge--neutral">{{ pagesTotal }}</span>
-          </header>
-          <div class="au-toolbar au-toolbar--panel">
-            <div class="au-search">
-              <app-icon name="search"></app-icon>
-              <input class="au-input au-input--search" type="search" placeholder="Search URL or title…" [(ngModel)]="pageQuery" (keyup.enter)="loadPages()" />
-            </div>
-            <select class="au-select au-filter-select" [(ngModel)]="pageCrawlState" (ngModelChange)="loadPages()" aria-label="Filter by crawl state">
-              <option value="">All states</option>
-              <option value="extracted">Extracted</option>
-              <option value="discovered">Discovered</option>
-              <option value="stale">Stale</option>
-              <option value="failed">Failed</option>
-              <option value="skipped">Skipped</option>
-            </select>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="loadPages()">Apply</button>
+            <section class="card">
+              <div class="card-header"><div><h2>Inventario de páginas</h2><p>Búsqueda y filtros por estado de extracción</p></div></div>
+              <form class="filter-bar" (ngSubmit)="applyPageFilters()">
+                <label class="search"><app-icon name="search"></app-icon><input class="input" type="search" name="pageQuery" placeholder="Buscar URL o título…" aria-label="Buscar URL o título" [(ngModel)]="pageQuery" /></label>
+                <select class="input filter-select" name="pageCrawlState" aria-label="Estado de extracción" [(ngModel)]="pageCrawlState" (ngModelChange)="applyPageFilters()">
+                  <option value="">Todos los estados</option><option value="extracted">Analizada</option><option value="failed">Fallida</option><option value="stale">Desactualizada</option>
+                  <option value="discovered">Descubierta</option><option value="skipped">Omitida</option>
+                </select>
+                <button class="btn small" type="submit">Filtrar</button>
+              </form>
+              <div class="table-wrap" role="region" aria-label="Páginas del inventario" tabindex="0" *ngIf="pages.length; else noPages">
+                <table class="table">
+                  <thead><tr><th>URL / título</th><th>Tipo</th><th>Palabras</th><th>Estado</th><th><span class="au-visually-hidden">Acción</span></th></tr></thead>
+                  <tbody>
+                    <ng-container *ngFor="let item of pages">
+                      <tr>
+                        <td><strong>{{ item.title || 'Sin título' }}</strong><div class="smtext">{{ item.url }}</div></td>
+                        <td>{{ item.contentType || '—' }}</td><td>{{ item.wordCount ?? '—' }}</td>
+                        <td><span class="badge" [class.ok]="item.crawlState === 'extracted'" [class.danger]="item.crawlState === 'failed'" [class.warning]="item.crawlState === 'stale'">{{ crawlStateLabels[item.crawlState] || item.crawlState }}</span></td>
+                        <td class="actions"><button class="btn small" type="button" [attr.aria-expanded]="openPageId === item.id" (click)="openPageId = openPageId === item.id ? null : item.id">Ver</button></td>
+                      </tr>
+                      <tr *ngIf="openPageId === item.id"><td colspan="5">
+                        <p>Último intento de rastreo · {{ (item.lastIndexedAt | date:'d MMM y, HH:mm':undefined:'es') || 'Sin registro' }}</p>
+                        <p *ngIf="item.modifiedAt">Última modificación · {{ item.modifiedAt | date:'d MMM y, HH:mm':undefined:'es' }}</p>
+                        <a [href]="item.url" target="_blank" rel="noopener">{{ item.url }}</a>
+                      </td></tr>
+                    </ng-container>
+                  </tbody>
+                </table>
+              </div>
+              <ng-template #noPages><p class="profile-muted">{{ pagesLoading ? 'Cargando inventario…' : 'Ninguna página coincide con los filtros.' }}</p></ng-template>
+              <p class="au-error" role="alert" *ngIf="pagesError">{{ pagesError }}</p>
+              <div class="form-footer" *ngIf="pagesTotal > 25">
+                <button class="btn small" type="button" [disabled]="page <= 1 || pagesLoading" (click)="goPage(page - 1)">Anterior</button>
+                <span class="profile-muted">Página {{ page }}</span>
+                <button class="btn small" type="button" [disabled]="page * 25 >= pagesTotal || pagesLoading" (click)="goPage(page + 1)">Siguiente</button>
+              </div>
+            </section>
           </div>
-          <div class="au-table-wrap au-table-wrap--scrollable">
-            <table class="au-table">
-              <thead>
-                <tr><th>URL</th><th>Title</th><th>Type</th><th>Words</th><th>State</th><th>Last indexed</th></tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let page of pages">
-                  <td class="au-muted au-ellipsis">{{ page.url }}</td>
-                  <td><span class="au-table__title">{{ page.title || '—' }}</span></td>
-                  <td><span class="au-channel">{{ page.contentType || '—' }}</span></td>
-                  <td>{{ page.wordCount ?? '—' }}</td>
-                  <td><span class="au-badge" [class.au-badge--success]="page.crawlState === 'extracted'" [class.au-badge--danger]="page.crawlState === 'failed'" [class.au-badge--neutral]="page.crawlState !== 'extracted' && page.crawlState !== 'failed'">{{ page.crawlState }}</span></td>
-                  <td class="au-muted">{{ page.lastIndexedAt ? (page.lastIndexedAt | date: 'medium') : '—' }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div class="au-pagination" *ngIf="pagesTotal > 25">
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page <= 1" (click)="goPage(page - 1)">Previous</button>
-            <span class="au-muted">Page {{ page }}</span>
-            <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="page * 25 >= pagesTotal" (click)="goPage(page + 1)">Next</button>
-          </div>
-        </section>
-      </ng-container>
+          <aside class="stack" aria-label="Ejecución y errores de rastreo">
+            <section class="card">
+              <div class="card-header"><div><h2>Última ejecución de setup</h2><p>El proceso inicial configura la evidencia editorial</p></div>
+                <a class="btn small" routerLink="/studio/activity">Ver trabajos</a>
+              </div>
+              <app-onboarding-timeline *ngIf="selectedSiteId" [siteId]="selectedSiteId" [allowStart]="true" [embedded]="true"></app-onboarding-timeline>
+            </section>
+            <section class="card">
+              <div class="card-header"><div><h2>Tratamiento de errores</h2><p>Estado de lectura y siguientes pasos</p></div></div>
+              <div class="callout" [class.warn]="(data.evidence?.failed ?? data.pageStates['failed'] ?? 0) > 0">
+                <h3>{{ (data.evidence?.failed ?? data.pageStates['failed'] ?? 0) }} URLs con fallos de extracción</h3><p>Consulta las operaciones del sitio para revisar su causa.</p>
+              </div>
+              <div class="form-footer">
+                <a class="btn small" routerLink="/studio/activity" [queryParams]="{ tab: 'failed' }">Inspeccionar operaciones</a>
+                <button class="btn small ghost" type="button" [disabled]="busy" (click)="crawlChanged()">Leer cambios</button>
+              </div>
+              <details class="profile-extra" *ngIf="data.evidence as evidence">
+                <summary>Cobertura por sección</summary>
+                <p>{{ evidence.fetched }} consultadas · {{ evidence.skipped }} omitidas</p>
+                <div class="table-wrap" role="region" aria-label="Cobertura por sección" tabindex="0">
+                  <table class="table sitemap-table">
+                    <thead><tr><th>Sección</th><th>Analizadas</th><th>Descubiertas</th></tr></thead>
+                    <tbody><tr *ngFor="let section of evidence.sections"><td>/{{ section.family === '/' ? '' : section.family }}</td><td>{{ section.extracted }}</td><td>{{ section.discovered }}</td></tr></tbody>
+                  </table>
+                </div>
+              </details>
+            </section>
+          </aside>
+        </div>
+      </div>
 
       <app-empty-state
         *ngIf="!loading && !overview && !loadError"
         icon="scan"
         title="No site intelligence yet"
-        text="Read the whole site to crawl its sitemaps, understand its content and build the site profile."
+        text="Leer el sitio completo to crawl its sitemaps, understand its content and build the site profile."
       ></app-empty-state>
     </section>
   `,
@@ -384,7 +434,8 @@ export class SiteIntelligencePageComponent implements OnInit {
   private readonly toast = inject(ToastService);
   private readonly intel = inject(IntelligenceApiService);
   private readonly editorialContext = inject(EditorialContextService);
-  readonly fieldGroups = FIELD_GROUPS.map((g) => ({ ...g, fields: FIELDS.filter((f) => g.keys.includes(f.key)) }));
+  readonly profileFields = PROFILE_FIELDS.map((key) => FIELDS.find((field) => field.key === key)!);
+  readonly additionalFields = FIELDS.filter((field) => !PROFILE_FIELDS.includes(field.key) && field.key !== 'editorialRestrictions');
   // ?tab= picks the section (sidebar sub-items); old tab ids still deep-link to the section that absorbed them.
   tab = 'profile';
   private readonly router = inject(Router);
@@ -398,11 +449,31 @@ export class SiteIntelligencePageComponent implements OnInit {
   layers: StrategyLayers | null = null;
   draft: StrategyConfig | null = null;
   versions: StrategyVersion[] = [];
+  versionsLoading = false;
+  versionsError = '';
   note = '';
   saving = false;
   strategyError = '';
   coverage: ClusterCoverage | null = null;
   coverageFor: string | null = null;
+  editingPillar: StrategyPillar | null = null;
+  readonly confidenceLabels = { low: 'baja', medium: 'media', high: 'alta' };
+
+  get activePillarCount(): number {
+    return this.draft?.pillars.filter((pillar) => pillar.included).length ?? 0;
+  }
+
+  get pillarPageTotal(): number {
+    return this.draft?.pillars.reduce((total, pillar) => total + this.pillarPages(pillar), 0) ?? 0;
+  }
+
+  pillarPages(pillar: StrategyPillar): number {
+    return this.layers?.detected?.clusters.find((cluster) => cluster.slug === pillar.clusterSlug)?.pagesCount ?? 0;
+  }
+
+  pillarGaps(pillar: StrategyPillar): number {
+    return this.overview?.opportunities?.filter((gap) => gap.pillar === pillar.name).length ?? 0;
+  }
 
   csv(value: unknown): string {
     return Array.isArray(value) ? value.join(', ') : '';
@@ -422,11 +493,11 @@ export class SiteIntelligencePageComponent implements OnInit {
   }
   sourceLabel(key: StrategyField): string {
     const s = this.source(key);
-    return s === 'approved' ? 'Approved' : s === 'suggested' ? 'From your site' : 'Empty';
+    return s === 'approved' ? 'Aprobado' : s === 'suggested' ? 'Del sitio' : 'Vacío';
   }
   pillarLabel(i: number): string {
     const p: Provenance | undefined = this.layers?.pillarProvenance?.[i];
-    return p === 'approved' ? 'Approved' : p === 'suggested' ? 'From your site' : 'New (unsaved)';
+    return p === 'approved' ? 'Aprobado' : p === 'suggested' ? 'Del sitio' : 'Sin guardar';
   }
   /** Plans split articles by weight among included pillars (editorial-plan-context). */
   share(p: StrategyPillar): number {
@@ -453,6 +524,7 @@ export class SiteIntelligencePageComponent implements OnInit {
     this.resetDraft();
   }
   resetDraft(): void {
+    this.editingPillar = null;
     this.draft = this.layers ? structuredClone(this.layers.effective) : null;
     this.strategyError = '';
   }
@@ -464,8 +536,9 @@ export class SiteIntelligencePageComponent implements OnInit {
       next: (res) => {
         this.saving = false;
         this.note = '';
-        this.versions = [];
+        this.loadVersions();
         this.applyLayers(res.layers);
+        if (this.tab === 'pillars') this.loadOverview();
         this.toast.success('Strategy saved as version ' + res.version + '.');
       },
       error: (err) => {
@@ -489,15 +562,26 @@ export class SiteIntelligencePageComponent implements OnInit {
     });
   }
   loadVersions(): void {
-    if (!this.selectedSiteId || this.versions.length) return;
-    this.intel.listVersions(this.selectedSiteId).subscribe({ next: (r) => (this.versions = r.items) });
+    if (!this.selectedSiteId) return;
+    this.versionsLoading = true;
+    this.versionsError = '';
+    this.intel.listVersions(this.selectedSiteId).subscribe({
+      next: (response) => {
+        this.versions = response.items;
+        this.versionsLoading = false;
+      },
+      error: () => {
+        this.versionsError = 'No se pudo cargar el historial.';
+        this.versionsLoading = false;
+      },
+    });
   }
   restore(version: number): void {
     this.saving = true;
     this.intel.restoreVersion(this.selectedSiteId, version).subscribe({
       next: (res) => {
         this.saving = false;
-        this.versions = [];
+        this.loadVersions();
         this.applyLayers(res.layers);
         this.toast.success('Restored version ' + version + ' as version ' + res.version + '.');
       },
@@ -510,8 +594,10 @@ export class SiteIntelligencePageComponent implements OnInit {
   addPillar(name = '', clusterSlug: string | null = null, keywords: string[] = []): void {
     const pillar: StrategyPillar = { name, description: null, subtopics: [], keywords, weight: 1, included: true, clusterSlug };
     this.draft?.pillars.push(pillar);
+    this.editingPillar = pillar;
   }
   removePillar(i: number): void {
+    if (this.editingPillar === this.draft?.pillars[i]) this.editingPillar = null;
     this.draft?.pillars.splice(i, 1);
   }
   investigate(p: StrategyPillar): void {
@@ -532,22 +618,54 @@ export class SiteIntelligencePageComponent implements OnInit {
   indexing = false;
   loadError = '';
   pages: SiteIndexedPageRow[] = [];
+  seoSearch = '';
+  seoQuery = '';
+  seoImpact = '';
+  openSeoSignal: string | null = null;
+
+  get seoSignals() {
+    return (this.overview?.seoSignals ?? []).filter((signal) => signal.of > 0).map((signal) => ({
+      ...signal,
+      ...(SEO_LABELS[signal.id] ?? { name: signal.label, type: 'Inventario', action: 'Revisa las páginas de la muestra.' }),
+      reach: signal.count === 0 ? '—' : signal.count / signal.of >= .5 ? 'Alto' : signal.count / signal.of >= .1 ? 'Medio' : 'Bajo',
+    }));
+  }
+
+  seoSignalKey(_index: number, signal: { id: string }): string { return signal.id; }
+
+  get seoOpenCount(): number {
+    return this.seoSignals.filter((signal) => signal.count > 0).length;
+  }
+
+  get seoHighCount(): number {
+    return this.seoSignals.filter((signal) => signal.reach === 'Alto').length;
+  }
+
+  get filteredSeoSignals() {
+    const search = this.seoQuery.trim().toLowerCase();
+    return this.seoSignals.filter((signal) =>
+      (!this.seoImpact || signal.reach === this.seoImpact) &&
+      (!search || `${signal.name} ${signal.type}`.toLowerCase().includes(search)),
+    );
+  }
   pagesTotal = 0;
   page = 1;
   pageQuery = '';
   pageCrawlState = '';
+  openPageId: string | null = null;
+  pagesLoading = false;
+  pagesError = '';
+  private pagesRequest = 0;
+  readonly crawlStateLabels: Record<string, string> = { extracted: 'Analizada', failed: 'Fallida', stale: 'Desactualizada', discovered: 'Descubierta', skipped: 'Omitida' };
+
+  applyPageFilters(): void {
+    this.page = 1;
+    this.loadPages();
+  }
 
   /** A crawl started here, or one already running server-side (e.g. from onboarding). */
   get busy(): boolean {
     return this.indexing || Boolean(this.overview?.indexing);
-  }
-
-  get host(): string {
-    try {
-      return this.overview?.site.baseUrl ? new URL(this.overview.site.baseUrl).hostname : '';
-    } catch {
-      return '';
-    }
   }
 
   /** Only the topic groups the crawl actually filled; a TV guide has no "commercial" group to show. */
@@ -580,6 +698,11 @@ export class SiteIntelligencePageComponent implements OnInit {
     this.loadError = '';
     this.editorialContext.update({ area: 'intelligence', siteId: this.selectedSiteId });
     this.loadStrategy();
+    this.loadVersions();
+    this.loadOverview();
+  }
+
+  private loadOverview(): void {
     this.api.getSiteIntelligence(this.selectedSiteId).subscribe({
       next: (overview) => {
         this.overview = overview;
@@ -596,13 +719,21 @@ export class SiteIntelligencePageComponent implements OnInit {
 
   loadPages(): void {
     if (!this.selectedSiteId) return;
+    const request = ++this.pagesRequest;
+    this.pagesLoading = true;
+    this.pagesError = '';
+    this.openPageId = null;
     this.api.listSiteIntelligencePages(this.selectedSiteId, { q: this.pageQuery || undefined, crawlState: this.pageCrawlState || undefined, page: this.page, pageSize: 25 }).subscribe({
       next: (response) => {
+        if (request !== this.pagesRequest) return;
+        this.pagesLoading = false;
         this.pages = response.items;
         this.pagesTotal = response.total;
       },
       error: () => {
-        this.loadError = 'Indexed pages could not be loaded.';
+        if (request !== this.pagesRequest) return;
+        this.pagesLoading = false;
+        this.pagesError = 'No se pudo cargar el inventario.';
       },
     });
   }

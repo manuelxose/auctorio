@@ -260,6 +260,7 @@ export type CreateStudioInvitationInput = {
 export type UpdateStudioUserInput = {
   displayName?: string;
   status?: StudioUserStatus;
+  roleIds?: string[];
 };
 
 export type StudioInvitationSummary = Pick<

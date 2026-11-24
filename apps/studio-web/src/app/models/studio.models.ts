@@ -74,6 +74,8 @@ export type StudioSession = {
     avatarUrl: string | null;
   };
   role: StudioRole;
+  permissions?: string[];
+  workspaceUserId?: string | null;
   sites: StudioSite[];
   activeSiteId: string | null;
 };
@@ -220,6 +222,7 @@ export type StudioSiteSummary = {
   updatedAt: string;
   projectCount: number;
   publishedProjectCount: number;
+  websiteConnection?: { stage: NonNullable<StudioOverview['connections'][number]['stage']>; lastVerifiedAt: string | null } | null;
   latestPublicationJob: Pick<
     PublicationExecutionState,
     'id' | 'status' | 'externalUrl' | 'createdAt' | 'publishedAt' | 'error'
@@ -485,6 +488,7 @@ export type StudioInvitationSummary = {
   createdAt: string;
   updatedAt: string;
   userId: string | null;
+  delivery?: 'sent' | 'not_configured' | 'failed';
 };
 
 export type StudioPromptVersionSummary = {
@@ -1435,10 +1439,12 @@ export type AutomationStatus = {
     maximumQueueSize: number;
   };
   nextSlots: Array<{ channel: string; at: string }>;
+  pipeline?: { planDueNow: number; planUpcoming: number; awaitingReview: number; activeSources: number; candidateStories: number; minQaScore: number; leadMinutes: number; keywordPlan: { upcoming: Array<{ id: string; keyword: string; scheduledFor: string | null; status: string; searchVolume: number | null }>; withVolume: number; metricsProvider: boolean } };
   warnings: string[];
 };
 
 export type StudioOverview = {
+  siteLogoUrl?: string | null;
   today: {
     articlesPlanned: number;
     articlesPublished: number;
@@ -1482,6 +1488,7 @@ export type StudioOverview = {
   };
   automation: {
     enabled: boolean;
+    mode?: AutomationPolicy['mode'];
     state: string;
     pausedReason: string | null;
     warnings: string[];
@@ -1665,13 +1672,13 @@ export type ConnectorInstallation = {
   discovered: WebsiteDiscoveryResult | Record<string, unknown> | null;
   capabilities: Record<string, unknown> | null;
   hasCredentials: boolean;
+  verificationStage?: NonNullable<StudioOverview['connections'][number]['stage']>;
   credentialsRef: string | null;
   lastError: string | null;
   verifiedAt: string | null;
   activatedAt: string | null;
   version: number;
   createdAt: string;
-  verificationStage?: NonNullable<StudioOverview['connections'][number]['stage']>;
   updatedAt: string;
 };
 

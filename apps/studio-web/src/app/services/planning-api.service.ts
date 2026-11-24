@@ -4,10 +4,15 @@ import { Observable, switchMap, takeWhile, timer } from 'rxjs';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import type { OperationItem, PaginatedResponse } from '../models/studio.models';
 import type {
+  BrandSettings,
+  DetectedBrand,
   GeneratorPresetPayload,
+  MonthPlan,
+  MonthPlanStart,
   PlanDetail,
   PlanGenerationAccepted,
   PlanItem,
+  PlanItemSelectionView,
   PlanKeywordsResult,
   PlanPreset,
   PlanningInventory,
@@ -28,6 +33,21 @@ export class PlanningApiService {
   /** Calendar "Add keywords": up to 50; the server drops duplicates and off-topic ones. */
   addKeywords(siteId: string, keywords: string[]): Observable<PlanKeywordsResult> {
     return this.http.post<PlanKeywordsResult>(`${this.base}/sites/${siteId}/plan-keywords`, { keywords });
+  }
+  /** The next 30 days with their plans, research and free slots. */
+  getMonthPlan(siteId: string): Observable<MonthPlan> {
+    return this.http.get<MonthPlan>(`${this.base}/sites/${siteId}/month-plan`);
+  }
+  generateMonthPlan(siteId: string): Observable<MonthPlanStart> {
+    return this.http.post<MonthPlanStart>(`${this.base}/sites/${siteId}/month-plan/generate`, {});
+  }
+  /** Why the item has its keyword, and the measured alternatives still free. */
+  getItemSelection(itemId: string): Observable<PlanItemSelectionView> {
+    return this.http.get<PlanItemSelectionView>(`${this.base}/editorial-plan-items/${itemId}/selection`);
+  }
+  /** Same slot, new keyword: the server drops the old keyword's brief and measures the new one. */
+  changeItemKeyword(itemId: string, keyword: string): Observable<PlanItem> {
+    return this.http.post<PlanItem>(`${this.base}/editorial-plan-items/${itemId}/keyword`, { keyword });
   }
   getPlan(planId: string): Observable<PlanDetail> {
     return this.http.get<PlanDetail>(`${this.base}/editorial-plans/${planId}`);
@@ -83,6 +103,17 @@ export class PlanningApiService {
     return this.http.delete<{ ok: true }>(`${this.base}/editorial-plan-presets/${presetId}`);
   }
 
+  /** The three CTA cards as articles will render them (server renderer + sanitizer) for a draft brand. */
+  previewCtaCards(siteId: string, brand: BrandSettings): Observable<{ cards: Record<'link_card' | 'contact_card' | 'map_card', string> }> {
+    return this.http.post<{ cards: Record<'link_card' | 'contact_card' | 'map_card', string> }>(`${this.base}/sites/${siteId}/cta-preview`, { brand });
+  }
+  /** Palette and logo crawled from the site itself (cached 30 days); the POST re-crawls now. */
+  getDetectedBrand(siteId: string): Observable<DetectedBrand> {
+    return this.http.get<DetectedBrand>(`${this.base}/sites/${siteId}/brand-detected`);
+  }
+  refreshDetectedBrand(siteId: string): Observable<DetectedBrand> {
+    return this.http.post<DetectedBrand>(`${this.base}/sites/${siteId}/brand-detected/refresh`, {});
+  }
   getPlanningSettings(siteId: string): Observable<SitePlanningSettings> {
     return this.http.get<SitePlanningSettings>(`${this.base}/sites/${siteId}/planning-settings`);
   }

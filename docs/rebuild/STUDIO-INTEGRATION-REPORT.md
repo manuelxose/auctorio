@@ -38,3 +38,66 @@ Conexiones reúne destinos web e identidades sociales en una sola vista. Disting
 La comprobación de un destino activo registra su resultado sin sacarlo de servicio. Reemplazar las credenciales de una instalación pendiente exige verificar de nuevo antes de activarla. Al sustituir un conector REST genérico, la activación actualiza el adaptador del sitio en la misma transacción.
 
 Desconectar un sitio conserva su historial y bloquea nuevas entregas, incluidas las que estaban en cola y las que podían recurrir a una credencial heredada. Las llamadas al proveedor ya iniciadas pueden finalizar. Las respuestas de instalaciones omiten credenciales y detalles internos de los errores. La verificación local utilizó proveedores simulados.
+
+## Rediseño de interfaz · Primera entrega
+
+El prompt maestro marca el §7.5, Descubrimiento web, como pendiente para retomarlo después del rediseño. Esta entrega aplica el marco visual de los prototipos de Configuración y Advanced a los componentes existentes de Angular. La navegación contextual usa el registro de Studio y ofrece selectores de herramienta y sección en móvil. En escritorio, las dos áreas se enlazan en la barra lateral.
+
+Sitios, Personas y Roles incorporan las tarjetas, superficies y estados de la referencia. Las cifras de Personas proceden del directorio del workspace. La interfaz conserva la barra global de Studio y deja el asistente cerrado por defecto en estas áreas cuando no hay una preferencia guardada.
+
+Los formularios de invitación y roles siguen en línea. La adaptación detallada de los subpaneles de Advanced queda para las siguientes entregas.
+
+## Rediseño de interfaz · Navegación y subvistas
+
+La barra lateral sigue el orden, las agrupaciones y los rótulos de Settings y Advanced de los dos prototipos. Configuración muestra nueve herramientas y 25 subvistas de workspace. Advanced muestra ocho herramientas y 24 subvistas. Administración global añade tres destinos a usuarios con acceso de plataforma. Ambos menús y los selectores móviles se construyen desde el mismo registro.
+
+| Función reubicada | Acceso en Studio |
+| --- | --- |
+| Ajustes de redes | Conexiones → Ajustes de redes. El enlace directo se conserva. |
+| Workers y colas | Salud del sistema → Workers y colas. Los enlaces antiguos de workers, colas y costes se conservan. |
+| Producción y fallos | Salud del sistema → Estado general conserva las tablas y acciones. Las rutas antiguas siguen abriendo su panel. |
+| Administración global | Una entrada para Workspaces, Proveedores IA y Uso global. Las tres rutas originales se conservan. |
+| Diagnósticos y paquetes | Advanced → Fuentes reúne las herramientas técnicas existentes. |
+| Auditoría | El pie de Configuración abre el historial paginado del workspace con permiso workspace.manage. |
+
+Sitios incorpora Identidad del sitio. Personas separa Miembros de Invitaciones y abre el formulario en un diálogo. Roles y permisos separa biblioteca, matriz y simulación. Conexiones muestra el estado y las credenciales de todos los destinos en su subvista de diagnóstico. La política y los límites de Descubrimiento web separan los campos ya existentes. La integración funcional del §7.5 sigue pendiente en el prompt maestro.
+
+Cola de revisión y Trabajos en segundo plano filtran en el servidor antes de paginar. Biblioteca multimedia conserva acciones y usa sus filtros por estado y uso. El enlace heredado a trabajos fallidos conserva el filtro. La barra global de Studio sigue disponible.
+
+## Rediseño de interfaz · Personas
+
+El directorio separa identidad, último acceso, estado y acción por persona. Gestionar acceso abre un diálogo con nombre, correo de solo lectura, estado, roles disponibles y el permiso efectivo resultante. La API guarda los cambios de nombre, estado y roles en una transacción de workspace, con delegación y protección del último administrador. El bloqueo de acceso conserva la confirmación y revoca las sesiones activas.
+
+La lista de invitaciones pendientes muestra las asignaciones reales y permite revocar una invitación con confirmación. La revocación se audita y suspende la membresía pendiente en ese workspace. Cada nueva invitación tiene un enlace propio. Reinvitar genera otro enlace, y los enlaces globales heredados siguen limitados a las membresías con acceso previo o invitación heredada. OIDC acepta la invitación con el correo verificado por el proveedor configurado.
+
+El §7.5, Descubrimiento web, conserva su marca de pendiente en el prompt maestro.
+
+## Rediseño de Advanced · Site Intelligence y Competidores
+
+Perfil y estrategia usa dos columnas en escritorio. La principal contiene la identidad detectada y el formulario de estrategia. La lateral reúne los ajustes relacionados, el historial restaurable y las cifras de evidencia. En móvil los bloques se apilan. Páginas y rastreo resume por separado las URL descubiertas, consultadas, analizadas y fallidas, y conserva el inventario enlazado.
+
+Competidores incorpora indicadores de seguimiento, tarjetas de la lista y búsqueda por texto. La vista de cobertura conserva su matriz y explica de dónde sale la muestra. Oportunidades añade búsqueda y filtro por estado sobre los registros del sitio y conserva sus acciones para planificar, vigilar o descartar. Ambas pantallas usan las API existentes.
+
+## Advanced · Fuentes a Trabajos en segundo plano
+
+Se integraron seis pantallas y sus enlaces existentes en el orden de `advanced.html` y `advanced.js`.
+
+- **Fuentes.** Registro en tabla con alcance, verificación, errores, referencias y detalle desplegable. Conserva la vista de tarjetas, la selección múltiple, las pruebas de extracción y la configuración. El alta sitúa la guía y los paquetes junto al formulario en escritorio.
+- **Inbox.** Resumen de la consulta, lista de historias con filtros y vista de clústeres. Conserva la procedencia, las decisiones editoriales y el panel de detalle.
+- **Plan editorial.** Indicadores del plan activo, backlog y tablero con columnas desplazables. Usa los estados del plan y conserva el vínculo al Calendario.
+- **Cola de revisión.** Aviso sobre el paso de propuesta a artículo, resumen y panel de pendientes o historial. Conserva revisión, QA y evidencia.
+- **Biblioteca multimedia.** Galería de cuatro, tres o dos columnas, según el ancho. La búsqueda actúa sobre los recursos cargados. Las miniaturas reales usan los archivos correspondientes y los recursos sin imagen tienen un marcador visual.
+- **Trabajos en segundo plano.** Indicadores agregados del backend y tabla con filtros, progreso y acciones. El historial y cada estado se filtran en el servidor antes de paginar.
+
+El CSS toma las dimensiones y puntos de quiebre del adjunto. La cabecera global y los controles de Studio siguen disponibles. Los indicadores de Inbox, revisión y multimedia identifican si su alcance es el resultado filtrado o los registros cargados. El §7.5 de Descubrimiento web sigue marcado como pendiente en el prompt maestro.
+
+## DataForSEO · Sin continuar (24/11/2026)
+
+La integración actual se queda como está y no se sigue desarrollando: se va a cambiar.
+
+- **Sin saldo:** el proveedor rechazó todas las consultas del 23/11 (HTTP 402), así que el plan mensual no se pudo probar con palabras medidas.
+- **Resultado en GuiaProgramacionTV:** las palabras del plan las propuso la IA (una se cambió a mano) y aparecen como "Sin medir".
+- **Sin demostrar con datos reales:** puntuación y su desglose, alternativas, descartes y dificultad alcanzable. Solo los cubren pruebas automáticas.
+- **Mientras tanto:** si no hay datos, el plan se genera igual con palabras de la IA y la pantalla avisa del motivo.
+
+Código que toca el cambio: `src/infrastructure/seo/dataforseo.ts` (cliente), `keyword-candidates.ts` y `keyword-metrics.ts` (plan), `serp-sources.ts` y `youtube-videos.ts` (redacción), y los usos de `dataForSeoConfigured` en `src/studio`.

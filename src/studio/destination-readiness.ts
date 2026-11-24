@@ -84,10 +84,12 @@ export function installationToConnection(i: InstallationReadinessInput) {
 }
 
 /**
- * A site that publishes with its stored credential reference (before installations existed) is a working
- * destination. It was never probed, so the reason says so instead of claiming a verification.
+ * A site with stored publishing credentials predates connector installations. The publishing
+ * account can carry a recorded check, and a real delivery can also establish verification.
  */
-export function legacySiteToConnection(site: { id: string; name: string }) {
+export function legacySiteToConnection(site: { id: string; name: string }, lastPublishedAt: Date | null = null, lastVerifiedAt: Date | null = null) {
+  const proofAt = [lastPublishedAt, lastVerifiedAt].reduce<Date | null>((latest, date) => date && (!latest || date > latest) ? date : latest, null);
+  const verified = Boolean(proofAt && Date.now() - proofAt.getTime() <= VERIFICATION_STALE_MS);
   return {
     id: `legacy-site-${site.id}`,
     platform: "website" as const,
@@ -96,11 +98,11 @@ export function legacySiteToConnection(site: { id: string; name: string }) {
     status: "active",
     connectionState: "connected",
     readiness: "ready" as DestinationReadiness,
-    stage: "stored" as DestinationStage,
-    reason: "Publishing with the credentials already stored for this site. It has not been checked with a test draft.",
-    checks: { configured: true, authenticated: null, reachable: null, capabilitiesVerified: false, canCreateDraft: null, canPublish: null },
-    lastVerifiedAt: null,
-    lastSuccessfulPublicationAt: null,
+    stage: (verified ? "ready" : proofAt ? "stale" : "stored") as DestinationStage,
+    reason: verified ? null : proofAt ? "The last publishing evidence is more than 30 days old." : "Publishing with the credentials already stored for this site. It has not been checked with a test draft.",
+    checks: { configured: true, authenticated: null, reachable: null, capabilitiesVerified: verified, canCreateDraft: null, canPublish: lastPublishedAt && verified ? true : null },
+    lastVerifiedAt,
+    lastSuccessfulPublicationAt: lastPublishedAt,
     siteId: site.id,
     siteName: site.name,
   };
@@ -154,18 +156,25 @@ export async function loadWebsiteDestinations(tenantId: string) {
     ...row,
     siteId: resolveSiteId(row),
   }));
-  const siteIds = [...new Set(resolved.map((r) => r.siteId).filter((s): s is string => !!s))];
-  const published = siteIds.length
-    ? await prisma.publication.groupBy({
-        by: ["siteId"],
-        where: { tenantId, siteId: { in: siteIds }, channel: "website", status: "published" },
-        _max: { publishedAt: true },
-      })
-    : [];
-  const lastBySite = new Map(published.map((p) => [p.siteId, p._max.publishedAt]));
-  const legacy = sites
-    .filter((site) => !siteIds.includes(site.id) && !disabledSiteIds.has(site.id) && site.publishingCredentialsRef && getEnv(site.publishingCredentialsRef, "").trim())
-    .map(legacySiteToConnection);
+  const linkedSiteIds = new Set(resolved.map((row) => row.siteId).filter((id): id is string => Boolean(id)));
+  const legacySites = sites.filter((site) => !linkedSiteIds.has(site.id) && !disabledSiteIds.has(site.id) && site.publishingCredentialsRef && getEnv(site.publishingCredentialsRef, "").trim());
+  const legacyIds = legacySites.map((site) => site.id);
+  const siteIds = [...linkedSiteIds, ...legacyIds];
+  const [published, verifiedAccounts] = await Promise.all([
+    siteIds.length ? prisma.publication.groupBy({
+      by: ["siteId"],
+      where: { tenantId, siteId: { in: siteIds }, channel: "website", status: "published", externalId: { not: null }, NOT: { externalId: { startsWith: "dryrun-" } } },
+      _max: { publishedAt: true },
+    }) : [],
+    legacyIds.length ? prisma.publishingAccount.groupBy({
+      by: ["siteId"],
+      where: { tenantId, siteId: { in: legacyIds }, platform: "website", enabled: true, status: "active" },
+      _max: { lastVerifiedAt: true },
+    }) : [],
+  ]);
+  const lastBySite = new Map(published.map((row) => [row.siteId, row._max.publishedAt]));
+  const verifiedBySite = new Map(verifiedAccounts.map((row) => [row.siteId, row._max.lastVerifiedAt]));
+  const legacy = legacySites.map((site) => legacySiteToConnection(site, lastBySite.get(site.id), verifiedBySite.get(site.id)));
   return [...legacy, ...resolved.map((row) =>
     installationToConnection({
       id: row.id,

@@ -245,7 +245,7 @@ export async function listOperations(
   input: {
     page?: number;
     pageSize?: number;
-    status?: OperationStatus | "all";
+    status?: OperationStatus | "all" | "active" | "history";
     type?: string;
     siteId?: string;
     search?: string;
@@ -255,11 +255,17 @@ export async function listOperations(
   const pageSize = Math.min(input.pageSize ?? 20, 100);
   const where: Prisma.OperationWhereInput = {
     tenantId,
-    ...(input.status && input.status !== "all" ? { status: input.status } : {}),
+    ...(input.search ? { OR: [
+      { type: { contains: input.search, mode: "insensitive" } },
+      { entityType: { contains: input.search, mode: "insensitive" } },
+    ] } : {}),
     ...(input.type ? { type: input.type } : {}),
     ...(input.siteId ? { siteId: input.siteId } : {}),
   };
 
+  if (input.status === "active") where.status = { in: ["queued", "running", "retrying"] };
+  else if (input.status === "history") where.status = { in: ["succeeded", "partial", "failed", "cancelled"] };
+  else if (input.status && input.status !== "all") where.status = input.status;
   const [total, items, countsRows] = await prisma.$transaction([
     prisma.operation.count({ where }),
     prisma.operation.findMany({
@@ -281,16 +287,6 @@ export async function listOperations(
     const count = row._count;
     const all = typeof count === "object" && count !== null && "_all" in count ? (count as { _all: number })._all : 0;
     counts[row.status] = all;
-  }
-  if (input.search) {
-    const query = input.search.toLowerCase();
-    return {
-      items: items.filter((item) => item.type.toLowerCase().includes(query) || item.entityType?.toLowerCase().includes(query)).map(toView),
-      page,
-      pageSize,
-      total,
-      counts,
-    };
   }
   return { items: items.map(toView), page, pageSize, total, counts };
 }

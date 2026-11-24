@@ -1,6 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AssistantApiService } from '../services/assistant-api.service';
@@ -19,16 +20,19 @@ const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
   standalone: true,
   imports: [DatePipe, AppIconComponent],
   template: `
+    <section class="au-page comp-settings">
     <header class="au-page__header">
+      <div><p class="au-page__eyebrow">Settings · Assistant</p>
       <h1 class="au-page__title">Assistant tools</h1>
       <p class="au-page__subtitle">What the copilot can do with your Studio data. Read tools answer from computed data. Write tools only prepare a change: nothing happens until you confirm it, and every confirmed change is audited.</p>
+      </div>
     </header>
 
     @if (error()) {
       <p class="au-alert au-alert--danger" role="alert">{{ error() }}</p>
     }
 
-    <section class="au-panel" aria-labelledby="comp-tools">
+    <section class="au-panel" aria-labelledby="comp-tools" [hidden]="!showTab('tools')">
       <div class="au-panel__header"><h2 id="comp-tools" class="au-panel__title">Editorial tools</h2></div>
       <div class="au-table-wrap"><table class="au-table">
         <thead>
@@ -56,7 +60,7 @@ const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
       </table></div>
     </section>
 
-    <section class="au-panel" aria-labelledby="comp-registry">
+    <section class="au-panel" aria-labelledby="comp-registry" [hidden]="!showTab('tools')">
       <div class="au-panel__header"><h2 id="comp-registry" class="au-panel__title">Registry</h2></div>
       <div class="au-table-wrap"><table class="au-table">
         <thead>
@@ -97,7 +101,7 @@ const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
       </table></div>
     </section>
 
-    <section class="au-panel" aria-labelledby="comp-history">
+    <section class="au-panel" aria-labelledby="comp-history" [hidden]="!showTab('runs')">
       <div class="au-panel__header"><h2 id="comp-history" class="au-panel__title">Your recent runs</h2></div>
       <div class="au-table-wrap"><table class="au-table">
         <thead>
@@ -126,9 +130,16 @@ const SCOPE_LABEL: Record<CopilotCompetency['scope'], string> = {
         </tbody>
       </table></div>
     </section>
+    </section>
   `,
+  styles: [`.comp-settings { display: grid; gap: 16px; }`],
 })
 export class CompetenciesPageComponent implements OnInit {
+  private readonly route = inject(ActivatedRoute);
+  showTab(tab: string): boolean {
+    const selected = this.route.snapshot.queryParamMap.get('tab');
+    return !selected || !['tools', 'runs'].includes(selected) || selected === tab;
+  }
   private readonly http = inject(HttpClient);
   private readonly copilot = inject(CopilotService);
   private readonly base = `${inject(STUDIO_ORIGIN)}/studio/api/backend/v2/copilot`;

@@ -86,6 +86,15 @@ test("operations are tenant-scoped and support filtering with status counts", as
   assert.ok(listA.items.length >= 1);
   assert.equal(typeof listA.counts.queued, "number");
 
+  const completed = await createOperation({ tenantId: tenantA, type: "text_generation", entityType: "grouped-search" });
+  await completeOperation(completed.id);
+  const active = await listOperations(tenantA, { status: "active", pageSize: 1 });
+  assert.equal(active.total, 1);
+  assert.equal(active.items[0]?.status, "queued");
+  const history = await listOperations(tenantA, { status: "history", search: "GROUPED", pageSize: 1 });
+  assert.equal(history.total, 1);
+  assert.equal(history.items[0]?.id, completed.id);
+
   const failed = await listOperations(tenantA, { status: "failed" });
   assert.ok(failed.items.every((item) => item.status === "failed"));
 });

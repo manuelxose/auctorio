@@ -50,6 +50,7 @@ import {
   listStudioSessionSites,
   listStudioRoles,
   listStudioUsers,
+  revokeStudioInvitation,
   revokeStudioSessionByToken,
   redeemStudioLaunchTicket,
   resetStudioPassword,
@@ -1916,7 +1917,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     if (["access_delegation_forbidden", "self_suspension_forbidden"].includes(error.message)) {
       return reply.code(403).send({ error: "forbidden", message: error.message });
     }
-    if (["last_admin", "last_owner", "system_role_locked", "member_already_exists"].includes(error.message)) {
+    if (["last_admin", "last_owner", "system_role_locked", "member_already_exists", "invitation_not_pending", "invitation_not_accepted"].includes(error.message)) {
       return reply.code(409).send({ error: "conflict", message: error.message });
     }
     if (["user_or_role_not_found", "role_not_found"].includes(error.message)) {
@@ -1954,6 +1955,20 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
   });
 
+  fastify.delete("/v2/users/:id/invitation", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "users.manage");
+    if (!context) return;
+    const userId = (request.params as { id: string }).id;
+    if (!isUuid(userId)) return badRequest(reply, "invalid user id");
+    try {
+      const revoked = await revokeStudioInvitation(context.tenantId, context, userId);
+      if (!revoked) return notFound(reply, "invitation not found");
+      return reply.code(204).send();
+    } catch (error) {
+      return accessMutationError(reply, error);
+    }
+  });
+
   fastify.patch("/v2/users/:id", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "users.manage");
     if (!context) {
@@ -1970,10 +1985,15 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return badRequest(reply, `status must be one of: ${STUDIO_USER_STATUSES.join(", ")}`);
     }
 
+    if (body.roleIds !== undefined && (!Array.isArray(body.roleIds) || body.roleIds.some((id) => typeof id !== "string" || !isUuid(id)))) {
+      return badRequest(reply, "roleIds must be an array of role ids");
+    }
+
     try {
       const user = await updateStudioUser(context.tenantId, context, userId, {
         displayName: parseOptionalString(body.displayName) ?? undefined,
         status: body.status,
+        roleIds: body.roleIds,
       });
       if (!user) {
         return notFound(reply, "user not found");

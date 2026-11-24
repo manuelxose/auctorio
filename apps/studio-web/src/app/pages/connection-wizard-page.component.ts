@@ -1482,7 +1482,10 @@ export class ConnectionWizardPageComponent implements OnInit, OnDestroy {
         if (this.installation?.kind === 'website' && siteId) {
           this.installation = response;
           this.onboardingSiteId = siteId;
-          this.loadSiteProfile(siteId);
+          void this.appContext.ensureSession(true).then(
+            () => this.loadSiteProfile(siteId),
+            () => this.toast.error('Destination activated. Refresh the page to update your site list.'),
+          );
           return;
         }
         this.goToConnections();

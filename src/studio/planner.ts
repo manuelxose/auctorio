@@ -18,6 +18,7 @@ import { runQualityRepairCycle } from "./quality-repair";
 import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import type { QaReportV2 } from "./qa";
 import { PLAN_LEAD_TIME_MINUTES, type AutomationMode } from "./automation-mode";
+import { ensureMonthlyPlan } from "./autopilot-plan";
 import { bulkApproveEditorialPlanItems } from "./editorial-plan";
 import { startProductionForPlanItem, startProductionForProject } from "./production/pipeline";
 
@@ -754,6 +755,7 @@ async function hasActiveSources(tenantId: string, siteId: string | null): Promis
 export type AutomationTickResult = {
   policiesProcessed: number;
   planItemsStarted: number;
+  monthPlansStarted: number;
   candidatesSelected: number;
   projectsAdvanced: number;
   socialJobsCreated: number;
@@ -766,6 +768,7 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
   const result: AutomationTickResult = {
     policiesProcessed: 0,
     planItemsStarted: 0,
+    monthPlansStarted: 0,
     candidatesSelected: 0,
     projectsAdvanced: 0,
     socialJobsCreated: 0,
@@ -794,6 +797,12 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
       where: { tenantId, ...(policy.siteId ? { siteId: policy.siteId } : {}), channel: "website", status: { in: ["draft", "ready", "scheduled"] } },
     });
 
+    // Autopilot keeps the next month planned; a failing plan must not stop the articles that are already due.
+    try {
+      if ((await ensureMonthlyPlan(policy)).started) result.monthPlansStarted += 1;
+    } catch (error) {
+      structuredEvent("planner.month_plan_failed", { tenantId, siteId: policy.siteId, error: error instanceof Error ? error.message : String(error) }, "error");
+    }
     result.planItemsStarted += await progressDuePlanItems(policy);
 
     // News sources are an Advanced feature: only sites with active Sources draft from SourceItems.

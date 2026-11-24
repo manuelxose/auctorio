@@ -18,6 +18,16 @@ if (-not (Test-Path node_modules/ts-node) -or -not (Test-Path apps/studio-web/no
 
 $studioPort = 4420
 $apiPort = 4301
+$postgresPort = 55432
+$excludedPorts = netsh interface ipv4 show excludedportrange protocol=tcp | ForEach-Object {
+  if ($_ -match '^\s*(\d+)\s+(\d+)') { [int]$Matches[1]..[int]$Matches[2] }
+}
+while (($postgresPort -in $excludedPorts) -or (Get-NetTCPConnection -LocalPort $postgresPort -State Listen -ErrorAction SilentlyContinue)) { $postgresPort++ }
+$env:POSTGRES_HOST_PORT = "$postgresPort"
+if (-not (Test-Path .env)) { throw 'No se pudo crear .env.' }
+$config = Get-Content .env -Raw
+$config = [regex]::Replace($config, '(?<=@127\.0\.0\.1:)\d+(?=/content_ai)', "$postgresPort")
+Set-Content .env $config -Encoding utf8
 
 # Stale ts-node/ng serve processes keep old code, hold the API port and lock the Prisma engine.
 # Kill them by port owner AND by command line (this repo's start-*.ts scripts and its ng serve), whole tree.

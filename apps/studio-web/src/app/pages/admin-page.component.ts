@@ -27,6 +27,7 @@ type AdminSection = 'overview' | 'workspaces' | 'ai';
       <app-empty-state *ngIf="denied" icon="lock" title="Platform admins only" text="Your account is not on the platform admin list (PLATFORM_ADMIN_EMAILS)."></app-empty-state>
 
       <div class="au-admin" *ngIf="!denied">
+        <p class="workspace-caption" *ngIf="section === 'overview' && overview">Platform overview · all workspaces</p>
         <div class="au-stats" *ngIf="section === 'overview' && overview">
           <div class="au-stat"><span class="au-stat__label">Workspaces</span><span class="au-stat__value">{{ overview.tenants }}</span><span class="au-stat__note">{{ overview.suspended }} suspended</span></div>
           <div class="au-stat"><span class="au-stat__label">Sites</span><span class="au-stat__value">{{ overview.sites }}</span></div>

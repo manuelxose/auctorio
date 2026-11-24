@@ -1,4 +1,4 @@
-import { CommonModule } from '@angular/common';
+import { CommonModule, DOCUMENT } from '@angular/common';
 import { Component, DestroyRef, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
@@ -13,11 +13,12 @@ import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import type {
   InternalLinkSuggestion,
   ProjectVersionDetail,
+  ReviewGateStage,
   StudioProjectDetailView,
   StudioPublication,
   StudioSocialContent,
 } from '../models/studio.models';
-import { stageLabel, stageTone } from '../utils/content-status';
+import { stageTone } from '../utils/content-status';
 import { articlePipeline, type PipelineStep } from '../utils/article-pipeline';
 
 type WorkspaceTab = 'content' | 'media' | 'seo' | 'social' | 'schedule' | 'history';
@@ -50,31 +51,32 @@ function hostOf(url: string): string {
   selector: 'app-content-workspace-page',
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AuRichEditorComponent, AppPopoverComponent],
-  styleUrls: ['./studio-page-kit.css', './content-workspace-page.component.css', './content-workspace-edit.css'],
+  styleUrls: ['./studio-page-kit.css', './content-workspace-page.component.css', './content-workspace-edit.css', './content-workspace-reference.css', './content-workspace-tabs.css'],
   template: `
     @if (project; as project) {
     <section class="sp art">
-      <a class="art-back" routerLink="/studio/content"><app-icon name="chevron-left"></app-icon>Articles</a>
+      <div class="art-crumb"><a class="art-back" routerLink="/studio/content"><app-icon name="chevron-left"></app-icon>Artículos</a><span aria-hidden="true">/</span><strong>Editor de contenido</strong></div>
 
       <header class="art-head">
         <div class="art-head__text">
+          <p class="art-overline">Espacio de trabajo editorial <span aria-hidden="true">/</span> {{ project.site.name }}</p>
           <h1 class="art-head__title">{{ project.title }}</h1>
           <p class="art-head__meta">
-            <span class="sp-status" [attr.data-tone]="stageTone(project.reviewGate)"><i class="sp-dot" aria-hidden="true"></i>{{ stageLabel(project.reviewGate) }}</span>
+            <span class="sp-status" [attr.data-tone]="stageTone(project.reviewGate)"><i class="sp-dot" aria-hidden="true"></i>{{ reviewLabels[project.reviewGate.stage] }}</span>
             <span>{{ project.site.name }}</span>
-            @if (project.origin === 'auto') { <span>Automatic</span> }
-            @if (project.latestVersion; as version) { <span>Version {{ version.versionNumber }}</span> }
+            @if (project.origin === 'auto') { <span>Generado automáticamente</span> }
+            @if (project.latestVersion; as version) { <span>Versión {{ version.versionNumber }}</span> }
           </p>
         </div>
         <div class="art-head__actions">
           @if (project.latestVersion) {
             <div class="sp-seg" role="group" aria-label="Mode">
-              <button type="button" class="sp-seg__item" [class.is-active]="!editing" [attr.aria-pressed]="!editing" (click)="editing = false">Preview</button>
-              <button type="button" class="sp-seg__item" [class.is-active]="editing" [attr.aria-pressed]="editing" (click)="editing = true">Edit</button>
+              <button type="button" class="sp-seg__item" [class.is-active]="!editing" [attr.aria-pressed]="!editing" (click)="editing = false; activeTab = 'content'"><app-icon name="eye" /> Vista previa</button>
+              <button type="button" class="sp-seg__item" [class.is-active]="editing" [attr.aria-pressed]="editing" (click)="editing = true; activeTab = 'content'"><app-icon name="edit" /> Editar</button>
             </div>
           }
           @if (canApprove) {
-            <button class="au-btn au-btn--primary" type="button" (click)="approve()"><app-icon name="circle-check"></app-icon>Approve</button>
+            <button class="au-btn au-btn--primary" type="button" (click)="approve()"><app-icon name="check"></app-icon>Aprobar artículo</button>
           } @else if (canPublish) {
             <button class="au-btn au-btn--primary" type="button" (click)="publish()"><app-icon name="publications"></app-icon>{{ published ? 'Republish' : 'Publish' }}</button>
           } @else if (!project.latestVersion && canGenerate) {
@@ -104,12 +106,17 @@ function hostOf(url: string): string {
         </div>
       </header>
 
-      <ol class="art-steps" aria-label="Article pipeline">
+      <ol class="art-steps" aria-label="Flujo editorial">
         @for (step of pipeline(); track step.id) {
           <li class="art-step" [class.is-done]="step.state === 'done'" [class.is-current]="step.state === 'current'" [class.is-failed]="step.state === 'failed'"
             [attr.aria-current]="step.state === 'current' || step.state === 'failed' ? 'step' : null">
             <span class="art-step__bar" aria-hidden="true"></span>
-            <span class="art-step__label">{{ step.label }}@if (step.state === 'failed') { · needs attention }</span>
+            <span class="art-step__indicator" aria-hidden="true">
+              @if (step.state === 'done') { <app-icon name="check" /> }
+              @else if (step.state === 'failed') { <app-icon name="warning" /> }
+              @else { {{ $index + 1 }} }
+            </span>
+            <span class="art-step__label">{{ step.label }}@if (step.state === 'failed') { <span class="sp-meta"> · Requiere atención</span> }</span>
           </li>
         }
       </ol>
@@ -117,16 +124,52 @@ function hostOf(url: string): string {
       @if (error) { <div class="au-banner au-banner--error"><app-icon name="warning"></app-icon><span class="au-banner__text">{{ error }}</span></div> }
       @if (notice) { <div class="au-banner au-banner--success"><app-icon name="circle-check"></app-icon><span class="au-banner__text">{{ notice }}</span></div> }
 
+      @if (project.latestVersion) {
+        <nav class="art-tabs" aria-label="Secciones del artículo">
+          @for (tab of tabs; track tab) {
+            <button type="button" [attr.aria-pressed]="tab === activeTab" (click)="activeTab = tab">
+              <app-icon [name]="tabIcons[tab]" /> {{ tabLabel(tab) }}
+              @if (tab === 'social' && social.length) { <span class="art-tab-count">{{ social.length }}</span> }
+            </button>
+          }
+        </nav>
+      }
+
       <div class="art-grid">
         <div class="art-main">
-          @if (!editing) {
+          @if (!editing && activeTab === 'content') {
             <article class="art-canvas" aria-label="Article preview">
               @if (project.latestVersion; as version) {
-                @if (coverUrl) { <img class="art-canvas__cover" [src]="coverUrl" alt="" /> }
-                <h2 class="art-canvas__title">{{ version.title }}</h2>
-                @if (version.excerpt) { <p class="art-canvas__excerpt">{{ version.excerpt }}</p> }
-                <!-- Already allowlist-sanitized server-side (html-sanitizer.ts); Angular's own pass would strip the cards' style/data-block. -->
-                <div class="art-canvas__body" [innerHTML]="trusted(version.bodyHtml)"></div>
+                <header class="art-panel-heading">
+                  <div><p class="art-overline">Artículo · {{ version.updatedAt | date: 'd MMM yyyy' }}</p><h2>Contenido del artículo</h2><p>Previsualiza el resultado final antes de aprobarlo.</p></div>
+                  <div class="art-panel-heading__actions">
+                    <span class="art-save-state" aria-live="polite"><app-icon name="clock" />
+                      {{ saving ? 'Guardando…' : hasPendingEdits ? 'Cambios pendientes' : 'Todos los cambios guardados' }}
+                    </span>
+                    <button class="au-btn au-btn--secondary au-btn--sm art-ai-action" type="button" (click)="editing = true; revisionOpen = true"><app-icon name="sparkles" /> Mejorar con IA</button>
+                  </div>
+                </header>
+                <div class="art-preview-content">
+                  @if (coverUrl; as cover) {
+                    <img class="art-preview-image" [src]="cover" alt="Portada del artículo" />
+                  } @else {
+                    <div class="art-preview-cover" aria-hidden="true">
+                      <div class="art-cover-copy">
+                        <span class="art-cover-site">{{ project.site.name }}@if (draftContentType === 'guide') { · Guía completa }</span>
+                        <strong>{{ project.title || version.title }}</strong>
+                        @if (version.excerpt) { <p>{{ version.excerpt }}</p> }
+                        <span class="art-cover-symbol"><app-icon name="globe" /></span>
+                      </div>
+                    </div>
+                  }
+                  <div class="art-preview-prose">
+                    <p class="art-overline">Actualizado el {{ version.updatedAt | date: 'd MMM yyyy' }}@if (readingMinutes) { · {{ readingMinutes }} min de lectura }</p>
+                    <h2 class="art-canvas__title">{{ version.title }}</h2>
+                    @if (version.excerpt) { <p class="art-canvas__excerpt">{{ version.excerpt }}</p> }
+                    <!-- Already allowlist-sanitized server-side (html-sanitizer.ts); Angular's own pass would strip the cards' style/data-block. -->
+                    <div class="art-canvas__body" [innerHTML]="trusted(version.bodyHtml)"></div>
+                  </div>
+                </div>
               } @else {
                 <div class="au-empty">
                   <span class="au-empty__icon"><app-icon name="sparkles"></app-icon></span>
@@ -136,173 +179,251 @@ function hostOf(url: string): string {
               }
             </article>
           } @else {
-            <div class="sp-seg art-tabs" role="tablist" aria-label="Edit sections">
-              @for (tab of tabs; track tab) {
-                <button type="button" role="tab" class="sp-seg__item" [class.is-active]="tab === activeTab" [attr.aria-selected]="tab === activeTab" (click)="activeTab = tab">{{ tabLabel(tab) }}</button>
-              }
-            </div>
-
             @switch (activeTab) {
               @case ('content') {
-                <section class="art-card">
+                <section class="art-card art-edit-card">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Artículo</p><h2>Contenido del artículo</h2><p>Edita el título, el extracto y el cuerpo antes de aprobarlo.</p></div>
+                    <span class="art-save-state" aria-live="polite"><app-icon name="clock" /> {{ saving ? 'Guardando…' : hasPendingEdits ? 'Cambios pendientes' : 'Todos los cambios guardados' }}</span>
+                  </header>
                   @if (!project.latestVersion) {
                     <p class="sp-muted">The editor opens when the first version is ready.</p>
                   } @else {
-                    <label class="au-field"><span class="au-field__label">Title</span><input class="au-input" type="text" [(ngModel)]="draftTitle" /></label>
-                    <label class="au-field"><span class="au-field__label">Excerpt</span><textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea></label>
+                    <div class="art-edit-fields">
+                      <label class="au-field"><span class="au-field__label">Título</span><input class="au-input" type="text" [(ngModel)]="draftTitle" /></label>
+                      <label class="au-field"><span class="au-field__label">Extracto</span><textarea class="au-textarea" rows="2" [(ngModel)]="draftExcerpt"></textarea></label>
+                    </div>
                     <div class="au-field">
-                      <span class="au-field__label">Article</span>
+                      <span class="au-field__label">Cuerpo del artículo</span>
                       <au-rich-editor [(ngModel)]="draftBody" (ngModelChange)="bodyDirty = true" (autosave)="onAutosave()"></au-rich-editor>
                     </div>
                     <div class="art-actions">
-                      <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save' }}</button>
-                      <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save(); editing = false">Save &amp; close</button>
-          <button class="au-btn au-btn--ghost" type="button" (click)="patchDrafts(project); editing = false">Discard</button>
-                      <span class="sp-muted">{{ bodyDirty ? 'Unsaved changes, autosaved every few minutes' : '' }}</span>
+                      <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Guardando…' : 'Guardar' }}</button>
+                      <button class="au-btn au-btn--secondary" type="button" [disabled]="saving" (click)="save(true)">Guardar y cerrar</button>
+                      <button class="au-btn au-btn--ghost" type="button" (click)="patchDrafts(project); editing = false">Descartar cambios</button>
                     </div>
                   }
-                  <details class="art-ai">
-                    <summary>Ask the AI to improve this</summary>
-                    <textarea class="au-textarea" rows="2" placeholder="e.g. Add a section about prices" [(ngModel)]="feedback" aria-label="What to improve"></textarea>
-                    <button class="au-btn au-btn--secondary" type="button" [disabled]="revising" (click)="revise()"><app-icon name="sparkles"></app-icon>{{ revising ? 'Revising…' : 'Revise with AI' }}</button>
+                  <details #revisionPanel class="art-ai art-section-card" [open]="revisionOpen" (toggle)="revisionOpen = revisionPanel.open">
+                    <summary>Mejorar con IA</summary>
+                    <textarea class="au-textarea" rows="2" placeholder="Por ejemplo, añade una sección sobre precios" [(ngModel)]="feedback" aria-label="Qué quieres mejorar"></textarea>
+                    <button class="au-btn au-btn--secondary art-ai-action" type="button" [disabled]="revising" (click)="revise()"><app-icon name="sparkles"></app-icon>{{ revising ? 'Revisando…' : 'Solicitar revisión' }}</button>
                   </details>
                 </section>
               }
               @case ('media') {
-                <section class="art-card">
-                  <h3 class="art-card__title">Cover</h3>
-                  @if (project.latestVersion?.assetVariants?.length) {
-                    <div class="art-media">
-                      @for (variant of project.latestVersion?.assetVariants ?? []; track variant.id) {
-                        <figure class="art-media__item"><img [src]="variant.publicUrl || ''" [alt]="variant.kind" loading="lazy" /><figcaption class="sp-num sp-muted">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</figcaption></figure>
-                      }
+                <section class="art-tab-panel">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Recursos visuales</p><h2>Multimedia</h2><p>Gestiona la portada, las variantes y las imágenes integradas en el artículo.</p></div>
+                    <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="generateAsset()"><app-icon name="media" /> Generar portada</button>
+                  </header>
+                  <div class="art-tab-body">
+                    <div class="art-media-feature">
+                      @if (coverUrl) { <img class="art-media-hero" [src]="coverUrl" alt="Portada del artículo" /> }
+                      @else { <div class="art-media-hero art-media-placeholder"><app-icon name="media" /><strong>{{ project.title }}</strong></div> }
+                      <div>
+                        <p class="art-overline">Imagen principal</p><h3>Portada del artículo</h3>
+                        <p class="sp-muted">{{ project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing' ? 'Generando la portada…' : imageNeedsRetry ? imageError : coverUrl ? 'Imagen para acompañar la publicación del artículo.' : 'El artículo aún no tiene portada.' }}</p>
+                        @if (imageNeedsRetry) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="retryImage()"><app-icon name="refresh" /> Reintentar imagen</button> }
+                      </div>
                     </div>
-                  } @else {
-                    <p class="sp-muted">{{ project.latestVersion?.image?.status === 'queued' || project.latestVersion?.image?.status === 'processing' ? 'Generating the cover…' : imageNeedsRetry ? imageError : 'No cover yet.' }}</p>
-                  }
-                  <div class="art-actions"><button class="au-btn au-btn--secondary" type="button" (click)="generateAsset()"><app-icon name="media"></app-icon>{{ coverUrl ? 'Generate a new cover' : 'Generate cover' }}</button></div>
-                  <h3 class="art-card__title">Images in the article · <span class="sp-num">{{ inlineImageCount }}/{{ INLINE_IMAGE_MIN }}</span></h3>
-                  <p class="sp-muted">Every article carries at least {{ INLINE_IMAGE_MIN }} images, placed after the first paragraph of a section.</p>
-                  @if (inlineImageCount < INLINE_IMAGE_MIN) {
-                    <div class="art-actions"><button class="au-btn au-btn--primary" type="button" (click)="generateInlineImages()"><app-icon name="sparkles"></app-icon>Generate {{ INLINE_IMAGE_MIN - inlineImageCount }} missing</button></div>
-                  }
+                    @if (project.latestVersion?.assetVariants?.length) {
+                      <section class="art-section-card">
+                        <h3>Variantes de portada</h3>
+                        <div class="art-media">
+                          @for (variant of project.latestVersion?.assetVariants ?? []; track variant.id) {
+                            <figure class="art-media__item">
+                              @if (variant.publicUrl) { <img [src]="variant.publicUrl" [alt]="variant.kind" loading="lazy" /> }
+                              <figcaption class="sp-num sp-muted">{{ variant.kind }} · {{ variant.width }}×{{ variant.height }}</figcaption>
+                            </figure>
+                          }
+                        </div>
+                      </section>
+                    }
+                    <section class="art-section-card">
+                      <h3>Imágenes del artículo <span class="art-tab-count">{{ inlineImageCount }}/{{ INLINE_IMAGE_MIN }}</span></h3>
+                      <p class="sp-muted">Objetivo editorial de {{ INLINE_IMAGE_MIN }} imágenes integradas en el contenido.</p>
+                      @if (articleImages.length) {
+                        <div class="art-media art-inline-media" aria-label="Imágenes insertadas en el artículo">
+                          @for (image of articleImages; track $index) {
+                            <figure class="art-media__item">
+                              <img [src]="image.src" [alt]="image.alt" loading="lazy" />
+                              <figcaption class="sp-muted">{{ image.alt || 'Imagen ' + ($index + 1) }}</figcaption>
+                            </figure>
+                          }
+                        </div>
+                      } @else {
+                        <p class="sp-muted">El contenido todavía no tiene imágenes insertadas.</p>
+                      }
+                      @if (inlineImageCount < INLINE_IMAGE_MIN) {
+                        <button class="au-btn au-btn--secondary au-btn--sm art-ai-action" type="button" (click)="generateInlineImages()"><app-icon name="sparkles" /> Generar imágenes pendientes</button>
+                      }
+                    </section>
+                  </div>
                 </section>
               }
               @case ('seo') {
-                <section class="art-card">
+                <section class="art-tab-panel">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Visibilidad en buscadores</p><h2>SEO del artículo</h2><p>Metadatos, intención de búsqueda y enlazado interno.</p></div>
+                    @if (project.latestVersion) { <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="saving" (click)="save()"><app-icon name="check" />{{ saving ? 'Guardando…' : 'Guardar SEO' }}</button> }
+                  </header>
+                  <div class="art-tab-body">
                   @if (project.latestVersion) {
-                    <h3 class="art-card__title">Search preview</h3>
-                    <div class="au-serp">
-                      <p class="au-serp__title">{{ draftSeoTitle || project.latestVersion.title || 'SEO title' }}</p>
+                    <div class="au-serp art-section-card art-serp-card">
+                      <h3><app-icon name="search" /> Vista previa en Google</h3>
+                      <p class="au-serp__title">{{ draftSeoTitle || project.latestVersion.title }}</p>
                       <p class="au-serp__url">{{ serpUrl }}</p>
-                      <p class="au-serp__desc">{{ draftSeoDescription || 'The meta description appears here.' }}</p>
+                      <p class="au-serp__desc">{{ draftSeoDescription || 'Aquí se mostrará la metadescripción.' }}</p>
                     </div>
-                    <div class="au-field-grid">
+                    <section class="art-section-card" (input)="metaDirty = true" (change)="metaDirty = true">
+                    <h3>Metadatos y estrategia</h3>
+                    <div class="au-field-grid art-seo-fields">
                       <label class="au-field">
-                        <span class="au-field__label">SEO title</span>
+                        <span class="au-field__label">Título SEO</span>
                         <input class="au-input" type="text" [(ngModel)]="draftSeoTitle" />
                         <span class="au-field__hint" [class.au-hint--over]="draftSeoTitle.length > 60">{{ draftSeoTitle.length }} / 60</span>
                       </label>
-                      <label class="au-field"><span class="au-field__label">Canonical URL</span><input class="au-input" type="text" [(ngModel)]="draftCanonicalUrl" placeholder="https://" /></label>
+                      <label class="au-field"><span class="au-field__label">Slug</span><input class="au-input" type="text" [(ngModel)]="draftSlug" /></label>
+                      <label class="au-field art-field-wide"><span class="au-field__label">Metadescripción</span><textarea class="au-textarea" rows="3" [(ngModel)]="draftSeoDescription"></textarea><span class="au-field__hint" [class.au-hint--over]="draftSeoDescription.length > 160">{{ draftSeoDescription.length }} / 160</span></label>
+                      <label class="au-field art-field-wide"><span class="au-field__label">URL canónica</span><input class="au-input" type="text" [(ngModel)]="draftCanonicalUrl" placeholder="https://" /></label>
                       <label class="au-field">
-                        <span class="au-field__label">Search intent</span>
-                        <select class="au-select" [(ngModel)]="draftPrimaryIntent"><option value="">None</option>@for (intent of intentOptions; track intent) { <option [value]="intent">{{ intent }}</option> }</select>
+                        <span class="au-field__label">Intención de búsqueda</span>
+                        <select class="au-select" [(ngModel)]="draftPrimaryIntent"><option value="">Sin especificar</option>@for (intent of intentOptions; track intent) { <option [value]="intent">{{ intent }}</option> }</select>
                       </label>
                       <label class="au-field">
-                        <span class="au-field__label">Content type</span>
-                        <select class="au-select" [(ngModel)]="draftContentType"><option value="">None</option>@for (format of formatOptions; track format) { <option [value]="format">{{ format }}</option> }</select>
+                        <span class="au-field__label">Formato</span>
+                        <select class="au-select" [(ngModel)]="draftContentType"><option value="">Sin especificar</option>@for (format of formatOptions; track format) { <option [value]="format">{{ format }}</option> }</select>
                       </label>
-                      <label class="au-field"><span class="au-field__label">Primary keyword</span><input class="au-input" type="text" [(ngModel)]="draftPrimaryKeyword" /></label>
-                      <label class="au-field"><span class="au-field__label">Target query</span><input class="au-input" type="text" [(ngModel)]="draftTargetQuery" /></label>
-                      <label class="au-field"><span class="au-field__label">Secondary keywords</span><input class="au-input" type="text" [(ngModel)]="draftSecondaryKeywords" placeholder="Comma-separated" /></label>
-                      <label class="au-field"><span class="au-field__label">Topic cluster</span><input class="au-input" type="text" [(ngModel)]="draftTopicCluster" /></label>
+                      <label class="au-field"><span class="au-field__label">Palabra clave principal</span><input class="au-input" type="text" [(ngModel)]="draftPrimaryKeyword" /></label>
+                      <label class="au-field"><span class="au-field__label">Consulta objetivo</span><input class="au-input" type="text" [(ngModel)]="draftTargetQuery" /></label>
+                      <label class="au-field"><span class="au-field__label">Palabras clave secundarias</span><input class="au-input" type="text" [(ngModel)]="draftSecondaryKeywords" placeholder="Separadas por comas" /></label>
+                      <label class="au-field"><span class="au-field__label">Clúster temático</span><input class="au-input" type="text" [(ngModel)]="draftTopicCluster" /></label>
                     </div>
                     <div class="art-actions">
-                      <button class="au-btn au-btn--primary" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save' }}</button>
-                      <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('seoTitle')"><app-icon name="sparkles"></app-icon>Improve SEO title</button>
-                      <button class="au-btn au-btn--ghost" type="button" (click)="aiImprove('metaDescription')"><app-icon name="sparkles"></app-icon>Improve meta description</button>
+                      <button class="au-btn au-btn--secondary au-btn--sm art-ai-action" type="button" (click)="aiImprove('seoTitle')"><app-icon name="sparkles" /> Mejorar título SEO</button>
+                      <button class="au-btn au-btn--secondary au-btn--sm art-ai-action" type="button" (click)="aiImprove('metaDescription')"><app-icon name="sparkles" /> Mejorar metadescripción</button>
                     </div>
-                    <h3 class="art-card__title">Internal links from your sitemap</h3>
-                    <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="linksLoading" (click)="loadLinkSuggestions()"><app-icon name="link"></app-icon>{{ linksLoading ? 'Looking up…' : 'Suggest internal links' }}</button>
+                    </section>
+                    <section class="art-section-card">
+                    <h3>Enlaces internos del sitemap</h3>
+                    <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="linksLoading" (click)="loadLinkSuggestions()"><app-icon name="link" />{{ linksLoading ? 'Buscando…' : 'Sugerir enlaces internos' }}</button>
                     @if (linkSuggestions.length) {
                       <ul class="art-list">
                         @for (suggestion of linkSuggestions; track suggestion.url) {
-                          <li><span><strong>{{ suggestion.title }}</strong><span class="sp-meta">{{ suggestion.url }} · {{ suggestion.reason }}</span></span><button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="insertLinkSuggestion(suggestion)">Insert</button></li>
+                          <li><span><strong>{{ suggestion.title }}</strong><span class="sp-meta">{{ suggestion.url }} · {{ suggestion.reason }}</span></span><button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="insertLinkSuggestion(suggestion)">Insertar</button></li>
                         }
                       </ul>
                     } @else if (linksChecked) {
-                      <p class="sp-muted">No page of the site inventory matches the current keyword.</p>
+                      <p class="sp-muted">No hay páginas del sitio que coincidan con la palabra clave.</p>
                     }
+                    </section>
                   } @else {
-                    <p class="sp-muted">Generate the article first; SEO works on the latest version.</p>
+                    <p class="sp-muted">Genera el artículo para editar el SEO de su última versión.</p>
                   }
+                  </div>
                 </section>
               }
               @case ('social') {
-                <section class="art-card">
-                  <div class="art-actions art-actions--top">
-                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.x" /> X</label>
-                    <label class="au-checkbox"><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
-                    <select class="au-select art-select" [(ngModel)]="socialThreadLength" [disabled]="!socialChannels.x" aria-label="X thread length">
-                      <option [ngValue]="1">Single post</option><option [ngValue]="2">2 posts</option><option [ngValue]="3">3 posts</option><option [ngValue]="5">5 posts</option>
-                    </select>
-                    <button class="au-btn au-btn--primary" type="button" [disabled]="socialGenerating" (click)="generateSocial()"><app-icon name="sparkles"></app-icon>{{ socialGenerating ? 'Writing…' : 'Write social posts' }}</button>
+                <section class="art-tab-panel">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Distribución social</p><h2>Publicaciones para redes</h2><p>Genera, revisa y aprueba piezas específicas para cada canal.</p></div>
+                    <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="socialGenerating || (!socialChannels.x && !socialChannels.instagram)" (click)="generateSocial()"><app-icon name="sparkles" />{{ socialGenerating ? 'Generando…' : 'Generar publicaciones' }}</button>
+                  </header>
+                  <div class="art-tab-body">
+                  <div class="art-section-card art-social-config">
+                    <div><strong>Plataformas</strong>
+                      <div class="art-actions art-platform-options">
+                        <label><input type="checkbox" [(ngModel)]="socialChannels.x" /> X</label>
+                        <label><input type="checkbox" [(ngModel)]="socialChannels.instagram" /> Instagram</label>
+                      </div>
+                    </div>
+                    <label class="au-field"><span class="au-field__label">Longitud del hilo de X</span>
+                      <select class="au-select" [(ngModel)]="socialThreadLength" [disabled]="!socialChannels.x">
+                        <option [ngValue]="1">Publicación individual</option><option [ngValue]="2">2 publicaciones</option><option [ngValue]="3">3 publicaciones</option><option [ngValue]="5">5 publicaciones</option>
+                      </select>
+                    </label>
                   </div>
                   @for (piece of social; track piece.id) {
-                    <article class="art-social">
+                    <article class="art-social art-section-card">
                       <header class="art-social__head">
-                        <span>{{ piece.channel }} · {{ piece.contentType }}@if (piece.threadPosition !== null) { · post {{ piece.threadPosition + 1 }} }</span>
-                        <span class="sp-status" [attr.data-tone]="piece.editorialStatus === 'approved' ? 'success' : piece.editorialStatus === 'rejected' ? 'danger' : 'warning'"><i class="sp-dot" aria-hidden="true"></i>{{ piece.editorialStatus }}</span>
+                        <span class="art-social-logo" [class.art-social-logo--instagram]="piece.channel === 'instagram'">
+                          @if (piece.channel === 'facebook') { <app-icon name="share" /> }
+                          @else { <svg aria-hidden="true" viewBox="0 0 24 24"><use [attr.href]="'/social-studio-icons.svg#soc-logo-' + piece.channel" /></svg> }
+                        </span>
+                        <strong>{{ piece.channel === 'x' ? 'X' : (piece.channel | titlecase) }}@if (piece.threadPosition !== null) { · publicación {{ piece.threadPosition + 1 }} }</strong>
+                        <span class="sp-status" [attr.data-tone]="piece.editorialStatus === 'approved' ? 'success' : piece.editorialStatus === 'rejected' ? 'danger' : 'warning'"><i class="sp-dot" aria-hidden="true"></i>{{ piece.editorialStatus === 'approved' ? 'Aprobada' : piece.editorialStatus === 'rejected' ? 'Rechazada' : 'Borrador' }}</span>
                         @if (piece.contentType !== 'x_thread' || piece.threadPosition !== null) {
                           <span class="sp-num" [class.art-over]="isOverLimit(piece)">{{ piece.characterCount ?? 0 }}/{{ limitFor(piece) }}</span>
                         }
                       </header>
-                      <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)" [attr.aria-label]="piece.channel + ' post'"></textarea>
-                      <footer class="art-actions">
-                        <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="approveSocial(piece)"><app-icon name="circle-check"></app-icon>Approve</button>
-                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="saveSocialPiece(piece)">Save</button>
-                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="regenerateSocialPiece(piece)"><app-icon name="refresh"></app-icon>Rewrite</button>
+                      <textarea class="au-textarea" rows="3" [ngModel]="piece.body" (ngModelChange)="updateSocialBody(piece, $event)" [attr.aria-label]="'Texto de ' + piece.channel"></textarea>
+                      <footer class="art-actions art-social-footer">
+                        <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="regenerateSocialPiece(piece)"><app-icon name="refresh" /> Reescribir</button>
+                        <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="saveSocialPiece(piece)">Guardar</button>
+                        <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="approveSocial(piece)"><app-icon name="circle-check" /> Aprobar</button>
                       </footer>
                     </article>
                   } @empty {
-                    <p class="sp-muted">No social posts yet. Write X and Instagram posts from this article.</p>
+                    <p class="sp-muted">Todavía no hay publicaciones para este artículo.</p>
                   }
+                  </div>
                 </section>
               }
               @case ('schedule') {
-                <section class="art-card">
-                  <p class="sp-muted">Where and when this article goes out. Dates are set in Calendar; publish now, retry or cancel in Results.</p>
+                <section class="art-tab-panel">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Planificación y destinos</p><h2>Programación</h2><p>Consulta los destinos y gestiona las acciones de publicación.</p></div>
+                    <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }"><app-icon name="calendar" /> Abrir calendario</a>
+                  </header>
+                  <div class="art-tab-body">
+                    <div class="art-schedule-banner">
+                      <span class="art-schedule-icon"><app-icon name="calendar" /></span>
+                      <div><h3>Publicación del artículo</h3><p>Organiza las fechas en Calendario y consulta el estado de cada destino aquí.</p></div>
+                    </div>
                   @if (publications.length) {
-                    <ul class="art-list">
+                    <ul class="art-list art-destinations">
                       @for (publication of publications; track publication.id) {
                         <li>
-                          <span><strong>{{ publication.channel }} · {{ destinationLabel(publication) }}</strong><span class="sp-meta">{{ publication.scheduledFor ? (publication.scheduledFor | date: 'medium') : 'Not scheduled' }}</span>
+                          <span><strong>{{ destinationLabel(publication) }}</strong><span class="sp-meta">{{ publication.scheduledFor ? (publication.scheduledFor | date: 'medium') : 'Sin fecha programada' }}</span>
                             @if (publication.lastError) { <span class="sp-meta sp-meta--danger">{{ publication.lastError }}</span> }</span>
                           <span class="sp-status" [attr.data-tone]="pubTone(publication.status)"><i class="sp-dot" aria-hidden="true"></i>{{ publication.status }}</span>
                         </li>
                       }
                     </ul>
+                  } @else {
+                    <div class="art-section-card"><h3>Destinos de publicación</h3><p class="sp-muted">El artículo todavía no tiene publicaciones web programadas.</p></div>
                   }
                   <div class="art-actions">
-                    <a class="au-btn au-btn--primary au-btn--sm" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }"><app-icon name="calendar"></app-icon>Schedule in Calendar</a>
-                    @if (publications.length) { <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/results" [queryParams]="{ projectId: projectId }">Manage in Results</a> }
+                    @if (canPublish) { <button class="au-btn au-btn--primary au-btn--sm" type="button" (click)="publish()"><app-icon name="publications" />{{ published ? 'Republicar' : 'Publicar ahora' }}</button> }
+                    @if (canSyncDraft) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="syncDraft()"><app-icon name="upload" /> Sincronizar borrador</button> }
+                    @if (publications.length) { <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/results" [queryParams]="{ projectId: projectId }">Ver en Resultados</a> }
+                  </div>
                   </div>
                 </section>
               }
               @case ('history') {
-                <section class="art-card">
-                  <ul class="art-list">
+                <section class="art-tab-panel">
+                  <header class="art-panel-heading">
+                    <div><p class="art-overline">Control de cambios</p><h2>Historial de versiones</h2><p>Revisa cada versión del artículo antes de continuar.</p></div>
+                    <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="refresh()"><app-icon name="refresh" /> Actualizar historial</button>
+                  </header>
+                  <div class="art-tab-body art-history-layout">
+                  <ul class="art-versions">
                     @for (version of project.versions; track version.id) {
-                      <li [class.is-active]="version.id === selectedVersionId">
-                        <button type="button" class="art-version" (click)="selectVersion(version)">
-                          <span class="sp-num">v{{ version.versionNumber }}</span>
-                          <span>{{ version.title }}</span>
-                          <span class="sp-muted">{{ version.status.replace('_', ' ') }} · {{ version.updatedAt | date: 'short' }}</span>
+                      <li>
+                        <button type="button" class="art-version" [attr.aria-pressed]="version.id === (selectedVersionId ?? project.versions[0].id)" (click)="selectVersion(version)">
+                          <span class="art-version-number">v{{ version.versionNumber }}</span>
+                          <span><strong>{{ version.title }}</strong><small>{{ version.updatedAt | date: 'short' }}</small></span>
                         </button>
                       </li>
                     }
                   </ul>
-                  @if (selectedVersion) { <pre class="au-diff">{{ selectedVersion.bodyHtml }}</pre> }
+                  @if (selectedVersion ?? project.versions[0]; as version) {
+                    <div class="art-section-card art-version-preview"><p class="art-overline">Versión {{ version.versionNumber }}</p><h3>{{ version.title }}</h3><p class="sp-muted">{{ version.updatedAt | date: 'medium' }}</p><pre class="au-diff">{{ version.bodyHtml }}</pre></div>
+                  } @else {
+                    <p class="sp-muted">Todavía no hay versiones del artículo.</p>
+                  }
+                  </div>
                 </section>
               }
             }
@@ -310,15 +431,23 @@ function hostOf(url: string): string {
         </div>
 
         <aside class="art-rail" aria-label="Article panel">
-          <a class="art-row art-row--link" routerLink="/studio/settings/writing"><app-icon name="settings"></app-icon>Customize future articles<app-icon name="chevron-right"></app-icon></a>
+          <header class="art-rail-heading">
+            <div><p class="art-overline">Panel de control</p><h2>Estado del artículo</h2></div>
+            <a class="au-btn au-btn--secondary au-btn--icon art-ai-action" routerLink="/studio/settings/writing" aria-label="Configurar próximos artículos"><app-icon name="settings" /></a>
+          </header>
 
           <section class="art-box" aria-labelledby="art-checks">
             <button type="button" class="art-box__toggle" (click)="checksOpen = !checksOpen" [attr.aria-expanded]="checksOpen" aria-controls="art-checks-list">
-              <span class="sp-status" [attr.data-tone]="checklist.length && checklistPassed === checklist.length ? 'success' : 'warning'"><i class="sp-dot" aria-hidden="true"></i></span>
-              <span id="art-checks" class="art-box__title">Built for search</span>
-              <span class="sp-num sp-muted">{{ checklist.length ? checklistPassed + '/' + checklist.length + ' checks' : 'Not checked yet' }}</span>
+              <span class="art-check-icon"><app-icon [name]="checklist.length && checklistPassed === checklist.length ? 'circle-check' : 'scan'" /></span>
+              <span id="art-checks" class="art-box__title">{{ canApprove ? 'Preparado para buscadores' : 'Preparación para buscadores' }}
+                <small>{{ checklist.length ? checklistPassed + ' de ' + checklist.length + ' comprobaciones superadas' : 'Pendiente de comprobación' }}</small>
+              </span>
               <app-icon [name]="checksOpen ? 'chevron-up' : 'chevron-down'"></app-icon>
             </button>
+            @if (checklist.length) {
+              <div class="art-editorial-score"><strong>{{ (checklistPassed / checklist.length * 100) | number:'1.0-0' }}%</strong><span>Calidad editorial</span></div>
+              <span class="art-bar art-quality-fill" aria-hidden="true"><i [style.width.%]="checklistPassed / checklist.length * 100"></i></span>
+            }
             @if (checksOpen) {
               <ul class="art-checks" id="art-checks-list">
                 @for (issue of blockingIssues; track issue.message) {
@@ -328,28 +457,28 @@ function hostOf(url: string): string {
                   <li [class.is-fail]="!item.passed" [title]="item.detail"><app-icon [name]="item.passed ? 'circle-check' : 'warning'"></app-icon><span>{{ item.label }}<span class="sp-meta">{{ item.detail }}</span></span></li>
                 }
               </ul>
-              @if (canFixWithAi) { <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="fixWithAi()"><app-icon name="sparkles"></app-icon>Fix with AI</button> }
+              @if (canFixWithAi) { <button class="au-btn au-btn--secondary au-btn--sm art-box__btn art-ai-action" type="button" (click)="fixWithAi()"><app-icon name="sparkles"></app-icon>Corregir con IA</button> }
             }
           </section>
 
           <section class="art-box">
-            <h2 class="art-label">Published URL</h2>
+            <h2 class="art-label">URL publicada</h2>
             @if (project.latestPublicationJob?.externalUrl) {
               <a class="art-url" [href]="externalLink" target="_blank" rel="noopener" [title]="externalLink"><i class="sp-dot" data-tone="success" aria-hidden="true"></i><span>{{ externalLink }}</span><app-icon name="external"></app-icon></a>
             } @else {
-              <p class="sp-muted art-tight">Not published yet · <a class="au-link" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }">Schedule</a></p>
+              <p class="sp-muted art-tight">Aún no publicado · <a class="au-link" routerLink="/studio/calendar" [queryParams]="{ projectId: projectId }">Programar</a></p>
             }
           </section>
 
           @if (project.latestVersion) {
             <section class="art-box">
-              <h2 class="art-label">Article data</h2>
+              <h2 class="art-label">Datos del artículo</h2>
               <div class="art-kw">
-                <span class="sp-muted">Target keyword</span>
+                <span class="sp-muted">Palabra clave objetivo</span>
                 <strong>{{ draftPrimaryKeyword || '—' }}</strong>
                 <div class="art-kw__metrics">
-                  <span><span class="sp-muted">Searches/mo</span><b class="sp-num">{{ project.keywordMetrics?.searchVolume != null ? (project.keywordMetrics!.searchVolume | number) : '—' }}</b></span>
-                  <span><span class="sp-muted">Difficulty</span><b class="sp-num">{{ project.keywordMetrics?.keywordDifficulty ?? '—' }}</b>
+                  <span><span class="sp-muted">Búsquedas/mes</span><b class="sp-num">{{ project.keywordMetrics?.searchVolume != null ? (project.keywordMetrics!.searchVolume | number) : '—' }}</b></span>
+                  <span><span class="sp-muted">Dificultad</span><b class="sp-num">{{ project.keywordMetrics?.keywordDifficulty ?? '—' }}</b>
                     @if (difficultyWord(project.keywordMetrics?.keywordDifficulty); as word) { <em class="art-chip" [attr.data-tone]="word.tone"><i class="sp-dot" aria-hidden="true"></i>{{ word.label }}</em> }</span>
                 </div>
               </div>
@@ -361,24 +490,25 @@ function hostOf(url: string): string {
             </section>
 
             <section class="art-box">
+              <h2 class="art-label">URL y metadatos</h2>
               <label class="art-label" for="art-slug">Slug</label>
               <input class="au-input" id="art-slug" [(ngModel)]="draftSlug" (ngModelChange)="metaDirty = true" placeholder="article-slug" />
               <span class="art-hint" [class.is-over]="draftSlug.length > 60">{{ draftSlug.length }}/60</span>
-              <label class="art-label" for="art-meta">Meta description <span class="sp-num" [class.art-ok]="metaOk" [class.art-warn]="!metaOk">{{ draftSeoDescription.length }}/160</span></label>
+              <label class="art-label" for="art-meta">Metadescripción <span class="sp-num" [class.art-ok]="metaOk" [class.art-warn]="!metaOk">{{ draftSeoDescription.length }}/160</span></label>
               <textarea class="au-textarea" id="art-meta" rows="4" [(ngModel)]="draftSeoDescription" (ngModelChange)="metaDirty = true"></textarea>
               <span class="art-bar" aria-hidden="true"><i [style.width.%]="metaPercent" [class.art-ok]="metaOk"></i></span>
-              @if (metaDirty) { <button class="au-btn au-btn--primary au-btn--sm art-box__btn" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Saving…' : 'Save slug and meta' }}</button> }
+              @if (metaDirty) { <button class="au-btn au-btn--primary au-btn--sm art-box__btn" type="button" [disabled]="saving" (click)="save()">{{ saving ? 'Guardando…' : 'Guardar metadatos' }}</button> }
             </section>
 
             <section class="art-box">
-              <h2 class="art-label">Cover image</h2>
-              @if (coverUrl) { <img class="art-cover" [src]="coverUrl" alt="Cover image" /> } @else { <p class="sp-muted art-tight">No cover yet</p> }
+              <h2 class="art-label">Portada</h2>
+              @if (coverUrl) { <img class="art-cover" [src]="coverUrl" alt="Portada del artículo" /> } @else { <p class="sp-muted art-tight">Todavía no hay portada</p> }
               @if (coverUrl && project.latestVersion?.image?.metadataStripped) { <p class="art-badge" title="EXIF, XMP and C2PA metadata were removed before storing the image"><app-icon name="check"></app-icon>No AI watermark metadata</p> }
-              <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="generateAsset()"><app-icon name="refresh"></app-icon>{{ coverUrl ? 'Replace cover' : 'Generate cover' }}</button>
+              <button class="au-btn au-btn--secondary au-btn--sm art-box__btn" type="button" (click)="generateAsset()"><app-icon name="refresh"></app-icon>{{ coverUrl ? 'Reemplazar portada' : 'Generar portada' }}</button>
             </section>
 
             @if (whyThisTopic) {
-              <details class="art-box art-why"><summary class="art-label">Why this topic</summary><p class="sp-muted">{{ whyThisTopic }}</p></details>
+              <details class="art-box art-why"><summary class="art-label">¿Por qué este tema?</summary><p class="sp-muted">{{ whyThisTopic }}</p></details>
             }
           }
         </aside>
@@ -396,7 +526,9 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   private readonly toast = inject(ToastService);
   private readonly destroyRef = inject(DestroyRef);
   private readonly domSanitizer = inject(DomSanitizer);
+  private readonly document = inject(DOCUMENT);
   private trustedCache: { html: string; safe: SafeHtml } | null = null;
+  private articleImagesCache?: { html: string; images: Array<{ src: string; alt: string }> };
 
   /** The stored body (server-sanitized) as trusted HTML, cached so change detection does not re-render it. */
   trusted(html: string | null | undefined): SafeHtml {
@@ -407,9 +539,11 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
 
   project: StudioProjectDetailView | null = null;
   activeTab: WorkspaceTab = 'content';
-  /** M5: the article opens as a preview; editing (the tabs) is a separate mode. */
+  /** The article opens as a preview. */
   editing = false;
+  revisionOpen = false;
   tabs: WorkspaceTab[] = ['content', 'media', 'seo', 'social', 'schedule', 'history'];
+  readonly tabIcons = { content: 'content', media: 'media', seo: 'search', social: 'share', schedule: 'calendar', history: 'history' } as const;
   error = '';
   notice = '';
   saving = false;
@@ -599,11 +733,25 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
   }
 
   get coverUrl(): string | null {
-    return this.project?.latestVersion?.assetVariants?.find((variant) => variant.publicUrl)?.publicUrl ?? null;
+    const version = this.project?.latestVersion;
+    return version?.assetVariants?.find((variant) => variant.kind === 'hero' && variant.publicUrl)?.publicUrl
+      || version?.assetUrl || version?.assetVariants?.find((variant) => variant.publicUrl)?.publicUrl || null;
   }
 
   get wordCount(): number {
     return this.draftBody.replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+  }
+
+  get readingMinutes(): number {
+    const text = this.project?.latestVersion?.bodyHtml?.replace(/<[^>]+>/g, ' ').trim();
+    return text ? Math.ceil(text.split(/\s+/).length / 220) : 0;
+  }
+
+  get hasPendingEdits(): boolean {
+    const version = this.project?.latestVersion;
+    return Boolean(this.bodyDirty || this.metaDirty || (version &&
+      (this.draftTitle !== version.title || this.draftExcerpt !== (version.excerpt ?? '') ||
+        this.draftSeoTitle !== (version.seoTitle ?? '') || this.draftSeoDescription !== (version.seoDescription ?? ''))));
   }
 
   readonly INLINE_IMAGE_MIN = 3;
@@ -611,6 +759,19 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
 
   get inlineImageCount(): number {
     return (this.draftBody.match(/<img[^>]*>/gi) ?? []).length;
+  }
+
+  get articleImages(): Array<{ src: string; alt: string }> {
+    const html = this.draftBody;
+    if (this.articleImagesCache?.html === html) return this.articleImagesCache.images;
+    const template = this.document.createElement('template');
+    template.innerHTML = html;
+    const images = Array.from(template.content.querySelectorAll('img[src]')).flatMap((image) => {
+      const src = image.getAttribute('src')?.trim();
+      return src ? [{ src, alt: image.getAttribute('alt')?.trim() ?? '' }] : [];
+    });
+    this.articleImagesCache = { html, images };
+    return images;
   }
 
   get imageNeedsRetry(): boolean {
@@ -652,9 +813,8 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
       next: (project) => {
         this.project = project;
         this.patchDrafts(project);
-        if (!this.checksOpenedOnce) {
-          // Open the checks when one fails, the first time the page loads.
-          this.checksOpen = this.checklist.some((item) => !item.passed) || this.blockingIssues.length > 0;
+        if (!this.checksOpenedOnce && (this.checklist.length || this.blockingIssues.length)) {
+          this.checksOpen = true;
           this.checksOpenedOnce = true;
         }
         if (this.isWorkInFlight(project)) {
@@ -735,7 +895,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
     }
   }
 
-  save(): void {
+  save(closeAfter = false): void {
     const version = this.project?.latestVersion;
     if (!version) {
       return;
@@ -753,7 +913,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
       })
       .subscribe({
         next: () => {
-          this.saveStrategyMetadata();
+          this.saveStrategyMetadata(closeAfter);
         },
         error: (err) => {
           this.saving = false;
@@ -762,7 +922,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
       });
   }
 
-  private saveStrategyMetadata(): void {
+  private saveStrategyMetadata(closeAfter: boolean): void {
     const current = this.project?.metadata ?? {};
     const merged = {
       ...current,
@@ -779,6 +939,7 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
       next: () => {
         this.saving = false;
         this.bodyDirty = false;
+        if (closeAfter) this.editing = false;
         this.notice = 'Saved. Quality checks refreshed.';
         this.load();
       },
@@ -995,17 +1156,17 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
   tabLabel(tab: WorkspaceTab): string {
     switch (tab) {
       case 'content':
-        return 'Content';
+        return 'Contenido';
       case 'media':
-        return 'Media';
+        return 'Multimedia';
       case 'seo':
         return 'SEO';
       case 'social':
-        return 'Social';
+        return 'Redes sociales';
       case 'schedule':
-        return 'Publishing';
+        return 'Programación';
       case 'history':
-        return 'History';
+        return 'Historial';
     }
   }
 
@@ -1095,10 +1256,30 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
     return body?.message ? String(body.message) : 'Request failed.';
   }
 
-  stageLabel = stageLabel;
+  readonly reviewLabels: Record<ReviewGateStage, string> = {
+    awaiting_generation: 'Borrador',
+    qa_blocked: 'Calidad por revisar',
+    needs_review: 'En revisión',
+    ready_to_approve: 'Pendiente de aprobación',
+    approved: 'Aprobado',
+    publish_queued: 'Publicación programada',
+    publish_failed: 'Error de publicación',
+    published: 'Publicado',
+  };
   stageTone = stageTone;
 
   pipeline(): PipelineStep[] {
-    return this.project ? articlePipeline(this.project.reviewGate.stage) : [];
+    if (!this.project) return [];
+    const [brief, draft, qa, review, approved, queued, published] = articlePipeline(this.project.reviewGate.stage);
+    const publicationState = published.state === 'done' ? 'done'
+      : queued.state === 'failed' ? 'failed'
+      : approved.state === 'todo' ? 'todo' : 'current';
+    return [
+      { ...brief, label: 'Planificación' },
+      { ...draft, label: 'Redacción' },
+      { ...qa, label: 'SEO y calidad' },
+      { ...review, label: 'Revisión' },
+      { id: 'publication', label: 'Publicación', state: publicationState },
+    ];
   }
 }

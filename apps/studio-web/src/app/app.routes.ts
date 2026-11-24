@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { studioAuthGuard, studioRoleGuard } from './guards/studio-guards';
+import { studioAuthGuard, studioPermissionGuard } from './guards/studio-guards';
 
 /**
  * Simplified product routes. Old editorial surface routes redirect to the
@@ -122,8 +122,8 @@ export const routes: Routes = [
       {
         path: 'operations',
         loadComponent: () => import('./pages/operations-page.component').then((m) => m.OperationsPageComponent),
-        canActivate: [studioRoleGuard],
-        data: { requiredRole: 'admin', studioMeta: { section: 'Operations', title: 'System health' } },
+        canActivate: [studioPermissionGuard],
+        data: { studioMeta: { section: 'Operations', title: 'System health' } },
       },
       {
         path: 'notifications',
@@ -151,8 +151,8 @@ export const routes: Routes = [
       {
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
-        canActivate: [studioRoleGuard],
-        data: { adminSections: ['team', 'roles'], studioMeta: { section: 'Settings', title: 'Settings' } },
+        canActivate: [studioPermissionGuard],
+        data: { studioMeta: { section: 'Settings', title: 'Settings' } },
       },
 
       // ── Compatibility redirects (old surface → new destination) ─────

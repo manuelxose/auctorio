@@ -4,6 +4,7 @@ import { STUDIO_ORIGIN } from '../infrastructure/http/studio-origin.token';
 
 export type OpportunityPlatform = 'reddit' | 'quora';
 export type OpportunityState = 'to_reply' | 'replied' | 'dismissed';
+export type ReplyTone = 'helpful' | 'casual' | 'expert';
 
 export interface Opportunity {
   id: string;
@@ -13,6 +14,7 @@ export interface Opportunity {
   community: string | null;
   keyword: string;
   votes: number | null;
+  score: number;
   publishedAt: string | null;
   status: OpportunityState;
   draft: string | null;
@@ -34,8 +36,10 @@ export class EngagementApiService {
     return `${this.base}/sites/${siteId}/engagement${path}?platform=${platform}`;
   }
 
-  list(siteId: string, platform: OpportunityPlatform) {
-    return this.http.get<{ items: Opportunity[]; settings: OpportunitySettings; searchConfigured: boolean }>(this.url(siteId, platform));
+  list(siteId: string, platform: OpportunityPlatform, status?: OpportunityState) {
+    return this.http.get<{ items: Opportunity[]; settings: OpportunitySettings; searchConfigured: boolean }>(
+      this.url(siteId, platform), status ? { params: { status } } : {},
+    );
   }
 
   saveSettings(siteId: string, platform: OpportunityPlatform, settings: OpportunitySettings) {
@@ -46,8 +50,8 @@ export class EngagementApiService {
     return this.http.post<{ operationId: string }>(this.url(siteId, platform, '/refresh'), {});
   }
 
-  draft(siteId: string, platform: OpportunityPlatform, id: string) {
-    return this.http.post<{ draft: string }>(this.url(siteId, platform, `/${id}/draft`), {});
+  draft(siteId: string, platform: OpportunityPlatform, id: string, options: { tone: ReplyTone; language?: 'es' | 'en' }) {
+    return this.http.post<{ draft: string }>(this.url(siteId, platform, `/${id}/draft`), options);
   }
 
   update(siteId: string, platform: OpportunityPlatform, id: string, patch: { status?: OpportunityState; draft?: string }) {
