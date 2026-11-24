@@ -12,8 +12,7 @@ import { extractPageFromHtml } from "./site-intelligence/crawler";
 
 /** Page excerpts are read by our own crawler, not by an SEO provider. */
 const PAGE_CACHE = "web";
-const RESOURCE = "serp_organic";
-const TTL_MS = 7 * 24 * 60 * 60 * 1000; // stored SERPs refresh every few weeks
+const TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 /** Page text plus the outlet's own name (og:site_name), when the page declares one. */
 type PageReader = (url: string) => Promise<{ content: string; siteName: string | null } | string | null>;
@@ -110,7 +109,7 @@ export function serpResultsToFacts(results: SerpResult[], exclude: { domains: st
 }
 
 export async function serpSourceFacts(
-  input: { tenantId: string; siteId: string; locale: string | null; keyword: string; exclude: { domains: string[]; urls: string[] }; max: number },
+  input: { tenantId: string; siteId: string; locale: string | null; keyword: string; siteType?: string; /** The topic moves: search results age in days, not weeks. */ timeSensitive?: boolean; exclude: { domains: string[]; urls: string[] }; max: number },
   fetchImpl: typeof fetch = fetch,
   readPage: PageReader = readPageText,
 ): Promise<LedgerFact[]> {
@@ -119,15 +118,11 @@ export async function serpSourceFacts(
   try {
     const route = await seoRoute("serp_organic", input.locale);
     if (!route.provider) return [];
-    const key = `${route.marketKey}|${keyword}`;
-    const cached = await lookupProviderCache(input.tenantId, route.provider.id, RESOURCE, key);
-    let results = cached.hit ? (cached.negative ? [] : (cached.payload as SerpResult[])) : null;
-    if (!results) {
-      const { data, meta } = await acquireSeo(route, "serp_organic", { keyword }, { tenantId: input.tenantId, siteId: input.siteId, kind: "serp_sources", resource: RESOURCE, fetchImpl });
-      results = data;
-      if (results.length || !meta.partial) await storeProviderCache(input.tenantId, route.provider.id, RESOURCE, key, results, { ttlMs: TTL_MS, negative: results.length === 0 });
-    }
-    return await withPageExcerpts(input.tenantId, serpResultsToFacts(results, input.exclude, input.max), keyword, readPage);
+    const { data } = await acquireSeo(route, "serp_organic", { keyword }, {
+      tenantId: input.tenantId, siteId: input.siteId, kind: "serp_sources", fetchImpl, priority: "planning",
+      decision: { importance: "normal", siteType: input.siteType, urgency: input.timeSensitive ? "time_sensitive" : "evergreen" },
+    });
+    return await withPageExcerpts(input.tenantId, serpResultsToFacts(data, input.exclude, input.max), keyword, readPage);
   } catch (error) {
     structuredEvent("serp_sources.failed", { tenantId: input.tenantId, siteId: input.siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
     return [];

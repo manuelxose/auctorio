@@ -145,7 +145,8 @@ export async function lookupProviderCache(
   cacheKey: string,
   now = new Date(),
 ): Promise<CacheLookup> {
-  const coalesceKey = `${tenantId}|${cacheKey}`;
+  // The resource is part of it: "guia tv" of one resource must never answer for another.
+  const coalesceKey = `${tenantId}|${providerKey}|${resourceType}|${cacheKey}`;
   const inFlight = coalescing.get(coalesceKey);
   if (inFlight) {
     return inFlight;

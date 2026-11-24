@@ -4,6 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
+import { enqueueEditorialPlanGeneration } from "../src/studio/editorial-plan";
 import { progressDuePlanItems, runAutomationTick } from "../src/studio/planner";
 
 const prisma = getPrismaClient();
@@ -114,6 +115,31 @@ async function cleanupWorkspace(tenantId: string): Promise<void> {
   await prisma.site.deleteMany({ where: { tenantId } });
   await prisma.tenant.delete({ where: { id: tenantId } });
 }
+
+test("a plan whose operation is gone when it fails does not raise an unhandled rejection", async () => {
+  const workspace = await createWorkspace();
+  const unhandled: unknown[] = [];
+  const listen = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", listen);
+  try {
+    // No site intelligence: the generation fails in the background.
+    const { planId, operationId } = await enqueueEditorialPlanGeneration({
+      tenantId: workspace.tenantId, siteId: workspace.siteId, dateFrom: new Date(), dateTo: new Date(Date.now() + 7 * 86_400_000), publicationCount: 1, channels: ["website"],
+    } as Parameters<typeof enqueueEditorialPlanGeneration>[0]);
+    await prisma.operation.delete({ where: { id: operationId } });
+    for (let i = 0; i < 100; i += 1) {
+      if ((await prisma.editorialPlan.findUniqueOrThrow({ where: { id: planId } })).status === "failed") break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.equal((await prisma.editorialPlan.findUniqueOrThrow({ where: { id: planId } })).status, "failed");
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    assert.deepEqual(unhandled, []);
+  } finally {
+    process.off("unhandledRejection", listen);
+    await prisma.editorialPlan.deleteMany({ where: { tenantId: workspace.tenantId } });
+    await cleanupWorkspace(workspace.tenantId);
+  }
+});
 
 test("autopilot: qa_passed is auto-approved and scheduled without any manual step", async () => {
   const workspace = await createWorkspace();

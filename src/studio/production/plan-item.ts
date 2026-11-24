@@ -280,6 +280,8 @@ export async function preparePlanItemInput(
         tenantId,
         siteId: site.id,
         locale: site.locale,
+        siteType: site.type,
+        timeSensitive: item.newsOrEvergreen === "news",
         keyword: item.primaryKeyword,
         exclude: {
           domains: [hostOf(site.baseUrl), ...competitors.map(({ domain }) => hostOf(`https://${domain.replace(/^https?:\/\//, "")}`))].filter((domain): domain is string => Boolean(domain)),

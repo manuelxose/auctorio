@@ -1032,7 +1032,7 @@ async function runPlanGenerationInBackground(
         errorCode: "plan_generation_failed",
         errorSummary: error instanceof Error ? error.message : String(error),
         retryable: true,
-      });
+      }).catch(() => undefined); // the operation may be gone with its workspace; nobody awaits this
       structuredEvent(
         "editorial_plan.generation.background_error",
         { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, normalizedError: error instanceof Error ? error.message : String(error) },
@@ -1533,7 +1533,8 @@ export async function updateEditorialPlanItem(
     },
   });
   if (!keywordChanged || !nextKeyword) return updated;
-  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId);
+  // Ordinary editing never buys data: only what is already stored.
+  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId, undefined, { reuseOnly: true });
   return (await prisma.editorialPlanItem.findUnique({ where: { id: item.id } })) ?? updated;
 }
 

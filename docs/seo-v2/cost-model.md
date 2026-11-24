@@ -30,19 +30,33 @@ AnyAPI prices were confirmed by its own quote endpoint on 2026-11-24 for all six
 test billed 0.15378 USD, equal in the wallet (0.16 → 0.00622) and in `ai_spend_events`. YouTube was billed 0.0005, not its 0.00034
 list price: another lane served it, within the quoted maximum.
 
+## Budgets in force without configuration (USD)
+
+| Budget | Limit |
+|---|---|
+| Platform | 25 a month, 5 a day |
+| Each provider | 20 a month |
+| Each plan, per workspace | 5 a month |
+| Each workspace | 5 a month, 2 a day |
+| Each site | 3 a month (recurring), 2 in all while onboarding (14 days), 1 a day, 0.5 a month for `search_volume` |
+
+They are initial assumptions, editable in the panel. All apply at once. Budgets start counting when SEO-V2-02 is deployed: earlier spending
+has no reservations. Months and days are UTC. Background work may use 80 % of a recurring limit.
+
 ## Accounting rules
 
-- `quote()` gives an estimate and a maximum. `null` means unknown: such a provider cannot win automatic routing and cannot be
-  live-tested. DataForSEO's `serp_organic` is the only such case; its existing use (one cached call per guide) is preserved.
-- What the provider reports as billed is recorded in `ai_spend_events` (provider, resource, tenant, site), on failures too.
-- An unreported cost is recorded at the quote's maximum, never zero, and logged (`seo.cost_unreported`).
-- A failure whose cost is unknown (a timeout) is logged (`seo.cost_unknown_after_error`), not recorded. SEO-V2-02 must reserve
-  the maximum before the call and settle it afterwards.
-- Billing above the quote is logged as an error (`seo.billed_over_quote`).
+- Prices live in `pricing.ts` (`SEO_PRICING_VERSION`); each reservation records its version. `null` means unknown: **nothing is
+  bought**. DataForSEO's `serp_organic` is the only such case, so guides get no SERP sources until an administrator records a ceiling.
+- A recorded ceiling never lowers a list price. Billing above the maximum settles the real amount, is logged (`seo.billed_over_quote`)
+  and closes the operation until an administrator confirms a new maximum.
+- An unreported cost is settled at the maximum, never zero (`seo.cost_unreported`).
+- A failure with an unknown bill (a timeout) becomes `uncertain` and keeps holding its maximum.
+- DataForSEO failures use the cost in their envelope; without one, only refused credentials or balance count as free.
 - Live test: explicit authorization, known maximum price within the administrator's ceiling, and never above 0.25 USD.
 
-## Not enforced yet (SEO-V2-02)
+## Where the saving comes from
 
-Hard global, tenant and site budgets; reservation before spending; cross-request deduplication; lifting `SEO_LOCKS`.
-Today DataForSEO spending is bounded only by each consumer's own caps and cache: at most 9 candidate calls per plan (30 days)
-and one SERP plus one video per guide (7 days). At list price a full, uncached plan is 9 × 0.024 = 0.216 USD, plus metrics.
+- A full, uncached plan costs at most 9 × 0.024 = 0.216 USD. Calls stop once there are as many candidates as the plan can use.
+- Volume, CPC, difficulty and intent that came with discovery are not bought again; a missing difficulty does not trigger an overview.
+- `search_volume` costs 0.09 USD flat: it waits until at least 10 keywords need it.
+- Freshness: keyword data 75 days (60–90), rankings 60 (30–90), SERP and YouTube 21 (14–30), time-sensitive SERP 3. Nothing is refreshed on a schedule.

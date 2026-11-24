@@ -16,9 +16,9 @@ import {
   type SeoErrorCode,
   type SeoMarket,
   type SeoProvider,
-  type SeoQuote,
   type SeoRequests,
 } from "./contract";
+import { priceQuote } from "./pricing";
 
 const ID = "anyapi";
 const BASE = "https://api.getanyapi.com/v1/run/";
@@ -34,12 +34,7 @@ type Operation<C extends SeoCapability> = {
   /** Name of the array inside output.data. */
   list: string;
   rows(rows: Row[], data: Row, request: SeoRequests[C]): Parsed<C>;
-  quote(request: SeoRequests[C]): SeoQuote;
 };
-
-// Published prices (catalog, 2026-11-24). max is sent as max_cost_usd, so AnyAPI refuses, uncharged, a dearer call.
-const linear = (base: number, per: number, units: number, unit: string): SeoQuote => ({ estimatedUsd: base + per * units, maxUsd: base + per * units, unit, units });
-const flat = (usd: number, maxUsd: number): SeoQuote => ({ estimatedUsd: usd, maxUsd, unit: "request", units: 1 });
 
 const isoSeconds = (value: unknown): string | null => {
   const seconds = num(value);
@@ -86,21 +81,18 @@ const operations: { [C in SeoCapability]: Operation<C> } = {
       const parsed = metricRows(rows);
       return { ...parsed, dropped: parsed.dropped + skipped(keywords) };
     },
-    quote: ({ keywords }) => linear(0.01438, 0.00016, keywords.length, "base + keyword"),
   },
   keyword_suggestions: {
     sku: "seo.keyword_ideas", // same semantics as the Labs keyword_ideas in use; seo.keyword_suggestions only extends the phrase
     list: "ideas",
     body: ({ seed, limit, market }) => ({ keywords: [seed], limit, orderBy: "volume_desc", ...geo(market) }),
     rows: (rows) => metricRows(rows),
-    quote: ({ limit }) => linear(0.01496, 0.00016, limit, "base + result"),
   },
   ranked_keywords: {
     sku: "seo.ranked_keywords",
     list: "rankedKeywords",
     body: ({ domain, limit, cursor, market }) => ({ target: domain, limit, offset: pageNumber(cursor, 0), orderBy: "volume_desc", ...geo(market) }),
     rows: (rows, _data, { limit, cursor }) => ({ ...metricRows(rows), nextCursor: rows.length === limit ? String(pageNumber(cursor, 0) + limit) : null }),
-    quote: ({ limit }) => linear(0.01496, 0.00016, limit, "base + result"),
   },
   serp_organic: {
     sku: "google.search",
@@ -121,7 +113,6 @@ const operations: { [C in SeoCapability]: Operation<C> } = {
       const hidden = valid.length - direct.length;
       return { data, dropped: rows.length - hidden - data.length, nextCursor: rows.length ? String(pageNumber(cursor, 1) + 1) : null, notes: hidden ? [`redirect_links_dropped:${hidden}`] : [] };
     },
-    quote: () => flat(0.0005, 0.002),
   },
   search_volume: {
     sku: "seo.search_volume",
@@ -135,7 +126,6 @@ const operations: { [C in SeoCapability]: Operation<C> } = {
       });
       return { data, dropped: rows.length - named.length + skipped(keywords) };
     },
-    quote: () => flat(0.108, 0.108),
   },
   youtube_search: {
     sku: "youtube.search",
@@ -149,7 +139,6 @@ const operations: { [C in SeoCapability]: Operation<C> } = {
         nextCursor: text(data.nextCursor),
       };
     },
-    quote: () => flat(0.00034, 0.0012),
   },
 };
 
@@ -172,12 +161,12 @@ async function call<C extends SeoCapability>(capability: C, request: SeoRequests
   const operation = operations[capability] as unknown as Operation<C>;
   const body = operation.body(request);
   if (Array.isArray(body.keywords) && body.keywords.length === 0) throw new SeoProviderError("bad_request", `${ID}: no keyword can be sent (over ${MAX_KEYWORD_CHARS} characters)`, ID, 0);
-  const quote = operation.quote(request);
+  const { maxUsd } = anyApiProvider.quote(capability, request);
   assertNetworkAllowed(fetchImpl, ID);
   let response: Response;
   let payload: Row | null;
   try {
-    response = await fetchImpl(`${BASE}${operation.sku}?max_cost_usd=${Number(quote.maxUsd!.toFixed(6))}`, {
+    response = await fetchImpl(`${BASE}${operation.sku}?max_cost_usd=${Number(maxUsd!.toFixed(6))}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${secretOf(KEY_ENV)}`, "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -256,6 +245,9 @@ export const anyApiProvider: SeoProvider = {
     if (capability === "youtube_search") return "global"; // the API has no market: the same results serve every locale
     return GOOGLE_LOCATION_CODES[market.country] ? `${market.country}|${market.language}` : null;
   },
-  quote: (capability, request) => (operations[capability] as unknown as Operation<typeof capability>).quote(request),
+  quote(capability, request) {
+    const { keywords, limit } = request as { keywords?: string[]; limit?: number };
+    return priceQuote(ID, capability, keywords?.length ?? limit ?? 1);
+  },
   run: call,
 };

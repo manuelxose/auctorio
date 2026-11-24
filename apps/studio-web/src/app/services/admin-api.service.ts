@@ -21,12 +21,26 @@ export type AdminSeoProvider = {
   capabilities: Record<string, { supported: boolean; dataKind?: string; methodology?: string; degraded?: string | null; reason?: string }>;
   licensing: { termsUrl: string; checkedAt: string; commercialUse: string; storage: string; crossTenantSharing: string; upstream: string; notes: string[] };
   rateLimit: string | null; liveVerification: 'pending' | 'partial' | 'verified';
-  health: { lastSuccessAt: string | null; lastErrorAt: string | null; lastErrorCode: string | null; lastErrorMessage: string | null };
+  health: { lastSuccessAt: string | null; lastErrorAt: string | null; lastErrorCode: string | null; lastErrorMessage: string | null; circuit: { until: string; reason: string | null } | null };
 };
 export type AdminSeo = {
   mode: string; modes: { id: string; locked: boolean }[]; routing: Record<string, string>; maxTestSpendUsd: number;
   providers: AdminSeoProvider[]; capabilities: { id: string; provider: string | null; reason: string | null }[];
 };
+
+export type AdminSeoBudgetKey = { scope: string; scopeId: string; operation: string; allowance: string; period: string };
+export type AdminSeoBudget = AdminSeoBudgetKey & { limitUsd: number; source: 'default' | 'custom'; name: string | null };
+export type AdminSeoUse = AdminSeoBudget & { extraUsd: number; actualUsd: number; heldUsd: number; remainingUsd: number };
+export type AdminSeoGovernor = {
+  emergency: { active: boolean; reason: string | null; at: string | null };
+  budgets: AdminSeoBudget[]; use: AdminSeoUse[];
+  pricing: { version: string; entries: { providerId: string; capability: string; perRequestUsd: number | null; perItemUsd: number; currency: string; verifiedAt: string; status: string; override: { maxRequestUsd?: number } | null }[] };
+  policy: { freshness: Record<string, { min: number; days: number; max: number }> } & Record<string, unknown>;
+  authorizations: (AdminSeoBudgetKey & { id: string; amountUsd: number; reason: string; expiresAt: string; name: string | null })[];
+  uncertain: { id: string; providerId: string; operation: string; tenant: string | null; site: string | null; maxUsd: number; reason: string | null; createdAt: string }[];
+  targets: { tenants: { id: string; name: string; plan: string | null }[]; sites: { id: string; name: string; tenantId: string }[] };
+};
+export type AdminSeoLedger = { page: number; total: number; items: { id: string; providerId: string; operation: string; state: string; maxUsd: number; actualUsd: number | null; createdAt: string }[] };
 
 /** Platform (SaaS) administration; every call is refused by the server unless the user is a platform admin. */
 @Injectable({ providedIn: 'root' })
@@ -55,14 +69,41 @@ export class AdminApiService {
   setSeoControl(patch: { mode?: string; routing?: Record<string, string> }): Observable<unknown> {
     return this.http.put(`${this.base}/seo/control`, patch);
   }
-  updateSeoProvider(id: string, patch: { enabled?: boolean; priority?: number }): Observable<unknown> {
+  updateSeoProvider(id: string, patch: { enabled?: boolean; priority?: number; resetCircuit?: true }): Observable<unknown> {
     return this.http.patch(`${this.base}/seo/providers/${id}`, patch);
   }
   setSeoCredential(id: string, envName: string, value: string): Observable<unknown> {
     return this.http.put(`${this.base}/seo/providers/${id}/credentials`, { envName, value });
   }
-  testSeoProvider(id: string, input: { capability: string; locale: string; maxSpendUsd: number; authorize: true }): Observable<{ rows: number; costUsd: number | null }> {
+  testSeoProvider(id: string, input: { capability: string; locale: string; maxSpendUsd: number; authorize: true; requestId: string }): Observable<{ rows: number; costUsd: number | null }> {
     return this.http.post<{ rows: number; costUsd: number | null }>(`${this.base}/seo/providers/${id}/verify`, input);
+  }
+  seoGovernor(): Observable<AdminSeoGovernor> {
+    return this.http.get<AdminSeoGovernor>(`${this.base}/seo/governor`);
+  }
+  seoLedger(page: number, state: string): Observable<AdminSeoLedger> {
+    return this.http.get<AdminSeoLedger>(`${this.base}/seo/ledger`, { params: { page, ...(state ? { state } : {}) } });
+  }
+  setSeoEmergencyStop(active: boolean, reason: string): Observable<unknown> {
+    return this.http.put(`${this.base}/seo/emergency-stop`, { active, reason });
+  }
+  setSeoBudget(key: AdminSeoBudgetKey, limitUsd: number | null): Observable<unknown> {
+    return this.http.put(`${this.base}/seo/budgets`, { ...key, limitUsd });
+  }
+  authorizeSeoSpend(key: AdminSeoBudgetKey, amountUsd: number, days: number, reason: string): Observable<unknown> {
+    return this.http.post(`${this.base}/seo/authorizations`, { ...key, amountUsd, days, reason });
+  }
+  revokeSeoAuthorization(id: string): Observable<unknown> {
+    return this.http.delete(`${this.base}/seo/authorizations/${id}`);
+  }
+  resolveSeoReservation(id: string, actualUsd: number, note: string): Observable<unknown> {
+    return this.http.post(`${this.base}/seo/reservations/${id}/resolve`, { actualUsd, note });
+  }
+  setSeoPrice(providerId: string, capability: string, maxRequestUsd: number | null, source: string): Observable<unknown> {
+    return this.http.put(`${this.base}/seo/pricing`, { providerId, capability, maxRequestUsd, source });
+  }
+  setSeoPolicy(policy: Record<string, unknown>): Observable<unknown> {
+    return this.http.put(`${this.base}/seo/policy`, { policy });
   }
   ai(): Observable<AdminAi> {
     return this.http.get<AdminAi>(`${this.base}/ai`);
