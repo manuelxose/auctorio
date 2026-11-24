@@ -4,16 +4,14 @@
 
 import { randomUUID } from "node:crypto";
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import { normalizeKeyword, type KeywordMetrics } from "../infrastructure/seo/contract";
-import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
+import { SeoProviderError, normalizeKeyword, type KeywordMetrics } from "../infrastructure/seo/contract";
 import { acquireSeo, seoRoute, type SeoRoute } from "./seo-manager";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import type { EditorialPlanningContext } from "./editorial-plan-context";
 import { structuredEvent } from "../shared/utils/logger";
 
 const prisma = getPrismaClient();
-const TTL_MS = 30 * 24 * 60 * 60 * 1000;
-// Cost caps per plan: ≤5 seeds + ≤3 competitors → ≤9 calls of ≤100 rows (docs/seo-v2/cost-model.md), cached 30 days.
+// Cost caps per plan: ≤5 seeds + ≤3 competitors → ≤9 calls of ≤100 rows (docs/seo-v2/cost-model.md), reused while fresh.
 const MAX_SEEDS = 5;
 const MAX_COMPETITORS = 3;
 const ROWS_PER_CALL = 100;
@@ -169,23 +167,19 @@ export function rankKeywordCandidates(
   return out.slice(0, limit);
 }
 
-async function cachedCall(
+async function keywordRows(
   tenantId: string,
-  siteId: string,
+  site: { id: string; type: string },
   route: SeoRoute,
-  resource: "keyword_ideas" | "ranked_keywords",
+  capability: "keyword_suggestions" | "ranked_keywords",
   subject: string,
-  fetchImpl: typeof fetch,
-): Promise<KeywordMetrics[]> {
-  const key = `${route.marketKey}|${subject}`;
-  const cached = await lookupProviderCache(tenantId, route.provider.id, resource, key);
-  if (cached.hit && !cached.stale) return cached.negative ? [] : (cached.payload as KeywordMetrics[]);
-  const scope = { tenantId, siteId, kind: "keyword_metrics", resource, fetchImpl };
-  const { data: items, meta } = resource === "keyword_ideas"
-    ? await acquireSeo(route, "keyword_suggestions", { seed: subject, limit: ROWS_PER_CALL }, scope)
-    : await acquireSeo(route, "ranked_keywords", { domain: subject, limit: ROWS_PER_CALL }, scope);
-  if (items.length || !meta.partial) await storeProviderCache(tenantId, route.provider.id, resource, key, items.length ? items : undefined, { ttlMs: TTL_MS, negative: items.length === 0 });
-  return items;
+  options: { fetchImpl: typeof fetch; reuseOnly: boolean },
+): Promise<{ rows: KeywordMetrics[]; stale: boolean }> {
+  const scope = { tenantId, siteId: site.id, kind: "keyword_metrics", priority: "planning" as const, decision: { importance: "normal" as const, siteType: site.type }, ...options };
+  const { data, meta } = capability === "keyword_suggestions"
+    ? await acquireSeo(route, capability, { seed: subject, limit: ROWS_PER_CALL }, scope)
+    : await acquireSeo(route, capability, { domain: subject, limit: ROWS_PER_CALL }, scope);
+  return { rows: data, stale: meta.freshness === "stale" };
 }
 
 function seedOrigin(seed: string, context: Pick<EditorialPlanningContext, "profile">, opportunityTopics: string[]): "opportunity" | "site_topic" | "cluster" {
@@ -233,7 +227,7 @@ export async function collectKeywordCandidates(
   let ownKeywords: KeywordMetrics[] = [];
   if (ownDomain && rankings.provider) {
     try {
-      ownKeywords = await cachedCall(tenantId, siteId, rankings, "ranked_keywords", ownDomain, fetchImpl);
+      ownKeywords = (await keywordRows(tenantId, context.site, rankings, "ranked_keywords", ownDomain, { fetchImpl, reuseOnly: false })).rows;
     } catch (error) {
       research.failedCalls += 1;
       research.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 200);
@@ -243,29 +237,44 @@ export async function collectKeywordCandidates(
   const opportunityTopics = opportunities.map((entry) => entry.topic);
   research.seeds = ideas.provider ? keywordSeeds(context, opportunityTopics).map((keyword) => ({ keyword, origin: seedOrigin(keyword, context, opportunityTopics) })) : [];
   const rankedCompetitors = rankings.provider ? competitors : [];
-  const calls: Array<{ origin: KeywordOrigin; run: () => Promise<KeywordMetrics[]> }> = [
+  const calls: Array<{ origin: KeywordOrigin; run: (reuseOnly: boolean) => ReturnType<typeof keywordRows> }> = [
     ...research.seeds.map(({ keyword, origin }) => ({
       origin: { kind: origin, value: keyword },
-      run: () => cachedCall(tenantId, siteId, ideas as SeoRoute, "keyword_ideas", keyword, fetchImpl),
+      run: (reuseOnly: boolean) => keywordRows(tenantId, context.site, ideas as SeoRoute, "keyword_suggestions", keyword, { fetchImpl, reuseOnly }),
     })),
     ...rankedCompetitors.map(({ domain }) => ({
       origin: { kind: "competitor" as const, value: domain },
-      run: () => cachedCall(tenantId, siteId, rankings as SeoRoute, "ranked_keywords", domain, fetchImpl),
+      run: (reuseOnly: boolean) => keywordRows(tenantId, context.site, rankings as SeoRoute, "ranked_keywords", domain, { fetchImpl, reuseOnly }),
     })),
   ];
-  const metrics: Array<KeywordMetrics & { origin: KeywordOrigin }> = [];
-  for (const call of calls) {
+  const reachableDifficulty = reachableDifficultyFor(ownKeywords);
+  const own = { keywords: ownKeywords.map((item) => item.keyword), reachableDifficulty };
+  // What is stored costs nothing and is always used; the rest is bought in order only while candidates are still short.
+  const answers = new Map<number, { rows: KeywordMetrics[]; stale: boolean }>();
+  for (const [index, call] of calls.entries()) {
+    const stored = await call.run(true).catch((error: unknown) => {
+      if (error instanceof SeoProviderError) return null;
+      throw error;
+    });
+    if (stored) answers.set(index, stored);
+  }
+  const collected = () => calls.flatMap((call, index) => (answers.get(index)?.rows ?? []).map((item) => ({ ...item, origin: call.origin })));
+  let bought = 0;
+  for (const [index, call] of calls.entries()) {
+    if (answers.get(index)?.stale === false) continue;
+    if (rankKeywordCandidates(collected(), context, limit, own).length >= limit) break;
     try {
-      metrics.push(...(await call.run()).map((item) => ({ ...item, origin: call.origin })));
+      answers.set(index, await call.run(false));
+      bought += 1;
     } catch (error) {
       research.failedCalls += 1;
       research.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 200);
       structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: research.lastError }, "warn");
     }
   }
-  const reachableDifficulty = reachableDifficultyFor(ownKeywords);
+  const metrics = collected();
   const rejects: KeywordReject[] = [];
-  const ranked = rankKeywordCandidates(metrics, context, limit, { keywords: ownKeywords.map((item) => item.keyword), reachableDifficulty }, rejects);
+  const ranked = rankKeywordCandidates(metrics, context, limit, own, rejects);
   Object.assign(research, {
     provider: ranked[0]?.source ?? null,
     skipped: ranked.length ? null : research.failedCalls && !metrics.length ? "provider_error" : "no_data",
@@ -282,6 +291,6 @@ export async function collectKeywordCandidates(
     rejected: rejects.reduce<KeywordResearch["rejected"]>((counts, { reason }) => ({ ...counts, [reason]: (counts[reason] ?? 0) + 1 }), {}),
     rejectedSample: [...rejects].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0)).slice(0, 25),
   } satisfies Partial<KeywordResearch>);
-  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain && rankings.provider ? 1 : 0), rows: metrics.length, candidates: ranked.length, reachableDifficulty });
+  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain && rankings.provider ? 1 : 0), bought, rows: metrics.length, candidates: ranked.length, reachableDifficulty });
   return ranked;
 }

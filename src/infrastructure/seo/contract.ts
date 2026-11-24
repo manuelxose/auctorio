@@ -32,7 +32,12 @@ export function seoMarket(locale: string | null | undefined): SeoMarket | null {
 export const GOOGLE_LOCATION_CODES: Record<string, number> = { ES: 2724, US: 2840, GB: 2826, MX: 2484, AR: 2032, FR: 2250, DE: 2276, IT: 2380, PT: 2620 };
 
 export function normalizeKeyword(keyword: string): string {
-  return keyword.trim().replace(/\s+/g, " ").toLowerCase();
+  return keyword.normalize("NFC").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** "https://www.Example.com/path" → "example.com": one spelling per domain in requests and cache keys. */
+export function normalizeDomain(domain: string): string {
+  return domain.trim().toLowerCase().replace(/^[a-z]+:\/\//, "").replace(/[/?#].*$/, "").replace(/:\d+$/, "").replace(/^www\./, "").replace(/\.$/, "");
 }
 
 /** BLG-style label derived from the 0–100 difficulty (never stored). */
@@ -122,8 +127,18 @@ export type SeoResult<C extends SeoCapability> = {
     dataKind: SeoDataKind;
     methodology: string;
     quote: SeoQuote;
+    /** What the answer is made of; counts of cache keys (keywords, or 1 for a single subject). */
+    cache: { hits: number; stale: number; bought: number };
+    /** Oldest state of the data returned. */
+    freshness: SeoFreshness;
+    /** Subjects nobody could answer now (no budget, cool-down, partial answer…): unknown, never "no data". */
+    unresolved: string[];
+    reservationIds: string[];
   };
 };
+
+/** missing: never acquired. expired: past retention, not served. */
+export type SeoFreshness = "fresh" | "stale" | "expired" | "missing";
 
 export type CapabilityDeclaration =
   | {
@@ -176,6 +191,8 @@ export interface SeoProvider {
 export type SeoErrorCode =
   | "external_disabled" | "provider_disabled" | "not_selected" | "not_configured" | "unsupported_capability" | "unsupported_market"
   | "paid_automation_locked" | "automatic_routing_locked" | "unknown_price" | "spend_limit" | "network_blocked" | "bad_request"
+  | "emergency_stop" | "license_prohibited" | "budget_exhausted" | "circuit_open" | "quota_wait" | "acquisition_in_progress"
+  | "billing_uncertain" | "retry_cooldown" | "duplicate_request" | "reuse_only" | "not_worth_cost"
   | "invalid_credentials" | "insufficient_balance" | "rate_limited" | "timeout" | "malformed_response" | "upstream_error";
 
 const RETRYABLE: ReadonlySet<SeoErrorCode> = new Set(["rate_limited", "timeout", "upstream_error"]);

@@ -329,6 +329,7 @@ model Tenant {
   contentVersions                ContentVersion[]
   contentDerivatives             ContentDerivative[]
   assetVariants                  AssetVariant[]
+  seoSnapshots                   SeoSnapshot[]
   studioIdentityProvider         StudioIdentityProvider?
   studioAccountsLastWorkspace    StudioAccount[]                  @relation("StudioAccountLastWorkspace")
   studioUsers                    StudioUser[]
@@ -1491,6 +1492,10 @@ model ProviderCacheEntry {
   expiresAt      DateTime @map("expires_at")
   lastAccessedAt DateTime @default(now()) @map("last_accessed_at")
   hitCount       Int      @default(0) @map("hit_count")
+  /// When the data was acquired (SEO-V2); null on entries written by other caches. expiresAt is then the end of retention.
+  fetchedAt      DateTime? @map("fetched_at")
+  /// Provenance of SEO data: upstream, asOf, methodology, partial.
+  meta           Json?
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
@@ -2942,6 +2947,8 @@ model AiSpendEvent {
   costUsd      Float    @map("cost_usd")
   tokensInput  Int?     @map("tokens_input")
   tokensOutput Int?     @map("tokens_output")
+  /// SEO acquisitions: the reservation this charge settled (one charge per reservation).
+  reservationId String? @unique @map("reservation_id") @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -3119,6 +3126,10 @@ model SeoProviderState {
   lastErrorMessage String?   @map("last_error_message")
   /// capability -> { at, market, costUsd } of each live call an admin authorized.
   verifications    Json?
+  consecutiveFailures Int    @default(0) @map("consecutive_failures")
+  /// Circuit breaker: no request is sent to the provider until then.
+  circuitOpenUntil DateTime? @map("circuit_open_until")
+  circuitReason    String?   @map("circuit_reason")
   updatedByUserId  String?   @map("updated_by_user_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -3132,9 +3143,129 @@ model SeoControlSetting {
   mode            String
   /// Manual mode: capability -> provider id.
   routing         Json?
+  /// Global emergency stop: independent of the mode, so lifting it restores the previous mode.
+  emergencyStop   Boolean  @default(false) @map("emergency_stop")
+  emergencyReason String?  @map("emergency_reason")
+  emergencyAt     DateTime? @map("emergency_at")
+  paidFallback    Boolean  @default(false) @map("paid_fallback")
+  /// Freshness and acquisition policy; null = code defaults.
+  policy          Json?
+  /// "provider:capability" -> administrator price ceilings and suspect prices.
+  pricing         Json?
   updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("seo_control_settings")
+}
+
+/// Hard SEO budget (SEO-V2-02). Every matching row must have room; no row = code default. scopeId "*" = each one of that scope.
+model SeoBudget {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// global | provider | plan | tenant | site
+  scope           String
+  scopeId         String   @map("scope_id")
+  /// Capability or "*".
+  operation       String   @default("*")
+  /// any | onboarding | recurring
+  allowance       String   @default("any")
+  /// daily | monthly | total
+  period          String
+  limitUsd        Decimal  @map("limit_usd") @db.Decimal(12, 6)
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@unique([scope, scopeId, operation, allowance, period], map: "seo_budgets_key")
+  @@map("seo_budgets")
+}
+
+/// Additional spend an administrator authorized on one exact budget, until it expires or is revoked.
+model SeoBudgetAuthorization {
+  id              String    @id @default(uuid()) @db.Uuid
+  scope           String
+  scopeId         String    @map("scope_id")
+  operation       String    @default("*")
+  allowance       String    @default("any")
+  period          String
+  amountUsd       Decimal   @map("amount_usd") @db.Decimal(12, 6)
+  reason          String
+  expiresAt       DateTime  @map("expires_at")
+  revokedAt       DateTime? @map("revoked_at")
+  createdByUserId String?   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@map("seo_budget_authorizations")
+}
+
+/// One paid SEO request: reserved -> dispatched -> settled | released | uncertain. Budgets add up these rows.
+/// No foreign keys: deleting a tenant must not give its spending back to the platform budgets.
+model SeoSpendReservation {
+  id               String    @id @default(uuid()) @db.Uuid
+  idempotencyKey   String    @unique @map("idempotency_key")
+  tenantId         String    @map("tenant_id") @db.Uuid
+  /// Not named siteId: a platform ledger must not be filtered by the request's active site.
+  targetSiteId     String?   @map("target_site_id") @db.Uuid
+  providerId       String    @map("provider_id")
+  operation        String
+  /// onboarding | recurring | admin_test
+  allowance        String
+  kind             String
+  resource         String
+  units            Int       @default(1)
+  state            String
+  estimatedUsd     Decimal?  @map("estimated_usd") @db.Decimal(12, 6)
+  maxUsd           Decimal   @map("max_usd") @db.Decimal(12, 6)
+  actualUsd        Decimal?  @map("actual_usd") @db.Decimal(12, 6)
+  pricingVersion   String    @map("pricing_version")
+  /// A worker that goes silent past this moment lost the request.
+  leaseUntil       DateTime  @map("lease_until")
+  dispatchedAt     DateTime? @map("dispatched_at")
+  resolvedAt       DateTime? @map("resolved_at")
+  resolution       String?
+  resolvedByUserId String?   @map("resolved_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@index([tenantId, createdAt])
+  @@index([state, leaseUntil])
+  @@index([providerId, dispatchedAt])
+  @@map("seo_spend_reservations")
+}
+
+/// Single flight across workers: who is acquiring a cache key, or why it must not be asked again yet.
+model SeoAcquisitionLease {
+  /// Hash of tenant, provider, resource and canonical cache key.
+  key           String   @id
+  reservationId String   @map("reservation_id") @db.Uuid
+  /// held | cooldown | uncertain
+  status        String
+  attempts      Int      @default(0)
+  errorCode     String?  @map("error_code")
+  until         DateTime
+
+  @@index([reservationId])
+  @@index([until])
+  @@map("seo_acquisition_leases")
+}
+
+/// Append-only history of acquired SEO data, kept as long as the provider's licence allows.
+model SeoSnapshot {
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @map("tenant_id") @db.Uuid
+  providerId    String    @map("provider_id")
+  operation     String
+  cacheKey      String    @map("cache_key")
+  payload       Json
+  meta          Json
+  reservationId String    @map("reservation_id") @db.Uuid
+  fetchedAt     DateTime  @map("fetched_at")
+  retainUntil   DateTime  @map("retain_until")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, providerId, operation, fetchedAt])
+  @@index([retainUntil])
+  @@map("seo_snapshots")
 }

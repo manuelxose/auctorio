@@ -18,11 +18,11 @@ import {
   type SeoErrorCode,
   type SeoMarket,
   type SeoProvider,
-  type SeoQuote,
   type SeoRequests,
   type SerpResult,
   type YoutubeResult,
 } from "./contract";
+import { priceQuote } from "./pricing";
 
 export { difficultyLabel, normalizeKeyword } from "./contract";
 export type { KeywordMetrics, SerpResult, YoutubeResult } from "./contract";
@@ -49,13 +49,20 @@ function locationOf(market: SeoMarket | null): DataForSeoLocation | null {
   return market && locationCode ? { locationCode, languageCode: market.language } : null;
 }
 
+/** A failure as DataForSEO states it, with the cost its envelope declares (null = it does not say). */
+class DataForSeoFailure extends Error {
+  constructor(message: string, readonly costUsd: number | null) {
+    super(message);
+  }
+}
+
 /** Every item of every task result, after DataForSEO's own status checks. costUsd is null when the response omits it. */
 function resultItems(body: unknown): { raws: unknown[]; costUsd: number | null } {
   const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ items?: unknown[] | null }> | null }> };
-  if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
+  if (root?.status_code !== 20000) throw new DataForSeoFailure(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim(), num(root?.cost));
   const raws: unknown[] = [];
   for (const task of root.tasks ?? []) {
-    if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
+    if (task.status_code !== 20000) throw new DataForSeoFailure(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim(), num(root.cost));
     for (const result of task.result ?? []) raws.push(...(result.items ?? []));
   }
   return { raws, costUsd: num(root.cost) };
@@ -131,7 +138,7 @@ async function postLive(url: string, task: Record<string, unknown>, location: Da
   });
   const body = await response.json().catch(() => null);
   // Errors carry DataForSEO's own reason (e.g. 40104 account not verified), not just the HTTP status.
-  if (!response.ok) throw new Error(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim());
+  if (!response.ok) throw new DataForSeoFailure(`dataforseo_http_${response.status}: ${body?.status_code ?? "?"} ${body?.status_message ?? ""}`.trim(), num(body?.cost));
   return body;
 }
 
@@ -171,10 +178,10 @@ export async function fetchYoutubeOrganic(keyword: string, location: DataForSeoL
  */
 export function parseGoogleAdsVolume(body: unknown): { items: KeywordVolume[]; costUsd: number | null } {
   const root = body as { status_code?: number; status_message?: string; cost?: number; tasks?: Array<{ status_code?: number; status_message?: string; result?: Array<{ keyword?: unknown; search_volume?: unknown }> | null }> };
-  if (root?.status_code !== 20000) throw new Error(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim());
+  if (root?.status_code !== 20000) throw new DataForSeoFailure(`dataforseo_error: ${root?.status_code ?? "?"} ${root?.status_message ?? ""}`.trim(), num(root?.cost));
   const items: KeywordVolume[] = [];
   for (const task of root.tasks ?? []) {
-    if (task.status_code !== 20000) throw new Error(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim());
+    if (task.status_code !== 20000) throw new DataForSeoFailure(`dataforseo_task_error: ${task.status_code ?? "?"} ${task.status_message ?? ""}`.trim(), num(root.cost));
     for (const row of task.result ?? []) {
       if (typeof row.keyword === "string" && typeof row.search_volume === "number") items.push({ keyword: normalizeKeyword(row.keyword), volume: row.search_volume });
     }
@@ -189,13 +196,6 @@ export async function fetchGoogleAdsVolume(keywords: string[], location: DataFor
 // ---- Adapter behind the provider contract ----
 
 const ID = "dataforseo";
-// Official live prices checked 2026-11-24 (docs/seo-v2/cost-model.md). historical_serps bills per stored snapshot
-// and how many there are is not known beforehand, so its maximum stays unknown.
-const LABS_TASK_USD = 0.012;
-const LABS_ITEM_USD = 0.00012;
-const ADS_TASK_USD = 0.09;
-const YOUTUBE_BLOCK_USD = 0.002; // per block of 20 results; we ask for 20
-
 /** DataForSEO failures as contract errors; the original message (status, DataForSEO code and reason) is kept. */
 function toSeoError(error: unknown): SeoProviderError {
   if (error instanceof SeoProviderError) return error;
@@ -212,7 +212,9 @@ function toSeoError(error: unknown): SeoProviderError {
   else if (match && !status && !detail) code = "malformed_response"; // 200 without DataForSEO's envelope
   else if (status.startsWith("4") || detail.startsWith("4")) code = "bad_request";
   else if (!match && error instanceof TypeError && name === "TypeError" && !/fetch/i.test(message)) code = "malformed_response";
-  return new SeoProviderError(code, message, ID);
+  // Refused credentials or balance are never charged; any other failure costs what the envelope says, or is unknown.
+  const free = code === "invalid_credentials" || code === "insufficient_balance";
+  return new SeoProviderError(code, message, ID, (error instanceof DataForSeoFailure ? error.costUsd : null) ?? (free ? 0 : null));
 }
 
 const result = <C extends SeoCapability>(data: SeoData[C], billedUsd: number | null, asOf: string | null = null): SeoAdapterResult<C> => ({
@@ -248,11 +250,6 @@ const handlers: Handlers = {
   },
 };
 
-const labs = (units: number): SeoQuote => {
-  const usd = LABS_TASK_USD + LABS_ITEM_USD * units;
-  return { estimatedUsd: usd, maxUsd: usd, unit: "task + item", units };
-};
-
 const METRIC_KINDS = { volume: "provider_reported", cpc: "provider_reported", adsCompetition: "provider_reported", difficulty: "estimated", intent: "estimated" } as const;
 const NO_OPTIONS = { devices: [], pagination: false, degraded: null };
 
@@ -285,14 +282,8 @@ export const dataForSeoProvider: SeoProvider = {
     return location ? `${location.locationCode}|${location.languageCode}` : null; // format of the keys already cached
   },
   quote(capability, request) {
-    switch (capability) {
-      case "keyword_metrics": return labs((request as SeoRequests["keyword_metrics"]).keywords.length);
-      case "keyword_suggestions": return labs((request as SeoRequests["keyword_suggestions"]).limit);
-      case "ranked_keywords": return labs((request as SeoRequests["ranked_keywords"]).limit);
-      case "search_volume": return { estimatedUsd: ADS_TASK_USD, maxUsd: ADS_TASK_USD, unit: "task", units: 1 };
-      case "youtube_search": return { estimatedUsd: YOUTUBE_BLOCK_USD, maxUsd: YOUTUBE_BLOCK_USD, unit: "20 results", units: 1 };
-      default: return { estimatedUsd: null, maxUsd: null, unit: "stored SERP", units: null };
-    }
+    const { keywords, limit } = request as { keywords?: string[]; limit?: number };
+    return priceQuote(ID, capability, keywords?.length ?? limit ?? 1);
   },
   async run(capability, request, fetchImpl) {
     const location = locationOf(request.market);

@@ -1533,7 +1533,8 @@ export async function updateEditorialPlanItem(
     },
   });
   if (!keywordChanged || !nextKeyword) return updated;
-  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId);
+  // Ordinary editing never buys data: only what is already stored.
+  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId, undefined, { reuseOnly: true });
   return (await prisma.editorialPlanItem.findUnique({ where: { id: item.id } })) ?? updated;
 }
 

@@ -138,7 +138,8 @@ export async function changePlanItemKeyword(tenantId: string, itemId: string, ra
   });
   if (changed.count !== 1) throw new Error("editorial_plan_item_keyword_locked");
 
-  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId);
+  // Ordinary editing never buys data: only what is already stored.
+  await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId, undefined, { reuseOnly: true });
   // The old keyword stays registered on purpose: it was discarded by a person, so the plan does not propose it again.
   await registerSearchTargets(tenantId, item.siteId, [{ query: keyword, keyword, intent: type.intent }]);
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_item.keyword_changed", entityType: "editorial_plan_item", entityId: item.id, metadata: { planId: item.planId, from: change.from, to: keyword, measured: Boolean(candidate) } });
