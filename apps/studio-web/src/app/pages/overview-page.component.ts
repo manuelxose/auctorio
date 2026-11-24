@@ -1,614 +1,517 @@
-import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
+import { CommonModule, DOCUMENT, registerLocaleData } from '@angular/common';
+import localeEs from '@angular/common/locales/es';
+import { Component, DestroyRef, OnDestroy, OnInit, computed, effect, inject, signal, untracked } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { RouterLink } from '@angular/router';
-import { Subscription, forkJoin, of, timer } from 'rxjs';
-import { catchError, switchMap } from 'rxjs/operators';
-import { StudioApiService } from '../services/studio-api.service';
-import { AppContextService } from '../services/app-context.service';
-import { ToastService } from '../services/toast.service';
-import { IntelligenceApiService } from '../services/intelligence-api.service';
-import { AppIconComponent } from '../components/ui/app-icon.component';
-import { OverviewWeekComponent, type WeekDay } from '../components/overview-week.component';
-import type { AutomationPolicy, EditorialPlan, EditorialPlanItem, OperationItem, SiteIntelligenceOverview, StudioOverview } from '../models/studio.models';
+import { Observable, Subscription, catchError, finalize, forkJoin, of, switchMap, tap, timer } from 'rxjs';
+import { OverviewWeekComponent, type WeekDay, type WeekEntry } from '../components/overview-week.component';
+import { addDays, localDate, localTime, zonedToUtc } from '../components/planning/planning-utils';
+import { AppIconComponent, type StudioIconName } from '../components/ui/app-icon.component';
 import type { StrategyLayers } from '../models/intelligence.models';
-import { activityLabel, autopilotHeadline, humanError, difficultyLabel, modeSummary, planChip, sameDay, setupSteps, type PlanChip, type SetupStep } from '../utils/overview-model';
+import type { AutomationPolicy, CalendarEvent, EditorialPlan, EditorialPlanItem, OperationItem, StudioOverview, StudioProjectSummary, SiteIntelligenceOverview } from '../models/studio.models';
+import { AppContextService } from '../services/app-context.service';
+import { ConfirmService } from '../services/confirm.service';
+import { IntelligenceApiService } from '../services/intelligence-api.service';
+import { StudioApiService } from '../services/studio-api.service';
+import { ToastService } from '../services/toast.service';
+import { activityLabel, difficultyLabel, humanError, setupSteps, type SetupStepId } from '../utils/overview-model';
+
+registerLocaleData(localeEs);
 
 type Mode = 'manual' | 'assisted' | 'autopilot';
-type DayItem = { item: EditorialPlanItem; title: string; chip: PlanChip };
+type Connection = StudioOverview['connections'][number];
+type AttentionKind = 'approval' | 'error' | 'connection';
+type Attention = { id: string; kind: AttentionKind; title: string; detail: string; action: string; link: string | string[]; params?: Record<string, string> };
 
-/**
- * Overview: what Auctorio did and will do for the active site, what is still needed to run
- * on autopilot, and what it learned about the site. Every figure comes from the API.
- */
-const STAGE_LABELS = { unconfigured: 'Unconfigured', stored: 'Stored', not_verified: 'Not verified', authenticated: 'Authenticated', read_only: 'Read-only', ready: 'Ready', stale: 'Stale', error: 'Error' } as const;
+const MODES: Record<Mode, { label: string; title: string; description: string }> = {
+  manual: { label: 'Manual', title: 'Tú eliges cuándo empezar', description: 'Auctorio prepara artículos cuando se lo pides.' },
+  assisted: { label: 'Asistido', title: 'Tú decides cuándo publicar', description: 'Auctorio prepara los artículos. Tú apruebas cada publicación.' },
+  autopilot: { label: 'Autopilot', title: 'Publicación automática', description: 'Auctorio prepara y publica según la política editorial del sitio.' },
+};
+const CONNECTION_STAGES = { unconfigured: 'Sin configurar', stored: 'Sin verificación registrada', not_verified: 'Sin verificar', authenticated: 'Autenticado', read_only: 'Solo lectura', ready: 'Verificado', stale: 'Verificación caducada', error: 'Requiere atención' };
+const SETUP_LABELS: Record<SetupStepId, string> = {
+  website: 'Conectar tu sitio web', learn: 'Analizar tu sitio', plan: 'Preparar el plan editorial',
+  autopilot: 'Elegir el modo de trabajo', instagram: 'Conectar Instagram', x: 'Conectar X', sources: 'Añadir fuentes de noticias',
+};
+const SETUP_LINKS: Record<SetupStepId, { url: string; params?: Record<string, string | number> }> = {
+  website: { url: '/studio/connections/wizard' }, learn: { url: '/studio/site-intelligence', params: { tab: 'crawl' } },
+  plan: { url: '/studio/plan', params: { new: 1 } }, autopilot: { url: '/studio/automation' },
+  instagram: { url: '/studio/connections/wizard', params: { target: 'instagram.com' } },
+  x: { url: '/studio/connections/wizard', params: { target: 'x.com' } }, sources: { url: '/studio/sources' },
+};
+const OPERATION_TITLES: Record<string, string> = {
+  text_generation: 'Redacción de artículo', image_generation: 'Creación de imágenes', publish: 'Envío de publicación',
+  site_index: 'Análisis del sitio', editorial_plan_generation: 'Planificación editorial',
+  connection_verification: 'Verificación de destino', discovery: 'Búsqueda de noticias', quality_repair: 'Corrección de calidad',
+  engagement_refresh_reddit: 'Actualización de Reddit', engagement_refresh_quora: 'Actualización de Quora', social_generation: 'Preparación para redes sociales',
+};
+const PUBLICATION_LABELS: Record<StudioOverview['recentPublications'][number]['status'], string> = {
+  draft: 'Borrador', ready: 'Lista', scheduled: 'Programada', queued: 'En cola', publishing: 'Publicando',
+  published: 'Publicada', failed: 'Fallida', canceled: 'Cancelada', deleted: 'Eliminada', unpublished: 'Retirada',
+};
+const MAX_WEEK_OFFSET = 28;
+const LAST_DAY_OFFSET = MAX_WEEK_OFFSET + 6;
 
 @Component({
   selector: 'app-overview-page',
   standalone: true,
   imports: [CommonModule, RouterLink, AppIconComponent, OverviewWeekComponent],
-  template: `
-    <section class="au-page ov">
-      <header class="ov__head">
-        <div>
-          <p class="au-page__eyebrow">{{ today | date: 'EEEE d MMMM' }}</p>
-          <h1 class="au-page__title">{{ siteName() }}</h1>
-          <p class="ov__status" [attr.data-tone]="headline().tone" role="status">
-            <span class="ov__dot" aria-hidden="true"></span>{{ headline().text }}
-            @if (reviewCount() > 0) { <a class="au-link" routerLink="/studio/calendar" [queryParams]="{ chip: 'review' }">Review now</a> }
-          </p>
-        </div>
-      </header>
-
-      @for (alert of attentionItems(); track alert.title) {
-        <div class="au-banner au-banner--error" role="alert">
-          <app-icon name="warning"></app-icon>
-          <span class="au-banner__text"><strong>{{ alert.title }}</strong> · {{ alert.detail }}</span>
-          <a class="au-banner__action" [routerLink]="alert.link">{{ alert.action }}</a>
-        </div>
-      }
-
-      <dl class="ov__kpis" aria-label="Key figures">
-        @if (overview(); as o) {
-          <div><dt>Published today</dt><dd>{{ o.today.articlesPublished }}</dd><dd class="ov__sub">of {{ o.today.articlesPlanned }} planned</dd></div>
-          <div><dt>Waiting for review</dt><dd>{{ o.pipeline.review }}</dd><dd class="ov__sub">{{ o.pipeline.drafts }} drafts in progress</dd></div>
-          <div><dt>Scheduled</dt><dd>{{ o.pipeline.scheduled }}</dd><dd class="ov__sub">ready to go out</dd></div>
-          <div [class.is-bad]="o.pipeline.failed > 0"><dt>Failed</dt><dd>{{ o.pipeline.failed }}</dd><dd class="ov__sub">{{ o.pipeline.failed ? 'need a retry' : 'nothing to fix' }}</dd></div>
-          <div><dt>Next 7 days</dt><dd>{{ weekTopicCount() }}</dd><dd class="ov__sub">topics planned</dd></div>
-        } @else {
-          @for (n of [1, 2, 3, 4, 5]; track n) { <div class="is-loading"><dt>&nbsp;</dt><dd>&nbsp;</dd></div> }
-        }
-      </dl>
-
-      <div class="ov__cols">
-        <div class="ov__main">
-          <!-- Activity by day -->
-          <section class="au-panel ov__card ov__activity" aria-labelledby="ov-activity">
-            <div class="ov__card-head">
-              <div>
-                <h2 id="ov-activity" class="ov__title">{{ dayOffset() === 0 ? 'Today' : dayOffset() > 0 ? 'Planned for ' : 'Done on ' }}{{ dayOffset() === 0 ? '' : (day() | date: 'EEE d MMM') }}</h2>
-                <p class="au-muted">{{ dayCount() }}</p>
-              </div>
-              <div class="ov__stepper" role="group" aria-label="Choose day">
-                <button class="au-icon-button" type="button" (click)="shiftDay(-1)" aria-label="Previous day"><app-icon name="chevron-left"></app-icon></button>
-                <button class="ov__stepper-day" type="button" (click)="dayOffset.set(0)" [disabled]="dayOffset() === 0">
-                  <span>{{ dayOffset() === 0 ? 'Today' : (day() | date: 'EEE') }}</span>
-                  <span class="au-muted">{{ day() | date: 'd MMM' }}</span>
-                </button>
-                <button class="au-icon-button" type="button" (click)="shiftDay(1)" aria-label="Next day"><app-icon name="chevron-right"></app-icon></button>
-              </div>
-            </div>
-
-            @if (featured(); as f) {
-              <article class="ov__feature">
-                <div class="ov__feature-top">
-                  <span class="ov__chip" [attr.data-chip]="f.chip">{{ f.chip }}</span>
-                  @if (f.item.contentType) { <span class="au-muted">{{ f.item.contentType }}</span> }
-                </div>
-                <h3 class="ov__feature-title">
-                  @if (f.item.projectId) {
-                    <a [routerLink]="['/studio/content', f.item.projectId]">{{ f.title }}</a>
-                  } @else { {{ f.title }} }
-                </h3>
-                <dl class="ov__facts">
-                  @if (f.item.primaryKeyword) { <div><dt>Keyword</dt><dd>{{ f.item.primaryKeyword }}</dd></div> }
-                  @if (difficulty(f.item); as d) { <div><dt>Difficulty</dt><dd><span class="ov__diff" [attr.data-level]="d">{{ d }}</span></dd></div> }
-                  @if (f.item.primaryIntent) { <div><dt>Intent</dt><dd>{{ f.item.primaryIntent }}</dd></div> }
-                  @if (f.item.scheduledFor) { <div><dt>Scheduled</dt><dd>{{ f.item.scheduledFor | date: 'HH:mm' }}</dd></div> }
-                </dl>
-                @if (f.item.rationale) {
-                  <details class="ov__why">
-                    <summary><app-icon name="info"></app-icon>Why this topic</summary>
-                    <p>{{ f.item.rationale }}</p>
-                  </details>
-                }
-              </article>
-            }
-
-            <ul class="ov__feed">
-              @for (op of showAllOps() ? dayOperations() : dayOperations().slice(0, 8); track op.id) {
-                <li [class.is-failed]="label(op).failed">
-                  <span class="ov__feed-icon"><app-icon [name]="label(op).icon"></app-icon></span>
-                  <span class="ov__feed-text">{{ label(op).label }}@if (op.errorSummary && label(op).failed) {<span class="au-muted"> · {{ humanError(op.errorSummary) }}</span>}</span>
-                  <time class="au-muted">{{ op.createdAt | date: 'HH:mm' }}</time>
-                </li>
-              }
-              @for (entry of otherDayItems(); track entry.item.id) {
-                <li>
-                  <span class="ov__feed-icon"><app-icon name="plan"></app-icon></span>
-                  <span class="ov__feed-text">Topic: {{ entry.title }}</span>
-                  <span class="ov__chip" [attr.data-chip]="entry.chip">{{ entry.chip }}</span>
-                </li>
-              }
-            </ul>
-            @if (dayOperations().length > 8) {
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="showAllOps.set(!showAllOps())" [attr.aria-expanded]="showAllOps()">{{ showAllOps() ? 'Show less' : 'Show all ' + dayOperations().length }}</button>
-            }
-            @if (!featured() && dayOperations().length === 0) {
-              <p class="ov__empty">{{ dayOffset() > 0 ? 'Nothing planned for this day yet.' : 'Nothing ran on this day.' }} @if (!planReady()) { <a class="au-link" routerLink="/studio/plan" [queryParams]="{ new: 1 }">Plan the next 30 days</a> }</p>
-            }
-          </section>
-
-          <!-- Coming up: next 7 days of the content plan -->
-          <section class="au-panel ov__card" aria-labelledby="ov-week">
-            <div class="ov__card-head">
-              <div>
-                <h2 id="ov-week" class="ov__title">Coming up</h2>
-                <p class="au-muted">{{ weekSummary() }}</p>
-              </div>
-              <a class="au-btn au-btn--sm" routerLink="/studio/calendar">Open plan<app-icon name="chevron-right"></app-icon></a>
-            </div>
-            <app-overview-week [days]="week()" (pick)="openDay($event)"></app-overview-week>
-          </section>
-
-          <section class="au-panel ov__card" aria-labelledby="ov-latest">
-            <div class="ov__card-head">
-              <div><h2 id="ov-latest" class="ov__title">Latest publications</h2><p class="au-muted">What went out, or tried to</p></div>
-              <a class="au-btn au-btn--sm" routerLink="/studio/results">All publications<app-icon name="chevron-right"></app-icon></a>
-            </div>
-            <ul class="ov__feed">
-              @for (pub of (overview()?.recentPublications ?? []).slice(0, 6); track pub.id) {
-                <li [class.is-failed]="pub.status === 'failed'">
-                  <span class="ov__feed-icon"><app-icon [name]="pub.status === 'failed' ? 'warning' : 'publications'"></app-icon></span>
-                  <span class="ov__feed-text">{{ pub.title }}<span class="au-muted"> · {{ pub.destination }}</span>@if (pub.lastError && pub.status === 'failed') {<span class="au-muted"> · {{ humanError(pub.lastError) }}</span>}</span>
-                  <span class="ov__chip" [attr.data-chip]="pub.status === 'published' ? 'Published' : pub.status === 'failed' ? 'Failed' : 'Queued'">{{ pub.status }}</span>
-                  <time class="au-muted">{{ (pub.publishedAt ?? pub.scheduledFor) | date: 'd MMM HH:mm' }}</time>
-                </li>
-              } @empty {
-                <li class="au-muted">Nothing published yet. Articles appear here once a destination is connected and the first one goes out.</li>
-              }
-            </ul>
-          </section>
-        </div>
-        <div class="ov__side">
-          <!-- Setup checklist: shown until every step is done or, once the site is connected, dismissed. -->
-          @if (!setupHidden()) {
-          <section class="au-panel ov__card ov__setup" aria-labelledby="ov-setup">
-            <div class="ov__card-head">
-              <div>
-                <h2 id="ov-setup" class="ov__title">{{ requiredLeft() === 0 ? 'Ready to go' : 'Get started' }}</h2>
-                <p class="au-muted">{{ requiredLeft() === 0 ? 'The optional steps improve the results. Skip any of them.' : 'Connect your website; everything else is optional.' }}</p>
-              </div>
-              @if (requiredLeft() === 0) { <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="dismissSetup()">Hide</button> }
-            </div>
-            <div class="ov__progress" role="progressbar" [attr.aria-valuenow]="requiredDone()" aria-valuemin="0" [attr.aria-valuemax]="requiredTotal()" aria-label="Setup progress">
-              <span [style.width.%]="(requiredDone() / requiredTotal()) * 100"></span>
-            </div>
-
-            @for (group of ['Required', 'Optional']; track group) {
-              <h3 class="ov__group">{{ group }}</h3>
-              <ul class="ov__steps">
-                @for (step of stepsFor(group === 'Required'); track step.id) {
-                  <li class="ov__step" [class.is-done]="step.done">
-                    <span class="ov__check" aria-hidden="true">@if (step.done) { <app-icon name="check"></app-icon> }</span>
-                    <div class="ov__step-body">
-                      <span class="ov__step-label">{{ step.label }}<span class="au-sr-only">{{ step.done ? ', done' : ', to do' }}</span></span>
-                      <span class="ov__step-detail">{{ step.detail }}</span>
-                      @if (step.id === 'autopilot') {
-                        <div class="ov__modes" role="radiogroup" aria-label="How much runs on its own">
-                          @for (m of modes; track m.id) {
-                            <button type="button" role="radio" class="ov__mode" [attr.aria-checked]="policy()?.enabled && policy()?.mode === m.id" [disabled]="modeBusy()" (click)="setMode(m.id)">{{ m.short }}</button>
-                          }
-                        </div>
-                        @if (modeError()) { <span class="au-error" role="alert">{{ modeError() }}</span> }
-                      }
-                    </div>
-                    @switch (step.id) {
-                      @case ('website') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/connections/wizard">Connect</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a> } }
-                      @case ('learn') { <a class="au-btn au-btn--sm" [class.au-btn--primary]="!step.done" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading…' : step.done ? 'Review' : 'Analyze' }}</a> }
-                      @case ('plan') { @if (!step.done) { <a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/plan" [queryParams]="{ new: 1 }">{{ planGenerating() ? 'Planning… ' + planProgress() : 'Plan' }}</a> } @else { <a class="au-btn au-btn--sm" routerLink="/studio/calendar">Open</a> } }
-                      @case ('autopilot') { <a class="au-btn au-btn--sm" routerLink="/studio/automation">Settings</a> }
-                      @case ('instagram') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'instagram.com' }">Connect</a> } }
-                      @case ('x') { @if (!step.done) { <a class="au-btn au-btn--sm" routerLink="/studio/connections/wizard" [queryParams]="{ target: 'x.com' }">Connect</a> } }
-                      @case ('sources') { <a class="au-btn au-btn--sm" routerLink="/studio/sources">{{ step.done ? 'Manage' : 'Add' }}</a> }
-                    }
-                  </li>
-                }
-              </ul>
-            }
-          </section>
-          }
-          <!-- What we learned -->
-          <section class="au-panel ov__card" aria-labelledby="ov-learned">
-            <div class="ov__card-head">
-              <div>
-                <h2 id="ov-learned" class="ov__title">What Auctorio learned about {{ siteName() }}</h2>
-                <p class="au-muted">Used to plan and write every article</p>
-              </div>
-            </div>
-            @if (profile(); as p) {
-              @if (p.brandSummary) { <p class="ov__summary">{{ p.brandSummary }}</p> }
-              <dl class="au-detail-grid">
-                @if (p.detectedAudience) { <dt>Audience</dt><dd>{{ p.detectedAudience }}</dd> }
-                @if (p.detectedLanguage) { <dt>Language</dt><dd>{{ p.detectedLanguage }}</dd> }
-                @if (p.editorialTone) { <dt>Tone</dt><dd>{{ p.editorialTone }}</dd> }
-                @if (p.detectedSiteType) { <dt>Site type</dt><dd>{{ p.detectedSiteType }}</dd> }
-                <dt>Pages read</dt><dd>{{ p.pageCount }}@if (p.indexedAt) { <span class="au-muted"> · {{ p.indexedAt | date: 'd MMM, HH:mm' }}</span> }</dd>
-              </dl>
-              @if (p.mainTopics.length) {
-                <ul class="ov__tags" aria-label="Main topics">
-                  @for (topic of p.mainTopics.slice(0, 12); track topic) { <li>{{ topic }}</li> }
-                </ul>
-              }
-              @if (strategyApproved() === false) {
-                <div class="ov__confirm" role="group" aria-labelledby="ov-confirm">
-                  <p id="ov-confirm" class="au-mb-0"><strong>Is this right?</strong> Auctorio plans with it either way; confirming locks it in.</p>
-                  <div class="ov__actions">
-                    <button class="au-btn au-btn--sm au-btn--primary" type="button" [disabled]="confirming()" (click)="confirmProfile()">{{ confirming() ? 'Saving…' : 'Correct' }}</button>
-                    <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'profile' }">Update</a>
-                  </div>
-                </div>
-              }
-              <div class="ov__actions">
-                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence">{{ strategyApproved() ? 'Review it' : 'Not quite right, review it' }}</a>
-                <a class="au-btn au-btn--sm" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading the site…' : 'Read the site again' }}</a>
-              </div>
-            } @else {
-              <p class="ov__empty">Nothing learned yet. Auctorio reads your public pages to find your topics, audience and tone.</p>
-              <div class="ov__actions"><a class="au-btn au-btn--sm au-btn--primary" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Reading the site…' : 'Analyze my site' }}</a></div>
-            }
-          </section>
-
-          <section class="au-panel ov__card" aria-labelledby="ov-dest">
-            <div class="ov__card-head"><h2 id="ov-dest" class="ov__title">Publishing to</h2><a class="au-btn au-btn--sm" routerLink="/studio/connections">Manage</a></div>
-            <ul class="ov__dest">
-              @for (c of siteConnections(); track c.id) {
-                <li [attr.title]="c.reason || null"><span class="ov__dest-dot" [attr.data-state]="connectionState(c)"></span>{{ c.displayName }}<span class="au-muted">{{ connectionLabel(c) }}{{ c.lastVerifiedAt ? ' · checked ' + checkedAge(c.lastVerifiedAt) : '' }}</span>@if (c.platform === 'website' && c.connectionState !== 'connected') { <a class="au-link" routerLink="/studio/connections">{{ c.connectionState === 'provider_error' ? 'Fix' : 'Verify' }}</a> }</li>
-              } @empty {
-                <li class="au-muted">No destinations yet · <a class="au-link" routerLink="/studio/connections/wizard">connect one</a></li>
-              }
-            </ul>
-          </section>
-        </div>
-      </div>
-    </section>
-  `,
-  styles: [
-    `
-      .ov { display: flex; flex-direction: column; gap: var(--au-s5); }
-      .ov__head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--au-s4); flex-wrap: wrap; }
-      .ov__status { display: flex; align-items: center; gap: var(--au-s2); margin-top: var(--au-s2); color: var(--au-text-2); }
-      .ov__dot { width: 8px; height: 8px; border-radius: 4px; background: var(--au-faint); flex: 0 0 8px; }
-      .ov__status[data-tone='ok'] .ov__dot { background: var(--au-success); box-shadow: 0 0 0 3px var(--au-success-soft); }
-      .ov__status[data-tone='warn'] .ov__dot { background: var(--au-warning); box-shadow: 0 0 0 3px var(--au-warning-soft); }
-      .ov__confirm { display: grid; gap: var(--au-s2); padding: var(--au-s3); margin-top: var(--au-s3); border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-surface-2); }
-      .ov__cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); gap: var(--au-s5); align-items: start; }
-      .ov__main, .ov__side { display: flex; flex-direction: column; gap: var(--au-s5); min-width: 0; }
-      .ov__kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--au-s3); margin: 0; }
-      .ov__kpis > div { display: flex; flex-direction: column; gap: 2px; padding: var(--au-s4); border: 1px solid var(--au-border); border-radius: 14px; background: var(--au-surface); box-shadow: var(--au-shadow-glass); }
-      .ov__kpis dt { color: var(--au-muted); font-size: var(--au-fs-caption); }
-      .ov__kpis dd { margin: 0; font: 600 26px/1.15 var(--au-font); font-variant-numeric: tabular-nums; }
-      .ov__kpis dd.ov__sub { font: 400 var(--au-fs-caption) var(--au-font); color: var(--au-faint); }
-      .ov__kpis .is-bad dd:not(.ov__sub) { color: var(--au-danger); }
-      .ov__kpis .is-loading { min-height: 88px; }
-      .ov__card { padding: var(--au-s5); display: flex; flex-direction: column; gap: var(--au-s4); }
-      .ov__card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--au-s3); }
-      .ov__title { font: 600 var(--au-fs-card) / 1.3 'Source Serif 4', Georgia, serif; }
-      .ov__stepper { display: flex; align-items: center; gap: var(--au-s1); padding: 2px; border: 1px solid var(--au-border); border-radius: 12px; background: var(--au-surface-hover); }
-      .ov__stepper-day { display: flex; flex-direction: column; align-items: center; min-width: 76px; padding: 2px var(--au-s2); border: 0; background: none; color: var(--au-text); font: 500 var(--au-fs-body-sm) / 1.2 var(--au-font); cursor: pointer; }
-      .ov__stepper-day .au-muted { font-size: var(--au-fs-caption); font-weight: 400; }
-      .ov__feature { display: flex; flex-direction: column; gap: var(--au-s3); padding: var(--au-s4) var(--au-s5); border: 1px solid var(--au-border); border-radius: 14px; background: var(--au-surface-hover); box-shadow: var(--au-shadow-glass); }
-      .ov__feature-top { display: flex; align-items: center; gap: var(--au-s2); font-size: var(--au-fs-caption); }
-      .ov__feature-title { font: 600 18px/1.35 'Source Serif 4', Georgia, serif; }
-      .ov__feature-title a { color: inherit; text-decoration: none; }
-      .ov__facts { display: flex; flex-wrap: wrap; gap: var(--au-s2) var(--au-s5); margin: 0; font-size: var(--au-fs-body-sm); }
-      .ov__facts div { display: flex; flex-direction: column; gap: 2px; }
-      .ov__facts dt { color: var(--au-muted); font-size: var(--au-fs-caption); }
-      .ov__facts dd { margin: 0; color: var(--au-text); }
-      .ov__diff { padding: 1px 8px; border-radius: 6px; font-size: var(--au-fs-caption); background: var(--au-success-soft); color: var(--au-success); }
-      .ov__diff[data-level='Medium'] { background: var(--au-warning-soft); color: var(--au-warning); }
-      .ov__diff[data-level='Hard'] { background: var(--au-danger-soft); color: var(--au-danger); }
-      .ov__why summary { display: inline-flex; align-items: center; gap: 6px; color: var(--au-brand); font-size: var(--au-fs-body-sm); cursor: pointer; list-style: none; }
-      .ov__why p { margin-top: var(--au-s2); color: var(--au-text-2); font-size: var(--au-fs-body-sm); }
-      .ov__feed { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; }
-      .ov__feed li { display: flex; align-items: center; gap: var(--au-s3); min-height: 44px; padding: var(--au-s2) 0; border-bottom: 1px solid var(--au-border); font-size: var(--au-fs-body-sm); }
-      .ov__feed li:last-child { border-bottom: 0; }
-      .ov__feed li.is-failed .ov__feed-icon { color: var(--au-danger); background: var(--au-danger-soft); }
-      .ov__feed-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 10px; background: var(--au-surface-2); color: var(--au-muted); flex: 0 0 32px; }
-      .ov__feed-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-      .ov__empty { color: var(--au-muted); font-size: var(--au-fs-body-sm); }
-      .ov__chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: var(--au-fs-caption); font-weight: 500; white-space: nowrap; background: var(--au-surface-2); color: var(--au-muted); }
-      .ov__chip[data-chip='Published'] { background: var(--au-success-soft); color: var(--au-success); }
-      .ov__chip[data-chip='Written'] { background: var(--au-info-soft); color: var(--au-info); }
-      .ov__chip[data-chip='Queued'] { background: var(--au-warning-soft); color: var(--au-warning); }
-      .ov__chip[data-chip='Needs approval'] { background: var(--au-brand-soft); color: var(--au-brand); }
-      .ov__chip[data-chip='Failed'] { background: var(--au-danger-soft); color: var(--au-danger); }
-      .ov__progress { height: 6px; border-radius: 3px; background: var(--au-surface-2); overflow: hidden; }
-      .ov__progress span { display: block; height: 100%; border-radius: 3px; background: var(--au-success); }
-      .ov__group { margin-top: var(--au-s2); color: var(--au-muted); font-size: var(--au-fs-caption); font-weight: 500; }
-      .ov__steps { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--au-s2); }
-      .ov__step { display: flex; align-items: flex-start; gap: var(--au-s3); padding: var(--au-s3); border: 1px solid var(--au-border); border-radius: 12px; background: var(--au-surface-hover); }
-      .ov__step.is-done { background: transparent; }
-      .ov__step.is-done .ov__step-label { color: var(--au-text-2); }
-      .ov__check { display: grid; place-items: center; width: 22px; height: 22px; margin-top: 1px; border: 1.5px solid var(--au-border-strong); border-radius: 11px; color: var(--au-success); flex: 0 0 22px; }
-      .ov__step.is-done .ov__check { border-color: var(--au-success); background: var(--au-success-soft); }
-      .ov__check app-icon { width: 13px; height: 13px; }
-      .ov__step-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-      .ov__step-label { font-weight: 500; font-size: var(--au-fs-body-sm); }
-      .ov__step-detail { color: var(--au-muted); font-size: var(--au-fs-caption); }
-      .ov__modes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; margin-top: var(--au-s2); padding: 2px; border: 1px solid var(--au-border); border-radius: 10px; background: var(--au-surface-2); }
-      .ov__mode { min-height: 32px; padding: 6px 4px; border: 0; border-radius: 8px; background: transparent; color: var(--au-text-2); font: 500 var(--au-fs-caption) / 1.2 var(--au-font); cursor: pointer; }
-      .ov__mode[aria-checked='true'] { background: var(--au-surface); color: var(--au-text); box-shadow: var(--au-shadow-glass); }
-      .ov__mode:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 1px; }
-      .ov__summary { color: var(--au-text-2); line-height: 1.6; }
-      .ov__tags { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
-      .ov__tags li { padding: 2px 10px; border-radius: 8px; background: var(--au-surface-2); color: var(--au-text-2); font-size: var(--au-fs-caption); }
-      .ov__actions { display: flex; flex-wrap: wrap; gap: var(--au-s2); }
-      .ov__dest { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--au-s2); font-size: var(--au-fs-body-sm); }
-      .ov__dest li { display: flex; align-items: center; gap: var(--au-s2); }
-      .ov__dest li .au-muted { margin-left: auto; font-size: var(--au-fs-caption); }
-      .ov__dest-dot { width: 8px; height: 8px; border-radius: 4px; background: var(--au-faint); }
-      .ov__dest-dot[data-state='ok'] { background: var(--au-success); }
-      .ov__dest-dot[data-state='bad'] { background: var(--au-danger); }
-      @media (max-width: 1100px) { .ov__cols { grid-template-columns: minmax(0, 1fr); } .ov__kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-      @media (max-width: 600px) {
-        .ov__card { padding: var(--au-s4); }
-        .ov__card-head { flex-direction: column; }
-        .ov__kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-        .ov__kpis > div:last-child { grid-column: span 2; }
-      }
-    `,
-  ],
+  templateUrl: './overview-page.component.html',
+  styleUrls: ['./overview-page.component.css', './overview-setup.css'],
 })
 export class OverviewPageComponent implements OnInit, OnDestroy {
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
+  private readonly confirm = inject(ConfirmService);
   private readonly intelligenceApi = inject(IntelligenceApiService);
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly document = inject(DOCUMENT);
 
-  readonly today = new Date();
-  readonly modes: Array<{ id: Mode; short: string }> = [
-    { id: 'manual', short: 'On request' },
-    { id: 'assisted', short: 'I approve' },
-    { id: 'autopilot', short: 'Autopilot' },
+  readonly modes = (Object.keys(MODES) as Mode[]).map((id) => ({ id, ...MODES[id] }));
+  readonly periods = [7, 14, 30];
+  readonly attentionFilters: Array<{ id: 'all' | AttentionKind; label: string }> = [
+    { id: 'all', label: 'Todas' }, { id: 'approval', label: 'Aprobaciones' },
+    { id: 'error', label: 'Errores' }, { id: 'connection', label: 'Conexiones' },
   ];
-  readonly modeBusy = signal(false);
-  readonly modeError = signal<string | null>(null);
+  readonly publicationLabels = PUBLICATION_LABELS;
+  readonly setupLabels = SETUP_LABELS;
+  readonly setupLinks = SETUP_LINKS;
+  readonly maxWeekOffset = MAX_WEEK_OFFSET;
+  readonly lastDayOffset = LAST_DAY_OFFSET;
+
+  readonly siteId = computed(() => this.appContext.activeSite()?.id ?? null);
+  readonly siteName = computed(() => this.appContext.activeSite()?.name ?? 'Todos los sitios');
+  readonly canManageAutomation = computed(() => this.appContext.permissions().includes('workspace.manage'));
+  readonly canConfirmProfile = computed(() => this.appContext.role() !== 'viewer');
 
   readonly overview = signal<StudioOverview | null>(null);
   readonly policy = signal<AutomationPolicy | null>(null);
   readonly intelligence = signal<SiteIntelligenceOverview | null>(null);
+  readonly strategy = signal<StrategyLayers | null>(null);
   readonly plans = signal<EditorialPlan[]>([]);
   readonly planItems = signal<EditorialPlanItem[]>([]);
-  readonly operations = signal<OperationItem[]>([]);
-  readonly dayOffset = signal(0);
-  readonly showAllOps = signal(false);
-  /** Null until loaded; false when the detected profile was never confirmed. */
-  readonly strategy = signal<StrategyLayers | null>(null);
-  readonly strategyApproved = computed(() => (this.strategy() ? Boolean(this.strategy()!.approved) : null));
+  readonly operations = signal<OperationItem[] | null>(null);
+  readonly calendar = signal<CalendarEvent[] | null>(null);
+  readonly reviewProjects = signal<StudioProjectSummary[]>([]);
+  readonly loading = signal(true);
+  readonly loadIssues = signal<string[]>([]);
+  readonly modeBusy = signal(false);
+  readonly modeError = signal<string | null>(null);
   readonly confirming = signal(false);
+  readonly dayOffset = signal(0);
+  readonly weekOffset = signal(0);
+  readonly agendaOffset = signal(0);
+  readonly failedLogoUrl = signal<string | null>(null);
+  readonly period = signal(7);
+  readonly attentionFilter = signal<'all' | AttentionKind>('all');
+  readonly showAllAttention = signal(false);
+  readonly showAllOps = signal(false);
+  readonly showAllPublications = signal(false);
   private readonly dismissed = signal(false);
+  private readonly now = signal(new Date());
+  private readonly timeZone = signal(Intl.DateTimeFormat().resolvedOptions().timeZone);
+  private requests = new Subscription();
+  private loadedSite: string | null | undefined;
 
-  private refresh: Subscription | null = null;
-
-  readonly siteId = computed(() => this.appContext.activeSite()?.id ?? null);
-  readonly siteName = computed(() => this.appContext.activeSite()?.name ?? 'All sites');
   readonly profile = computed(() => this.intelligence()?.profile ?? null);
+  readonly logoUrl = computed(() => {
+    const logo = this.overview()?.siteLogoUrl ?? null;
+    return logo === this.failedLogoUrl() ? null : logo;
+  });
   readonly indexing = computed(() => Boolean(this.intelligence()?.indexing));
-  /** A plan still "generating" after 30 minutes without an update was interrupted; do not block a new one. */
-  readonly planGenerating = computed(() => this.plans().some((plan) => plan.status === 'generating' && Date.now() - new Date(plan.updatedAt ?? plan.createdAt ?? 0).getTime() < 30 * 60_000));
-  /** "12 of 30" from the running planning operation, written after each wave of topics. */
-  readonly planProgress = computed(() => {
-    const op = this.operations().find((o) => o.type === 'editorial_plan_generation' && (o.status === 'running' || o.status === 'queued'));
-    return op && op.totalSteps > 0 ? `${op.completedSteps} of ${op.totalSteps}` : '';
-  });
-  readonly planReady = computed(() => {
-    const now = new Date();
-    return this.plans().some((plan) => plan.status === 'ready' && new Date(plan.dateTo) >= now);
+  readonly mode = computed(() => this.policy()?.mode ?? this.overview()?.automation.mode ?? null);
+  readonly modeDetails = computed(() => this.mode() ? MODES[this.mode()!] : null);
+  readonly automationStatus = computed(() => {
+    const automation = this.policy() ?? this.overview()?.automation;
+    if (!automation) return null;
+    if (automation.state === 'paused') return { label: 'Automatización en pausa', tone: 'amber' };
+    if (automation.state === 'degraded') return { label: 'Automatización con incidencias', tone: 'amber' };
+    return automation.enabled ? { label: 'Automatización activa', tone: 'green' } : { label: 'Automatización desactivada', tone: 'neutral' };
   });
 
-  /** Destinations of the active site, plus workspace-wide ones (social accounts without a site). */
-  readonly siteConnections = computed(() => {
-    const siteId = this.siteId();
-    return (this.overview()?.connections ?? []).filter((c) => !siteId || !c.siteId || c.siteId === siteId);
-  });
-
-  readonly steps = computed<SetupStep[]>(() => {
-    const o = this.overview();
-    const connections = this.siteConnections();
-    const connected = (platform: string) => connections.some((c) => c.platform === platform && c.enabled && this.connectionState(c) === 'ok');
-    const p = this.policy();
+  readonly siteConnections = computed(() => (this.overview()?.connections ?? []).filter((c) => !this.siteId() || !c.siteId || c.siteId === this.siteId()));
+  readonly steps = computed(() => {
+    const connected = (platform: string) => this.siteConnections().some((c) => c.platform === platform && this.connectionTone(c) === 'green');
     return setupSteps({
-      websiteConnected: connected('website'),
+      websiteConnected: connected('website') || this.siteConnections().some((c) => c.platform === 'website' && c.enabled && c.id.startsWith('legacy-site-') && c.readiness === 'ready'),
       siteAnalyzed: Boolean(this.profile()?.indexedAt),
-      planReady: this.planReady(),
-      autopilotMode: p?.mode ?? null,
-      automationEnabled: Boolean(p?.enabled),
+      planReady: this.plans().some((plan) => plan.status === 'ready' && localDate(plan.dateTo, this.timeZone()) >= this.dateKey(0)),
+      autopilotMode: this.mode(),
+      automationEnabled: Boolean(this.policy()?.enabled),
       instagramConnected: connected('instagram'),
       xConnected: connected('x'),
-      sourceCount: o?.sources.total ?? 0,
+      sourceCount: this.overview()?.sources.total ?? 0,
     });
   });
-  readonly requiredTotal = computed(() => this.steps().filter((s) => s.required).length);
-  readonly requiredDone = computed(() => this.steps().filter((s) => s.required && s.done).length);
-  readonly requiredLeft = computed(() => this.requiredTotal() - this.requiredDone());
+  readonly websiteReady = computed(() => this.steps().some((step) => step.id === 'website' && step.done));
+  readonly setupRemaining = computed(() => this.steps().filter((step) => !step.done).length);
+  readonly setupHidden = computed(() => !this.setupRemaining() || (this.websiteReady() && this.dismissed()));
   readonly reviewCount = computed(() => this.overview()?.pipeline.review ?? 0);
-  readonly setupHidden = computed(() => this.steps().every((step) => step.done) || (this.requiredLeft() === 0 && this.dismissed()));
   readonly headline = computed(() => {
-    const a = this.overview()?.automation;
-    const p = this.policy();
-    return autopilotHeadline(this.steps(), { enabled: Boolean(p?.enabled ?? a?.enabled), paused: (p?.state ?? a?.state) === 'paused', pausedReason: p?.pausedReason ?? a?.pausedReason ?? null, mode: p?.mode ?? null, review: this.reviewCount() });
+    if (!this.overview()) return { title: this.loading() ? 'Cargando tu espacio editorial…' : 'Resumen no disponible', detail: '' };
+    if (!this.websiteReady()) return { title: 'Conecta tu sitio web para empezar', detail: 'La conexión habilita la publicación desde Auctorio.' };
+    const verified = this.siteConnections().some((c) => c.platform === 'website' && this.connectionTone(c) === 'green');
+    const detail = [verified ? 'Web verificada' : 'Web pendiente de verificar', this.profile() ? 'Perfil editorial disponible' : '', this.modeDetails()?.label].filter(Boolean).join(' · ');
+    return { title: 'Tu espacio editorial está listo', detail };
   });
 
-  readonly day = computed(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + this.dayOffset());
-    return d;
+  private readonly upcomingEvents = computed(() => {
+    const now = this.now().getTime();
+    const end = zonedToUtc(this.dateKey(this.period()), '00:00', this.timeZone()).getTime();
+    return (this.calendar() ?? []).filter((event) => {
+      if (!event.scheduledFor) return false;
+      const at = new Date(event.scheduledFor).getTime();
+      return at >= now && at < end;
+    }).sort((a, b) => a.scheduledFor!.localeCompare(b.scheduledFor!));
   });
-  private readonly publishedTitles = computed(() => new Set((this.overview()?.recentPublications ?? []).filter((p) => p.status === 'published').map((p) => p.title.trim().toLowerCase())));
-  private itemsOn(date: Date): DayItem[] {
-    return this.planItems()
-      .filter((item) => item.channel === 'website' && item.scheduledFor && sameDay(new Date(item.scheduledFor), date))
-      .map((item) => {
-        const title = item.finalSuggestedTitle || item.workingTitle || item.title;
-        return { item, title, chip: planChip(item, this.publishedTitles(), title) };
-      })
-      .filter((entry): entry is DayItem => entry.chip !== null);
+  readonly nextScheduled = computed(() => this.upcomingEvents().filter((event) => event.kind === 'publication' && ['scheduled', 'queued'].includes(event.status)));
+  readonly upcoming = computed(() => this.nextScheduled()[0] ?? this.upcomingEvents().find((event) => event.channel === 'website' && event.kind !== 'social_draft' && ['planned', 'drafting', 'needs_review', 'ready'].includes(event.lifecycle ?? '')) ?? null);
+
+  upcomingState(event: CalendarEvent): { label: string; tone: string; detail: string } {
+    if (this.nextScheduled().includes(event)) return { ...this.eventState(event), tone: 'green', detail: 'Envío programado' };
+    if (event.lifecycle === 'needs_review') return { label: 'Por revisar', tone: 'amber', detail: 'El artículo requiere revisión antes de publicarse.' };
+    if (event.lifecycle === 'drafting') return { label: 'En producción', tone: 'blue', detail: 'La redacción está en curso.' };
+    if (event.lifecycle === 'ready') return { label: 'Preparado', tone: 'violet', detail: 'El envío aún está pendiente de programación.' };
+    const policy = this.policy();
+    if (policy?.enabled && policy.state === 'active' && policy.mode === 'autopilot') {
+      return { label: 'Plan de Autopilot', tone: 'violet', detail: 'Autopilot recoge el tema al acercarse su franja y aplica los controles editoriales.' };
+    }
+    if (policy?.enabled && policy.state === 'active' && policy.mode === 'assisted' && event.status === 'approved') {
+      return { label: 'Plan asistido', tone: 'violet', detail: 'Auctorio prepara el artículo. La publicación requiere aprobación.' };
+    }
+    return { ...this.eventState(event), detail: event.status === 'proposed' ? 'La propuesta está pendiente de aprobación en el plan.' : 'Franja reservada en el plan editorial.' };
   }
-  readonly dayItems = computed(() => this.itemsOn(this.day()));
-  readonly featured = computed(() => this.dayItems()[0] ?? null);
-  readonly otherDayItems = computed(() => this.dayItems().slice(1));
-  readonly dayOperations = computed(() => (this.dayOffset() > 0 ? [] : this.operations().filter((op) => sameDay(new Date(op.createdAt), this.day()))));
-  readonly dayCount = computed(() => {
-    const ops = this.dayOperations().length;
-    const topics = this.dayItems().length;
-    const parts = [ops ? `${ops} ${ops === 1 ? 'activity' : 'activities'}` : '', topics ? `${topics} ${topics === 1 ? 'topic' : 'topics'}` : ''].filter(Boolean);
-    return parts.join(' · ') || (this.dayOffset() > 0 ? 'Nothing planned yet' : 'No activity');
+  readonly attention = computed<Attention[]>(() => {
+    const overview = this.overview();
+    if (!overview) return [];
+    const items: Attention[] = overview.recentPublications.filter((pub) => pub.status === 'failed').map((pub) => ({
+      id: pub.id, kind: 'error', title: pub.title, detail: [pub.destination, humanError(pub.lastError)].filter(Boolean).join(' · '),
+      action: 'Resolver', link: '/studio/results', params: { id: pub.id },
+    }));
+    const missingFailures = overview.pipeline.failed - items.length;
+    if (missingFailures > 0) items.push({ id: 'failures', kind: 'error', title: missingFailures === 1 ? 'Una publicación fallida' : `${missingFailures} publicaciones fallidas`, detail: 'Consulta los intentos de envío en Resultados.', action: 'Resolver', link: '/studio/results', params: { status: 'failed' } });
+    for (const project of this.reviewProjects()) {
+      items.push({ id: project.id, kind: 'approval', title: project.title, detail: 'Artículo pendiente de revisión', action: 'Revisar', link: ['/studio/content', project.id] });
+    }
+    const remainingReviews = overview.pipeline.review - this.reviewProjects().length;
+    if (remainingReviews > 0) items.push({ id: 'reviews', kind: 'approval', title: remainingReviews === 1 ? 'Un artículo pendiente de revisión' : `${remainingReviews} artículos pendientes de revisión`, detail: 'Abre el calendario filtrado por revisión.', action: 'Revisar', link: '/studio/calendar', params: { chip: 'review' } });
+    for (const connection of this.siteConnections()) {
+      if (this.connectionTone(connection) === 'red' || ['stale', 'not_verified', 'stored'].includes(connection.stage ?? '') || (connection.enabled && connection.platform === 'website' && this.connectionTone(connection) !== 'green')) {
+        items.push({ id: connection.id, kind: 'connection', title: connection.displayName, detail: connection.reason || this.connectionLabel(connection), action: 'Gestionar', link: '/studio/connections' });
+      }
+    }
+    if (overview.sources.failing) items.push({ id: 'sources', kind: 'error', title: overview.sources.failing === 1 ? 'Una fuente con errores' : `${overview.sources.failing} fuentes con errores`, detail: 'Revisa las fuentes que han dejado de actualizarse.', action: 'Revisar', link: '/studio/sources' });
+    return items;
   });
-  readonly week = computed<WeekDay[]>(() =>
-    Array.from({ length: 7 }, (_, offset) => {
-      const date = new Date();
-      date.setDate(date.getDate() + offset);
-      return { offset, date, isToday: offset === 0, items: this.itemsOn(date) };
-    }),
-  );
-  readonly weekTopicCount = computed(() => this.week().reduce((sum, d) => sum + d.items.length, 0));
-  readonly weekSummary = computed(() => {
-    const items = this.week().flatMap((d) => d.items);
-    if (!items.length) return this.planReady() ? 'No topics in the next 7 days' : 'No plan yet';
-    const count = (chip: PlanChip) => items.filter((i) => i.chip === chip).length;
-    return [`${items.length} topic${items.length === 1 ? '' : 's'}`, count('Written') ? `${count('Written')} written` : '', count('Queued') ? `${count('Queued')} queued` : '', count('Needs approval') ? `${count('Needs approval')} need approval` : ''].filter(Boolean).join(' · ');
-  });
+  readonly filteredAttention = computed(() => this.attention().filter((item) => this.attentionFilter() === 'all' || item.kind === this.attentionFilter()));
+  readonly recentPublications = computed(() => this.overview()?.recentPublications ?? []);
 
-  /** Reload when the active site changes so destination rows never show the previous site's state. */
-  private lastSiteId: string | null | undefined;
-  private readonly reloadOnSiteChange = effect(() => {
-    const id = this.siteId();
+  private readonly eventsByDay = computed(() => {
+    const byDay = new Map<string, CalendarEvent[]>();
+    for (const event of this.calendar() ?? []) {
+      if (!event.scheduledFor || event.channel !== 'website' || ['canceled', 'deleted', 'rejected'].includes(event.status)) continue;
+      const key = localDate(event.scheduledFor, this.timeZone());
+      const entries = byDay.get(key);
+      if (entries) entries.push(event);
+      else byDay.set(key, [event]);
+    }
+    return byDay;
+  });
+  readonly dayEvents = computed(() => this.eventsByDay().get(this.dateKey(this.dayOffset())) ?? []);
+  readonly dayOperations = computed(() => this.operations()?.filter((op) => localDate(op.createdAt, this.timeZone()) === this.dateKey(this.dayOffset())) ?? []);
+  readonly day = computed(() => this.dateAt(this.dayOffset()));
+  readonly agendaDate = computed(() => this.dateAt(this.agendaOffset()));
+  readonly selectedDateKey = computed(() => this.dateKey(this.agendaOffset()));
+  readonly agendaEventCount = computed(() => this.eventsByDay().get(this.selectedDateKey())?.length ?? 0);
+  readonly periodCoverage = computed(() => this.coverage(0, this.period()));
+  readonly weekCoverage = computed(() => this.coverage(this.weekOffset(), 7));
+  readonly week = computed<WeekDay[]>(() => Array.from({ length: 7 }, (_, index) => {
+    const offset = this.weekOffset() + index;
+    const items: WeekEntry[] = (this.eventsByDay().get(this.dateKey(offset)) ?? []).map((event) => ({
+      id: event.id, title: event.title, ...this.eventState(event), detail: event.primaryKeyword || this.eventTime(event.scheduledFor),
+    }));
+    return { offset, date: this.dateAt(offset), isToday: offset === 0, items };
+  }));
+  readonly featured = computed(() => this.dayEvents()[0] ?? null);
+  readonly featuredPlanItem = computed(() => this.planItems().find((item) => item.id === this.featured()?.planItemId) ?? null);
+  readonly runningWork = computed(() => this.dayOffset() === 0
+    ? this.operations()?.find((op) => op.status === 'running' || op.status === 'retrying' || op.status === 'queued') ?? null
+    : null);
+
+  private readonly reloadOnSite = effect(() => {
+    const siteId = this.siteId();
     untracked(() => {
-      if (this.lastSiteId !== undefined && this.lastSiteId !== id) this.load();
-      this.lastSiteId = id;
+      if (this.loadedSite !== undefined && this.loadedSite !== siteId) this.load();
     });
   });
 
   ngOnInit(): void {
     this.load();
-    // Every 5 s while a plan is being written (to show its progress), otherwise every 30 s.
-    let ticks = 0;
-    this.refresh = timer(5_000, 5_000).subscribe(() => {
-      ticks += 1;
-      if (!document.hidden && (this.planGenerating() || ticks % 6 === 0)) this.load();
+    timer(30_000, 30_000).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      if (!this.document.hidden && !this.loading() && !this.modeBusy() && !this.confirming()) this.load();
     });
   }
 
   ngOnDestroy(): void {
-    this.refresh?.unsubscribe();
+    this.requests.unsubscribe();
   }
 
   load(): void {
-    const siteId = this.siteId() ?? undefined;
-    this.api.getOverview(siteId).subscribe({ next: (o) => this.overview.set(o), error: () => undefined });
-    this.api.getAutomationPolicy(siteId).subscribe({ next: (p) => this.policy.set(p), error: () => undefined });
-    if (siteId) this.api.getSiteIntelligence(siteId).subscribe({ next: (i) => this.intelligence.set(i), error: () => undefined });
-    if (siteId) this.intelligenceApi.getStrategy(siteId).subscribe({ next: (layers) => this.strategy.set(layers), error: () => undefined });
-    this.dismissed.set(typeof localStorage !== 'undefined' && localStorage.getItem(`au-setup-hidden:${siteId ?? 'all'}`) === '1');
-    this.api.listOperations({ page: 1, pageSize: 100, siteId }).subscribe({ next: (r) => this.operations.set(r.items), error: () => undefined });
-    this.api
-      .listEditorialPlans(1, 10, this.appContext.activeSite()?.id)
-      .pipe(
-        switchMap((page) => {
-          const plans = page.items.filter((plan) => !siteId || !plan.siteId || plan.siteId === siteId);
-          this.plans.set(plans);
-          const current = plans.filter((plan) => plan.status === 'ready' && new Date(plan.dateTo) >= new Date(Date.now() - 86_400_000)).slice(0, 3);
-          return current.length ? forkJoin(current.map((plan) => this.api.getEditorialPlan(plan.id).pipe(catchError(() => of(null))))) : of([]);
-        }),
-      )
-      .subscribe({
-        next: (details) => this.planItems.set(details.flatMap((plan) => plan?.items ?? [])),
-        error: () => undefined,
-      });
-  }
-
-  dismissSetup(): void {
-    localStorage.setItem(`au-setup-hidden:${this.siteId() ?? 'all'}`, '1');
-    this.dismissed.set(true);
-  }
-
-  /** "Correct": the detected strategy becomes the approved one, unchanged. */
-  confirmProfile(): void {
     const siteId = this.siteId();
-    const layers = this.strategy();
-    if (!siteId || !layers) return;
-    this.confirming.set(true);
-    this.intelligenceApi.saveStrategy(siteId, layers.effective, 'Confirmed from Home').subscribe({
-      next: (saved) => {
-        this.strategy.set(saved.layers);
-        this.confirming.set(false);
-        this.toast.success('Profile confirmed.');
-      },
-      error: (err) => {
-        this.confirming.set(false);
-        this.toast.error(err?.error?.error?.message || 'The profile could not be confirmed.');
-      },
-    });
+    if (this.loadedSite !== siteId) {
+      this.resetSite();
+      this.loadedSite = siteId;
+    }
+    // A later reload owns the signals, including after switching the active site.
+    this.requests.unsubscribe();
+    this.requests = new Subscription();
+    this.loadIssues.set([]);
+    this.loading.set(true);
+    this.now.set(new Date());
+    const scope = siteId ?? undefined;
+    const from = zonedToUtc(this.dateKey(-MAX_WEEK_OFFSET - 1), '00:00', this.timeZone());
+    const to = zonedToUtc(this.dateKey(LAST_DAY_OFFSET + 2), '00:00', this.timeZone());
+    const requests: Observable<unknown>[] = [
+      this.read('resumen', this.api.getOverview(scope), this.overview.set),
+      this.read('automatización', this.api.getAutomationPolicy(scope), (value) => {
+        if (!this.modeBusy()) this.policy.set(value);
+      }),
+      this.read('actividad', this.api.listOperations({ page: 1, pageSize: 100, siteId: scope }), (value) => this.operations.set(value.items)),
+      this.read('calendario', this.api.listCalendar(from.toISOString(), to.toISOString(), undefined, scope), (response) => {
+        if (response.timeZone) this.timeZone.set(response.timeZone);
+        this.calendar.set(response.items);
+      }),
+      this.read('aprobaciones', forkJoin([
+        this.api.listProjects({ siteId: scope, status: 'in_review', pageSize: 6 }),
+        this.api.listProjects({ siteId: scope, status: 'qa_passed', pageSize: 6 }),
+      ]), (pages) => this.reviewProjects.set(pages.flatMap((page) => page.items).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6))),
+      this.read('plan editorial', this.api.listEditorialPlans(1, 10, scope).pipe(switchMap((page) => {
+        const plans = page.items.filter((plan) => !siteId || !plan.siteId || plan.siteId === siteId);
+        this.plans.set(plans);
+        const current = plans.filter((plan) => plan.status === 'ready' && localDate(plan.dateTo, this.timeZone()) >= this.dateKey(0)).slice(0, 3);
+        return current.length ? forkJoin(current.map((plan) => this.api.getEditorialPlan(plan.id))) : of([]);
+      })), (plans) => this.planItems.set(plans.flatMap((plan) => plan.items ?? []))),
+    ];
+    if (siteId) {
+      requests.push(
+        this.read('perfil del sitio', this.api.getSiteIntelligence(siteId), this.intelligence.set),
+        this.read('estrategia', this.intelligenceApi.getStrategy(siteId), (value) => { if (!this.confirming()) this.strategy.set(value); }),
+      );
+    }
+    this.requests.add(forkJoin(requests).subscribe({ complete: () => this.loading.set(false) }));
   }
 
-  stepsFor(required: boolean): SetupStep[] {
-    return this.steps().filter((step) => step.required === required);
+  private read<T>(label: string, source: Observable<T>, apply: (value: T) => void): Observable<T | null> {
+    return source.pipe(tap(apply), catchError(() => {
+      this.loadIssues.update((issues) => [...issues, label]);
+      return of(null);
+    }));
   }
 
-  shiftDay(delta: number): void {
-    this.dayOffset.update((value) => Math.max(-30, Math.min(30, value + delta)));
+  private resetSite(): void {
+    this.overview.set(null);
+    this.policy.set(null);
+    this.intelligence.set(null);
+    this.strategy.set(null);
+    this.plans.set([]);
+    this.planItems.set([]);
+    this.operations.set(null);
+    this.calendar.set(null);
+    this.reviewProjects.set([]);
+    this.dayOffset.set(0);
+    this.weekOffset.set(0);
+    this.agendaOffset.set(0);
+    this.failedLogoUrl.set(null);
+    this.setAttention('all');
+    this.showAllOps.set(false);
+    this.showAllPublications.set(false);
+    this.modeError.set(null);
+    this.timeZone.set(Intl.DateTimeFormat().resolvedOptions().timeZone);
+    this.dismissed.set(typeof localStorage !== 'undefined' && localStorage.getItem(`au-setup-hidden:${this.siteId() ?? 'all'}`) === '1');
   }
 
-  openDay(offset: number): void {
-    this.dayOffset.set(offset);
-    document.getElementById('ov-activity')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  private dateAt(offset: number): Date {
+    return new Date(`${this.dateKey(offset)}T12:00:00`);
+  }
+
+  private dateKey(offset: number): string {
+    return addDays(localDate(this.now(), this.timeZone()), offset);
+  }
+
+  private coverage(start: number, length: number): number | null {
+    if (!this.calendar()) return null;
+    return Array.from({ length }, (_, i) => this.eventsByDay().has(this.dateKey(start + i))).filter(Boolean).length;
+  }
+
+  eventTime(value: string | null): string {
+    return value ? localTime(value, this.timeZone()) : '';
+  }
+
+  eventDateKey(value: string | null): string | null {
+    return value ? localDate(value, this.timeZone()) : null;
+  }
+
+  eventDate(value: string | null): Date | null {
+    return value ? new Date(`${localDate(value, this.timeZone())}T12:00:00`) : null;
+  }
+
+  eventState(event: CalendarEvent): { label: string; tone: string } {
+    if (event.kind === 'publication' && event.status in PUBLICATION_LABELS) {
+      const status = event.status as keyof typeof PUBLICATION_LABELS;
+      return { label: PUBLICATION_LABELS[status], tone: status === 'published' ? 'green' : status === 'failed' ? 'red' : 'violet' };
+    }
+    if (event.chip === 'failed') return { label: 'Fallido', tone: 'red' };
+    if (event.chip === 'review') return { label: 'Por revisar', tone: 'amber' };
+    if (event.chip === 'drafting') return { label: 'En redacción', tone: 'blue' };
+    return { label: event.status === 'proposed' ? 'Propuesto' : 'Planificado', tone: 'violet' };
   }
 
   readonly humanError = humanError;
+  readonly difficulty = difficultyLabel;
 
-  label(op: OperationItem) {
-    return activityLabel(op.type, op.status);
+  operationInfo(op: OperationItem): { icon: StudioIconName; title: string; status: string; tone: string } {
+    const info = activityLabel(op.type, op.status);
+    const status = op.status === 'succeeded' ? 'Completado' : info.failed ? 'Con errores' : op.status === 'cancelled' ? 'Cancelado' : op.status === 'queued' ? 'En cola' : op.status === 'retrying' ? 'Reintentando' : 'En proceso';
+    return { icon: info.icon, title: OPERATION_TITLES[op.type] ?? info.label, status, tone: info.failed ? 'red' : op.status === 'succeeded' ? 'green' : 'violet' };
   }
 
-  difficulty(item: EditorialPlanItem) {
-    return difficultyLabel(item.difficultyEstimate);
+  operationProgress(op: OperationItem): number {
+    return op.totalSteps > 0 ? Math.min(100, Math.max(0, Math.round(op.completedSteps / op.totalSteps * 100))) : 0;
   }
 
-  setMode(mode: Mode): void {
+  connectionTone(c: Connection): 'green' | 'red' | 'amber' | 'neutral' {
+    if (!c.enabled) return 'neutral';
+    if (c.status === 'error' || c.stage === 'error' || ['expired', 'provider_error', 'permissions_required'].includes(c.connectionState ?? '')) return 'red';
+    if (c.platform === 'website' && c.stage) return c.stage === 'ready' ? 'green' : 'amber';
+    if (c.connectionState === 'connected' && c.lastVerifiedAt) return 'green';
+    return 'amber';
+  }
+
+  connectionLabel(c: Connection): string {
+    if (!c.enabled) return 'Desactivado';
+    if (c.platform === 'website' && c.stage) {
+      if (c.stage === 'stored' && c.readiness === 'ready') return 'Conectado · sin verificación registrada';
+      return CONNECTION_STAGES[c.stage];
+    }
+    const tone = this.connectionTone(c);
+    return tone === 'green' ? 'Verificado' : tone === 'red' ? 'Requiere atención' : 'Sin verificar';
+  }
+
+
+  setAttention(filter: 'all' | AttentionKind): void {
+    this.attentionFilter.set(filter);
+    this.showAllAttention.set(false);
+  }
+
+  focusAttention(filter: AttentionKind): void {
+    this.setAttention(filter);
+    this.document.getElementById('ov-attention')?.focus();
+  }
+
+  selectPeriod(event: Event): void {
+    this.period.set(Number((event.target as HTMLSelectElement).value));
+  }
+
+  shiftWeek(delta: number): void {
+    this.weekOffset.update((offset) => Math.max(-MAX_WEEK_OFFSET, Math.min(MAX_WEEK_OFFSET, offset + delta)));
+    this.agendaOffset.set(this.weekOffset());
+  }
+
+  shiftDay(delta: number): void {
+    this.selectDay(Math.max(-MAX_WEEK_OFFSET, Math.min(LAST_DAY_OFFSET, this.dayOffset() + delta)));
+  }
+
+  selectDay(offset: number): void {
+    this.dayOffset.set(offset);
+    this.showAllOps.set(false);
+  }
+
+  dismissSetup(): void {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(`au-setup-hidden:${this.siteId() ?? 'all'}`, '1');
+    this.dismissed.set(true);
+  }
+
+  async setMode(mode: Mode): Promise<void> {
+    if (!this.canManageAutomation() || this.modeBusy() || !this.policy() || this.mode() === mode) return;
+    const siteId = this.siteId();
+    this.beginAutomationChange();
+    if (mode === 'autopilot') {
+      const accepted = await this.confirm.confirm({
+        title: '¿Activar Autopilot?',
+        message: 'Auctorio podrá publicar automáticamente según la política editorial del sitio.',
+        confirmLabel: 'Activar Autopilot',
+        cancelLabel: 'Cancelar',
+      });
+      if (!accepted || siteId !== this.siteId()) {
+        this.modeBusy.set(false);
+        return;
+      }
+    }
+    this.saveAutomation(siteId, this.api.updateAutomationPolicy({ siteId, mode }), `Modo ${MODES[mode].label} guardado.`);
+  }
+
+  async togglePause(): Promise<void> {
+    const policy = this.policy();
+    if (!this.canManageAutomation() || this.modeBusy() || !policy) return;
+    const siteId = this.siteId();
+    this.beginAutomationChange();
+    const paused = policy.state !== 'active';
+    if (!paused) {
+      const accepted = await this.confirm.confirm({
+        title: '¿Pausar la automatización?',
+        message: 'Se dejarán de crear y programar publicaciones automáticas. Los trabajos en curso continuarán.',
+        confirmLabel: 'Pausar automatización',
+        cancelLabel: 'Cancelar',
+        danger: true,
+      });
+      if (!accepted || siteId !== this.siteId()) {
+        this.modeBusy.set(false);
+        return;
+      }
+    }
+    const scope = siteId ?? undefined;
+    this.saveAutomation(siteId, paused ? this.api.resumeAutomation(scope) : this.api.pauseAutomation('paused_manually', scope), paused ? 'Automatización reanudada.' : 'Automatización en pausa.');
+  }
+
+  private beginAutomationChange(): void {
     this.modeBusy.set(true);
     this.modeError.set(null);
-    this.api.updateAutomationPolicy({ siteId: this.siteId(), mode }).subscribe({
+  }
+
+  private saveAutomation(siteId: string | null, request: Observable<AutomationPolicy>, message: string): void {
+    request.pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.modeBusy.set(false))).subscribe({
       next: (policy) => {
-        this.policy.set(policy);
-        this.modeBusy.set(false);
-        this.toast.success(modeSummary(mode));
+        if (siteId === this.siteId()) {
+          this.policy.set(policy);
+          this.toast.success(message);
+        }
+        this.load();
       },
       error: (err) => {
-        this.modeBusy.set(false);
-        this.modeError.set(err?.error?.error?.message || err?.error?.message || 'The mode could not be saved.');
+        if (siteId === this.siteId()) this.modeError.set(err?.error?.error?.message || err?.error?.message || 'No se pudo guardar el cambio.');
+        else this.load();
       },
     });
   }
 
-  connectionState(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string }): 'ok' | 'bad' | 'idle' {
-    if (!c.enabled) return 'idle';
-    // Website installs are only ready once verified; a stored/active status alone is not proof.
-    if (c.platform === 'website') return c.connectionState === 'connected' ? 'ok' : c.connectionState === 'provider_error' ? 'bad' : 'idle';
-    if (c.connectionState === 'connected' || c.status === 'active') return 'ok';
-    if (c.status === 'error' || ['expired', 'provider_error', 'permissions_required'].includes(c.connectionState ?? '')) return 'bad';
-    return 'idle';
-  }
-
-  checkedAge(iso: string): string {
-    const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86_400_000);
-    return days <= 0 ? 'today' : `${days}d ago`;
-  }
-
-  connectionLabel(c: { enabled: boolean; status: string; connectionState: string | null; platform?: string; stage?: keyof typeof STAGE_LABELS }): string {
-    const state = this.connectionState(c);
-    return !c.enabled ? 'Disabled' : c.platform === 'website' && c.stage ? STAGE_LABELS[c.stage] : state === 'ok' ? 'Connected' : state === 'bad' ? 'Action needed' : 'Not verified';
-  }
-
-  attentionItems(): Array<{ title: string; detail: string; action: string; link: string }> {
-    const o = this.overview();
-    if (!o) return [];
-    const items: Array<{ title: string; detail: string; action: string; link: string }> = [];
-    if (o.pipeline.failed > 0) items.push({ title: `${o.pipeline.failed} failed publication${o.pipeline.failed === 1 ? '' : 's'}`, detail: 'Open the attempt and retry or fix the destination', action: 'Review', link: '/studio/results' });
-    for (const c of this.siteConnections()) {
-      if (this.connectionState(c) === 'bad') items.push({ title: `${c.displayName} needs attention`, detail: 'Its credentials stopped working', action: 'Fix', link: '/studio/connections' });
-      else if (c.platform === 'website' && c.enabled && (c.connectionState === 'not_verified' || c.connectionState === 'stale')) items.push({ title: `${c.displayName} is ${c.connectionState === 'stale' ? 'stale' : 'not verified'}`, detail: c.connectionState === 'stale' ? 'Last verification is over 30 days old' : 'Run verification before publishing', action: 'Verify', link: '/studio/connections' });
-    }
-    if (o.sources.failing > 0) items.push({ title: `${o.sources.failing} failing source${o.sources.failing === 1 ? '' : 's'}`, detail: 'They stopped feeding the inbox', action: 'Review', link: '/studio/sources' });
-    return items;
+  confirmProfile(): void {
+    const siteId = this.siteId();
+    const layers = this.strategy();
+    if (!this.canConfirmProfile() || this.confirming() || !siteId || !layers || layers.approved) return;
+    this.confirming.set(true);
+    this.intelligenceApi.saveStrategy(siteId, layers.effective, 'Confirmado desde Overview')
+      .pipe(takeUntilDestroyed(this.destroyRef), finalize(() => this.confirming.set(false)))
+      .subscribe({
+        next: (saved) => {
+          if (siteId !== this.siteId()) { this.load(); return; }
+          this.strategy.set(saved.layers);
+          this.toast.success('Perfil confirmado.');
+        },
+        error: (err) => {
+          if (siteId !== this.siteId()) { this.load(); return; }
+          this.toast.error(err?.error?.error?.message || err?.error?.message || 'No se pudo confirmar el perfil.');
+        },
+      });
   }
 }

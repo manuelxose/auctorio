@@ -1,0 +1,32 @@
+/* Compact pack cards and provider table from the Advanced reference. */
+.source-diagnostics .split > .stack { min-width: 0; }
+.source-pack {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid #ebe5f0;
+  border-radius: 12px;
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+.source-pack h3 { margin: 0 0 5px; font-size: 12px; }
+.source-pack p { margin: 0 0 11px; color: #7c758e; font-size: 11px; }
+.source-pack__actions, .source-provider-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.source-provider-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.source-pack__details[open] { flex: 1 0 100%; }
+.source-pack__details p { margin-top: 8px; }
+.source-pack__details ul { margin: 8px 0; padding-left: 16px; font-size: 11px; }
+.source-pack__details li + li { margin-top: 6px; }
+.source-pack__details summary::-webkit-details-marker { display: none; }
+.source-option { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; font-size: 11px; }
+.provider-form { margin-bottom: 14px; }
+.provider-details { margin-top: 3px; font-size: 10px; color: #817b93; overflow-wrap: anywhere; }
+.provider-details summary, .source-domain-details summary { cursor: pointer; }
+.provider-details[open] { min-width: 120px; }
+.provider-result { margin-top: 14px; overflow-wrap: anywhere; }
+.profile-reference .source-danger { color: #b95552; }
+.source-policy { margin: 0 0 13px; }
+.source-policy dd { margin: 0; font-size: 12px; font-weight: 700; text-align: right; }
+.source-muted { margin: 0 0 10px; color: #817b93; font-size: 11px; }
+.source-domain-details { margin-top: 14px; }
+.source-domain-details > summary { color: #655782; font-size: 11px; font-weight: 700; }
+.source-domain-details > .stack { margin-top: 14px; }

@@ -134,6 +134,10 @@ export type ArticleTargetsOverride = Partial<Omit<ArticleTargets, "sections" | "
 export const LENGTH_MODES = { dynamic: null, short: 1400, medium: 2000, long: 2600 } as const;
 export type LengthMode = keyof typeof LENGTH_MODES;
 
+export function wordTargetRange(words: number): { min: number; max: number } {
+  return { min: Math.round(words * 0.87), max: Math.round(words * 1.13) };
+}
+
 export type WritingSettings = {
   /** Rules every article follows ("Never use the word leverage"); ≤30, ≤300 chars each. */
   instructions: string[];

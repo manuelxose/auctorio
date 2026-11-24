@@ -206,7 +206,10 @@ test("refreshing suggestions or the detected profile never overwrites the approv
 
 test("reading the strategy derives a missing or outdated suggestion from the detected profile", async () => {
   const { tenantId, siteId } = await fixture();
-  const first = await getStrategyLayers(tenantId, siteId);
+  const [first, ...parallelReads] = await Promise.all(
+    Array.from({ length: 4 }, () => getStrategyLayers(tenantId, siteId)),
+  );
+  assert.ok(parallelReads.every(({ suggested }) => suggested?.config.primaryAudience === first.suggested?.config.primaryAudience));
   assert.ok(first.suggested, "a profile without a suggestion gets one on read");
   assert.equal(first.provenance.primaryAudience, "suggested");
   assert.equal(first.effective.primaryAudience, first.detected?.audience);

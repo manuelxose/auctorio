@@ -29,7 +29,7 @@ AYRSHARE_API_KEY=&lt;key from your Ayrshare dashboard&gt;</pre>
         </li>
         <li>
           <strong>Your own developer app</strong>
-          <span class="au-muted">{{ platform() === 'x' ? 'An X developer app with OAuth 2.0 enabled' : 'A Meta app with Instagram Graph API; the Instagram account must be Business or Creator and linked to a Facebook Page' }}</span>
+          <span class="au-muted">{{ platform() === 'x' ? 'An X developer app with OAuth 2.0 enabled. Reconnect existing accounts to grant image upload access.' : 'A Meta app with Instagram Graph API; the Instagram account must be Business or Creator and linked to a Facebook Page' }}</span>
           <pre class="au-setup-guide__code">SOCIAL_PROVIDER=direct
 {{ platform() === 'x' ? 'X_CLIENT_ID=…\nX_CLIENT_SECRET=…' : 'META_APP_ID=…\nMETA_APP_SECRET=…' }}</pre>
           @if (callbackUrl()) {
@@ -64,7 +64,7 @@ AYRSHARE_API_KEY=&lt;key from your Ayrshare dashboard&gt;</pre>
 })
 export class SocialSetupGuideComponent {
   private readonly api = inject(StudioApiService);
-  readonly platform = input<'instagram' | 'x'>('instagram');
+  readonly platform = input<'instagram' | 'facebook' | 'x'>('instagram');
   readonly callbackUrl = signal('');
   readonly status = signal('checking…');
   readonly copied = signal(false);
@@ -80,7 +80,7 @@ export class SocialSetupGuideComponent {
   }
 
   platformLabel(): string {
-    return this.platform() === 'x' ? 'X' : 'Instagram';
+    return { x: 'X', facebook: 'Facebook', instagram: 'Instagram' }[this.platform()];
   }
 
   copy(): void {

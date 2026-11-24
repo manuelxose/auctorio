@@ -21,9 +21,11 @@ import {
 import { discoverWebsite, normalizeDestinationUrl } from "./connectors/discovery";
 import { verificationProbePlan } from "./connectors/verification";
 import {
+  activateWebsiteInstallation,
   cancelInstallation,
   createInstallation,
   deleteInstallationDraft,
+  disconnectWebsiteInstallation,
   getInstallation,
   listInstallations,
   storeInstallationCredentials,
@@ -31,12 +33,13 @@ import {
   transitionInstallation,
   type InstallationView,
 } from "./connectors/installation";
-import { createOperation } from "./operations";
+import { createOperation, failOperation } from "./operations";
 import { enqueueConnectionJob } from "../infrastructure/queue/producer";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { startConnectionSession } from "./social-connections";
 import { publishEvent } from "./events";
 import { notify } from "./notifications";
+import { resolveSiteIdByOrigin } from "./destination-readiness";
 
 const prisma = getPrismaClient();
 
@@ -62,19 +65,9 @@ function siteKeyForOrigin(origin: string): string {
   }
 }
 
-function originOf(url: string | null | undefined): string | null {
-  try {
-    return url ? new URL(url).origin.toLowerCase().replace("://www.", "://") : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function findSiteIdByOrigin(tenantId: string, baseUrl: string): Promise<string | null> {
-  const origin = originOf(baseUrl);
-  if (!origin) return null;
   const sites = await prisma.site.findMany({ where: { tenantId }, select: { id: true, baseUrl: true } });
-  return sites.find((site) => originOf(site.baseUrl) === origin)?.id ?? null;
+  return resolveSiteIdByOrigin(baseUrl, sites);
 }
 
 /** Saving credentials makes a draft verifiable; without this a draft can never reach `verifying`. */
@@ -134,13 +127,14 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       ...(query.state ? { state: query.state as (typeof STATES)[number] } : {}),
     });
     // Read-only link by normalized origin so unlinked installs show their site; nothing is persisted.
-    const linked = await Promise.all(
-      items.map(async (item) => {
+    const sites = items.some((item) => !item.siteId && item.kind === "website")
+      ? await prisma.site.findMany({ where: { tenantId: context.tenantId }, select: { id: true, baseUrl: true } })
+      : [];
+    const linked = items.map((item) => {
         const baseUrl = (item.config as { baseUrl?: unknown } | null)?.baseUrl;
         if (item.siteId || item.kind !== "website" || typeof baseUrl !== "string") return item;
-        return { ...item, siteId: await findSiteIdByOrigin(context.tenantId, baseUrl) };
-      }),
-    );
+        return { ...item, siteId: resolveSiteIdByOrigin(baseUrl, sites) };
+    });
     return reply.send({ items: linked });
   });
 
@@ -176,6 +170,7 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       });
       return reply.code(201).send(installation);
     } catch (error) {
+      if (error instanceof Error && error.message === "site_not_found") return notFound(reply, "site not found");
       return badRequest(reply, String(error));
     }
   });
@@ -377,8 +372,10 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
     if (!installation.credentialsCiphertext && !installation.credentialsRef) {
       return conflict(reply, "credentials are required before verification");
     }
+    const recheck = installation.state === "active";
+    if (installation.state === "verifying") return conflict(reply, "Verification is already in progress.");
     try {
-      await transitionInstallation(context.tenantId, id, "verifying", { userId: context.userId });
+      if (!recheck) await transitionInstallation(context.tenantId, id, "verifying", { userId: context.userId });
     } catch (error) {
       if (error instanceof Error && error.name === "InvalidTransitionError") {
         return conflict(reply, error.message);
@@ -386,30 +383,35 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       throw error;
     }
 
-    const operation = await createOperation({
-      tenantId: context.tenantId,
-      siteId: installation.siteId,
-      type: "connection_verification",
-      initiatorUserId: context.userId,
-      entityType: "connector_installation",
-      entityId: installation.id,
-      queueName: "queue_connection",
-      metadata: { phase: "verification" },
-    });
-    const jobId = crypto.randomUUID();
-    await prisma.operation.update({
-      where: { id: operation.id },
-      data: { jobKey: jobId },
-    });
-    await enqueueConnectionJob(jobId, {
-      kind: "verify",
-      installationId: installation.id,
-      tenantId: context.tenantId,
-      operationId: operation.id,
-      siteId: installation.siteId,
-    });
-
-    return reply.code(202).send({ operationId: operation.id, state: "verifying" });
+    let operationId: string | null = null;
+    try {
+      const operation = await createOperation({
+        tenantId: context.tenantId,
+        siteId: installation.siteId,
+        type: "connection_verification",
+        initiatorUserId: context.userId,
+        entityType: "connector_installation",
+        entityId: installation.id,
+        queueName: "queue_connection",
+        metadata: { phase: "verification" },
+      });
+      operationId = operation.id;
+      const jobId = crypto.randomUUID();
+      await prisma.operation.update({ where: { id: operation.id }, data: { jobKey: jobId } });
+      await enqueueConnectionJob(jobId, {
+        kind: "verify",
+        recheck,
+        installationId: installation.id,
+        tenantId: context.tenantId,
+        operationId: operation.id,
+        siteId: installation.siteId,
+      });
+      return reply.code(202).send({ operationId: operation.id, state: "verifying" });
+    } catch {
+      if (operationId) await failOperation(operationId, { errorCode: "verification_queue_unavailable", errorSummary: "Verification could not be queued.", retryable: true });
+      if (!recheck) await transitionInstallation(context.tenantId, id, "failed", { userId: context.userId, error: "verification_queue_unavailable" });
+      return reply.code(503).send({ error: { code: "verification_queue_unavailable", message: "Verification could not be queued. Try again." } });
+    }
   });
 
   // ── Social authorization session (preserves PKCE/state protections)
@@ -521,6 +523,9 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
 
     // Website activation: create or update the publishing Site behind the
     // installation so the existing publication pipeline can use it.
+    if (toInstallationView(installation).verificationStage !== "ready") {
+      return conflict(reply, "Run a successful destination check before activation.");
+    }
     const config = (installation.config ?? {}) as Record<string, unknown>;
     const baseUrl = parseOptionalString(config.baseUrl);
     if (!baseUrl) {
@@ -550,14 +555,17 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
       return notFound(reply, "linked site not found");
     }
 
-    const activated = await transitionInstallation(context.tenantId, id, "active", {
-      userId: context.userId,
-      patch: {
-        siteId: site.id,
-        displayName: installation.displayName ?? site.name,
-        activatedAt: new Date(),
-      },
-    });
+    let activated: InstallationView;
+    try {
+      activated = await activateWebsiteInstallation({
+        tenantId: context.tenantId, installationId: id, siteId: site.id,
+        userId: context.userId, displayName: installation.displayName ?? site.name,
+        transport: installation.provider === "auctorio_feed" ? undefined : { type: siteType, baseUrl },
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === "installation_not_verified") return conflict(reply, "Run a successful destination check before activation.");
+      throw error;
+    }
     await notify({
       tenantId: context.tenantId,
       siteId: site.id,
@@ -586,6 +594,24 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
 
   // ── Cancel / resume / delete
 
+  fastify.post("/v2/connector-installations/:id/disconnect", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "integrations.manage");
+    if (!context) return;
+    const { id } = request.params as { id: string };
+    if (!isUuid(id)) return badRequest(reply, "invalid installation id");
+    try {
+      return reply.send(await disconnectWebsiteInstallation(context.tenantId, id, context.userId));
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === "installation_not_found") return notFound(reply, "installation not found");
+        if (error.message === "installation_not_active" || error.message === "installation_site_not_linked") {
+          return conflict(reply, "Only an active installation linked to a website can be disconnected.");
+        }
+      }
+      throw error;
+    }
+  });
+
   fastify.post("/v2/connector-installations/:id/cancel", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "integrations.manage");
     if (!context) {
@@ -595,6 +621,9 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
     if (!isUuid(id)) {
       return badRequest(reply, "invalid installation id");
     }
+    const current = await getInstallation(context.tenantId, id);
+    if (!current) return notFound(reply, "installation not found");
+    if (current.state === "active" || current.state === "disabled") return conflict(reply, "Use the destination's disconnect action.");
     const installation = await cancelInstallation(context.tenantId, id, context.userId);
     return reply.send(sanitizeInstallation(installation));
   });
@@ -612,7 +641,8 @@ export function registerConnectorRoutes(fastify: FastifyInstance) {
     if (!installation) {
       return notFound(reply, "installation not found");
     }
-    const resumeState = installation.kind === "website" ? "credentials_required" : "draft";
+    if (installation.state === "disabled") return conflict(reply, "Start a new setup to reconnect this website.");
+    const resumeState = installation.kind === "website" && installation.state !== "cancelled" ? "credentials_required" : "draft";
     const updated = await transitionInstallation(context.tenantId, id, resumeState, { userId: context.userId });
     return reply.send(sanitizeInstallation(updated));
   });

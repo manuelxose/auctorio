@@ -6,6 +6,7 @@ import { runIntelligencePipelineForItem } from "../../studio/intelligence/pipeli
 import { getIntelligenceSettings } from "../../studio/intelligence/intelligence-settings";
 import { createLevelBudget } from "../../studio/intelligence/cost-control";
 import { runWebDiscoveryTick } from "../../studio/web-discovery";
+import { runEngagementTick } from "../../studio/engagement";
 import { structuredEvent } from "../../shared/utils/logger";
 import { newRunKey } from "../../studio/discovery-run";
 import { runIntervalWorker } from "./worker-runtime";
@@ -192,6 +193,7 @@ export async function runDiscoveryWorker() {
         intervalMs: Math.max(300_000, getNumberEnv("WEB_DISCOVERY_INTERVAL_MS", 30 * 60_000)),
         tick: async () => {
           await runWebDiscoveryTick();
+          await runEngagementTick();
         },
       },
     ],

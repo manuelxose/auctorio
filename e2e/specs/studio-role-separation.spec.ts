@@ -40,7 +40,7 @@ test('admin keeps team, roles and System health; autopilot saves without opening
   await expect(await settingsTools(page)).toContainText(['People', 'Roles', 'System health']);
 
   await page.goto('/studio/automation', { waitUntil: 'networkidle' });
-  await expect(page.getByRole('button', { name: 'Save automation policy' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Guardar política de automatización' })).toBeVisible();
   await expect(page.getByText('Workers & operational health')).toHaveCount(0);
   await expect(page.getByText('Recover stuck automatic content')).toBeVisible();
   if (SHOTS) await page.screenshot({ path: `${SHOTS}/admin-automation-1440.png`, fullPage: true });
@@ -63,8 +63,8 @@ for (const [width, height] of [[1440, 900], [1024, 768], [390, 844]]) {
 
     await page.goto('/studio/automation', { waitUntil: 'networkidle' });
     await expect(page.getByText('Only workspace admins can change autopilot.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Save automation policy' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /Pause automation|Resume automation/ })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Guardar política de automatización' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Pausar automatización|Reanudar automatización/ })).toHaveCount(0);
     await expect(page.getByText('Recover stuck automatic content')).toHaveCount(0);
     if (SHOTS) await page.screenshot({ path: `${SHOTS}/editor-automation-${width}.png`, fullPage: true });
 

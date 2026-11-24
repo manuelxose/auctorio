@@ -56,6 +56,8 @@ import type {
   StudioSiteDetail,
   StudioSiteSummary,
   StudioSocialContent,
+  SiteSocialSettings,
+  SiteSocialPost,
   StudioSource,
   StudioSourceItem,
   StudioStoryCluster,
@@ -79,6 +81,12 @@ import type {
   CostControlsView,
   CostBudgetView,
 } from '../models/studio.models';
+
+export type WorkspaceAuditPage = {
+  items: Array<{ id: string; actorType: string; actorUser: { displayName: string } | null; action: string; entityType: string; createdAt: string }>;
+  total: number;
+  pageSize: number;
+};
 
 @Injectable({ providedIn: 'root' })
 export class StudioApiService {
@@ -147,6 +155,12 @@ export class StudioApiService {
           .set('pageSize', pageSize),
       },
     );
+  }
+
+  getSiteLogo(siteId: string): Observable<{ logoUrl: string | null }> {
+    return this.http.get<{ logoUrl: string | null }>(`${this.apiBase}/backend/v2/sites/${siteId}/logo`, {
+      headers: { 'x-studio-site-id': siteId },
+    });
   }
 
   getSite(siteId: string): Observable<StudioSiteDetail> {
@@ -319,6 +333,14 @@ export class StudioApiService {
     );
   }
 
+  createRole(payload: { name: string; description: string; permissions: string[] }): Observable<StudioRoleSummary> {
+    return this.http.post<StudioRoleSummary>(`${this.apiBase}/backend/v2/roles`, payload);
+  }
+
+  updateRole(roleId: string, payload: { name: string; description: string; permissions: string[] }): Observable<StudioRoleSummary> {
+    return this.http.patch<StudioRoleSummary>(`${this.apiBase}/backend/v2/roles/${roleId}`, payload);
+  }
+
   listUsers(): Observable<StudioUserSummary[]> {
     return this.http.get<StudioUserSummary[]>(`${this.apiBase}/backend/v2/users`);
   }
@@ -334,9 +356,13 @@ export class StudioApiService {
     );
   }
 
+  revokeUserInvitation(userId: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBase}/backend/v2/users/${userId}/invitation`);
+  }
+
   updateUser(
     userId: string,
-    payload: { displayName?: string; status?: 'invited' | 'active' | 'suspended' },
+    payload: { displayName?: string; status?: 'invited' | 'active' | 'suspended'; roleIds?: string[] },
   ): Observable<StudioUserSummary> {
     return this.http.patch<StudioUserSummary>(
       `${this.apiBase}/backend/v2/users/${userId}`,
@@ -731,7 +757,7 @@ export class StudioApiService {
 
   // ─── Editorial platform: social ───────────────────────────────────────
 
-  listSocial(projectId: string, channel?: 'x' | 'instagram'): Observable<{ items: StudioSocialContent[] }> {
+  listSocial(projectId: string, channel?: 'x' | 'instagram' | 'facebook'): Observable<{ items: StudioSocialContent[] }> {
     let params = new HttpParams();
     if (channel) {
       params = params.set('channel', channel);
@@ -739,17 +765,52 @@ export class StudioApiService {
     return this.http.get<{ items: StudioSocialContent[] }>(`${this.apiBase}/backend/v2/projects/${projectId}/social`, { params });
   }
 
-  generateSocial(projectId: string, payload: { channels: Array<'x' | 'instagram'>; threadLength?: number; versionId?: string }): Observable<{ job_id: string }> {
+  generateSocial(projectId: string, payload: {
+    channels: Array<'x' | 'instagram' | 'facebook'>;
+    threadLength?: number;
+    versionId?: string;
+    instagramFormat?: 'instagram_carousel' | 'instagram_story';
+  }): Observable<{ job_id: string }> {
     return this.http.post<{ job_id: string }>(`${this.apiBase}/backend/v2/projects/${projectId}/social/generate`, payload);
   }
 
   updateSocial(socialId: string, payload: {
     body?: string;
+    title?: string;
     hashtags?: string[];
     editorialStatus?: 'draft' | 'approved' | 'rejected';
     mediaAssetIds?: string[];
   }): Observable<StudioSocialContent> {
     return this.http.patch<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${socialId}`, payload);
+  }
+
+  duplicateSocial(id: string): Observable<StudioSocialContent> {
+    return this.http.post<StudioSocialContent>(`${this.apiBase}/backend/v2/social/${id}/duplicate`, {});
+  }
+
+  deleteSocialDraft(id: string): Observable<void> {
+    return this.http.delete<void>(`${this.apiBase}/backend/v2/social/${id}`);
+  }
+
+  appendSocialSlide(id: string, slide: { headline: string; body: string }): Observable<void> {
+    return this.http.post<void>(`${this.apiBase}/backend/v2/social/${id}/slides`, slide);
+  }
+
+  scheduleSocial(id: string, scheduledFor: string): Observable<StudioPublication> {
+    return this.http.post<StudioPublication>(`${this.apiBase}/backend/v2/social/${id}/schedule`, { scheduledFor });
+  }
+
+  listSiteSocial(siteId: string, channel: SiteSocialPost['channel'], postId?: string | null): Observable<{ items: SiteSocialPost[] }> {
+    const params: Record<string, string> = { channel, ...(postId ? { postId } : {}) };
+    return this.http.get<{ items: SiteSocialPost[] }>(`${this.apiBase}/backend/v2/sites/${siteId}/social`, { params });
+  }
+
+  getSocialSettings(siteId: string): Observable<SiteSocialSettings> {
+    return this.http.get<SiteSocialSettings>(`${this.apiBase}/backend/v2/sites/${siteId}/social-settings`);
+  }
+
+  putSocialSettings(siteId: string, patch: Partial<SiteSocialSettings>): Observable<SiteSocialSettings> {
+    return this.http.put<SiteSocialSettings>(`${this.apiBase}/backend/v2/sites/${siteId}/social-settings`, patch);
   }
 
   regenerateSocial(socialId: string): Observable<{ job_id: string }> {
@@ -767,7 +828,7 @@ export class StudioApiService {
   }
 
   createPublishingAccount(payload: {
-    platform: 'website' | 'x' | 'instagram';
+    platform: 'website' | 'x' | 'instagram' | 'facebook';
     displayName: string;
     credentialsRef?: string;
     externalAccountId?: string;
@@ -798,7 +859,7 @@ export class StudioApiService {
     return this.http.get<SocialSetupInfo>(`${this.apiBase}/backend/v2/social-connections/setup`);
   }
 
-  startSocialConnectionSession(platform: 'x' | 'instagram'): Observable<SocialConnectionSession> {
+  startSocialConnectionSession(platform: 'x' | 'instagram' | 'facebook'): Observable<SocialConnectionSession> {
     return this.http.post<SocialConnectionSession>(`${this.apiBase}/backend/v2/social-connections/session`, { platform });
   }
 
@@ -960,6 +1021,10 @@ export class StudioApiService {
 
   // ─── Editorial platform: overview & audit ─────────────────────────────
 
+  listWorkspaceAudit(page: number): Observable<WorkspaceAuditPage> {
+    return this.http.get<WorkspaceAuditPage>(`${this.apiBase}/backend/v2/audit`, { params: { page, pageSize: 25 } });
+  }
+
   getOverview(siteId?: string): Observable<StudioOverview> {
     return this.http.get<StudioOverview>(`${this.apiBase}/backend/v2/overview`, { params: siteId ? { siteId } : {} });
   }
@@ -1078,6 +1143,10 @@ export class StudioApiService {
     return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/cancel`, {});
   }
 
+  disconnectConnectorInstallation(id: string): Observable<ConnectorInstallation> {
+    return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/disconnect`, {});
+  }
+
   resumeInstallation(id: string): Observable<ConnectorInstallation> {
     return this.http.post<ConnectorInstallation>(`${this.apiBase}/backend/v2/connector-installations/${id}/resume`, {});
   }
@@ -1155,7 +1224,7 @@ export class StudioApiService {
 
   // ─── Editorial Engine (Phase 4) ─────────────────────────────────────
 
-  listGenerations(page = 1, pageSize = 20, filters: { siteId?: string; clusterId?: string } = {}): Observable<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }> {
+  listGenerations(page = 1, pageSize = 20, filters: { siteId?: string; clusterId?: string; review?: "pending" | "history"; decision?: string; outcome?: string } = {}): Observable<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }> {
     let params = new HttpParams().set('page', page).set('pageSize', pageSize);
     if (filters.siteId) {
       params = params.set('siteId', filters.siteId);
@@ -1163,6 +1232,9 @@ export class StudioApiService {
     if (filters.clusterId) {
       params = params.set('clusterId', filters.clusterId);
     }
+    if (filters.review) params = params.set('review', filters.review);
+    if (filters.decision) params = params.set('decision', filters.decision);
+    if (filters.outcome) params = params.set('outcome', filters.outcome);
     return this.http.get<{ items: StudioGenerationSummary[]; page: number; pageSize: number; total: number }>(
       `${this.apiBase}/backend/v2/editorial-engine/generations`,
       { params },

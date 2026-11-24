@@ -303,7 +303,7 @@ export async function upsertConnectionAccount(input: {
     provider: input.provider,
     providerProfileId: profileId,
     providerAccountId: input.profile.providerAccountId,
-    displayName: input.profile.username ?? input.profile.displayName ?? (platform === "x" ? "X account" : "Instagram account"),
+    displayName: input.profile.username ?? input.profile.displayName ?? (platform === "x" ? "X account" : platform === "facebook" ? "Facebook page" : "Instagram account"),
     externalAccountId: input.profile.providerAccountId,
     username: input.profile.username,
     avatarUrl: input.profile.avatarUrl,
@@ -471,7 +471,7 @@ async function verifyLegacyAccount(account: PublishingAccount): Promise<{ ok: bo
     });
     return { ok: false, state: "expired", message: "credentials_not_resolved" };
   }
-  const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+  const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
   const result = await publisher.validateCredentials(credentials);
   await prisma.publishingAccount.update({
     where: { id: account.id },

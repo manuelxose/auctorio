@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { fetchWithTimeout } from "../shared/utils/http";
 import { getBooleanEnv, getEnv, getNumberEnv, isProductionEnv } from "../shared/utils/env";
+import { validateXPayload, type SocialPublishInput } from "./social-provider";
 
 // ────────────────────────────────────────────────────────────── Capabilities
 
@@ -41,7 +42,7 @@ export type SocialPublishResult = {
 };
 
 export type SocialPublisherAdapter = {
-  platform: "x" | "instagram";
+  platform: "x" | "instagram" | "facebook";
   capabilities: PublisherCapabilities;
   validateCredentials(credentials: Record<string, unknown>): Promise<{ ok: boolean; message: string }>;
   publish(payload: SocialPublishPayload, credentials: Record<string, unknown>): Promise<SocialPublishResult>;
@@ -164,31 +165,68 @@ function buildOAuthHeader(
     .join(", ")}`;
 }
 
-async function xCreateTweet(text: string, credentials: XCredentials): Promise<{ id: string }> {
-  const url = "https://api.twitter.com/2/tweets";
-  const response = await fetchWithTimeout(url, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: buildOAuthHeader("POST", url, credentials),
-    },
-    body: { text },
-    timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-    retries: 1,
-  });
-  const body = await response.text();
-  if (!response.ok) {
-    throw new Error(`x_publish_failed status=${response.status} body=${body.slice(0, 300)}`);
+export const X_POSTS_URL = "https://api.x.com/2/tweets";
+
+export async function publishXPosts(
+  payload: SocialPublishInput,
+  authorization: (method: "POST" | "DELETE", url: string) => string,
+  uploadImage: (url: string) => Promise<string>,
+): Promise<SocialPublishResult> {
+  const errors = validateXPayload(payload);
+  if (errors.length) throw new Error(errors.join(", "));
+
+  const mediaIds = [];
+  for (const url of payload.mediaUrls) mediaIds.push(await uploadImage(url));
+
+  const posts = payload.thread?.length ? payload.thread : [{ body: payload.text }];
+  const tweetIds: string[] = [];
+  try {
+    for (const { body } of posts) {
+      const previous = tweetIds.at(-1);
+      const response = await fetchWithTimeout(X_POSTS_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: authorization("POST", X_POSTS_URL) },
+        body: {
+          text: body,
+          ...(previous ? { reply: { in_reply_to_tweet_id: previous } } : {}),
+          ...(!previous && mediaIds.length ? { media: { media_ids: mediaIds } } : {}),
+        },
+        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+        retries: 0,
+      }).catch((error) => {
+        throw new Error("x_post_delivery_uncertain", { cause: error });
+      });
+      if (!response.ok) {
+        const code = response.status >= 500 ? "x_post_delivery_uncertain" : "x_publish_failed";
+        const responseBody = await response.text().catch(() => "");
+        throw new Error(`${code} status=${response.status} body=${responseBody.slice(0, 300)}`);
+      }
+      const parsed = await response.json().catch(() => null) as { data?: { id?: string } } | null;
+      if (!parsed?.data?.id) throw new Error("x_post_delivery_uncertain: missing post ID");
+      tweetIds.push(parsed.data.id);
+    }
+  } catch (error) {
+    const remaining = [];
+    for (const id of tweetIds.reverse()) {
+      const url = `${X_POSTS_URL}/${encodeURIComponent(id)}`;
+      const response = await fetchWithTimeout(url, {
+        method: "DELETE",
+        headers: { authorization: authorization("DELETE", url) },
+        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+        retries: 0,
+      }).catch(() => null);
+      if (!response?.ok && response?.status !== 404) remaining.push(id);
+    }
+    if (remaining.length) throw new Error(`x_thread_cleanup_failed ids=${remaining.join(",")} cause=${String(error)}`);
+    throw error;
   }
-  const parsed = JSON.parse(body) as { data?: { id?: string } };
-  if (!parsed.data?.id) {
-    throw new Error("x_publish_missing_id");
-  }
-  return { id: parsed.data.id };
+
+  const tweetId = tweetIds[0];
+  return { externalId: tweetId, externalUrl: `https://x.com/i/status/${tweetId}`, responsePayload: { tweetId, tweetIds }, dryRun: false };
 }
 
 async function xDeleteTweet(externalId: string, credentials: XCredentials): Promise<void> {
-  const url = `https://api.twitter.com/2/tweets/${externalId}`;
+  const url = `${X_POSTS_URL}/${encodeURIComponent(externalId)}`;
   const response = await fetchWithTimeout(url, {
     method: "DELETE",
     headers: {
@@ -197,7 +235,7 @@ async function xDeleteTweet(externalId: string, credentials: XCredentials): Prom
     timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
     retries: 1,
   });
-  if (!response.ok) {
+  if (!response.ok && response.status !== 404) {
     const body = await response.text();
     throw new Error(`x_delete_failed status=${response.status} body=${body.slice(0, 300)}`);
   }
@@ -315,55 +353,11 @@ class XPublisherAdapterImpl implements SocialPublisherAdapter {
       return dryRunResult("x", `${payload.text}|${payload.imageUrls.join(",")}`);
     }
 
-    let mediaId: string | null = null;
-    if (payload.mediaType === "photo" && payload.imageUrls.length > 0) {
-      mediaId = await xUploadMedia(payload.imageUrls[0], resolved);
-    }
-
-    const posts = payload.thread && payload.thread.length > 0
-      ? payload.thread.map((entry) => entry.body)
-      : [payload.text];
-
-    let lastId: string | null = null;
-    for (const body of posts) {
-      if (!body.trim()) {
-        continue;
-      }
-      const tweetUrl = "https://api.twitter.com/2/tweets";
-      const tweetPayload: Record<string, unknown> = { text: body };
-      if (mediaId) {
-        tweetPayload.media = { media_ids: [mediaId] };
-      }
-      const response = await fetchWithTimeout(tweetUrl, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: buildOAuthHeader("POST", tweetUrl, resolved),
-        },
-        body: tweetPayload,
-        timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-        retries: 1,
-      });
-      const responseBody = await response.text();
-      if (!response.ok) {
-        throw new Error(`x_publish_failed status=${response.status} body=${responseBody.slice(0, 300)}`);
-      }
-      const parsed = JSON.parse(responseBody) as { data?: { id?: string; text?: string } };
-      if (parsed.data?.id) {
-        lastId = parsed.data.id;
-      }
-    }
-
-    if (!lastId) {
-      throw new Error("x_publish_missing_id");
-    }
-
-    return {
-      externalId: lastId,
-      externalUrl: `https://x.com/i/status/${lastId}`,
-      responsePayload: { tweetId: lastId },
-      dryRun: false,
-    };
+    return publishXPosts(
+      { text: payload.text, mediaUrls: payload.imageUrls, mediaType: payload.mediaType, thread: payload.thread },
+      (method, url) => buildOAuthHeader(method, url, resolved),
+      (url) => xUploadMedia(url, resolved),
+    );
   }
 
   async update(_externalId: string, _payload: SocialPublishPayload, _credentials: Record<string, unknown>): Promise<SocialPublishResult> {
@@ -453,28 +447,21 @@ class InstagramPublisherAdapterImpl implements SocialPublisherAdapter {
 
     let creationId: string;
     if (mediaType === "CAROUSEL") {
-      if (payload.imageUrls.length < 2) {
-        throw new Error("instagram_carousel_requires_multiple_images");
+      const body = buildInstagramCarouselBodies(payload);
+      const children: string[] = [];
+      for (const child of body.children) {
+        const created = await graphPost(`/${resolved.igUserId}/media`, resolved.accessToken, child, "instagram_create_failed");
+        await waitForContainer(String(created.id), resolved.accessToken);
+        children.push(String(created.id));
       }
-      const createResponse = await fetchWithTimeout(
-        igUrl(`/${resolved.igUserId}/media`, resolved.accessToken),
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: {
-            media_type: "CAROUSEL",
-            children: payload.imageUrls,
-            caption: payload.text,
-          },
-          timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
-          retries: 1,
-        },
+      const carousel = await graphPost(
+        `/${resolved.igUserId}/media`,
+        resolved.accessToken,
+        { ...body.carousel, children: children.join(",") },
+        "instagram_create_failed",
       );
-      const createBody = await createResponse.text();
-      if (!createResponse.ok) {
-        throw new Error(`instagram_create_failed status=${createResponse.status} body=${createBody.slice(0, 300)}`);
-      }
-      creationId = String((JSON.parse(createBody) as { id: string }).id);
+      creationId = String(carousel.id);
+      await waitForContainer(creationId, resolved.accessToken);
     } else {
       if (mediaType !== "STORIES" && payload.imageUrls.length === 0) {
         throw new Error("instagram_requires_image");
@@ -565,12 +552,127 @@ class InstagramPublisherAdapterImpl implements SocialPublisherAdapter {
   }
 }
 
-export function getSocialPublisher(platform: "x" | "instagram"): SocialPublisherAdapter {
+/** Graph API carousel: one `is_carousel_item` container per image, then a CAROUSEL container (2–10 images). */
+export function buildInstagramCarouselBodies(payload: SocialPublishPayload): {
+  children: Array<Record<string, unknown>>;
+  carousel: Record<string, unknown>;
+} {
+  if (payload.imageUrls.length < 2 || payload.imageUrls.length > 10) {
+    throw new Error("instagram_carousel_requires_2_to_10_images");
+  }
+  return {
+    children: payload.imageUrls.map((url) => ({ image_url: url, is_carousel_item: true })),
+    carousel: { media_type: "CAROUSEL", caption: payload.text.slice(0, 2200) },
+  };
+}
+
+async function graphPost(path: string, accessToken: string, body: Record<string, unknown>, errorCode: string): Promise<Record<string, unknown>> {
+  const response = await fetchWithTimeout(igUrl(path, accessToken), {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body,
+    timeoutMs: getNumberEnv("PUBLISH_TIMEOUT_MS", 30_000),
+    retries: 1,
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`${errorCode} status=${response.status} body=${text.slice(0, 300)}`);
+  }
+  return JSON.parse(text) as Record<string, unknown>;
+}
+
+async function waitForContainer(containerId: string, accessToken: string): Promise<void> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await fetchWithTimeout(igUrl(`/${containerId}?fields=status_code`, accessToken), { timeoutMs: 15_000, retries: 1 });
+    const parsed = (await response.json()) as { status_code?: string };
+    if (parsed.status_code === "FINISHED") return;
+    if (parsed.status_code === "ERROR" || parsed.status_code === "EXPIRED") {
+      throw new Error(`instagram_container_${parsed.status_code.toLowerCase()} ${containerId}`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 3_000));
+  }
+  throw new Error(`instagram_container_timeout ${containerId}`);
+}
+
+// ────────────────────────────────────────────────────────────── Facebook Page — Graph API
+
+function readFacebookCredentials(credentials: Record<string, unknown>): { accessToken: string; pageId: string } | null {
+  const accessToken = String(credentials.accessToken ?? "").trim();
+  const pageId = String(credentials.pageId ?? "").trim();
+  return accessToken && pageId ? { accessToken, pageId } : null;
+}
+
+class FacebookPublisherAdapterImpl implements SocialPublisherAdapter {
+  platform = "facebook" as const;
+  capabilities: PublisherCapabilities = {
+    publish: true,
+    update: true,
+    delete: true,
+    unpublish: false,
+    media: true,
+    carousel: true,
+    thread: false,
+    schedulingNative: false,
+  };
+
+  async validateCredentials(credentials: Record<string, unknown>) {
+    const resolved = readFacebookCredentials(credentials);
+    if (!resolved) return { ok: false, message: "facebook_credentials_incomplete (accessToken, pageId)" };
+    if (isDryRunEnabled(true).enabled) return { ok: true, message: "facebook_credentials_valid (dry run)" };
+    const response = await fetchWithTimeout(igUrl(`/${resolved.pageId}?fields=id,name`, resolved.accessToken), { timeoutMs: 15_000, retries: 0 });
+    if (!response.ok) return { ok: false, message: `facebook_verification_failed status=${response.status}` };
+    const parsed = (await response.json()) as { name?: string };
+    return { ok: true, message: `facebook_page_verified: ${parsed.name ?? "unknown"}` };
+  }
+
+  async publish(payload: SocialPublishPayload, credentials: Record<string, unknown>): Promise<SocialPublishResult> {
+    const resolved = readFacebookCredentials(credentials);
+    if (isDryRunEnabled(Boolean(resolved)).enabled || !resolved) {
+      return dryRunResult("facebook", `${payload.mediaType}|${payload.text}|${payload.imageUrls.join(",")}`);
+    }
+    const { accessToken, pageId } = resolved;
+    let postId: string;
+    if (payload.imageUrls.length === 0) {
+      postId = String((await graphPost(`/${pageId}/feed`, accessToken, { message: payload.text }, "facebook_publish_failed")).id);
+    } else if (payload.imageUrls.length === 1) {
+      const photo = await graphPost(`/${pageId}/photos`, accessToken, { url: payload.imageUrls[0], caption: payload.text }, "facebook_publish_failed");
+      postId = String(photo.post_id ?? photo.id);
+    } else {
+      // Multi-photo post: upload unpublished photos, then attach them to one feed post.
+      const media: Array<{ media_fbid: string }> = [];
+      for (const url of payload.imageUrls) {
+        const photo = await graphPost(`/${pageId}/photos`, accessToken, { url, published: false }, "facebook_photo_failed");
+        media.push({ media_fbid: String(photo.id) });
+      }
+      postId = String((await graphPost(`/${pageId}/feed`, accessToken, { message: payload.text, attached_media: media }, "facebook_publish_failed")).id);
+    }
+    return { externalId: postId, externalUrl: `https://www.facebook.com/${postId}`, responsePayload: { postId }, dryRun: false };
+  }
+
+  async update(externalId: string, payload: SocialPublishPayload, credentials: Record<string, unknown>): Promise<SocialPublishResult> {
+    const resolved = readFacebookCredentials(credentials);
+    if (isDryRunEnabled(Boolean(resolved)).enabled || !resolved) return dryRunResult("facebook", `update:${externalId}`);
+    await graphPost(`/${externalId}`, resolved.accessToken, { message: payload.text }, "facebook_update_failed");
+    return { externalId, externalUrl: `https://www.facebook.com/${externalId}`, responsePayload: { updated: true }, dryRun: false };
+  }
+
+  async delete(externalId: string, credentials: Record<string, unknown>): Promise<SocialPublishResult> {
+    const resolved = readFacebookCredentials(credentials);
+    if (isDryRunEnabled(Boolean(resolved)).enabled || !resolved) return dryRunResult("facebook", `delete:${externalId}`);
+    const response = await fetchWithTimeout(igUrl(`/${externalId}`, resolved.accessToken), { method: "DELETE", timeoutMs: 30_000, retries: 1 });
+    if (!response.ok) throw new Error(`facebook_delete_failed status=${response.status}`);
+    return { externalId: null, externalUrl: null, responsePayload: { deleted: true }, dryRun: false };
+  }
+}
+
+export function getSocialPublisher(platform: "x" | "instagram" | "facebook"): SocialPublisherAdapter {
   switch (platform) {
     case "x":
       return new XPublisherAdapterImpl();
     case "instagram":
       return new InstagramPublisherAdapterImpl();
+    case "facebook":
+      return new FacebookPublisherAdapterImpl();
     default:
       throw new Error(`unsupported_social_platform ${platform}`);
   }

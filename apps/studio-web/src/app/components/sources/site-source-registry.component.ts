@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, Input, OnDestroy, OnInit, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { AppContextService } from '../../services/app-context.service';
 import { ConfirmService } from '../../services/confirm.service';
@@ -16,15 +17,20 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
 @Component({
   selector: 'app-site-source-registry',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
+  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent, RouterLink],
   styles: [
     `
-      .reg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--au-s3); }
-      .reg-card { border: 1px solid var(--au-border); border-radius: var(--au-radius, 8px); padding: var(--au-s3); background: var(--au-surface); display: flex; flex-direction: column; gap: 8px; }
-      .reg-card h3 { margin: 0; font-size: var(--au-fs-body); overflow-wrap: anywhere; }
+      .reg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+      .reg-recommendations .reg-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      @media (max-width: 1080px) { .reg-recommendations .reg-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+      @media (max-width: 760px) { .reg-recommendations .reg-grid { grid-template-columns: 1fr; } }
+      .reg-card { border: 1px solid var(--au-border); border-radius: 12px; padding: var(--au-s3); background: var(--au-surface-solid); display: flex; flex-direction: column; gap: 8px; }
+      .reg-card h3, .reg-table h3 { margin: 0; font-size: var(--au-fs-body); overflow-wrap: anywhere; }
+      .reg-table { border: 1px solid var(--au-border); border-radius: 10px; }
+      .reg-table table { min-width: 610px; }
+      .reg-table .reg-actions { justify-content: flex-end; }
       .reg-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       .reg-muted { color: var(--au-muted); font-size: var(--au-fs-body-sm); overflow-wrap: anywhere; }
-      .reg-notice { border-left: 3px solid var(--au-info); padding: 8px 12px; background: var(--au-info-soft); margin-bottom: var(--au-s3); font-size: var(--au-fs-body-sm); }
       .reg-detail { border-top: 1px solid var(--au-border); padding-top: 8px; display: grid; gap: 8px; }
       .reg-detail ul { margin: 0; padding-left: 18px; }
       .reg-err { color: var(--au-danger); }
@@ -32,30 +38,63 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
     `,
   ],
   template: `
-    <p class="reg-notice" role="note">
-      <strong>Ingestion is not republication.</strong> Accepting a source lets Auctorio read its titles and links as research evidence. It does not grant
-      permission to republish or copy its content.
+    <dl class="advanced-kpis" aria-label="Resumen de fuentes" *ngIf="section === 'sources' && sourcesLoaded()">
+        <div class="au-stat">
+          <dt class="au-stat__label">Fuentes configuradas</dt>
+          <dd class="au-stat__value">{{ sources().length }}</dd>
+          <dd class="au-stat__note">Por sitio y compartidas</dd>
+        </div>
+        <div class="au-stat advanced-stat--good">
+          <dt class="au-stat__label">Activas</dt>
+          <dd class="au-stat__value">{{ activeCount() }}</dd>
+          <dd class="au-stat__note">Habilitadas para ingesta</dd>
+        </div>
+        <div class="au-stat advanced-stat--warning">
+          <dt class="au-stat__label">Con errores</dt>
+          <dd class="au-stat__value">{{ errorCount() }}</dd>
+          <dd class="au-stat__note">Último resultado registrado</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">Referencias recogidas</dt>
+          <dd class="au-stat__value">{{ referenceCount() }}</dd>
+          <dd class="au-stat__note">Elementos de las fuentes</dd>
+        </div>
+      </dl>
+
+    <p class="workspace-banner" role="note"><app-icon name="info"></app-icon><span>
+      <strong>Uso de las fuentes.</strong> Al aceptar una fuente, Auctorio puede leer sus títulos y enlaces como evidencia. La republicación requiere permiso.</span>
     </p>
 
-    <div class="au-toolbar au-toolbar--panel au-mb-3" *ngIf="section !== 'evidence'">
+    <ng-template #filters>
+      <div class="au-toolbar advanced-filter-bar">
       <button *ngIf="section === 'recommendations'" class="au-btn au-btn--primary" type="button" [disabled]="busy()" (click)="discover()"><app-icon name="sparkles"></app-icon>{{ busy() ? 'Discovering...' : 'Discover sources' }}</button>
-      <span class="au-toolbar__spacer"></span>
-      <input class="au-input au-input--search" type="search" placeholder="Filter by name, URL or topic" aria-label="Filter sources" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+        <label class="au-search">
+          <app-icon name="search"></app-icon>
+          <input class="au-input au-input--search" type="search" placeholder="Nombre, URL o categoría…" aria-label="Filter sources" [ngModel]="search()" (ngModelChange)="search.set($event)" />
+        </label>
+        <select *ngIf="section === 'sources'" class="au-select" aria-label="State" [ngModel]="state()" (ngModelChange)="state.set($event)">
+          <option value="">Todos los estados</option>
+          <option value="active">Activas</option>
+          <option value="paused">Pausadas</option>
+          <option value="failed">Con error</option>
+          <option value="archived">Archivadas</option>
+        </select>
       <select *ngIf="section === 'recommendations'" class="au-select" aria-label="Relationship" [ngModel]="relationship()" (ngModelChange)="relationship.set($event)">
         <option value="">All relationships</option>
         <option value="first_party">First-party</option>
         <option value="external">External</option>
       </select>
       <select class="au-select" aria-label="Layout" [ngModel]="layout()" (ngModelChange)="layout.set($event)">
-        <option value="cards">Cards</option>
-        <option value="list">List</option>
+        <option value="cards">Tarjetas</option>
+        <option value="list">{{ section === 'sources' ? 'Tabla' : 'Lista' }}</option>
       </select>
-    </div>
+      </div>
+    </ng-template>
 
     <!-- Recommendations: the site's own discovery plus workspace-wide web discovery, in one list. -->
-    <section class="au-panel au-panel--padded au-mb-3" aria-labelledby="reg-rec" *ngIf="section === 'recommendations'">
+    <section class="au-panel au-panel--padded au-mb-3 reg-recommendations" aria-labelledby="reg-rec" *ngIf="section === 'recommendations'">
       <div class="reg-row au-mb-2">
-        <h2 class="au-panel__title" id="reg-rec">Recommended sources ({{ openRecommendations().length }})</h2>
+        <div class="advanced-card-header"><h2 class="au-panel__title" id="reg-rec">Sugerencias para este sitio</h2><p>Revisa cada sugerencia antes de incorporarla.</p></div>
         <span class="au-toolbar__spacer"></span>
         <ng-container *ngIf="selected().size > 0">
           <span class="reg-muted">{{ selected().size }} selected</span>
@@ -63,6 +102,7 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
           <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="bulk('reject')">Reject selected</button>
         </ng-container>
       </div>
+      <ng-container *ngTemplateOutlet="filters"></ng-container>
       <app-empty-state *ngIf="openRecommendations().length === 0" icon="sources" title="No open recommendations" text="Run Discover sources to find first-party feeds and external sources for this site's topics."></app-empty-state>
       <div [class.reg-grid]="layout() === 'cards'" [style.display]="layout() === 'list' ? 'grid' : null" [style.gap]="layout() === 'list' ? '8px' : null">
         <article class="reg-card" *ngFor="let rec of openRecommendations(); trackBy: trackId">
@@ -96,24 +136,48 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
       </div>
     </section>
 
-    <!-- Evidence: recent items from active, verified sources that planning can cite. -->
-    <section class="au-panel au-panel--padded" aria-labelledby="reg-ev" *ngIf="section === 'evidence'">
-      <h2 class="au-panel__title" id="reg-ev">Recent evidence</h2>
-      <p class="au-page__subtitle">Items from active, verified sources that match this site's topics. Editorial planning may cite these; each plan item keeps the source it came from.</p>
-      <p *ngIf="evidence() === null" role="status">Loading evidence…</p>
-      <app-empty-state *ngIf="evidence()?.length === 0" icon="sources" title="No recent evidence" text="Accept and fetch a source whose items match your topics to see evidence here."></app-empty-state>
-      <ul class="au-list" *ngIf="evidence()?.length">
-        <li *ngFor="let item of evidence()">
-          <a [href]="item.url" target="_blank" rel="noopener noreferrer">{{ item.title }}</a>
-          <small> · {{ item.sourceName }}<ng-container *ngIf="item.publishedAt"> · {{ item.publishedAt | date: 'mediumDate' }}</ng-container><ng-container *ngIf="item.topics.length"> · {{ item.topics.join(', ') }}</ng-container></small>
-        </li>
-      </ul>
+    <section class="au-panel au-panel--padded au-mb-3" *ngIf="section === 'recommendations'" aria-labelledby="reg-criteria">
+      <div class="advanced-card-header"><h2 class="au-panel__title" id="reg-criteria">Criterios de recomendación</h2><p>Comprueba la relación con el sitio, la cobertura temática y el estado de verificación.</p></div>
+      <div class="advanced-grid-2">
+        <div class="advanced-callout"><strong>Relevancia editorial</strong><p>Revisa los temas, la categoría y la procedencia indicados en cada sugerencia.</p></div>
+        <div class="advanced-callout"><strong>Prueba y alcance</strong><p>Confirma la URL y si su ingesta se compartirá con el workspace.</p></div>
+      </div>
     </section>
+
+    <div *ngIf="section === 'evidence'">
+      <dl class="advanced-kpis" aria-label="Resumen de evidencias" *ngIf="evidence() as rows">
+        <div class="au-stat"><dt class="au-stat__label">Evidencias recientes</dt><dd class="au-stat__value">{{ rows.length }}</dd><dd class="au-stat__note">Resultados de este sitio</dd></div>
+        <div class="au-stat"><dt class="au-stat__label">Fuentes citadas</dt><dd class="au-stat__value">{{ evidenceSourceCount() }}</dd><dd class="au-stat__note">En este conjunto</dd></div>
+        <div class="au-stat"><dt class="au-stat__label">Temas relacionados</dt><dd class="au-stat__value">{{ evidenceTopicCount() }}</dd><dd class="au-stat__note">Temas únicos</dd></div>
+        <div class="au-stat"><dt class="au-stat__label">Con fecha</dt><dd class="au-stat__value">{{ datedEvidenceCount() }}</dd><dd class="au-stat__note">Fecha de publicación disponible</dd></div>
+      </dl>
+      <div class="advanced-source-split">
+        <section class="au-panel au-panel--padded" aria-labelledby="reg-ev">
+          <div class="advanced-card-header"><h2 class="au-panel__title" id="reg-ev">Rastro de procedencia</h2><p>Referencias individuales de fuentes activas y verificadas.</p></div>
+          <p *ngIf="evidence() === null" role="status">Cargando evidencias…</p>
+          <app-empty-state *ngIf="evidence()?.length === 0" icon="sources" title="Aún no hay evidencias recientes" text="Comprueba una fuente y recoge elementos relacionados con los temas del sitio."></app-empty-state>
+          <ul class="advanced-row-list" *ngIf="evidence()?.length">
+            <li *ngFor="let item of evidence()">
+              <span class="advanced-row-icon"><app-icon name="shield"></app-icon></span>
+              <div><strong>{{ item.title }}</strong><p>{{ item.sourceName }}<ng-container *ngIf="item.publishedAt"> · {{ item.publishedAt | date: 'mediumDate' }}</ng-container><ng-container *ngIf="item.topics.length"> · {{ item.topics.join(', ') }}</ng-container></p></div>
+              <a class="au-btn au-btn--secondary au-btn--sm" [href]="item.url" target="_blank" rel="noopener noreferrer">Abrir evidencia</a>
+            </li>
+          </ul>
+        </section>
+        <aside class="advanced-source-stack">
+          <section class="au-panel au-panel--padded"><div class="advanced-card-header"><h2 class="au-panel__title">Descubrimiento y bloqueos</h2><p>Consulta los dominios detectados y la lista de exclusión.</p></div><a class="au-btn au-btn--secondary au-btn--sm" routerLink="." [queryParams]="{ tab: 'settings' }">Abrir diagnósticos</a></section>
+          <section class="au-panel au-panel--padded"><div class="advanced-card-header"><h2 class="au-panel__title">Dónde se usan</h2><p>Las propuestas editoriales pueden enlazar a las referencias de origen.</p></div><a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/plan">Abrir Plan editorial</a></section>
+        </aside>
+      </div>
+    </div>
 
     <!-- Managed sources -->
     <section class="au-panel au-panel--padded" aria-labelledby="reg-src" *ngIf="section === 'sources'">
       <div class="reg-row au-mb-2">
-        <h2 class="au-panel__title" id="reg-src">Sources feeding this site ({{ filteredSources().length }})</h2>
+        <div class="advanced-card-header">
+          <h2 class="au-panel__title" id="reg-src">Registro de fuentes ({{ filteredSources().length }})</h2>
+          <p>Consulta el alcance, el estado y las acciones de cada fuente.</p>
+        </div>
         <span class="au-toolbar__spacer"></span>
         <ng-container *ngIf="selectedSources().size > 0">
           <span class="reg-muted">{{ selectedSources().size }} selected</span>
@@ -124,15 +188,61 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
           <button class="au-btn au-btn--sm au-btn--ghost" type="button" (click)="bulkSources('archive')">Archive</button>
           <button class="au-btn au-btn--sm au-btn--danger-ghost" type="button" (click)="bulkSources('delete')">Delete</button>
         </ng-container>
-        <select class="au-select" aria-label="State" [ngModel]="state()" (ngModelChange)="state.set($event)">
-          <option value="">All states</option>
-          <option value="active">Active</option>
-          <option value="paused">Paused</option>
-          <option value="archived">Archived</option>
-        </select>
       </div>
-      <app-empty-state *ngIf="filteredSources().length === 0" icon="sources" title="No sources for this site" text="Accept a recommendation or add one in the Add tab."></app-empty-state>
-      <div [class.reg-grid]="layout() === 'cards'" [style.display]="layout() === 'list' ? 'grid' : null" [style.gap]="layout() === 'list' ? '8px' : null">
+      <ng-container *ngTemplateOutlet="filters"></ng-container>
+      <app-empty-state *ngIf="filteredSources().length === 0" icon="sources" title="No hay fuentes para este sitio" text="Acepta una recomendación o añade una fuente."></app-empty-state>
+      <div class="au-table-wrap reg-table" role="region" aria-label="Fuentes registradas" tabindex="0" *ngIf="layout() === 'list' && filteredSources().length > 0">
+        <table class="au-table au-table--keep-columns">
+          <thead>
+            <tr>
+              <th scope="col"><span class="au-visually-hidden">Selección</span></th>
+              <th scope="col">Fuente</th>
+              <th scope="col">Alcance</th>
+              <th scope="col">Estado / prueba</th>
+              <th scope="col">Referencias</th>
+              <th scope="col"><span class="au-visually-hidden">Acciones</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            <ng-container *ngFor="let src of filteredSources(); trackBy: trackId">
+              <tr>
+                <td><input type="checkbox" [attr.aria-label]="'Select ' + src.name" [checked]="selectedSources().has(src.id)" (change)="toggleSource(src.id)" /></td>
+                <td>
+                  <h3>{{ src.name }}</h3>
+                  <a class="reg-muted" [href]="src.url" target="_blank" rel="noopener noreferrer">{{ src.url }}</a>
+                </td>
+                <td>{{ src.shared ? 'Compartida' : 'Este sitio' }}</td>
+                <td>
+                  <span class="au-badge" [ngClass]="src.state === 'active' ? 'au-badge--success' : src.state === 'paused' ? 'au-badge--warning' : 'au-badge--neutral'">{{ stateLabels[src.state] }}</span>
+                  <span class="au-badge" [ngClass]="src.lastError ? 'au-badge--danger' : src.verificationStatus === 'verified' ? 'au-badge--success' : 'au-badge--neutral'">
+                    {{ src.lastError ? 'Error' : src.verificationStatus === 'verified' ? 'Verificada' : 'Sin verificar' }}
+                  </span>
+                </td>
+                <td>{{ src.itemsCount }}</td>
+                <td>
+                  <div class="reg-row reg-actions">
+                    <button class="au-btn au-btn--sm au-btn--secondary" type="button" [attr.aria-expanded]="openId() === src.id" (click)="open(src)">{{ openId() === src.id ? 'Cerrar' : 'Detalle' }}</button>
+                    <button class="au-btn au-btn--sm au-btn--ghost" type="button" [disabled]="testing() === src.id" (click)="test(src)">{{ testing() === src.id ? 'Probando…' : 'Probar' }}</button>
+                  </div>
+                </td>
+              </tr>
+              <tr *ngIf="openId() === src.id">
+                <td colspan="6">
+                  <div class="reg-row">
+                    <button class="au-btn au-btn--sm au-btn--ghost" type="button" *ngIf="src.state === 'active'" (click)="setState(src, 'pause')">Pausar</button>
+                    <button class="au-btn au-btn--sm au-btn--ghost" type="button" *ngIf="src.state === 'paused'" (click)="setState(src, 'resume')">Reactivar</button>
+                    <button class="au-btn au-btn--sm au-btn--ghost" type="button" *ngIf="src.state !== 'archived'" (click)="setState(src, 'archive')">Archivar</button>
+                    <button class="au-btn au-btn--sm au-btn--ghost" type="button" *ngIf="src.state === 'archived'" (click)="setState(src, 'restore')">Restaurar</button>
+                  </div>
+                  <p class="reg-muted reg-err" *ngIf="src.lastError">{{ src.lastError }}</p>
+                  <ng-container *ngTemplateOutlet="sourceDetails; context: { $implicit: src }"></ng-container>
+                </td>
+              </tr>
+            </ng-container>
+          </tbody>
+        </table>
+      </div>
+      <div class="reg-grid" *ngIf="layout() === 'cards'">
         <article class="reg-card" *ngFor="let src of filteredSources(); trackBy: trackId">
           <div class="reg-row">
             <input type="checkbox" [attr.aria-label]="'Select ' + src.name" [checked]="selectedSources().has(src.id)" (change)="toggleSource(src.id)" />
@@ -153,7 +263,14 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
             <button class="au-btn au-btn--sm au-btn--ghost" type="button" (click)="open(src)">{{ openId() === src.id ? 'Close' : 'Details' }}</button>
           </div>
 
-          <div class="reg-detail" *ngIf="openId() === src.id">
+          <ng-container *ngIf="openId() === src.id">
+            <ng-container *ngTemplateOutlet="sourceDetails; context: { $implicit: src }"></ng-container>
+          </ng-container>
+        </article>
+      </div>
+
+      <ng-template #sourceDetails let-src>
+          <div class="reg-detail">
             <div class="reg-row">
               <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="verify(src)">Verify</button>
               <button class="au-btn au-btn--sm au-btn--secondary" type="button" (click)="fetchNow(src)">Fetch now</button>
@@ -189,8 +306,7 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
               <ul><li *ngFor="let i of items()"><a [href]="i.canonicalUrl || i.sourceUrl" target="_blank" rel="noopener noreferrer">{{ i.title }}</a> <span class="reg-muted">{{ i.processingStatus }}</span></li></ul>
             </div>
           </div>
-        </article>
-      </div>
+      </ng-template>
     </section>
   `,
 })
@@ -209,11 +325,19 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
 
   readonly recommendations = signal<SiteSourceRecommendation[]>([]);
   readonly sources = signal<SiteSource[]>([]);
+  readonly sourcesLoaded = signal(false);
+  readonly activeCount = computed(() => this.sources().filter((source) => source.state === 'active').length);
+  readonly errorCount = computed(() => this.sources().filter((source) => source.lastError).length);
+  readonly referenceCount = computed(() => this.sources().reduce((total, source) => total + source.itemsCount, 0));
   readonly evidence = signal<SourceEvidenceRow[] | null>(null);
+  readonly evidenceSourceCount = computed(() => new Set(this.evidence()?.map((item) => item.sourceName)).size);
+  readonly evidenceTopicCount = computed(() => new Set(this.evidence()?.flatMap((item) => item.topics)).size);
+  readonly datedEvidenceCount = computed(() => this.evidence()?.filter((item) => item.publishedAt).length ?? 0);
   readonly search = signal('');
   readonly relationship = signal('');
   readonly state = signal('');
   readonly layout = signal<'cards' | 'list'>('cards');
+  readonly stateLabels = { active: 'Activa', paused: 'Pausada', archived: 'Archivada' };
   readonly selected = signal<Set<string>>(new Set());
   readonly busy = signal(false);
   readonly openId = signal<string | null>(null);
@@ -237,7 +361,12 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
   });
   readonly filteredSources = computed(() => {
     const term = this.search().trim().toLowerCase();
-    return this.sources().filter((src) => (!this.state() || src.state === this.state()) && (!term || `${src.name} ${src.url}`.toLowerCase().includes(term)));
+    const state = this.state();
+    return this.sources().filter((source) => {
+      const matchesState = state === 'failed' ? Boolean(source.lastError) : !state || source.state === state;
+      const matchesSearch = !term || [source.name, source.url, ...(source.categories ?? [])].some((value) => value?.toLowerCase().includes(term));
+      return matchesState && matchesSearch;
+    });
   });
 
   constructor() {
@@ -252,6 +381,7 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    if (this.section === 'sources') this.layout.set('list');
     this.editorial.update({ area: 'sources' });
   }
   ngOnDestroy(): void {
@@ -273,7 +403,10 @@ export class SiteSourceRegistryComponent implements OnInit, OnDestroy {
       return [null, null] as const;
     });
     if (recs) this.recommendations.set(recs.items);
-    if (srcs) this.sources.set(srcs.items);
+    if (srcs) {
+      this.sources.set(srcs.items);
+      this.sourcesLoaded.set(true);
+    }
     this.selected.set(new Set());
     this.selectedSources.set(new Set());
   }

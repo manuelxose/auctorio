@@ -1,0 +1,285 @@
+<ng-template #platformLogo let-id>
+  @if (id === 'reddit') {
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <ellipse cx="12" cy="13.5" rx="7" ry="5.5" />
+      <path d="m12 8 1.2-5.1 4 1M9 15.4c1.6 1.4 4.4 1.4 6 0" />
+      <circle cx="18.6" cy="4.4" r="1.5" /><circle cx="4.4" cy="11" r="1.9" /><circle cx="19.6" cy="11" r="1.9" />
+      <circle cx="9" cy="12.8" r=".8" fill="currentColor" stroke="none" /><circle cx="15" cy="12.8" r=".8" fill="currentColor" stroke="none" />
+    </svg>
+  } @else {
+    <span class="opp-quora-logo" aria-hidden="true">Q</span>
+  }
+</ng-template>
+
+<div class="opp-frame">
+  <header class="opp-heading">
+    <div>
+      <p class="opp-eyebrow">Descubrimiento social <span aria-hidden="true">/</span> {{ channel() }}</p>
+      <h1>Oportunidades en {{ channel() }}</h1>
+      <p>{{ platform() === 'reddit' ? 'Encuentra hilos relevantes y prepara una respuesta.' : 'Encuentra preguntas relevantes y prepara una respuesta.' }}</p>
+    </div>
+    <button class="au-btn opp-primary" type="button" (click)="search()" [disabled]="loading() || searching() || !searchConfigured() || !savedKeywords()">
+      <app-icon name="search" /> {{ searching() ? 'Buscando…' : 'Buscar ahora' }}
+    </button>
+  </header>
+
+  <nav class="opp-platforms" aria-label="Canales de oportunidades">
+    @for (item of channels; track item.id) {
+      <a routerLink="/studio/opportunities" [queryParams]="{ tab: item.id }" [attr.aria-current]="platform() === item.id ? 'page' : null">
+        <span class="opp-brand" [class.opp-quora]="item.id === 'quora'" aria-hidden="true">
+          <ng-container [ngTemplateOutlet]="platformLogo" [ngTemplateOutletContext]="{$implicit: item.id}" />
+        </span>
+        {{ item.label }}
+      </a>
+    }
+  </nav>
+
+  @if (!loading() && !loadError()) {
+    <div class="opp-stats" role="group" aria-label="Resumen de oportunidades">
+      <button type="button" class="opp-stat" [attr.aria-pressed]="state() === 'all'" (click)="state.set('all')">
+        <span class="opp-icon"><app-icon name="layers" /></span>
+        <span>Detectadas <strong>{{ detectedCount() }}</strong></span>
+      </button>
+      <button type="button" class="opp-stat" [attr.aria-pressed]="state() === 'to_reply'" (click)="state.set('to_reply')">
+        <span class="opp-icon"><app-icon name="message" /></span>
+        <span>Por responder <strong>{{ pendingCount() }}</strong></span>
+      </button>
+      <button type="button" class="opp-stat" [attr.aria-pressed]="state() === 'replied'" (click)="state.set('replied')">
+        <span class="opp-icon opp-success"><app-icon name="circle-check" /></span>
+        <span>Respondidas <strong>{{ repliedCount() }}</strong></span>
+      </button>
+      <button type="button" class="opp-stat" [attr.aria-pressed]="state() === 'dismissed'" (click)="state.set('dismissed')">
+        <span class="opp-icon opp-neutral"><app-icon name="circle-x" /></span>
+        <span>Descartadas <strong>{{ dismissedCount() }}</strong></span>
+      </button>
+      <div class="opp-stat opp-average">
+        <span class="opp-icon"><app-icon name="activity" /></span>
+        <span>Puntuación media <strong>{{ averageScore() === null ? '—' : averageScore() + '/100' }}</strong></span>
+      </div>
+    </div>
+
+    @if (!searchConfigured()) {
+      <p class="opp-notice" role="status">Para buscar, configura un proveedor en <a routerLink="/studio/settings/discovery">Ajustes de búsqueda web</a>.</p>
+    }
+    <details class="opp-panel opp-config" [open]="!savedKeywords()">
+      <summary>
+        <span class="opp-icon"><app-icon name="filter" /></span>
+        <span class="opp-config-title">
+          <strong>Configurar búsqueda</strong>
+          <small>Palabras clave{{ platform() === 'reddit' ? ', comunidades' : '' }} y tono de respuesta</small>
+        </span>
+        @if (keywordSummary) { <span class="opp-config-summary">{{ keywordSummary }}</span> }
+        <app-icon name="chevron-down" class="opp-chevron" />
+      </summary>
+      <form class="opp-form" (ngSubmit)="saveSettings()">
+        <label class="au-field">
+          <span>Palabras clave</span>
+          <small>Una por línea.</small>
+          <textarea class="au-input" name="keywords" rows="3" [(ngModel)]="keywords"></textarea>
+        </label>
+        @if (platform() === 'reddit') {
+          <label class="au-field">
+            <span>Subreddits (opcional)</span>
+            <small>Hasta diez, uno por línea. Por ejemplo, r/television.</small>
+            <textarea class="au-input" name="subreddits" rows="3" [(ngModel)]="subreddits"></textarea>
+          </label>
+        }
+        <label class="au-field">
+          <span>Tono de respuesta (opcional)</span>
+          <input class="au-input" name="replyStyle" maxlength="1000" [(ngModel)]="replyStyle" />
+        </label>
+        @if (suggestedKeywords().length) {
+          <div class="opp-suggestions" role="group" aria-label="Palabras clave sugeridas">
+            @for (suggestion of suggestedKeywords(); track suggestion) {
+              <button class="au-btn au-btn--secondary" type="button" (click)="addKeyword(suggestion)" [disabled]="hasKeyword(suggestion)">+ {{ suggestion }}</button>
+            }
+          </div>
+        }
+        <div class="opp-form-actions">
+          <span>Estos ajustes se usan al buscar y preparar respuestas.</span>
+          <button class="au-btn au-btn--secondary" type="button" (click)="resetSettings()" [disabled]="saving()">Restablecer</button>
+          <button class="au-btn opp-primary" type="submit" [disabled]="saving()">{{ saving() ? 'Guardando…' : 'Guardar configuración' }}</button>
+        </div>
+      </form>
+    </details>
+  }
+
+  <section aria-label="Bandeja de oportunidades" [attr.aria-busy]="loading() || searching()">
+    @if (loadError()) {
+      <div class="opp-panel opp-empty">
+        <p>No se pudo cargar la bandeja.</p>
+        <button class="au-btn au-btn--secondary" type="button" (click)="load()">Reintentar</button>
+      </div>
+    } @else if (loading()) {
+      <div class="opp-panel opp-empty" role="status">Cargando oportunidades…</div>
+    } @else {
+      <div class="opp-workspace">
+        <section class="opp-list" aria-labelledby="opp-list-title">
+          <div class="opp-list-title">
+            <h2 id="opp-list-title">{{ platform() === 'reddit' ? 'Conversaciones' : 'Preguntas' }}</h2>
+            <span class="opp-pill">{{ visibleItems().length }}</span>
+          </div>
+          <label class="opp-search">
+            <app-icon name="search" />
+            <input type="search" aria-label="Buscar en oportunidades" placeholder="Buscar en oportunidades…" [ngModel]="query()" (ngModelChange)="query.set($event)" />
+          </label>
+          <div class="opp-filters" role="group" aria-label="Estado de la respuesta">
+            <button type="button" [attr.aria-pressed]="state() === 'to_reply'" (click)="state.set('to_reply')">Pendientes</button>
+            <button type="button" [attr.aria-pressed]="state() === 'replied'" (click)="state.set('replied')">Respondidas</button>
+            <button type="button" [attr.aria-pressed]="state() === 'all'" (click)="state.set('all')">Todas</button>
+          </div>
+          <div class="opp-items">
+            @for (item of visibleItems(); track item.id) {
+              <button class="opp-item" type="button" aria-controls="opp-detail" [attr.aria-label]="item.title" [attr.aria-pressed]="selected()?.id === item.id" (click)="select(item, detail)">
+                <span class="opp-item-meta">
+                  <span class="opp-item-source">
+                    <span class="opp-brand opp-avatar" [class.opp-quora]="platform() === 'quora'" aria-hidden="true">
+                      <ng-container [ngTemplateOutlet]="platformLogo" [ngTemplateOutletContext]="{$implicit: platform()}" />
+                    </span>
+                    {{ item.community ? 'r/' + item.community : channel() }}
+                  </span>
+                  @if (item.score > 0) { <span class="opp-pill">{{ item.score }}/100</span> }
+                </span>
+                <strong>{{ item.title }}</strong>
+                @if (item.snippet) { <span class="opp-item-snippet">{{ item.snippet }}</span> }
+              </button>
+            }
+          </div>
+        </section>
+
+        <section #detail id="opp-detail" class="opp-panel opp-detail" aria-label="Detalle de la oportunidad">
+          @if (selected(); as item) {
+            <header class="opp-detail-header">
+              <div class="opp-detail-top">
+                <div class="opp-identity">
+                  <span class="opp-brand opp-avatar" [class.opp-quora]="platform() === 'quora'" aria-hidden="true">
+                    <ng-container [ngTemplateOutlet]="platformLogo" [ngTemplateOutletContext]="{$implicit: platform()}" />
+                  </span>
+                  <div>
+                    <strong>{{ item.community ? 'r/' + item.community : channel() }}</strong>
+                    <small>
+                      {{ platform() === 'reddit' ? 'Hilo de Reddit' : 'Pregunta de Quora' }}
+                      @if (item.publishedAt) { · <time [attr.datetime]="item.publishedAt">{{ item.publishedAt | date:'d MMM yyyy' }}</time> }
+                    </small>
+                  </div>
+                </div>
+                <div class="opp-badges">
+                  @if (item.score > 0) { <span class="opp-pill">Puntuación {{ item.score }}/100</span> }
+                  <span class="opp-pill opp-state" [class.opp-success]="item.status === 'replied'" [class.opp-neutral]="item.status === 'dismissed'">
+                    {{ item.status === 'replied' ? 'Respondida' : item.status === 'dismissed' ? 'Descartada' : 'Por responder' }}
+                  </span>
+                </div>
+              </div>
+              <h2>{{ item.title }}</h2>
+            </header>
+
+            <div class="opp-detail-columns">
+              <div class="opp-context">
+                <h3>Contexto de la conversación</h3>
+                <div class="opp-thread">
+                  <div class="opp-thread-meta">
+                    <span class="opp-pill">{{ item.keyword }}</span>
+                    @if (item.votes !== null) { <span><app-icon name="thumbs-up" /> {{ item.votes }} votos</span> }
+                  </div>
+                  <p>{{ item.snippet || 'El resultado no incluye un extracto.' }}</p>
+                  <a class="opp-source-link" [href]="item.url" target="_blank" rel="noopener noreferrer">
+                    Abrir en {{ channel() }} <app-icon name="external" />
+                  </a>
+                </div>
+                @if (platform() === 'reddit' && item.status === 'to_reply') {
+                  <div class="opp-notice opp-guidance">
+                    <app-icon name="info" />
+                    <p>Consulta las reglas del subreddit antes de responder. Algunas comunidades prohíben la autopromoción.</p>
+                  </div>
+                }
+              </div>
+
+              <div class="opp-editor">
+                <div class="opp-reply-head">
+                  <h3><app-icon name="edit" /> {{ item.status === 'to_reply' ? 'Preparar respuesta' : 'Respuesta preparada' }}</h3>
+                  <span class="opp-pill">Borrador local</span>
+                </div>
+                @if (item.status === 'to_reply') {
+                  <div class="opp-reply-settings">
+                    <div>
+                      <span id="opp-tone-label">Estilo de respuesta</span>
+                      <div class="opp-tones" role="group" aria-labelledby="opp-tone-label">
+                        @for (tone of replyTones; track tone.id) {
+                          <button type="button" [attr.aria-pressed]="replyTone === tone.id" (click)="replyTone = tone.id">{{ tone.label }}</button>
+                        }
+                      </div>
+                    </div>
+                    <label>Idioma
+                      <select [(ngModel)]="replyLanguage" class="au-select">
+                        <option value="">Del sitio</option>
+                        <option value="en">Inglés</option>
+                        <option value="es">Español</option>
+                      </select>
+                    </label>
+                  </div>
+                }
+                <label class="au-field">
+                  <span>Borrador de respuesta</span>
+                  <textarea class="au-input" rows="7" maxlength="6000" [(ngModel)]="item.draft" [readOnly]="item.status !== 'to_reply'"
+                    [placeholder]="item.status === 'to_reply' ? 'Escribe una respuesta o genera un borrador…' : 'No hay un borrador guardado.'"></textarea>
+                </label>
+                <div class="opp-draft-meta">
+                  @if (item.status === 'to_reply') { <span><app-icon name="info" /> Revísala antes de publicarla</span> }
+                  <small class="opp-characters">{{ item.draft?.length ?? 0 }} caracteres</small>
+                </div>
+                <div class="opp-actions">
+                  @if (item.status === 'to_reply') {
+                    @if (!item.draft?.trim()) {
+                      <button class="au-btn opp-draft-button" type="button" [disabled]="!!busyId()" (click)="draft(item)">
+                        <app-icon name="sparkles" /> {{ busyId() === item.id ? 'Preparando…' : 'Redactar respuesta' }}
+                      </button>
+                    }
+                    @if (item.draft !== null) {
+                      <button class="au-btn opp-draft-button" type="button" [disabled]="!!busyId()" (click)="update(item)">
+                        <app-icon name="check" /> Guardar borrador
+                      </button>
+                    }
+                  }
+                  <button class="au-btn au-btn--secondary" type="button" (click)="copyDraft(item)" [disabled]="!item.draft?.trim()">
+                    <app-icon name="copy" /> Copiar borrador
+                  </button>
+                </div>
+                @if (item.status === 'to_reply') {
+                  <div class="opp-notice">
+                    <app-icon name="info" />
+                  <div><strong>Control manual de publicación</strong><p>Copia el texto y publícalo en {{ channel() }} antes de marcarlo como respondido.</p></div>
+                  </div>
+                }
+              </div>
+            </div>
+
+            <footer class="opp-detail-footer">
+              @if (item.status === 'to_reply') {
+                <button class="au-btn opp-discard" type="button" [disabled]="!!busyId()" (click)="update(item, 'dismissed')">
+                  <app-icon name="close" /> Descartar
+                </button>
+                <button class="au-btn opp-primary" type="button" [disabled]="!!busyId()" (click)="update(item, 'replied')">
+                  <app-icon name="check" /> Marcar como respondida
+                </button>
+              } @else {
+                <button class="au-btn au-btn--secondary" type="button" [disabled]="!!busyId()" (click)="update(item, 'to_reply')">
+                  <app-icon name="undo" /> Volver a pendientes
+                </button>
+              }
+            </footer>
+          } @else {
+            <div class="opp-empty">
+              <span class="opp-icon"><app-icon name="message" /></span>
+              <h2>{{ query().trim() ? 'No hay coincidencias' : state() === 'replied' ? 'Todavía no hay respuestas registradas' : state() === 'dismissed' ? 'No hay oportunidades descartadas' : state() === 'to_reply' ? 'No hay oportunidades por responder' : 'No hay oportunidades' }}</h2>
+              @if (query().trim()) {
+                <button class="au-btn au-btn--secondary" type="button" (click)="query.set('')">Limpiar búsqueda</button>
+              } @else if ((state() === 'all' || state() === 'to_reply') && searchConfigured()) {
+                <p>{{ savedKeywords() ? 'Busca hilos o preguntas con las palabras clave del sitio.' : 'Añade palabras clave en Configurar búsqueda.' }}</p>
+              }
+            </div>
+          }
+        </section>
+      </div>
+    }
+  </section>
+</div>

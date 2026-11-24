@@ -73,5 +73,20 @@ describe('CalendarPageComponent reschedule', () => {
     component.timeZone = 'Europe/Madrid';
     expect(component.ariaLabel(event())).toContain('Scheduled publication');
     expect(component.ariaLabel({ ...event(), kind: 'plan_item', status: 'proposed' })).toContain('Proposal, not scheduled to publish');
+    const socialDraft: CalendarEvent = { ...event(), kind: 'social_draft', channel: 'x', status: 'draft' };
+    expect(component.ariaLabel(socialDraft)).toContain('Social draft: X');
+    expect(component.ariaLabel(socialDraft)).toContain('pending approval');
+    expect(component.canDrag(socialDraft)).toBeFalse();
+  });
+
+  it('shows Instagram and X below website posts on the same day, including in compact cells', () => {
+    const component = create({});
+    const website = event();
+    const instagram = { ...website, id: 'instagram', channel: 'instagram' as const, scheduledFor: '2026-08-23T08:00:00.000Z' };
+    const thread = { ...website, id: 'thread', channel: 'x' as const, scheduledFor: '2026-08-23T09:00:00.000Z' };
+    component.events = [thread, website, { ...website, id: 'web-2' }, { ...website, id: 'web-3' }, instagram];
+    const entries = component.groupedEvents[0].entries.map(({ item }) => item);
+    expect(entries.map(({ channel }) => channel)).toEqual(['website', 'website', 'website', 'instagram', 'x']);
+    expect(component.compactDayEvents(entries).map(({ channel }) => channel)).toEqual(['website', 'website', 'instagram']);
   });
 });

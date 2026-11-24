@@ -6,6 +6,7 @@ import { getLatestVersion, getProjectById, getSiteById, updateProjectStatus } fr
 import { writeAudit, type AuditEntryInput } from "./audit";
 import { getPublisher } from "./publishers";
 import { recordWebsitePublishFailure, resetWebsitePublishCircuit } from "./automation";
+import { isWebsiteDestinationDisconnected } from "./connectors/installation";
 import { notifyOperators } from "./notifications";
 import { assertPublicationReleaseReady } from "./release-readiness";
 
@@ -72,6 +73,7 @@ const TRANSIENT_PATTERNS = [
 ];
 
 const PERMANENT_PATTERNS = [
+  /^website_destination_disconnected$/,
   /invalid.*credential/i,
   /credentials?/i,
   /unauthorized/i,
@@ -88,6 +90,7 @@ const PERMANENT_PATTERNS = [
   /validation/i,
   /invalid.*(api.?key|token|secret)/i,
   /already exists/i,
+  /x_(?:thread_cleanup_failed|post_delivery_uncertain)/,
 ];
 
 export function classifyPublicationError(message: string): FailureClass {
@@ -159,6 +162,9 @@ export async function startWebsiteAttempt(publicationId: string, request: Websit
   }
   const previous = publication.metadata && typeof publication.metadata === "object" ? (publication.metadata as Record<string, unknown>) : {};
   const unpublish = request.unpublish ?? previous.unpublishRequested === true;
+  if (!unpublish && publication.siteId && await isWebsiteDestinationDisconnected(publication.tenantId, publication.siteId)) {
+    throw new Error("website_destination_disconnected");
+  }
   const targetStatus = request.targetStatus ?? "publish";
   const attemptNumber = publication.currentAttempt + 1;
 
@@ -228,7 +234,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       : new Date(input.scheduledFor)
     : null;
 
-  const idempotencyKey = [
+  const idempotencyKey = input.socialContentId ? `publication:social:${input.socialContentId}` : [
     "publication",
     input.projectId,
     input.versionId,
@@ -240,7 +246,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
   const existing = await prisma.publication.findFirst({
     where: {
       tenantId: input.tenantId,
-      idempotencyKey,
+      ...(input.socialContentId ? { socialContentId: input.socialContentId } : { idempotencyKey }),
     },
   });
   if (existing) {
@@ -274,6 +280,7 @@ export async function createPublication(input: CreatePublicationInput): Promise<
 
   const publication = await prisma.publication.create({
     data: {
+      id: input.socialContentId ?? undefined,
       tenantId: input.tenantId,
       projectId: input.projectId,
       versionId: input.versionId,
@@ -288,6 +295,14 @@ export async function createPublication(input: CreatePublicationInput): Promise<
       idempotencyKey,
       metadata: Prisma.JsonNull,
     },
+  }).catch(async (error: unknown) => {
+    if (input.socialContentId && error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      const existing = await prisma.publication.findFirst({
+        where: { tenantId: input.tenantId, socialContentId: input.socialContentId },
+      });
+      if (existing) return existing;
+    }
+    throw error;
   });
 
   await writeAudit({
@@ -973,7 +988,7 @@ export async function failAttempt(
 
   // Circuit breaker: too many consecutive terminal website failures pause
   // autopublishing for the site instead of continuing blindly.
-  if (terminal && publication.channel === "website") {
+  if (terminal && publication.channel === "website" && error.message !== "website_destination_disconnected") {
     await recordWebsitePublishFailure(tenantId, publication.siteId).catch(() => undefined);
   }
   if (terminal && publication.channel === "website" && publication.projectId) {

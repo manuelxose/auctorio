@@ -128,7 +128,7 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
       }),
     ),
   );
-  // Measured volume + difficulty for the new items (no-op without DataForSEO; never blocks).
+  // Measured volume + difficulty for the new items (no-op without an SEO provider; never blocks).
   await enrichPlanItemsWithKeywordMetrics(tenantId, plan.id);
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_items.keywords_added", entityType: "site", entityId: siteId, metadata: { planId: plan.id, created: created.length, dropped: screen.dropped.length, unscheduled: unscheduled.length } });
   return { created: created.map((item) => ({ id: item.id, keyword: item.primaryKeyword ?? "", scheduledFor: item.scheduledFor! })), dropped: screen.dropped, unscheduled };

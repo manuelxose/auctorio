@@ -57,9 +57,9 @@ async function readText(url: URL): Promise<string> {
 }
 
 /** The site's crawled palette (cached); null when the site can't be read. */
-export async function crawlBrand(tenantId: string, baseUrl: string | null): Promise<CrawledBrand | null> {
+export async function crawlBrand(tenantId: string, baseUrl: string | null, options: { refresh?: boolean } = {}): Promise<CrawledBrand | null> {
   if (!baseUrl) return null;
-  const cached = await lookupProviderCache(tenantId, "site", "brand_palette", baseUrl);
+  const cached = options.refresh ? { hit: false as const } : await lookupProviderCache(tenantId, "site", "brand_palette", baseUrl);
   if (cached.hit) return cached.negative ? null : (cached.payload as CrawledBrand);
   try {
     const home = new URL(baseUrl);

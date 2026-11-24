@@ -109,7 +109,6 @@ const AUTOPILOT_LABELS: Record<string, string> = {
                 <th>Status</th>
                 <th>Quality</th>
                 <th class="sp-hide-md">Publication</th>
-                <th class="sp-hide-lg">Social</th>
                 <th class="sp-hide-lg">Updated</th>
                 <th class="sp-col-menu"><span class="au-sr-only">Actions</span></th>
               </tr>
@@ -148,7 +147,6 @@ const AUTOPILOT_LABELS: Record<string, string> = {
                       <span class="sp-faint">Not scheduled</span>
                     }
                   </td>
-                  <td class="sp-hide-lg sp-num sp-muted">{{ item.socialCount || '—' }}</td>
                   <td class="sp-hide-lg sp-muted" [title]="item.updatedAt">{{ formatRelativeTime(item.updatedAt) }}</td>
                   <td class="sp-col-menu" (click)="$event.stopPropagation()">
                     <button class="au-btn au-btn--ghost au-btn--icon au-btn--sm" type="button" #menuTrigger (click)="rowMenu.toggle(menuTrigger)" [attr.aria-label]="'Actions for ' + item.title" aria-haspopup="menu">

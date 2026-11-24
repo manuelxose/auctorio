@@ -107,13 +107,20 @@ async function cleanupFixture(tenantId: string) {
   await prisma.tenant.deleteMany({ where: { id: tenantId } });
 }
 
-async function clearQueue(queueName: string) {
-  const queue = new Queue(queueName, { connection: getRedisConnectionOptions() });
-  const jobs = await queue.getJobs(["waiting", "active", "delayed", "failed", "completed", "paused"]);
-  for (const job of jobs) {
-    await job.remove();
+async function removeFixtureSocialJobs(tenantId: string) {
+  const attempts = await prisma.publicationAttempt.findMany({
+    where: { tenantId },
+    select: { id: true },
+  });
+  const queue = new Queue(QUEUE_NAMES.social, { connection: getRedisConnectionOptions() });
+  try {
+    for (const { id } of attempts) {
+      const job = await queue.getJob(id);
+      await job?.remove();
+    }
+  } finally {
+    await queue.close();
   }
-  await queue.close();
 }
 
 // Producer queues cache ioredis connections that would otherwise keep the
@@ -217,7 +224,7 @@ test("duplicate enqueuePublication calls are idempotent for in-flight publicatio
     const attemptsAfterSecond = await prisma.publicationAttempt.count({ where: { publicationId: publication.id } });
     assert.equal(attemptsAfterSecond, 1);
   } finally {
-    await clearQueue(QUEUE_NAMES.social);
+    await removeFixtureSocialJobs(fixture.tenantId);
     await cleanupFixture(fixture.tenantId);
   }
 });

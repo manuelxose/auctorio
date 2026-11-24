@@ -213,14 +213,17 @@ export function runVersionQaV2(
     add("keyword_in_headings", "Keyword in headings", containsKeyword(stripHtml(headingsBlob), primaryKeyword), "warning", `Incluye la keyword "${primaryKeyword}" en algún H2/H3.`, "seo");
   }
   const siteUrl = typeof metadata.siteUrl === "string" ? metadata.siteUrl : null;
+  const targets = metadata.articleTargets && typeof metadata.articleTargets === "object" ? metadata.articleTargets as ArticleTargets : null;
   const { internal: internalLinks, external: externalLinks } = countLinks(body, siteUrl);
-  add("internal_links", "Internal links", internalLinks >= 2, "warning", `Añade al menos 2 enlaces internos reales del inventario del sitio (actual: ${internalLinks}).`, "seo");
+  if (targets?.internalLinks !== 0 && metadata.internalLinksEnabled !== false) {
+    add("internal_links", "Internal links", internalLinks >= 2, "warning", `Añade al menos 2 enlaces internos reales del inventario del sitio (actual: ${internalLinks}).`, "seo");
+  }
   add("evidence_links", "External evidence links", externalLinks >= 1 || !(intent === "news" || intent === "commercial-investigation"), intent === "news" || intent === "commercial-investigation" ? "warning" : "info", "El contenido de actualidad o comparación debe citar fuentes externas verificables.", "seo");
   const imageCount = countImages(body);
   // Checked once the hero exists: inline images are queued with it and land in the body as they finish.
   add("image_presence", "Inline images", imageCount >= INLINE_IMAGE_MIN || !context.imageReady, "error", `El artículo debe llevar al menos ${INLINE_IMAGE_MIN} imágenes dentro del cuerpo (actual: ${imageCount}).`, "seo");
   add("image_alt", "Image alt text", hasImageAlt(body), "warning", "Todas las imágenes deben llevar texto alternativo descriptivo.", "seo");
-  if (faqCandidates > 0 || intent === "informational" || intent === "commercial-investigation" || intent === "transactional") {
+  if (targets?.sections?.faq !== false && (faqCandidates > 0 || intent === "informational" || intent === "commercial-investigation" || intent === "transactional")) {
     add("faq_section", "FAQ section", hasFaqSection(body), "warning", "Esta intención se beneficia de una sección FAQ con preguntas frecuentes.", "seo");
   } else {
     add("faq_section", "FAQ section", true, "info", "No se requiere FAQ para este formato.", "seo");
@@ -294,7 +297,7 @@ export function runVersionQaV2(
     primaryKeyword,
     semanticKeywords: [...stringList(metadata.semanticKeywords), ...stringList(metadata.secondaryKeywords)],
     // Stored by the plan brief for guides only (structure.ts resolveArticleTargets).
-    targets: metadata.articleTargets && typeof metadata.articleTargets === "object" ? (metadata.articleTargets as ArticleTargets) : null,
+    targets,
     cannibalizationRisk: context.cannibalizationRisk ?? null,
     internalLinkInventorySize: context.internalLinkInventorySize ?? storedInventory,
     externalSourceInventorySize: context.externalSourceInventorySize ?? (typeof metadata.externalSourceInventorySize === "number" ? metadata.externalSourceInventorySize : null),

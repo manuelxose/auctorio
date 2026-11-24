@@ -3,6 +3,7 @@ import type { PublicationChannel } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { buildAssetPublicUrl } from "./orchestration";
 import { articleChip, articleState } from "./article-lifecycle";
+import { nextSocialSlot, SOCIAL_SETTINGS_DEFAULTS } from "./social-settings";
 
 const prisma = getPrismaClient();
 
@@ -21,6 +22,7 @@ export type CalendarFilters = {
  * originating plan item so a brief stays traceable through to delivery.
  */
 export async function listCalendarEvents(tenantId: string, filters: CalendarFilters) {
+  const now = new Date();
   const where: Prisma.PublicationWhereInput = {
     tenantId,
     status: { not: "deleted" },
@@ -29,7 +31,7 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
     scheduledFor: { gte: filters.from, lte: filters.to },
   };
 
-  const [publications, planItems] = await Promise.all([
+  const [publications, planItems, socialDrafts] = await Promise.all([
     prisma.publication.findMany({
       where,
       orderBy: { scheduledFor: "asc" },
@@ -64,6 +66,25 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
         site: { select: { id: true, key: true, name: true, type: true } },
       },
     }),
+    filters.channel === "website" || filters.to <= now ? [] : prisma.socialContent.findMany({
+      where: {
+        tenantId,
+        channel: filters.channel,
+        generationStatus: "done",
+        editorialStatus: "draft",
+        OR: [{ threadPosition: null }, { threadPosition: 0 }],
+        publications: { none: { status: { not: "deleted" } } },
+        ...(filters.siteId ? { project: { siteId: filters.siteId } } : {}),
+      },
+      select: {
+        id: true, projectId: true, channel: true, contentType: true, body: true, createdAt: true, updatedAt: true,
+        project: { select: {
+          title: true,
+          origin: true,
+          site: { select: { id: true, key: true, name: true, type: true, socialSettings: true } },
+        } },
+      },
+    }),
   ]);
 
   // Content → plan item, so publications can point back at their brief.
@@ -87,14 +108,14 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
 
   const publicationEvents = await Promise.all(
     publications.map(async (publication) => {
-      const brief = linkedItems.find((item) => item.projectId === publication.projectId && item.channel === publication.channel)
-        ?? linkedItems.find((item) => item.projectId === publication.projectId);
+      const brief = linkedItems.find((item) => item.projectId === publication.projectId && item.channel === publication.channel);
       return {
         kind: "publication" as const,
         id: publication.id,
         projectId: publication.projectId,
         planId: brief?.planId ?? null,
         planItemId: brief?.id ?? null,
+        socialContentId: publication.socialContent?.id ?? null,
         channel: publication.channel,
         status: publication.status as string,
         scheduledFor: publication.scheduledFor,
@@ -115,7 +136,7 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
         lastError: publication.lastError,
         failureClass: publication.failureClass,
         priority: null as number | null,
-        contentType: null as string | null,
+        contentType: publication.socialContent?.contentType ?? null,
         primaryKeyword: null as string | null,
         searchVolume: null as number | null,
         keywordDifficulty: null as number | null,
@@ -126,9 +147,46 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
     }),
   );
 
-  // A plan item whose content already has a publication on its channel is represented by that publication.
+  const publishedSocialIds = new Set(publications.map((publication) => publication.socialContentId));
+  const socialEvents = socialDrafts.flatMap((draft) => {
+    if (publishedSocialIds.has(draft.id)) return [];
+    const { socialSettings, ...site } = draft.project.site;
+    const scheduledFor = nextSocialSlot(socialSettings ?? SOCIAL_SETTINGS_DEFAULTS, now);
+    if (scheduledFor < filters.from || scheduledFor > filters.to) return [];
+    return [{
+      kind: "social_draft" as const,
+      id: draft.id,
+      socialContentId: draft.id,
+      projectId: draft.projectId,
+      planId: null,
+      planItemId: null,
+      channel: draft.channel,
+      status: "draft",
+      scheduledFor,
+      publishedAt: null,
+      externalUrl: null,
+      title: draft.body.slice(0, 80) || draft.project.title,
+      projectTitle: draft.project.title,
+      destination: site.name,
+      site,
+      account: null,
+      thumbnail: null,
+      automated: draft.project.origin === "auto",
+      lastError: null,
+      failureClass: null,
+      priority: null,
+      contentType: draft.contentType,
+      createdAt: draft.createdAt,
+      updatedAt: draft.updatedAt,
+      lifecycle: "needs_review",
+      chip: "review" as const,
+    }];
+  });
+  const socialKeys = new Set(socialEvents.map((event) => `${event.projectId}:${event.channel}`));
+  // A plan item is represented by the draft or publication on its channel.
   const planEvents = planItems
     .filter((item) => !item.project?.publications.some((publication) => publication.channel === item.channel))
+    .filter((item) => !socialKeys.has(`${item.projectId}:${item.channel}`))
     .map((item) => ({
       kind: "plan_item" as const,
       id: item.id,
@@ -160,7 +218,7 @@ export async function listCalendarEvents(tenantId: string, filters: CalendarFilt
       ...lifecycle({ planItem: item, job: jobByItem.get(item.id) }),
     }));
 
-  return [...publicationEvents, ...planEvents].sort(
+  return [...publicationEvents, ...planEvents, ...socialEvents].sort(
     (a, b) => (a.scheduledFor?.getTime() ?? 0) - (b.scheduledFor?.getTime() ?? 0),
   );
 }

@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
-import { Component, OnDestroy, OnInit, inject } from '@angular/core';
+import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, DestroyRef, OnDestroy, OnInit, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Subscription, timer } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
@@ -27,67 +28,84 @@ type InboxTab = 'inbox' | 'clusters';
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, ProductionStatusComponent],
   template: `
-    <section class="au-page">
+    <section class="au-page advanced-page advanced-inbox">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Discovery</p>
-          <h1 class="au-page__title">Inbox</h1>
-          <p class="au-page__subtitle">Stories discovered across your sources, ready to triage.</p>
+          <p class="au-page__eyebrow">Auctorio / Herramientas avanzadas</p>
+          <h1 class="au-page__title">Inbox editorial</h1>
+          <p class="au-page__subtitle">Descubrimiento, triage y evidencias: convertir información en propuestas sin ruido.</p>
         </div>
         <div class="au-page__actions">
+          <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="load()" [disabled]="loading"><app-icon name="refresh"></app-icon>Actualizar historias</button>
           <a class="au-btn au-btn--secondary" routerLink="/studio/sources">
             <app-icon name="sources"></app-icon>
-            Manage sources
+            Gestionar fuentes
           </a>
         </div>
       </header>
 
-      <div class="au-tabs">
-        <button class="au-tab" [class.is-active]="tab === 'inbox'" type="button" (click)="setTab('inbox')">
-          Stories
-          <span class="au-badge au-badge--neutral">{{ tab === 'inbox' ? total : '…' }}</span>
-        </button>
-        <button class="au-tab" [class.is-active]="tab === 'clusters'" type="button" (click)="setTab('clusters')">
-          Clusters
-          <span class="au-badge au-badge--neutral">{{ tab === 'clusters' ? clusters.length : '…' }}</span>
-        </button>
-      </div>
-
-      <div class="au-toolbar" *ngIf="tab === 'inbox'">
-        <div class="au-search">
-          <app-icon name="search"></app-icon>
-          <input
-            class="au-input au-input--search"
-            type="search"
-            placeholder="Search stories…"
-            [(ngModel)]="filters.search"
-            (keyup.enter)="applyFilters()"
-          />
+      <dl class="advanced-kpis" aria-label="Resumen del Inbox" *ngIf="tab === 'inbox' && !loading">
+        <div class="au-stat">
+          <dt class="au-stat__label">Historias encontradas</dt>
+          <dd class="au-stat__value">{{ total }}</dd>
+          <dd class="au-stat__note">Con los filtros actuales</dd>
         </div>
-        <select class="au-select au-filter-select" [(ngModel)]="filters.sourceId" (ngModelChange)="applyFilters()" aria-label="Filter by source">
-          <option value="">All sources</option>
-          <option *ngFor="let source of sources" [ngValue]="source.id">{{ source.name }}</option>
-        </select>
-        <select class="au-select au-filter-select" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()" aria-label="Filter by status">
-          <option value="candidate">Candidates</option>
-          <option value="discovered">New</option>
-          <option value="selected">Selected</option>
-          <option value="rejected">Rejected</option>
-          <option value="processed">Processed</option>
-          <option value="">All</option>
-        </select>
-        <select class="au-select au-filter-select" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()" aria-label="Sort stories">
-          <option value="score">Highest score first</option>
-          <option value="discovered">Newest first</option>
-        </select>
-        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="load()" [disabled]="loading">
-          <app-icon name="refresh"></app-icon>
-          Refresh
-        </button>
-      </div>
+        <div class="au-stat advanced-stat--good">
+          <dt class="au-stat__label">Seleccionadas</dt>
+          <dd class="au-stat__value">{{ selectedOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">Con referencia de origen</dt>
+          <dd class="au-stat__value">{{ linkedOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">Clústeres</dt>
+          <dd class="au-stat__value">{{ clustersOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+      </dl>
 
-      <ng-container *ngIf="tab === 'inbox'">
-        <section class="au-panel">
+      <section class="au-panel au-panel--padded" *ngIf="tab === 'inbox'" aria-labelledby="inbox-stories">
+        <div class="advanced-card-header">
+          <h2 class="au-panel__title" id="inbox-stories">Historias encontradas</h2>
+          <p>Filtra las historias y revisa sus fuentes antes de continuar.</p>
+        </div>
+        <div class="au-toolbar advanced-filter-bar" role="search" aria-label="Search and filter stories">
+          <div class="au-search">
+            <app-icon name="search"></app-icon>
+            <input
+              class="au-input au-input--search"
+              type="search"
+              placeholder="Buscar historias, fuentes o temas…"
+              aria-label="Search stories"
+              [(ngModel)]="filters.search"
+              (keyup.enter)="applyFilters()"
+            />
+          </div>
+          <select class="au-select au-filter-select" [(ngModel)]="filters.sourceId" (ngModelChange)="applyFilters()" aria-label="Filter by source">
+            <option value="">Todas las fuentes</option>
+            <option *ngFor="let source of sources" [ngValue]="source.id">{{ source.name }}</option>
+          </select>
+          <select class="au-select au-filter-select" [(ngModel)]="filters.status" (ngModelChange)="applyFilters()" aria-label="Filter by status">
+            <option value="candidate">Candidatas</option>
+            <option value="discovered">Nuevas</option>
+            <option value="selected">Seleccionadas</option>
+            <option value="rejected">Descartadas</option>
+            <option value="processed">Procesadas</option>
+            <option value="">Todas</option>
+          </select>
+          <select class="au-select au-filter-select" [(ngModel)]="filters.sort" (ngModelChange)="applyFilters()" aria-label="Sort stories">
+            <option value="score">Mayor puntuación</option>
+            <option value="discovered">Más recientes</option>
+          </select>
+          <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="applyFilters()" [disabled]="loading">
+            <app-icon name="search"></app-icon>
+            Filtrar
+          </button>
+        </div>
+
           @if (loading && items.length === 0) {
             <div class="au-skeleton-row">
               <div class="au-skeleton au-skeleton-avatar"></div>
@@ -169,21 +187,36 @@ type InboxTab = 'inbox' | 'clusters';
               </div>
             }
           }
-        </section>
-      </ng-container>
+      </section>
 
-      <section class="au-panel" *ngIf="tab === 'clusters'">
+      <section class="au-panel au-panel--padded advanced-followup" *ngIf="tab === 'inbox'" aria-labelledby="inbox-triage">
+        <div class="advanced-card-header"><h2 class="au-panel__title" id="inbox-triage">Aprender del triage</h2><p>Revisa las señales que ayudan a decidir qué historias considerar.</p></div>
+        <div class="advanced-grid-3">
+          <div class="advanced-callout"><strong>Procedencia</strong><p>Consulta las fuentes y la fecha de publicación.</p></div>
+          <div class="advanced-callout"><strong>Relevancia</strong><p>Abre una historia para ver cómo se calculó su puntuación.</p></div>
+          <div class="advanced-callout"><strong>Duplicados</strong><p>Usa Clústeres para revisar referencias del mismo hecho.</p></div>
+        </div>
+      </section>
+
+      <section class="au-panel au-panel--padded" *ngIf="tab === 'clusters'" aria-labelledby="inbox-clusters">
+        <div class="advanced-card-header">
+          <h2 class="au-panel__title" id="inbox-clusters">Clústeres y duplicados</h2>
+          <p>Reúne distintas fuentes que describen un mismo hecho.</p>
+        </div>
+        <div class="au-toolbar advanced-filter-bar">
+          <label class="au-search"><app-icon name="search"></app-icon><input class="au-input au-input--search" type="search" aria-label="Buscar clúster" placeholder="Buscar clúster…" [(ngModel)]="clusterSearch" /></label>
+        </div>
         <app-empty-state
-          *ngIf="clusters.length === 0 && !loading"
+          *ngIf="visibleClusters.length === 0 && !loading"
           icon="layers"
-          title="No story clusters yet"
-          text="Clusters appear when the same story is discovered across several sources and enriched by the intelligence pipeline."
+          [title]="clusterSearch.trim() ? 'Ningún clúster coincide' : 'Todavía no hay clústeres'"
+          text="Los clústeres agrupan varias referencias relacionadas con una misma historia."
         ></app-empty-state>
-        <div class="au-feed" *ngIf="clusters.length > 0">
+        <div class="au-feed advanced-grid-2" *ngIf="visibleClusters.length > 0">
           <article
             class="au-feed__item au-feed__item--interactive"
-            *ngFor="let cluster of clusters"
-            (click)="openStory(cluster.id)"
+            *ngFor="let cluster of visibleClusters"
+            (click)="openStory(cluster.id)" tabindex="0" role="button" (keydown.enter)="openStory(cluster.id)" (keydown.space)="$event.preventDefault(); openStory(cluster.id)"
             [attr.aria-label]="'Open story ' + cluster.headline"
           >
             <div class="au-feed__body">
@@ -368,6 +401,8 @@ type InboxTab = 'inbox' | 'clusters';
   `,
 })
 export class InboxPageComponent implements OnInit, OnDestroy {
+  private readonly route = inject(ActivatedRoute);
+  private readonly destroyRef = inject(DestroyRef);
   private readonly api = inject(StudioApiService);
   private readonly appContext = inject(AppContextService);
   private readonly toast = inject(ToastService);
@@ -375,6 +410,12 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   generatingStoryId: string | null = null;
 
   tab: InboxTab = 'inbox';
+  clusterSearch = '';
+
+  get visibleClusters(): StudioStoryCluster[] {
+    const term = this.clusterSearch.trim().toLowerCase();
+    return term ? this.clusters.filter((cluster) => `${cluster.headline} ${cluster.summary}`.toLowerCase().includes(term)) : this.clusters;
+  }
   items: StudioSourceItem[] = [];
   clusters: StudioStoryCluster[] = [];
   sources: StudioSource[] = [];
@@ -400,6 +441,10 @@ export class InboxPageComponent implements OnInit, OnDestroy {
   };
   private refreshSubscription: Subscription | null = null;
 
+  get selectedOnPage(): number { return this.items.filter((item) => item.processingStatus === 'selected').length; }
+  get linkedOnPage(): number { return this.items.filter((item) => item.canonicalUrl || item.sourceUrl).length; }
+  get clustersOnPage(): number { return new Set(this.items.flatMap((item) => item.clusterId ? [item.clusterId] : [])).size; }
+
   get totalPages(): number {
     return Math.max(1, Math.ceil(this.total / this.pageSize));
   }
@@ -410,7 +455,9 @@ export class InboxPageComponent implements OnInit, OnDestroy {
         this.sources = response.items;
       },
     });
-    this.load();
+    this.route.queryParamMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
+      this.setTab(params.get('tab') === 'clusters' ? 'clusters' : 'inbox');
+    });
     this.loadMutes();
     this.refreshSubscription = timer(30_000, 30_000).subscribe(() => this.load(true));
   }

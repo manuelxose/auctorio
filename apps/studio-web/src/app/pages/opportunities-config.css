@@ -1,0 +1,21 @@
+.opp-config { margin-block: 17px; }
+.opp-config summary { display: flex; align-items: center; gap: 12px; padding: 12px 14px; list-style: none; }
+.opp-config summary::-webkit-details-marker { display: none; }
+.opp-config-title { flex: 1; }
+.opp-config-title strong { font-size: 12px; }
+.opp-config-title small, .opp-identity small { display: block; margin-top: 2px; color: var(--au-muted); font-size: 12px; }
+.opp-config-title small { font-size: 11px; }
+.opp-config-summary { padding: 5px 10px; border-radius: 20px; background: var(--au-surface-2); color: var(--au-muted); font-size: 11px; }
+.opp-config[open] .opp-chevron { transform: rotate(180deg); }
+.opp-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 185px), 1fr)); gap: 13px; border-top: 1px solid var(--au-border); padding: 14px; background: var(--opp-editor-bg); }
+.opp-form .au-field small { color: var(--au-muted); }
+.opp-form :is(input, textarea) { border-radius: 9px; background: var(--opp-card); font-size: 12px; }
+.opp-form-actions, .opp-suggestions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 7px; }
+.opp-form-actions { justify-content: flex-end; align-items: center; border-top: 1px solid var(--au-border); padding-top: 10px; }
+.opp-form-actions > span { margin-inline-end: auto; color: var(--au-muted); font-size: 11px; }
+.opp-form-actions .au-btn { min-height: 36px; }
+
+@container (max-width: 700px) {
+  .opp-config-summary { display: none; }
+  .opp-form-actions > span { width: 100%; }
+}

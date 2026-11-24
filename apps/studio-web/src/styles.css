@@ -1,3 +1,5 @@
+@import "./app/layout/workspace-pages.css";
+
 /* ─── Public website (v3) ──────────────────────────────────────────────
    Same "Ink & Vermilion" palette and glass language as the Studio: every
    colour comes from the --au-* tokens below, so light/dark follow the
@@ -1144,6 +1146,10 @@ html[data-theme='light'] {
     radial-gradient(640px 480px at 48% 46%, rgba(167, 139, 250, 0.16), transparent 70%);
   --au-surface: rgba(255, 255, 255, 0.5);
   --au-surface-solid: #fdfcfa;
+  --au-table-head: #faf8fb;
+  --au-table-head-text: #827c8e;
+  --au-table-row-line: #f0edf2;
+  --au-table-row-hover: #fdfbff;
   --au-surface-chrome: rgba(255, 255, 255, 0.42);
   --au-surface-pop: rgba(255, 255, 255, 0.82);
   --au-surface-2: rgba(30, 27, 75, 0.05);
@@ -1192,6 +1198,10 @@ html[data-theme='dark'] {
     radial-gradient(640px 480px at 48% 46%, rgba(139, 92, 246, 0.14), transparent 70%);
   --au-surface: rgba(30, 28, 60, 0.45);
   --au-surface-solid: #1a1834;
+  --au-table-head: rgba(255, 255, 255, 0.05);
+  --au-table-head-text: #b5b1cc;
+  --au-table-row-line: rgba(255, 255, 255, 0.08);
+  --au-table-row-hover: rgba(255, 255, 255, 0.04);
   --au-surface-chrome: rgba(22, 20, 46, 0.42);
   --au-surface-pop: rgba(28, 26, 56, 0.86);
   --au-surface-2: rgba(255, 255, 255, 0.06);
@@ -1421,6 +1431,8 @@ html[data-theme='dark'] {
   font: 600 10px/1 var(--au-font);
   flex: 0 0 auto;
 }
+
+.au-top__site-mark img { display: block; object-fit: contain; border-radius: 4px; }
 
 .au-crumbs {
   display: flex;
@@ -1814,7 +1826,8 @@ html[data-theme='dark'] {
     grid-template-areas: 'top' 'main';
   }
   .au-top { padding: 0 var(--au-s2); gap: var(--au-s1); }
-  .au-top__site { max-width: 140px; }
+  .au-top__site { min-width: 0; max-width: 140px; }
+  .au-top__site-mark, .au-top__site app-icon { flex-shrink: 0; }
   .au-top__search { width: 36px; padding: 0; justify-content: center; margin-left: auto; background: transparent; border-color: transparent; }
   .au-top .au-top__search span, .au-top .au-top__search .au-kbd, .au-top .au-split__label, .au-top .au-split__caret, .au-top .au-top__brand span { display: none; }
   .au-top .au-split .au-btn--primary { border-radius: 10px; }
@@ -3880,15 +3893,15 @@ tr.is-selected {
   padding: var(--au-s3);
 }
 
-/* Mobile: tables become cards */
+/* Mobile: tables become cards unless the view preserves its columns. */
 @media (max-width: 760px) {
-  .au-table thead { display: none; }
-  .au-table tbody tr {
+  .au-table:not(.au-table--keep-columns) thead { display: none; }
+  .au-table:not(.au-table--keep-columns) tbody tr {
     display: block;
     padding: 10px 0;
     border-bottom: 1px solid var(--au-border);
   }
-  .au-table td {
+  .au-table:not(.au-table--keep-columns) td {
     display: flex;
     justify-content: space-between;
     gap: var(--au-s3);
@@ -3896,7 +3909,7 @@ tr.is-selected {
     border-bottom: none;
     text-align: right;
   }
-  .au-table td::before {
+  .au-table:not(.au-table--keep-columns) td::before {
     content: attr(data-label);
     color: var(--au-muted);
     font-size: var(--au-fs-caption);
@@ -4532,6 +4545,7 @@ html[data-theme="dark"] .au-app {
 :root { --au-areas-h: 44px; --au-sb-assist-w: 332px; }
 .au-shell {
   --au-sb-w: var(--au-sb-assist-w);
+  --au-workspace-height: calc(100vh - var(--au-topnav-h) - var(--au-areas-h) - var(--au-gap) * 4);
   grid-template-columns: var(--au-sb-w) minmax(0, 1fr);
   grid-template-rows: var(--au-topnav-h) var(--au-areas-h) minmax(0, 1fr);
   grid-template-areas: 'top top' 'areas areas' 'side main';
@@ -4577,7 +4591,7 @@ html[data-theme="dark"] .au-app {
 
 .au-sb {
   top: calc(var(--au-topnav-h) + var(--au-areas-h) + var(--au-gap) * 3);
-  height: calc(100vh - var(--au-topnav-h) - var(--au-areas-h) - var(--au-gap) * 4);
+  height: var(--au-workspace-height);
   padding: var(--au-s3) var(--au-s2) 0;
   overflow: hidden;
 }
@@ -4731,3 +4745,13 @@ app-calendar-page .au-btn--secondary { background: var(--au-surface-solid); back
   .cal-row { grid-template-columns: 48px minmax(0, 1fr); gap: 8px 12px; padding: 8px 12px; }
   .cal-row__actions { grid-column: 2; justify-content: flex-start; }
 }
+
+/* ── Tablas del workspace: marco, cabecera tintada y filas como en la referencia aprobada ── */
+.au-app .au-table-wrap { border: 1px solid var(--au-border); border-radius: 12px; background: var(--au-surface-solid, #fffefd); }
+.au-app .au-table th { background: var(--au-table-head); color: var(--au-table-head-text); font-weight: 700; border-bottom: 1px solid var(--au-border); }
+.au-app .au-table td { border-bottom-color: var(--au-table-row-line); }
+.au-app .au-table tbody tr:hover { background: transparent; }
+.au-app .au-table tbody tr:hover td { background: var(--au-table-row-hover); }
+.au-app .au-table td strong, .au-app .au-table .au-cell-title__name { color: var(--au-text); font-weight: 700; }
+.au-app .au-table .au-cell-title__meta { color: var(--au-table-head-text); }
+@media (max-width: 760px) { .au-app .au-table tbody tr:hover td { background: transparent; } }

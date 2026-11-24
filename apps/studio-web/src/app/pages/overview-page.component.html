@@ -1,0 +1,450 @@
+<ng-template #destinationIcon let-name let-showLogo="showLogo" let-size="size">
+  @if (showLogo && logoUrl(); as logo) {
+    <img class="ov__site-icon" [src]="logo" alt="" [width]="size" [height]="size" (error)="failedLogoUrl.set(logo)" />
+  } @else {
+    <app-icon [name]="name"></app-icon>
+  }
+</ng-template>
+
+<section class="au-page ov">
+  <header class="ov__head">
+    <div>
+      <p class="ov__kicker">Centro de operaciones · {{ siteName() }}</p>
+      <h1>Todo tu contenido, bajo control.</h1>
+      <p class="ov__muted">Decisiones, producción y próximas publicaciones.</p>
+    </div>
+    <div class="ov__controls">
+      <label class="ov__period">
+        <app-icon name="calendar"></app-icon>
+        <span>Período</span>
+        <select [value]="period()" (change)="selectPeriod($event)">
+          @for (days of periods; track days) { <option [value]="days">{{ days }} días</option> }
+        </select>
+      </label>
+      <button class="au-btn" type="button" [disabled]="loading()" (click)="load()">
+        <app-icon name="refresh"></app-icon>{{ loading() ? 'Actualizando…' : 'Actualizar' }}
+      </button>
+    </div>
+  </header>
+
+  <div class="ov__banner">
+    <span class="ov__icon" [attr.data-tone]="websiteReady() ? 'green' : 'violet'">
+      <app-icon [name]="websiteReady() ? 'check' : 'connections'"></app-icon>
+    </span>
+    <div class="ov__banner-copy" role="status">
+      <strong>{{ headline().title }}</strong>
+      @if (headline().detail; as detail) { <p class="ov__muted">{{ detail }}</p> }
+    </div>
+    @if (reviewCount() > 0) {
+      <div class="ov__banner-action">
+        <span class="ov__muted">{{ reviewCount() }} {{ reviewCount() === 1 ? 'artículo por revisar' : 'artículos por revisar' }}</span>
+        <button class="au-btn ov__accent" type="button" (click)="focusAttention('approval')">Ver pendientes <app-icon name="chevron-right"></app-icon></button>
+      </div>
+    } @else if (overview() && !websiteReady()) {
+      <a class="au-btn ov__accent" routerLink="/studio/connections/wizard">Conectar sitio <app-icon name="chevron-right"></app-icon></a>
+    }
+  </div>
+
+  @if (loadIssues().length > 0) {
+    <p class="ov__error" role="alert"><app-icon name="warning"></app-icon> No se pudo actualizar {{ loadIssues().join(', ') }}. Puedes volver a intentarlo con «Actualizar».</p>
+  }
+
+  <div class="ov__kpis" aria-label="Indicadores editoriales">
+    <a class="ov__kpi ov__kpi--primary" routerLink="/studio/results" [queryParams]="{ status: 'published' }">
+      <span class="ov__icon" data-tone="violet"><app-icon name="publications"></app-icon></span>
+      <span class="ov__kpi-label">Publicados hoy <app-icon name="chevron-right"></app-icon></span>
+      <span class="ov__number">{{ overview()?.today?.articlesPublished ?? '—' }}
+        @if (overview(); as data) { <small>/ {{ data.today.articlesPlanned }} previstos</small> }
+      </span>
+      @if (overview(); as data) {
+        @if (data.today.articlesPlanned > 0) { <progress aria-label="Avance de publicaciones de hoy" [value]="data.today.articlesPublished" [max]="data.today.articlesPlanned"></progress> }
+      }
+    </a>
+    <button class="ov__kpi" type="button" (click)="focusAttention('approval')">
+      <span class="ov__icon" data-tone="violet"><app-icon name="clock"></app-icon></span>
+      <span class="ov__kpi-label">Por revisar <app-icon name="chevron-right"></app-icon></span>
+      <span class="ov__number">{{ overview()?.pipeline?.review ?? '—' }}
+        @if (reviewCount()) { <small class="ov__badge" data-tone="violet">Tu siguiente acción</small> }
+      </span>
+      @if (overview(); as data) { <span class="ov__muted">{{ data.pipeline.drafts }} en borrador</span> }
+    </button>
+    <a class="ov__kpi" routerLink="/studio/results" [queryParams]="{ status: 'scheduled' }">
+      <span class="ov__icon" data-tone="blue"><app-icon name="calendar"></app-icon></span>
+      <span class="ov__kpi-label">Programadas <app-icon name="chevron-right"></app-icon></span>
+      <span class="ov__number">{{ calendar() ? nextScheduled().length : '—' }}</span>
+      <span class="ov__muted">Próximos {{ period() }} días</span>
+    </a>
+    <button class="ov__kpi" type="button" (click)="focusAttention('error')">
+      <span class="ov__icon" data-tone="red"><app-icon name="warning"></app-icon></span>
+      <span class="ov__kpi-label">Necesitan solución <app-icon name="chevron-right"></app-icon></span>
+      <span class="ov__number">{{ overview()?.pipeline?.failed ?? '—' }}</span>
+      <span class="ov__muted">Publicaciones fallidas</span>
+    </button>
+    <a class="ov__kpi" href="#ov-week">
+      <span class="ov__icon" data-tone="green"><app-icon name="activity"></app-icon></span>
+      <span class="ov__kpi-label">Cobertura editorial <app-icon name="chevron-right"></app-icon></span>
+      <span class="ov__number">{{ periodCoverage() === null ? '—' : periodCoverage() + '/' + period() }}</span>
+      <span class="ov__muted">Días con contenido web</span>
+    </a>
+  </div>
+
+  <div class="ov__columns">
+    <div class="ov__stack">
+      <section class="ov__card" aria-labelledby="ov-attention">
+        <div class="ov__card-head">
+          <div>
+            <p class="ov__kicker">Centro de decisiones</p>
+            <h2 id="ov-attention" tabindex="-1">Necesita tu atención
+              @if (attention().length) { <span class="ov__badge" data-tone="violet">{{ attention().length }}</span> }
+            </h2>
+            <p class="ov__muted">Incidencias de publicación, artículos para revisar y conexiones.</p>
+          </div>
+          <a class="ov__link" routerLink="/studio/notifications">Ver notificaciones <app-icon name="chevron-right"></app-icon></a>
+        </div>
+        <div class="ov__filters" role="group" aria-label="Filtrar decisiones">
+          @for (filter of attentionFilters; track filter.id) {
+            <button type="button" [attr.aria-pressed]="attentionFilter() === filter.id" (click)="setAttention(filter.id)">{{ filter.label }}</button>
+          }
+        </div>
+        <ul class="ov__rows">
+          @for (item of showAllAttention() ? filteredAttention() : filteredAttention().slice(0, 3); track item.id) {
+            <li class="ov__row">
+              <span class="ov__icon" [attr.data-tone]="item.kind === 'error' ? 'red' : 'violet'">
+                <app-icon [name]="item.kind === 'error' ? 'warning' : item.kind === 'approval' ? 'content' : 'connections'"></app-icon>
+              </span>
+              <div class="ov__row-copy"><strong>{{ item.title }}</strong><p class="ov__muted">{{ item.detail }}</p></div>
+              <a class="au-btn ov__small ov__accent" [routerLink]="item.link" [queryParams]="item.params" [attr.aria-label]="item.action + ': ' + item.title">{{ item.action }}</a>
+            </li>
+          } @empty {
+            <li class="ov__empty">{{ overview() ? 'No hay acciones pendientes en este filtro.' : loading() ? 'Cargando decisiones…' : 'Decisiones no disponibles.' }}</li>
+          }
+        </ul>
+        @if (filteredAttention().length > 3) {
+          <footer class="ov__footer">
+            <button class="ov__link" type="button" [attr.aria-expanded]="showAllAttention()" (click)="showAllAttention.set(!showAllAttention())">
+              {{ showAllAttention() ? 'Mostrar menos' : 'Mostrar todas las tareas (' + filteredAttention().length + ')' }}
+              <app-icon [name]="showAllAttention() ? 'chevron-up' : 'chevron-down'"></app-icon>
+            </button>
+          </footer>
+        }
+      </section>
+
+      <section class="ov__card" aria-labelledby="ov-activity">
+        <div class="ov__card-head">
+          <div>
+            <p class="ov__kicker">Actividad y producción</p>
+            <h2 id="ov-activity">Así va tu día</h2>
+            <p class="ov__muted" aria-live="polite">{{ day() | date: 'EEEE d MMMM yyyy' : '' : 'es' }}</p>
+          </div>
+          <div class="ov__stepper" role="group" aria-label="Elegir día de actividad">
+            <button type="button" aria-label="Día anterior" [disabled]="dayOffset() <= -maxWeekOffset" (click)="shiftDay(-1)"><app-icon name="chevron-left"></app-icon></button>
+            <button type="button" aria-label="Volver a hoy" [disabled]="dayOffset() === 0" (click)="selectDay(0)">{{ dayOffset() === 0 ? 'Hoy' : (day() | date: 'd MMM' : '' : 'es') }}</button>
+            <button type="button" aria-label="Día siguiente" [disabled]="dayOffset() >= lastDayOffset" (click)="shiftDay(1)"><app-icon name="chevron-right"></app-icon></button>
+          </div>
+        </div>
+
+        @if (runningWork(); as op) {
+          @let state = operationInfo(op);
+          <article class="ov__work">
+            <span class="ov__work-icon"><app-icon name="sparkles"></app-icon></span>
+            <div class="ov__work-body">
+              <div class="ov__spread">
+                <span class="ov__badge" data-tone="violet">{{ state.status }}</span>
+                @if (op.totalSteps > 0) { <span class="ov__muted">{{ op.completedSteps }} de {{ op.totalSteps }} pasos</span> }
+              </div>
+              <h3>{{ state.title }}</h3>
+              @if (op.totalSteps > 0) {
+                <progress [value]="operationProgress(op)" max="100" [attr.aria-label]="'Progreso de ' + state.title"></progress>
+              }
+              <a class="ov__link" [routerLink]="op.type === 'editorial_plan_generation' ? '/studio/plan' : '/studio/activity'">
+                {{ op.type === 'editorial_plan_generation' ? 'Ver planificación' : 'Ver trabajo' }} <app-icon name="chevron-right"></app-icon>
+              </a>
+            </div>
+          </article>
+        }
+
+        @if (featured(); as event) {
+          @let state = eventState(event);
+          <article class="ov__work">
+            <span class="ov__work-icon"><app-icon name="plan"></app-icon></span>
+            <div class="ov__work-body">
+              <span class="ov__badge" [attr.data-tone]="state.tone">{{ state.label }}</span>
+              <h3>
+                @if (event.projectId) { <a [routerLink]="['/studio/content', event.projectId]">{{ event.title }}</a> }
+                @else { {{ event.title }} }
+              </h3>
+              <p class="ov__muted">
+                {{ eventTime(event.scheduledFor) }}
+                @if (event.primaryKeyword) { · {{ event.primaryKeyword }} }
+                @if (featuredPlanItem()?.primaryIntent; as intent) { · {{ intent }} }
+                @if (difficulty(event.keywordDifficulty); as level) { · {{ level === 'Easy' ? 'Fácil' : level === 'Medium' ? 'Media' : 'Difícil' }} }
+              </p>
+              @if (featuredPlanItem()?.rationale; as rationale) {
+                <details><summary>Motivo de la elección</summary><p>{{ rationale }}</p></details>
+              }
+            </div>
+          </article>
+        }
+        <ul class="ov__rows">
+          @for (op of showAllOps() ? dayOperations() : dayOperations().slice(0, 4); track op.id) {
+            @let state = operationInfo(op);
+            <li class="ov__row">
+              <span class="ov__icon" [attr.data-tone]="state.tone"><app-icon [name]="state.icon"></app-icon></span>
+              <div class="ov__row-copy"><strong>{{ state.title }}</strong><p class="ov__muted">{{ state.status }}@if (op.errorSummary) { · {{ humanError(op.errorSummary) }} }</p></div>
+              <time class="ov__muted" [attr.datetime]="op.createdAt">{{ eventTime(op.createdAt) }}</time>
+            </li>
+          }
+          @for (event of dayEvents().slice(1); track event.id) {
+            @let state = eventState(event);
+            <li class="ov__row">
+              <span class="ov__icon" data-tone="violet"><app-icon name="plan"></app-icon></span>
+              <span class="ov__row-copy">{{ event.title }}</span>
+              <span class="ov__badge" [attr.data-tone]="state.tone">{{ state.label }}</span>
+            </li>
+          }
+          @if (!runningWork() && !featured() && !dayOperations().length) {
+            <li class="ov__empty">{{ operations() && calendar() ? 'No hay actividad ni temas para este día.' : loading() ? 'Cargando actividad…' : 'No se pudo cargar toda la actividad.' }}</li>
+          }
+        </ul>
+        <footer class="ov__footer">
+          @if (dayOperations().length > 4) {
+            <button class="ov__link" type="button" [attr.aria-expanded]="showAllOps()" (click)="showAllOps.set(!showAllOps())">
+              {{ showAllOps() ? 'Mostrar menos' : 'Mostrar toda la actividad' }} <app-icon [name]="showAllOps() ? 'chevron-up' : 'chevron-down'"></app-icon>
+            </button>
+          }
+          <a class="ov__link ov__push" routerLink="/studio/activity">Ver trabajos <app-icon name="chevron-right"></app-icon></a>
+        </footer>
+      </section>
+    </div>
+
+    <div class="ov__stack">
+      <section class="ov__card" aria-labelledby="ov-automation">
+        <div class="ov__card-head">
+          <div><p class="ov__kicker">Automatización</p><h2 id="ov-automation">Cómo trabaja Auctorio</h2></div>
+          <a class="au-btn ov__icon-link" routerLink="/studio/automation" aria-label="Configurar automatización"><app-icon name="settings"></app-icon></a>
+        </div>
+        @if (canManageAutomation()) {
+          <div class="ov__modes" role="group" aria-label="Modo de trabajo">
+            @for (item of modes; track item.id) {
+              <button type="button" [attr.aria-pressed]="mode() === item.id" [disabled]="modeBusy() || !policy()" (click)="setMode(item.id)">{{ item.label }}</button>
+            }
+          </div>
+        }
+        @if (modeDetails(); as modeInfo) {
+          <div class="ov__row ov__mode-detail">
+            <span class="ov__icon" data-tone="violet"><app-icon name="automation"></app-icon></span>
+            <div class="ov__row-copy"><strong>{{ modeInfo.title }}@if (!canManageAutomation()) { · {{ modeInfo.label }} }</strong><p class="ov__muted">{{ modeInfo.description }}</p></div>
+          </div>
+        }
+        <footer class="ov__footer">
+          @if (automationStatus(); as state) {
+            <span><span class="ov__muted">Estado del sistema</span><strong class="ov__state"><span class="ov__dot" [attr.data-tone]="state.tone" aria-hidden="true"></span>{{ state.label }}</strong></span>
+          } @else { <span class="ov__muted">{{ loading() ? 'Consultando estado…' : 'Estado no disponible' }}</span> }
+          @if (canManageAutomation() && policy() && (policy()?.enabled || policy()?.state !== 'active')) {
+            <button class="au-btn ov__small" type="button" [disabled]="modeBusy()" (click)="togglePause()">
+              <app-icon [name]="policy()?.state !== 'active' ? 'play' : 'pause'"></app-icon>{{ policy()?.state !== 'active' ? 'Reanudar' : 'Pausar' }}
+            </button>
+          }
+        </footer>
+        @if (modeError(); as error) { <p class="ov__error" role="alert">{{ error }}</p> }
+      </section>
+
+      <section class="ov__card" aria-labelledby="ov-upcoming">
+        <div class="ov__card-head">
+          <div><p class="ov__kicker">Próxima publicación</p><h2 id="ov-upcoming">Lo siguiente en salir</h2></div>
+          <span class="ov__icon" data-tone="violet"><app-icon name="calendar"></app-icon></span>
+        </div>
+        @if (upcoming(); as event) {
+          @let state = upcomingState(event);
+          <div class="ov__row">
+            <span class="ov__date"><strong>{{ eventDate(event.scheduledFor) | date: 'd' }}</strong>{{ eventDate(event.scheduledFor) | date: 'MMM' : '' : 'es' }}</span>
+            <div class="ov__row-copy">
+              @if (nextScheduled().includes(event)) {
+                <a class="ov__item-link" routerLink="/studio/results" [queryParams]="{ id: event.id }">{{ event.title }}</a>
+              } @else {
+                <a class="ov__item-link" routerLink="/studio/calendar" [queryParams]="{ date: eventDateKey(event.scheduledFor) }">{{ event.title }}</a>
+              }
+              <p class="ov__muted">{{ eventDate(event.scheduledFor) | date: 'EEE d MMM' : '' : 'es' }} · {{ eventTime(event.scheduledFor) }}</p>
+            </div>
+          </div>
+          <div class="ov__footer">
+            <span class="ov__destination">
+              <ng-container [ngTemplateOutlet]="destinationIcon" [ngTemplateOutletContext]="{
+                $implicit: event.channel === 'website' ? 'globe' : 'connections',
+                showLogo: event.channel === 'website' && event.site?.id === siteId(),
+                size: 22
+              }"></ng-container>
+              {{ event.destination }}
+            </span>
+            <span class="ov__badge" [attr.data-tone]="state.tone">{{ state.label }}</span>
+          </div>
+          <p class="ov__muted">{{ state.detail }}</p>
+        } @else {
+          <p class="ov__empty">{{ calendar() ? 'No hay próximas publicaciones ni temas previstos en este período.' : loading() ? 'Consultando calendario…' : 'Calendario no disponible.' }}</p>
+        }
+        <a class="au-btn ov__full" routerLink="/studio/calendar" [queryParams]="{ date: eventDateKey(upcoming()?.scheduledFor ?? null) }">Abrir calendario <app-icon name="chevron-right"></app-icon></a>
+      </section>
+
+      <section class="ov__card" aria-labelledby="ov-dest">
+        <div class="ov__card-head">
+          <div><p class="ov__kicker">Distribución</p><h2 id="ov-dest">Salud de los destinos</h2></div>
+          <a class="ov__link" routerLink="/studio/connections">Gestionar</a>
+        </div>
+        <ul class="ov__rows">
+          @for (connection of siteConnections(); track connection.id) {
+            @let tone = connectionTone(connection);
+            <li class="ov__row">
+              <span class="ov__icon" data-tone="violet">
+                <ng-container [ngTemplateOutlet]="destinationIcon" [ngTemplateOutletContext]="{
+                  $implicit: connection.platform === 'website' ? 'globe' : 'connections',
+                  showLogo: connection.platform === 'website' && connection.siteId === siteId(),
+                  size: 30
+                }"></ng-container>
+              </span>
+              <div class="ov__row-copy">
+                <strong>{{ connection.displayName }}</strong>
+                <p class="ov__muted">{{ connection.platform === 'website' ? 'Sitio web · ' : '' }}{{ connectionLabel(connection) }}@if (connection.lastVerifiedAt) { · {{ eventDate(connection.lastVerifiedAt) | date: 'd MMM' : '' : 'es' }} }</p>
+              </div>
+              <span class="ov__icon ov__icon--mini" [attr.data-tone]="tone"><app-icon [name]="tone === 'green' ? 'check' : tone === 'red' ? 'warning' : 'dots'"></app-icon></span>
+            </li>
+          } @empty {
+            <li class="ov__empty">{{ overview() ? 'Todavía no hay destinos configurados.' : loading() ? 'Consultando destinos…' : 'Destinos no disponibles.' }}</li>
+          }
+        </ul>
+      </section>
+
+      @if (overview() && !setupHidden()) {
+        <section class="ov__card ov__setup" aria-labelledby="ov-setup">
+          <details [open]="!websiteReady()">
+            <summary>
+              <span class="ov__icon" data-tone="violet"><app-icon name="layers"></app-icon></span>
+              <span class="ov__row-copy"><strong id="ov-setup">Configuración inicial</strong><span class="ov__muted">{{ setupRemaining() }} {{ setupRemaining() === 1 ? 'paso pendiente' : 'pasos pendientes' }}</span></span>
+              <app-icon name="chevron-down"></app-icon>
+            </summary>
+            <div class="ov__checklist">
+            @for (required of [true, false]; track required) {
+              <h3>{{ required ? 'Obligatorio' : 'Opcional' }}</h3>
+              <ul class="ov__steps">
+                @for (step of steps(); track step.id) {
+                  @if (step.required === required) {
+                    <li class="ov__step" [class.is-done]="step.done">
+                      <app-icon [name]="step.done ? 'circle-check' : 'clock'"></app-icon>
+                      <span class="ov__row-copy">{{ setupLabels[step.id] }} <span class="au-sr-only">{{ step.done ? '(completado)' : '(pendiente)' }}</span></span>
+                      @if (!step.done) { <a class="au-btn ov__small" [routerLink]="setupLinks[step.id].url" [queryParams]="setupLinks[step.id].params" [attr.aria-label]="setupLabels[step.id]">Abrir</a> }
+                    </li>
+                  }
+                }
+              </ul>
+            }
+            @if (websiteReady()) { <button class="ov__link" type="button" (click)="dismissSetup()">Ocultar configuración inicial</button> }
+            </div>
+          </details>
+        </section>
+      }
+    </div>
+  </div>
+
+  <section class="ov__card" aria-labelledby="ov-week">
+    <div class="ov__card-head">
+      <div>
+        <p class="ov__kicker">Agenda editorial</p>
+        <h2 id="ov-week">{{ weekOffset() === 0 ? 'Tu próxima semana' : 'Semana seleccionada' }}
+          @if (weekCoverage() !== null) { <span class="ov__badge" data-tone="neutral">{{ weekCoverage() }} de 7 días cubiertos</span> }
+        </h2>
+        <p class="ov__muted">{{ week()[0].date | date: 'd MMM' : '' : 'es' }} – {{ week()[6].date | date: 'd MMM yyyy' : '' : 'es' }}</p>
+      </div>
+      <div class="ov__week-controls">
+        <button class="au-btn ov__small" type="button" [disabled]="weekOffset() <= -maxWeekOffset" (click)="shiftWeek(-7)"><app-icon name="chevron-left"></app-icon> Semana anterior</button>
+        <button class="au-btn ov__small" type="button" [disabled]="weekOffset() >= maxWeekOffset" (click)="shiftWeek(7)">Siguiente <app-icon name="chevron-right"></app-icon></button>
+        <a class="au-btn ov__small" routerLink="/studio/calendar">Calendario completo</a>
+      </div>
+    </div>
+    @if (calendar()) {
+      <app-overview-week [days]="week()" [selectedOffset]="agendaOffset()" (pick)="agendaOffset.set($event)"></app-overview-week>
+      <footer class="ov__footer ov__week-footer">
+        <p class="ov__muted" aria-live="polite">
+          {{ agendaDate() | date: 'EEE d MMM' : '' : 'es' }} · {{ agendaEventCount() ? agendaEventCount() + (agendaEventCount() === 1 ? ' entrada editorial' : ' entradas editoriales') : 'Sin contenido web' }}
+        </p>
+        <a class="ov__link" routerLink="/studio/calendar" [queryParams]="{ date: selectedDateKey() }">Gestionar día en Calendario <app-icon name="chevron-right"></app-icon></a>
+      </footer>
+    } @else { <p class="ov__empty">{{ loading() ? 'Cargando agenda editorial…' : 'Agenda editorial no disponible.' }}</p> }
+  </section>
+
+  <div class="ov__bottom">
+    <section class="ov__card" aria-labelledby="ov-latest">
+      <div class="ov__card-head">
+        <div><p class="ov__kicker">Resultados y trazabilidad</p><h2 id="ov-latest">Publicaciones recientes</h2></div>
+        <a class="ov__link" routerLink="/studio/results">Ver resultados <app-icon name="chevron-right"></app-icon></a>
+      </div>
+      <ul class="ov__rows">
+        @for (pub of showAllPublications() ? recentPublications() : recentPublications().slice(0, 3); track pub.id) {
+          <li class="ov__row">
+            <span class="ov__icon" [attr.data-tone]="pub.status === 'failed' ? 'red' : 'violet'">
+              <ng-container [ngTemplateOutlet]="destinationIcon" [ngTemplateOutletContext]="{
+                $implicit: pub.status === 'failed' ? 'warning' : 'publications',
+                showLogo: pub.channel === 'website' && pub.status !== 'failed',
+                size: 30
+              }"></ng-container>
+            </span>
+            <div class="ov__row-copy">
+              <a class="ov__item-link" routerLink="/studio/results" [queryParams]="{ id: pub.id }">{{ pub.title }}</a>
+              <p class="ov__muted">{{ pub.destination }}@if (pub.publishedAt || pub.scheduledFor) { · {{ eventDate(pub.publishedAt ?? pub.scheduledFor) | date: 'd MMM' : '' : 'es' }} · {{ eventTime(pub.publishedAt ?? pub.scheduledFor) }} }</p>
+              @if (pub.status === 'failed' && pub.lastError) { <p class="ov__muted">{{ humanError(pub.lastError) }}</p> }
+            </div>
+            <span class="ov__badge" [attr.data-tone]="pub.status === 'published' ? 'green' : pub.status === 'failed' ? 'red' : 'violet'">{{ publicationLabels[pub.status] }}</span>
+          </li>
+        } @empty {
+          <li class="ov__empty">{{ overview() ? 'Aún no hay publicaciones recientes.' : loading() ? 'Consultando publicaciones…' : 'Publicaciones no disponibles.' }}</li>
+        }
+      </ul>
+      @if (recentPublications().length > 3) {
+        <footer class="ov__footer">
+          <button class="ov__link ov__push" type="button" [attr.aria-expanded]="showAllPublications()" (click)="showAllPublications.set(!showAllPublications())">
+            {{ showAllPublications() ? 'Ver menos' : 'Ver más' }} <app-icon [name]="showAllPublications() ? 'chevron-up' : 'chevron-down'"></app-icon>
+          </button>
+        </footer>
+      }
+    </section>
+
+    <section class="ov__card" aria-labelledby="ov-learned">
+      <div class="ov__card-head">
+        <div><p class="ov__kicker">Conocimiento del sitio</p><h2 id="ov-learned">Lo que Auctorio sabe de tu web</h2></div>
+        <a class="au-btn ov__icon-link" routerLink="/studio/site-intelligence" aria-label="Abrir inteligencia del sitio"><app-icon name="external"></app-icon></a>
+      </div>
+      @if (profile(); as profileData) {
+        <div class="ov__row">
+          <span class="ov__avatar" aria-hidden="true">
+            @if (logoUrl(); as logo) { <img class="ov__site-icon" [src]="logo" alt="" width="36" height="36" (error)="failedLogoUrl.set(logo)" /> }
+            @else { {{ siteName().slice(0, 1).toUpperCase() }} }
+          </span>
+          <div class="ov__row-copy"><strong>{{ siteName() }}</strong><p class="ov__muted">{{ profileData.detectedSiteType }}@if (profileData.detectedLanguage) { · {{ profileData.detectedLanguage }} }</p></div>
+          @if (strategy()?.approved) { <span class="ov__badge" data-tone="green">Estrategia confirmada</span> }
+          @else if (profileData.indexedAt) { <span class="ov__badge" data-tone="violet">Perfil analizado</span> }
+        </div>
+        @if (profileData.brandSummary) { <p class="ov__muted">{{ profileData.brandSummary }}</p> }
+        @if (profileData.mainTopics.length) {
+          <ul class="ov__tags" aria-label="Temas principales">
+            @for (topic of profileData.mainTopics.slice(0, 12); track $index) { <li class="ov__badge" data-tone="violet">{{ topic }}</li> }
+          </ul>
+        }
+        <dl class="ov__facts">
+          <div><dt>Páginas analizadas</dt><dd>{{ profileData.pageCount }}</dd></div>
+          @if (profileData.detectedAudience) { <div><dt>Audiencia</dt><dd>{{ profileData.detectedAudience }}</dd></div> }
+          @if (profileData.editorialTone) { <div><dt>Tono editorial</dt><dd>{{ profileData.editorialTone }}</dd></div> }
+        </dl>
+        <footer class="ov__footer ov__profile-actions">
+          <a class="au-btn ov__small" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'profile' }">Revisar perfil</a>
+          @if (canConfirmProfile() && strategy() && !strategy()?.approved) {
+            <button class="au-btn ov__small ov__accent" type="button" [disabled]="confirming()" (click)="confirmProfile()"><app-icon name="check"></app-icon>{{ confirming() ? 'Guardando…' : 'Confirmar estrategia' }}</button>
+          }
+          <a class="ov__link" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Analizando el sitio…' : 'Volver a analizar' }}</a>
+        </footer>
+      } @else {
+        <p class="ov__empty">{{ !siteId() ? 'Selecciona un sitio para consultar su perfil editorial.' : intelligence() ? 'Todavía no hay un perfil editorial disponible.' : loading() ? 'Consultando perfil…' : 'No se pudo consultar el perfil.' }}</p>
+        @if (siteId()) {
+          <a class="ov__link" routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">{{ indexing() ? 'Ver análisis en curso' : 'Analizar sitio' }} <app-icon name="chevron-right"></app-icon></a>
+        }
+      }
+    </section>
+  </div>
+</section>

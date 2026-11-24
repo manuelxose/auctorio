@@ -1,20 +1,20 @@
 // External sources for keyword-first guides (BLG parity M4): the pages Google ranks for the
 // keyword become citable ledger facts (title + snippet, publisher = domain, real URL).
-// Best effort: no credentials, unknown market or provider error → no extra sources, writing never blocks.
+// Best effort: no provider, unknown market or provider error → no extra sources, writing never blocks.
 
-import { dataForSeoConfigured, dataForSeoLocation, fetchSerpOrganic, normalizeKeyword, type SerpResult } from "../infrastructure/seo/dataforseo";
+import { normalizeKeyword, type SerpResult } from "../infrastructure/seo/contract";
 import type { LedgerFact } from "./editorial-engine/types";
 import { lookupProviderCache, storeProviderCache } from "./enrichment/provider-cache";
-import { recordAiSpend } from "./cost-budgets";
+import { acquireSeo, seoRoute } from "./seo-manager";
 import { structuredEvent } from "../shared/utils/logger";
 import { fetchUrl, validateScrapeUrl } from "../infrastructure/scraping";
 import { extractPageFromHtml } from "./site-intelligence/crawler";
 
-const PROVIDER = "dataforseo";
+/** Page excerpts are read by our own crawler, not by an SEO provider. */
+const PAGE_CACHE = "web";
 const RESOURCE = "serp_organic";
-const TTL_MS = 7 * 24 * 60 * 60 * 1000; // Labs snapshots refresh every few weeks
+const TTL_MS = 7 * 24 * 60 * 60 * 1000; // stored SERPs refresh every few weeks
 
-type Fetcher = typeof fetchSerpOrganic;
 /** Page text plus the outlet's own name (og:site_name), when the page declares one. */
 type PageReader = (url: string) => Promise<{ content: string; siteName: string | null } | string | null>;
 
@@ -55,7 +55,7 @@ async function withPageExcerpts(tenantId: string, facts: LedgerFact[], keyword: 
     facts.map(async (fact) => {
       const url = fact.sourceUrl!;
       const key = `${keyword}|${url}`;
-      const cached = await lookupProviderCache(tenantId, PROVIDER, "source_page", key);
+      const cached = await lookupProviderCache(tenantId, PAGE_CACHE, "source_page", key);
       // Older cache entries hold the bare excerpt string.
       const stored = cached.hit && !cached.negative ? cached.payload : null;
       let page: { excerpt: string; publisher: string | null } | null = cached.hit
@@ -65,7 +65,7 @@ async function withPageExcerpts(tenantId: string, facts: LedgerFact[], keyword: 
         const read = await readPage(url);
         const content = typeof read === "string" ? read : read?.content ?? "";
         page = { excerpt: content ? pickSourceExcerpt(content, keyword) : "", publisher: typeof read === "object" && read ? cleanPublisher(read.siteName) : null };
-        await storeProviderCache(tenantId, PROVIDER, "source_page", key, page, { ttlMs: TTL_MS, negative: !page.excerpt && !page.publisher });
+        await storeProviderCache(tenantId, PAGE_CACHE, "source_page", key, page, { ttlMs: TTL_MS, negative: !page.excerpt && !page.publisher });
       }
       // The outlet's real name («Xataka») instead of its domain for «Título, Editor».
       const named = page.publisher ? { ...fact, publisher: page.publisher } : fact;
@@ -111,21 +111,21 @@ export function serpResultsToFacts(results: SerpResult[], exclude: { domains: st
 
 export async function serpSourceFacts(
   input: { tenantId: string; siteId: string; locale: string | null; keyword: string; exclude: { domains: string[]; urls: string[] }; max: number },
-  fetcher: Fetcher = fetchSerpOrganic,
+  fetchImpl: typeof fetch = fetch,
   readPage: PageReader = readPageText,
 ): Promise<LedgerFact[]> {
-  const location = dataForSeoLocation(input.locale);
   const keyword = normalizeKeyword(input.keyword);
-  if (!dataForSeoConfigured() || !location || !keyword || input.max <= 0) return [];
-  const key = `${location.locationCode}|${location.languageCode}|${keyword}`;
+  if (!keyword || input.max <= 0) return [];
   try {
-    const cached = await lookupProviderCache(input.tenantId, PROVIDER, RESOURCE, key);
+    const route = await seoRoute("serp_organic", input.locale);
+    if (!route.provider) return [];
+    const key = `${route.marketKey}|${keyword}`;
+    const cached = await lookupProviderCache(input.tenantId, route.provider.id, RESOURCE, key);
     let results = cached.hit ? (cached.negative ? [] : (cached.payload as SerpResult[])) : null;
     if (!results) {
-      const fetched = await fetcher(keyword, location);
-      if (fetched.costUsd > 0) await recordAiSpend({ tenantId: input.tenantId, siteId: input.siteId, kind: "serp_sources", provider: PROVIDER, model: RESOURCE, costUsd: fetched.costUsd });
-      results = fetched.results;
-      await storeProviderCache(input.tenantId, PROVIDER, RESOURCE, key, results, { ttlMs: TTL_MS, negative: results.length === 0 });
+      const { data, meta } = await acquireSeo(route, "serp_organic", { keyword }, { tenantId: input.tenantId, siteId: input.siteId, kind: "serp_sources", resource: RESOURCE, fetchImpl });
+      results = data;
+      if (results.length || !meta.partial) await storeProviderCache(input.tenantId, route.provider.id, RESOURCE, key, results, { ttlMs: TTL_MS, negative: results.length === 0 });
     }
     return await withPageExcerpts(input.tenantId, serpResultsToFacts(results, input.exclude, input.max), keyword, readPage);
   } catch (error) {

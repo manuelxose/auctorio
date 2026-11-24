@@ -10,6 +10,7 @@ import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { localDateInZone, zonedTimeToUtc } from "../plan-slots";
 import { enqueueFillMissingSlots, enqueueRegeneratePlanItem, titleTokenOverlap, updateEditorialPlanItem } from "../editorial-plan";
 import type { StudioPermission } from "../security";
+import { updateOpportunity, type EngagementPlatform } from "../engagement";
 import { type AssistantContext, evidenceCount, strings, unfilledSlotsOf } from "./assistant-context";
 import { CopilotError } from "./errors";
 
@@ -549,7 +550,61 @@ const proposeSource: WriteTool = {
   },
 };
 
+const pendingEngagement: ReadTool = {
+  kind: "read",
+  label: "Oportunidades pendientes",
+  description: "Lists Reddit and Quora opportunities awaiting a reply for the selected site. Optional platform: reddit or quora.",
+  permission: "analytics.read",
+  needs: "a site",
+  async run(ctx, args) {
+    const siteId = requireId(args, "siteId", ctx.site?.id, "Selecciona un sitio.");
+    const platform = args.platform;
+    if (platform !== undefined && platform !== "reddit" && platform !== "quora") throw new CopilotError(400, "Elige Reddit o Quora.");
+    const items = await prisma.engagementOpportunity.findMany({
+      where: { tenantId: ctx.tenantId, siteId, platform, status: "to_reply" },
+      orderBy: [{ score: "desc" }, { discoveredAt: "desc" }], take: 10,
+      select: { id: true, platform: true, title: true },
+    });
+    return {
+      content: items.map((item) => `- ${item.title.replace(/[\r\n]/g, " ")} (${item.platform}, ID ${item.id})`).join("\n") || "No hay oportunidades por responder.",
+      sources: [{ label: "Oportunidades", path: `/studio/opportunities?tab=${platform ?? "reddit"}` }],
+    };
+  },
+};
+
+const markEngagementReplied: WriteTool = {
+  kind: "write",
+  label: "Marcar oportunidad como respondida",
+  description: "Marks a pending Reddit or Quora opportunity as replied after the operator confirms. Requires opportunityId.",
+  permission: "projects.manage",
+  needs: "a site and an opportunity ID",
+  async prepare(ctx, args) {
+    const siteId = requireId(args, "siteId", ctx.site?.id, "Selecciona un sitio.");
+    const opportunityId = requireId(args, "opportunityId", null, "Indica el ID de la oportunidad.");
+    const item = await prisma.engagementOpportunity.findFirst({
+      where: { id: opportunityId, tenantId: ctx.tenantId, siteId, status: "to_reply" },
+      select: { platform: true, title: true },
+    });
+    if (!item) throw new CopilotError(404, "La oportunidad ya no está pendiente.");
+    return { args: { siteId, opportunityId, platform: item.platform }, summary: `Marcar como respondida: ${item.title}` };
+  },
+  async execute(tenantId, _userId, args) {
+    const siteId = requireId(args, "siteId", null, "Selecciona un sitio.");
+    const opportunityId = requireId(args, "opportunityId", null, "Indica el ID de la oportunidad.");
+    const platform = args.platform as EngagementPlatform;
+    if (platform !== "reddit" && platform !== "quora") throw new CopilotError(400, "Elige Reddit o Quora.");
+    try {
+      await updateOpportunity({ tenantId, siteId, platform }, opportunityId, { status: "replied" }, "to_reply");
+    } catch (error) {
+      if (error instanceof Error && error.message === "opportunity_not_found") throw new CopilotError(409, "La oportunidad ya no está pendiente.");
+      throw error;
+    }
+    return { result: { opportunityId, status: "replied" }, links: [{ label: "Oportunidades", path: `/studio/opportunities?tab=${platform}` }] };
+  },
+};
+
 export const READ_TOOLS = {
+  pending_engagement: pendingEngagement,
   explain_strategy: explainStrategy,
   explain_proposal_relevance: explainProposalRelevance,
   find_plan_weaknesses: findPlanWeaknesses,
@@ -559,6 +614,7 @@ export const READ_TOOLS = {
 } as const;
 
 export const WRITE_TOOLS = {
+  mark_engagement_replied: markEngagementReplied,
   update_proposal: updateProposal,
   regenerate_proposal: regenerateProposal,
   fill_missing_slots: fillMissingSlots,

@@ -109,6 +109,16 @@ test("processPublishingJob publishes, marks the project published and verifies t
   assert.deepEqual(calls, ["attempt:running", "attempt:succeeded:remote-1", "mark-published", "verify"]);
 });
 
+test("a queued website delivery does not call the provider after disconnection", async () => {
+  const calls: string[] = [];
+  await assert.rejects(processPublishingJob(JOB, {
+    ...dependencies(buildPublication(), calls),
+    isDisconnected: async () => true,
+    getPublisher: () => assert.fail("disconnected destinations should not call a publisher"),
+  }), /website_destination_disconnected/);
+  assert.deepEqual(calls, ["attempt:running"]);
+});
+
 test("processPublishingJob uses publishDraft and keeps the project approved when syncing a draft", async () => {
   const calls: string[] = [];
   await processPublishingJob(JOB, dependencies(buildPublication({ metadata: { targetStatus: "draft" } }), calls));

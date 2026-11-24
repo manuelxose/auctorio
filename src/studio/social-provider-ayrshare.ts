@@ -28,6 +28,7 @@ const AYRSHARE_API_BASE = "https://api.ayrshare.com/api";
 const PLATFORM_MAP: Record<SocialPlatform, string> = {
   x: "twitter",
   instagram: "instagram",
+  facebook: "facebook",
 };
 
 export class AyrshareSocialProvider implements SocialIntegrationProvider {

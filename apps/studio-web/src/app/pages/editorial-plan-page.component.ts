@@ -40,31 +40,29 @@ type View = 'backlog' | 'pipeline';
       .pw-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--au-s2); }
       .pw-extend { display: flex; flex-wrap: wrap; align-items: end; gap: var(--au-s2); padding: var(--au-s3) var(--au-s4); border-bottom: 1px solid var(--au-border); background: var(--au-surface-2); }
       .pw-op { padding: var(--au-s3) var(--au-s4); border-bottom: 1px solid var(--au-border); }
-      .pw-counts { display: flex; flex-wrap: wrap; gap: var(--au-s3); padding: var(--au-s2) var(--au-s4); font-size: var(--au-fs-metadata); color: var(--au-muted); border-bottom: 1px solid var(--au-border); }
-      .pw-counts strong { color: var(--au-text); }
       .pw-body { padding: var(--au-s3) var(--au-s4); }
       .pw-warn { margin: var(--au-s3) var(--au-s4) 0; }
       @media (max-width: 640px) {
-        .pw-head, .pw-body, .pw-counts, .pw-op, .pw-extend { padding-left: var(--au-s3); padding-right: var(--au-s3); }
+        .pw-head, .pw-body, .pw-op, .pw-extend { padding-left: var(--au-s3); padding-right: var(--au-s3); }
       }
     `,
   ],
   template: `
-    <section class="au-page">
+    <section class="au-page advanced-page advanced-plan">
       <header class="au-page__header au-page__header--split">
         <div>
-          <p class="au-page__eyebrow">Editorial control</p>
-          <h1 class="au-page__title">Editorial Plan</h1>
-          <p class="au-page__subtitle">Decide what to publish and review proposals. Dates and publishing live in Calendar.</p>
+          <p class="au-page__eyebrow">Auctorio / Herramientas avanzadas</p>
+          <h1 class="au-page__title">Plan editorial</h1>
+          <p class="au-page__subtitle">Backlog de temas, briefs editables y fases de producción. La agenda vive en Calendario.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--secondary" type="button" (click)="showGenerator = !showGenerator" [attr.aria-expanded]="showGenerator">
+          <button class="au-btn au-btn--primary" type="button" (click)="showGenerator = !showGenerator" [attr.aria-expanded]="showGenerator">
             <app-icon name="sparkles"></app-icon>
-            {{ showGenerator ? 'Hide generator' : 'New plan' }}
+            {{ showGenerator ? 'Ocultar generador' : 'Crear plan' }}
           </button>
           <a class="au-btn au-btn--ghost" routerLink="/studio/calendar">
             <app-icon name="calendar"></app-icon>
-            Open calendar
+            Abrir calendario
           </a>
         </div>
       </header>
@@ -87,7 +85,30 @@ type View = 'backlog' | 'pipeline';
         </div>
       </section>
 
-      <div class="pw-bar" *ngIf="visiblePlans().length > 0">
+      <dl class="advanced-kpis" aria-label="Resumen del plan" *ngIf="plan && !detailLoading">
+        <div class="au-stat">
+          <dt class="au-stat__label">Temas del plan</dt>
+          <dd class="au-stat__value">{{ items().length }}</dd>
+          <dd class="au-stat__note">Todos los estados</dd>
+        </div>
+        <div class="au-stat advanced-stat--warning">
+          <dt class="au-stat__label">Por aprobar</dt>
+          <dd class="au-stat__value">{{ count('proposed') }}</dd>
+          <dd class="au-stat__note">Propuestas iniciales</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">En producción</dt>
+          <dd class="au-stat__value">{{ count('approved') + count('content_pending') + count('generating') + count('content_ready') + count('review_required') }}</dd>
+          <dd class="au-stat__note">Aprobados y en preparación</dd>
+        </div>
+        <div class="au-stat advanced-stat--good">
+          <dt class="au-stat__label">Programados o publicados</dt>
+          <dd class="au-stat__value">{{ count('scheduled') + count('published') }}</dd>
+          <dd class="au-stat__note">Calendario y publicación</dd>
+        </div>
+      </dl>
+
+      <div class="pw-bar workspace-banner" *ngIf="visiblePlans().length > 0">
         <label class="pw-bar__switch">
           <span class="pw-bar__label">Plan</span>
           <select class="au-select" [ngModel]="plan?.id || ''" (ngModelChange)="selectPlan($event)">
@@ -98,6 +119,10 @@ type View = 'backlog' | 'pipeline';
       </div>
 
       <section class="au-panel" *ngIf="plan" [attr.aria-busy]="!!activeOp">
+        <div class="advanced-card-header advanced-plan-heading">
+          <h2 class="au-panel__title">{{ view === 'backlog' ? 'Backlog de propuestas' : 'Pipeline de producción' }}</h2>
+          <p>{{ view === 'backlog' ? 'Cada tema es un brief con intención, palabras clave y evidencia.' : 'Fases del mismo plan editorial.' }}</p>
+        </div>
         <header class="pw-head">
           <div>
             <h2>{{ plan.name }}</h2>
@@ -150,15 +175,8 @@ type View = 'backlog' | 'pipeline';
           <span class="au-banner__text">{{ error }}</span>
         </div>
 
-        <div class="pw-counts">
-          <span><strong>{{ items().length }}</strong> proposals</span>
-          <span><strong>{{ count('proposed') }}</strong> to review</span>
-          <span><strong>{{ count('approved') }}</strong> approved</span>
-          <span><strong>{{ count('content_ready') + count('review_required') }}</strong> drafted</span>
-          <span><strong>{{ count('scheduled') + count('published') }}</strong> scheduled or published</span>
-        </div>
-
         <div class="pw-body">
+
           <div class="au-skeleton" *ngIf="detailLoading">Loading plan…</div>
           <ng-container *ngIf="!detailLoading">
             <app-empty-state *ngIf="items().length === 0" icon="plan" title="This plan has no proposals" text="Use Fill missing slots to generate proposals for the empty slots."></app-empty-state>

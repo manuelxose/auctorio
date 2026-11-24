@@ -72,7 +72,7 @@ export type PreparedInput = {
   siteFitScore: number | null;
   /** Primary entity names used by the duplicate check. */
   primaryEntityNames: string[];
-  /** Site `article_targets` override (guides only); resolved in the plan brief. */
+  /** Site `article_targets` defaults used when the production brief is built. */
   siteArticleTargets?: unknown;
   /** Project created for this job before writing (plan item shell); excluded from the duplicate check. */
   ownProjectId: string | null;

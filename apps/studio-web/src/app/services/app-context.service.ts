@@ -28,13 +28,10 @@ export class AppContextService {
     if (!session) {
       return null;
     }
-    return (
-      session.sites.find((site) => site.id === session.activeSiteId) ??
-      session.sites[0] ??
-      null
-    );
+    return session.sites.find((site) => site.id === session.activeSiteId) ?? null;
   });
   readonly role = computed(() => this.sessionState()?.role ?? 'viewer');
+  readonly permissions = computed(() => this.sessionState()?.permissions ?? []);
 
   constructor() {
     // The HTTP interceptor reads the active site from this small store.

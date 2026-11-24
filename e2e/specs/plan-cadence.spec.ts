@@ -18,7 +18,7 @@ test('STUDIO-06: plan page keeps proposals separate from the Calendar and stays 
     await page.setViewportSize({ width, height });
     await page.goto('/studio/plan', { waitUntil: 'networkidle' });
     await expect(page.getByText('Dates and publishing live in Calendar.')).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Open calendar' })).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Abrir calendario' })).toBeVisible();
     await page.screenshot({ path: `test-results/plan-${width}.png`, fullPage: true });
   }
 

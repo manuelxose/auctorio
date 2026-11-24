@@ -209,6 +209,7 @@ enum StoryClusterStatus {
 enum SocialChannel {
   x
   instagram
+  facebook
 }
 
 enum SocialContentType {
@@ -217,6 +218,8 @@ enum SocialContentType {
   instagram_caption
   instagram_story
   social_post
+  instagram_carousel
+  facebook_post
 }
 
 enum SocialGenerationStatus {
@@ -236,6 +239,7 @@ enum PublishingAccountPlatform {
   website
   x
   instagram
+  facebook
 }
 
 enum PublishingAccountStatus {
@@ -249,6 +253,7 @@ enum PublicationChannel {
   website
   x
   instagram
+  facebook
 }
 
 enum PublicationState {
@@ -327,6 +332,8 @@ model Tenant {
   studioIdentityProvider         StudioIdentityProvider?
   studioAccountsLastWorkspace    StudioAccount[]                  @relation("StudioAccountLastWorkspace")
   studioUsers                    StudioUser[]
+  engagementOpportunities        EngagementOpportunity[]
+  engagementSettings             EngagementSettings[]
   studioRoles                    StudioRole[]
   studioInvitations              StudioInvitation[]
   studioUserSessions             StudioUserSession[]
@@ -341,6 +348,7 @@ model Tenant {
   sourcePackImports              SourcePackImport[]
   enrichmentProviders            EnrichmentProvider[]
   socialContents                 SocialContent[]
+  siteSocialSettings             SiteSocialSettings[]
   publishingAccounts             PublishingAccount[]
   publications                   Publication[]
   publicationAttempts            PublicationAttempt[]
@@ -595,6 +603,9 @@ model Site {
   timezone               String                   @default("Europe/Madrid")
   editorialPlanPresets   EditorialPlanPreset[]
   planningSettings       SitePlanningSettings?
+  socialSettings         SiteSocialSettings?
+  engagementOpportunities EngagementOpportunity[]
+  engagementSettings      EngagementSettings[]
   // onboarding + strategy (agent B)
   onboardingRun          SiteOnboardingRun?
   editorialStrategy      SiteEditorialStrategy?
@@ -1998,7 +2009,7 @@ model EditorialPlanItem {
   searchVolume                   Int?                    @map("search_volume")
   /// Provider keyword difficulty 0–100 (unlike the 1–10 model estimate above).
   keywordDifficulty              Int?                    @map("keyword_difficulty")
-  /// Provider that was queried (e.g. "dataforseo"); null = never checked.
+  /// Source of the metrics (SEO provider source tag, e.g. "dataforseo", "anyapi"); null = never checked.
   keywordMetricsSource           String?                 @map("keyword_metrics_source")
   keywordMetricsAt               DateTime?               @map("keyword_metrics_at")
   opportunityScore              Float?                  @map("opportunity_score")
@@ -2051,6 +2062,72 @@ model EditorialPlanPreset {
 
   @@index([tenantId, siteId])
   @@map("editorial_plan_presets")
+}
+
+model EngagementOpportunity {
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @map("tenant_id") @db.Uuid
+  siteId       String   @map("site_id") @db.Uuid
+  platform     String
+  url          String
+  title        String
+  snippet      String?  @db.Text
+  community    String?
+  votes        Int?
+  reason       String   @default("keyword_match")
+  score        Int      @default(0)
+  keyword      String
+  publishedAt  DateTime? @map("published_at")
+  discoveredAt DateTime @default(now()) @map("discovered_at")
+  status       String   @default("to_reply")
+  draft        String?  @db.Text
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, url])
+  @@index([tenantId, siteId, platform, status, discoveredAt], map: "engagement_opportunity_inbox_idx")
+  @@map("engagement_opportunities")
+}
+
+model EngagementSettings {
+  id         String   @id @default(uuid()) @db.Uuid
+  tenantId   String   @map("tenant_id") @db.Uuid
+  siteId     String   @map("site_id") @db.Uuid
+  platform   String
+  keywords   String[] @default([])
+  subreddits String[] @default([])
+  replyStyle String   @default("") @map("reply_style") @db.Text
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId, platform])
+  @@map("engagement_settings")
+}
+
+model SiteSocialSettings {
+  id             String   @id @default(uuid()) @db.Uuid
+  tenantId       String   @map("tenant_id") @db.Uuid
+  siteId         String   @map("site_id") @db.Uuid
+  workflow       String   @default("approve")
+  postDays       Int[]    @default([1, 3, 5]) @map("post_days")
+  postTime       String   @default("10:00") @map("post_time")
+  timezone       String   @default("UTC")
+  categories     String[] @default(["educational", "myths", "storytelling"])
+  imageStyle     String   @default("photo") @map("image_style")
+  fontFamily     String   @default("sans") @map("font_family")
+  highlightStyle String   @default("marker") @map("highlight_style")
+  useLogo        Boolean  @default(false) @map("use_logo")
+  showBrandMark  Boolean  @default(true) @map("show_brand_mark")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([siteId])
+  @@map("site_social_settings")
 }
 
 /// Per-site planning defaults that prefill the plan generator.
@@ -3029,4 +3106,35 @@ model AiProviderKey {
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   @@map("ai_provider_keys")
+}
+
+/// SEO provider switch, priority, health and live-verification record (SEO-V2). No row = code default. No secrets here.
+model SeoProviderState {
+  providerId       String    @id @map("provider_id")
+  enabled          Boolean
+  priority         Int
+  lastSuccessAt    DateTime? @map("last_success_at")
+  lastErrorAt      DateTime? @map("last_error_at")
+  lastErrorCode    String?   @map("last_error_code")
+  lastErrorMessage String?   @map("last_error_message")
+  /// capability -> { at, market, costUsd } of each live call an admin authorized.
+  verifications    Json?
+  updatedByUserId  String?   @map("updated_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@map("seo_provider_states")
+}
+
+/// Platform-wide SEO operating mode; one row, id "global" (SEO-V2). No row = DataForSEO only.
+model SeoControlSetting {
+  id              String   @id @default("global")
+  mode            String
+  /// Manual mode: capability -> provider id.
+  routing         Json?
+  updatedByUserId String?  @map("updated_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("seo_control_settings")
 }

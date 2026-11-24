@@ -1,4 +1,5 @@
 import { Worker } from "bullmq";
+import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../db/prisma";
 import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
@@ -9,7 +10,7 @@ import {
   resolveInstallationSecrets,
   transitionInstallation,
 } from "../../studio/connectors/installation";
-import { failOperation, startOperation, touchOperationProgress } from "../../studio/operations";
+import { completeOperation, failOperation, startOperation, touchOperationProgress } from "../../studio/operations";
 import { notify } from "../../studio/notifications";
 import { publishEvent } from "../../studio/events";
 import { structuredEvent } from "../../shared/utils/logger";
@@ -21,7 +22,7 @@ const prisma = getPrismaClient();
 
 type ConnectionJobData =
   | { kind: "discover"; installationId: string; tenantId: string; operationId: string; siteId: string | null }
-  | { kind: "verify"; installationId: string; tenantId: string; operationId: string; siteId: string | null };
+  | { kind: "verify"; installationId: string; tenantId: string; operationId: string; siteId: string | null; recheck?: boolean };
 
 type ConnectionDependencies = {
   discoverWebsite: typeof discoverWebsite;
@@ -83,6 +84,10 @@ async function runVerification(data: Extract<ConnectionJobData, { kind: "verify"
   if (!installation) {
     throw new Error("installation_not_found");
   }
+  if (installation.state !== (data.recheck ? "active" : "verifying")) {
+    await failOperation(data.operationId, { errorCode: "installation_changed", errorSummary: "The connection changed before verification ran.", retryable: false });
+    return;
+  }
   await startOperation(data.operationId, "verifying");
   await touchOperationProgress(data.operationId, { phase: "verifying", progress: 20 });
   try {
@@ -92,12 +97,25 @@ async function runVerification(data: Extract<ConnectionJobData, { kind: "verify"
       mergedConfig,
     );
     await touchOperationProgress(data.operationId, { phase: "verifying", progress: 80 });
+    const capabilities = { ...((installation.capabilities as Record<string, unknown> | null) ?? {}), verification: { probes: result.probes, summary: result.summary } };
+    if (data.recheck) {
+      const updated = await prisma.connectorInstallation.updateMany({
+        where: { id: installation.id, tenantId: data.tenantId, state: "active" },
+        data: { capabilities: capabilities as Prisma.InputJsonObject, lastError: result.verified ? null : "verification_failed", ...(result.verified ? { verifiedAt: new Date() } : {}) },
+      });
+      if (!updated.count || !result.verified) {
+        await failOperation(data.operationId, { errorCode: "verification_failed", errorSummary: "The destination did not pass its latest check.", retryable: true });
+      } else {
+        await completeOperation(data.operationId, { phase: "verified" });
+      }
+      return;
+    }
     if (result.verified) {
       await transitionInstallation(data.tenantId, installation.id, "ready", {
         patch: {
           verifiedAt: new Date(),
           // Persist probe outcomes (no secrets) so readiness can separate auth / draft / publish.
-          capabilities: { ...((installation.capabilities as Record<string, unknown> | null) ?? {}), verification: { probes: result.probes, summary: result.summary } },
+          capabilities,
         },
       });
       await publishEvent({
@@ -136,7 +154,11 @@ async function runVerification(data: Extract<ConnectionJobData, { kind: "verify"
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    await transitionInstallation(data.tenantId, installation.id, "failed", { error: message });
+    if (data.recheck) {
+      await prisma.connectorInstallation.updateMany({ where: { id: installation.id, tenantId: data.tenantId, state: "active" }, data: { lastError: "verification_error" } });
+    } else {
+      await transitionInstallation(data.tenantId, installation.id, "failed", { error: message });
+    }
     await failOperation(data.operationId, { errorCode: "verification_error", errorSummary: message, retryable: true });
     throw error;
   }

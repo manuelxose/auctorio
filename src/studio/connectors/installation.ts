@@ -1,9 +1,10 @@
-import { Prisma, type ConnectorInstallation, type InstallationKind, type InstallationState } from "@prisma/client";
+import { Prisma, type ConnectorInstallation, type InstallationKind, type InstallationState, type SiteType } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { encryptSecret, sha256Hex } from "../../shared/utils/crypto";
 import { structuredEvent } from "../../shared/utils/logger";
 import { writeAudit } from "../audit";
 import { getConnectorDescriptor } from "./registry";
+import { installationToConnection, resolveSiteIdByOrigin, type DestinationStage } from "../destination-readiness";
 
 const prisma = getPrismaClient();
 
@@ -27,7 +28,7 @@ const TRANSITIONS: Record<InstallationState, InstallationState[]> = {
   discovering: ["discovering", "credentials_required", "failed", "draft", "cancelled"],
   credentials_required: ["discovering", "verifying", "ready", "draft", "failed", "cancelled"],
   verifying: ["verifying", "ready", "failed", "credentials_required", "cancelled"],
-  ready: ["discovering", "active", "cancelled", "draft"],
+  ready: ["discovering", "verifying", "active", "cancelled", "draft"],
   active: ["disabled", "expired", "failed", "cancelled"],
   failed: ["discovering", "draft", "credentials_required", "verifying", "cancelled"],
   expired: ["credentials_required", "cancelled"],
@@ -68,6 +69,7 @@ export type InstallationView = {
   capabilities: Record<string, unknown> | null;
   hasCredentials: boolean;
   credentialsRef: string | null;
+  verificationStage?: DestinationStage;
   lastError: string | null;
   verifiedAt: Date | null;
   activatedAt: Date | null;
@@ -77,6 +79,29 @@ export type InstallationView = {
 };
 
 export function toInstallationView(installation: ConnectorInstallation): InstallationView {
+  const hasCredentials = Boolean(installation.credentialsCiphertext || installation.credentialsRef);
+  const descriptor = getConnectorDescriptor(installation.provider);
+  const rawConfig = (installation.config ?? {}) as Record<string, unknown>;
+  const config: Record<string, unknown> = {};
+  for (const field of descriptor?.configSchema.fields ?? []) {
+    const value = rawConfig[field.key];
+    if (field.kind === "secret") continue;
+    if (field.kind === "url" && typeof value === "string") {
+      try {
+        const url = new URL(value);
+        url.username = url.password = url.search = url.hash = "";
+        config[field.key] = url.toString();
+      } catch {
+        continue;
+      }
+    } else if (typeof value === "string" || typeof value === "boolean") {
+      config[field.key] = value;
+    }
+  }
+  // The feed wizard can display the issuance/pull status, never the key hash.
+  for (const key of ["feedKeyHint", "feedKeyIssuedAt", "feedSiteKey", "lastPulledAt"]) {
+    if (typeof rawConfig[key] === "string") config[key] = rawConfig[key];
+  }
   return {
     id: installation.id,
     tenantId: installation.tenantId,
@@ -86,12 +111,15 @@ export function toInstallationView(installation: ConnectorInstallation): Install
     state: installation.state,
     displayName: installation.displayName,
     externalAccountId: installation.externalAccountId,
-    config: (installation.config ?? null) as Record<string, unknown> | null,
+    config: installation.config ? config : null,
     discovered: (installation.discovered ?? null) as Record<string, unknown> | null,
     capabilities: (installation.capabilities ?? null) as Record<string, unknown> | null,
-    hasCredentials: Boolean(installation.credentialsCiphertext || installation.credentialsRef),
-    credentialsRef: installation.credentialsRef,
-    lastError: installation.lastError,
+    hasCredentials,
+    credentialsRef: null,
+    verificationStage: installation.kind === "website"
+      ? installationToConnection({ ...installation, site: null, configured: hasCredentials }).stage
+      : undefined,
+    lastError: installation.lastError ? "The last connection check failed. Review the destination and try again." : null,
     verifiedAt: installation.verifiedAt,
     activatedAt: installation.activatedAt,
     version: installation.version,
@@ -115,6 +143,9 @@ export async function createInstallation(input: {
   const descriptor = getConnectorDescriptor(input.provider);
   if (!descriptor || descriptor.kind !== input.kind) {
     throw new Error(`unknown_connector ${input.provider} for kind ${input.kind}`);
+  }
+  if (input.siteId && !(await prisma.site.findFirst({ where: { id: input.siteId, tenantId: input.tenantId }, select: { id: true } }))) {
+    throw new Error("site_not_found");
   }
   const created = await prisma.connectorInstallation.create({
     data: {
@@ -184,8 +215,9 @@ export async function transitionInstallation(
       activatedAt: Date;
     }>;
   } = {},
+  db: Prisma.TransactionClient = prisma,
 ): Promise<InstallationView> {
-  const current = await getInstallation(tenantId, id);
+  const current = await db.connectorInstallation.findFirst({ where: { tenantId, id } });
   if (!current) {
     throw new Error("installation_not_found");
   }
@@ -193,8 +225,8 @@ export async function transitionInstallation(
     return toInstallationView(current);
   }
   assertCanTransition(current.state, to);
-  const updated = await prisma.connectorInstallation.update({
-    where: { id: current.id },
+  const updated = await db.connectorInstallation.update({
+    where: { id: current.id, state: current.state },
     data: {
       state: to,
       lastError: input.error ? input.error.slice(0, 2000) : to === "failed" ? current.lastError : null,
@@ -216,7 +248,7 @@ export async function transitionInstallation(
     entityType: "connector_installation",
     entityId: id,
     metadata: { from: current.state, to, error: input.error ? input.error.slice(0, 300) : null },
-  });
+  }, db);
   structuredEvent("connection.installation.transitioned", {
     tenantId,
     installationId: id,
@@ -239,6 +271,9 @@ export async function storeInstallationCredentials(
   if (!current) {
     throw new Error("installation_not_found");
   }
+  if (!["draft", "credentials_required", "ready", "failed", "expired"].includes(current.state)) {
+    throw new Error("installation_credentials_locked");
+  }
   const secretEntries = Object.entries(input.secrets).filter(([, value]) => value && value.trim().length > 0);
   const secrets = Object.fromEntries(secretEntries);
   if (Object.keys(secrets).length === 0) {
@@ -247,8 +282,12 @@ export async function storeInstallationCredentials(
   const ciphertext = encryptSecret(JSON.stringify(secrets));
   const fingerprint = secretFingerprint(JSON.stringify(secretEntries.map(([key, value]) => [key, value]).sort()));
   const updated = await prisma.connectorInstallation.update({
-    where: { id: current.id },
+    where: { id: current.id, state: current.state },
     data: {
+      state: "credentials_required",
+      verifiedAt: null,
+      lastError: null,
+      capabilities: { ...((current.capabilities ?? {}) as Prisma.InputJsonObject), verification: null },
       credentialsCiphertext: ciphertext,
       secretFingerprint: fingerprint,
       config: input.config as Prisma.InputJsonObject,
@@ -325,6 +364,66 @@ export async function deleteInstallationDraft(tenantId: string, id: string, user
     entityType: "connector_installation",
     entityId: id,
   });
+}
+
+export async function disconnectWebsiteInstallation(tenantId: string, id: string, userId: string | null): Promise<InstallationView> {
+  return prisma.$transaction(async (db) => {
+    const current = await db.connectorInstallation.findFirst({ where: { id, tenantId, kind: "website" } });
+    if (!current) throw new Error("installation_not_found");
+    if (current.state === "disabled") return toInstallationView(current);
+    if (current.state !== "active") throw new Error("installation_not_active");
+    const sites = await db.site.findMany({ where: { tenantId }, select: { id: true, baseUrl: true } });
+    const resolve = (installation: Pick<ConnectorInstallation, "siteId" | "config">) =>
+      installation.siteId ?? resolveSiteIdByOrigin((installation.config as { baseUrl?: unknown } | null)?.baseUrl, sites);
+    const siteId = resolve(current);
+    if (!siteId || !sites.some((site) => site.id === siteId)) throw new Error("installation_site_not_linked");
+    await db.$queryRaw`SELECT id FROM sites WHERE id = ${siteId}::uuid AND tenant_id = ${tenantId}::uuid FOR NO KEY UPDATE`;
+    const installations = await db.connectorInstallation.findMany({
+      where: { tenantId, kind: "website", state: "active", OR: [{ siteId }, { siteId: null }] },
+      select: { id: true, siteId: true, config: true },
+    });
+    await db.connectorInstallation.updateMany({
+      where: { tenantId, id: { in: installations.filter((installation) => resolve(installation) === siteId).map(({ id: installationId }) => installationId) }, state: "active" },
+      data: { state: "disabled", siteId },
+    });
+    await writeAudit({
+      tenantId, actorUserId: userId, actorType: userId ? "user" : "automation",
+      action: "connection.installation.disconnected", entityType: "connector_installation", entityId: id,
+      metadata: { siteId },
+    }, db);
+    return toInstallationView(await db.connectorInstallation.findUniqueOrThrow({ where: { id } }));
+  });
+}
+
+export async function activateWebsiteInstallation(input: {
+  tenantId: string; installationId: string; siteId: string; displayName: string; userId: string | null;
+  transport?: { type: SiteType; baseUrl: string };
+}): Promise<InstallationView> {
+  return prisma.$transaction(async (db) => {
+    const { tenantId, installationId, siteId, displayName, userId, transport } = input;
+    await db.$queryRaw`SELECT id FROM sites WHERE id = ${siteId}::uuid AND tenant_id = ${tenantId}::uuid FOR NO KEY UPDATE`;
+    const site = await db.site.findFirst({ where: { id: siteId, tenantId } });
+    if (!site) throw new Error("site_not_found");
+    const current = await db.connectorInstallation.findFirst({ where: { id: installationId, tenantId, kind: "website" } });
+    if (current?.state !== "ready" || toInstallationView(current).verificationStage !== "ready") throw new Error("installation_not_verified");
+    if (transport) await db.site.update({ where: { id: siteId }, data: transport });
+    await db.connectorInstallation.updateMany({
+      where: { tenantId, siteId, kind: "website", state: "active", id: { not: installationId } },
+      data: { state: "disabled" },
+    });
+    return transitionInstallation(tenantId, installationId, "active", {
+      userId, patch: { siteId, displayName, activatedAt: new Date() },
+    }, db);
+  });
+}
+
+export async function isWebsiteDestinationDisconnected(tenantId: string, siteId: string): Promise<boolean> {
+  const installations = await prisma.connectorInstallation.findMany({
+    where: { tenantId, siteId, kind: "website", state: { in: ["active", "disabled"] } },
+    select: { state: true },
+    distinct: ["state"],
+  });
+  return installations.some(({ state }) => state === "disabled") && !installations.some(({ state }) => state === "active");
 }
 
 export type InstallationWithSecret = ConnectorInstallation & { decryptedSecrets: Record<string, string> | null };

@@ -1,0 +1,317 @@
+<link rel="stylesheet" href="/social-studio.css" />
+<div class="social-reference">
+  <div class="app-shell">
+    <h1 class="social-sr-only">{{ channelLabel() }}</h1>
+    <nav class="channel-tabs" aria-label="Canales de redes">
+      @for (section of channels; track section.id) {
+        <a class="channel-tab" routerLink="/studio/social" [queryParams]="{ tab: section.id }"
+          [class.active]="channel() === section.id" [attr.aria-current]="channel() === section.id ? 'page' : null">
+          <span class="channel-logo" [class.channel-logo--instagram]="section.id === 'instagram'">
+            <svg class="ico" aria-hidden="true"><use [attr.href]="'/social-studio-icons.svg#soc-logo-' + section.id" /></svg>
+          </span>
+          {{ section.label }}
+        </a>
+      }
+    </nav>
+
+    @if (!postId() && !loadError() && !loading()) {
+      <section class="stats-grid" aria-label="Resumen de publicaciones">
+        @for (status of filters; track status.id) {
+          <button class="stat-card" type="button"
+            [class.selected]="view() === 'posts' && filter() === status.id"
+            [attr.aria-pressed]="view() === 'posts' && filter() === status.id"
+            (click)="showPosts(status.id)">
+            <span class="stat-icon" [class]="status.tone"><svg class="ico" aria-hidden="true"><use [attr.href]="'/social-studio-icons.svg#soc-i-' + status.icon" /></svg></span>
+            <span class="stat-content"><span class="stat-label">{{ status.label }}</span><strong>{{ counts()[status.id] }}</strong></span>
+            @if (status.id === 'all') {
+              <span class="stat-side"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-chart" /></svg></span>
+            } @else {
+              <span class="stat-percent" [class.green-percent]="status.id === 'published'">{{ percent(counts()[status.id]) }}%</span>
+            }
+          </button>
+        }
+        <div class="stat-card stat-readonly">
+          <span class="stat-icon clean"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-trend" /></svg></span>
+          <span class="stat-content"><span class="stat-label">Tasa de publicación</span><strong>{{ percent(counts().published) }}%</strong></span>
+          <svg class="ico info-icon" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-info" /></svg>
+        </div>
+      </section>
+    }
+
+    <div class="workspace" [attr.aria-busy]="loading() || busy()">
+      <button class="outline-button mobile-menu" type="button" aria-controls="social-sidebar"
+        [attr.aria-expanded]="mobileOpen()" (click)="mobileOpen.set(!mobileOpen())">
+        <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-menu" /></svg> Publicaciones
+      </button>
+      <aside id="social-sidebar" class="sidebar" [class.open]="mobileOpen()">
+        <div class="sidebar-heading"><h2>Publicaciones en {{ channelLabel() }}</h2><span class="count-tag">{{ visiblePosts().length }}</span></div>
+        <div class="post-list" role="group" aria-label="Elegir publicación">
+          @for (post of visiblePosts(); track post.id) {
+            <button class="post-item" type="button" [class.active]="selected()?.id === post.id && (view() === 'posts' || view() === 'drafts')"
+              [attr.aria-pressed]="selected()?.id === post.id && (view() === 'posts' || view() === 'drafts')" (click)="select(post)">
+              <span class="post-thumb">
+                @if (slides(post)[0]?.imageUrl || imageUrl(post); as cover) {
+                  <img [src]="cover" alt="" width="54" height="65" loading="lazy" />
+                } @else {
+                  <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-layers" /></svg>
+                }
+              </span>
+              <span class="post-text">
+                <strong>{{ post.title || post.projectTitle }}</strong>
+                <small>{{ formatLabels[post.contentType] }} · {{ post.createdAt | date: 'd MMM yyyy' }}</small>
+              </span>
+            </button>
+          } @empty {
+            @if (!loading()) { <p class="empty-sidebar">No hay publicaciones en esta vista.</p> }
+          }
+        </div>
+      </aside>
+
+      <section class="editor-panel" [attr.aria-label]="'Publicaciones en ' + channelLabel()" [attr.aria-busy]="loading() || busy()">
+        @if (loadError()) {
+          <div class="empty-state" role="status"><p>No se pudieron cargar las publicaciones.</p><button class="outline-button" type="button" (click)="loadPosts()">Reintentar</button></div>
+        } @else if (loading() && !posts().length) {
+          <div class="empty-state" role="status">Cargando publicaciones…</div>
+        } @else if (view() === 'templates') {
+          <section class="view-layout">
+            <h3>Plantillas de publicación</h3>
+            @if (loadingTemplates()) {
+              <p role="status">Cargando artículos…</p>
+            } @else if (templateError()) {
+              <p role="status">No se pudieron cargar los artículos.</p>
+              <button class="outline-button" type="button" (click)="loadTemplateSources()">Reintentar</button>
+            } @else if (templateSources().length) {
+              <div class="field social-template-source">
+                <label for="social-template-source">Artículo de origen</label>
+                <select #source id="social-template-source" class="form-control">
+                  @for (sourceProject of templateSources(); track sourceProject.id) { <option [value]="sourceProject.id">{{ sourceProject.title }}</option> }
+                </select>
+              </div>
+              <div class="field-grid social-view-list">
+                @for (template of templates(); track template.format) {
+                  <button class="post-item" type="button" [disabled]="busy()" (click)="createFromTemplate(template.format, source.value)">
+                    <span class="post-thumb"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-layers" /></svg></span>
+                    <span class="post-text"><strong>{{ template.label }}</strong><small>{{ template.description }}</small></span>
+                  </button>
+                }
+              </div>
+            } @else {
+              <p>Selecciona un artículo para generar su primera publicación social.</p>
+              <a class="outline-button" routerLink="/studio/content">Ver artículos</a>
+            }
+          </section>
+        } @else if (view() === 'stats') {
+          <section class="view-layout">
+            <h3>Estadísticas de {{ channelLabel() }}</h3>
+            <p>Estado editorial de las publicaciones cargadas.</p>
+            <div class="chart-bars" aria-hidden="true">
+              @for (status of filters; track status.id) { <div [style.height.%]="percent(counts()[status.id])"></div> }
+            </div>
+            <div class="social-chart-legend">
+              @for (status of filters; track status.id) { <span>{{ status.label }} <strong>{{ counts()[status.id] }}</strong></span> }
+            </div>
+          </section>
+        } @else if (selected(); as post) {
+          @for (current of [post]; track current.id) {
+            <article class="soc-post" [attr.data-post-id]="current.id">
+              <header class="editor-header">
+                <div class="editor-heading">
+                  <div class="post-meta">{{ formatLabels[current.contentType] }} <span class="dot-separator">·</span> {{ current.createdAt | date: 'd MMM yyyy' }}</div>
+                  <div class="post-name-row">
+                    <h2>{{ current.title || current.projectTitle }}</h2>
+                    <button class="title-edit" type="button" aria-label="Editar título" [disabled]="busy()" (click)="showDialog('rename', dialogElement)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-edit" /></svg></button>
+                  </div>
+                </div>
+                <div class="editor-actions">
+                  <span class="status-pill" [class.scheduled]="current.publication?.status === 'scheduled'"
+                    [class.published]="current.publication?.status === 'published'" data-testid="post-state">{{ state(current) }}</span>
+                  <div class="more-wrapper">
+                    <button class="square-button" type="button" aria-label="Más opciones" aria-controls="social-post-menu"
+                      [attr.aria-expanded]="menuOpen()" (click)="menuOpen.set(!menuOpen())"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-dots" /></svg></button>
+                    @if (menuOpen()) {
+                      <div id="social-post-menu" class="more-menu">
+                        <a [routerLink]="['/studio/content', current.projectId]"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-link" /></svg>Abrir artículo de origen</a>
+                        <button type="button" [disabled]="busy()" (click)="showDialog('rename', dialogElement)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-edit" /></svg>Renombrar</button>
+                        @if (current.generationStatus === 'done' && current.threadPosition === null) {
+                          <button type="button" [disabled]="busy()" (click)="duplicate(current)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-copy" /></svg>Duplicar publicación</button>
+                        }
+                        @if (isDraft(current) || current.generationStatus === 'failed') {
+                          <button type="button" [disabled]="busy()" (click)="menuOpen.set(false); regenerate(current)">Regenerar</button>
+                        }
+                        @if (isDraft(current)) { <button type="button" [disabled]="busy()" (click)="menuOpen.set(false); reject(current)">Rechazar</button> }
+                        @if (canDelete(current)) {
+                          <button type="button" [disabled]="busy()" (click)="showDialog('delete', dialogElement)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-trash" /></svg>Eliminar borrador</button>
+                        }
+                      </div>
+                    }
+                  </div>
+                  @if (current.generationStatus === 'done' && current.threadPosition === null) {
+                    <button class="square-button" type="button" aria-label="Duplicar publicación" title="Duplicar" [disabled]="busy()" (click)="duplicate(current)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-copy" /></svg></button>
+                  }
+                  @if (canDelete(current)) {
+                    <button class="square-button" type="button" aria-label="Eliminar borrador" title="Eliminar" [disabled]="busy()" (click)="showDialog('delete', dialogElement)"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-trash" /></svg></button>
+                  }
+                  @if (isDraft(current)) {
+                    <button class="primary-button" type="button" [disabled]="busy()" (click)="approve(current, caption())"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-check" /></svg>Aprobar</button>
+                  } @else if (canSchedule(current)) {
+                    <button class="primary-button" type="button" (click)="inspector.set('schedule')"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-calendar" /></svg>{{ current.publication?.status === 'scheduled' ? 'Reprogramar' : 'Programar' }}</button>
+                  }
+                </div>
+              </header>
+              <div class="editor-columns">
+                <section class="gallery-panel" aria-label="Vista previa">
+                  @let canAddSlide = current.contentType === 'instagram_carousel' && isDraft(current) && !current.publication && slides(current).length < 10;
+                  @if (slides(current).length) {
+                    <app-social-carousel [slides]="slides(current)" [studioGallery]="true" [canAddSlide]="canAddSlide"
+                      [busy]="busy()" (addSlide)="showDialog('slide', dialogElement)"></app-social-carousel>
+                  } @else {
+                    @if (imageUrl(current); as cover) { <img class="social-cover" [src]="cover" alt="Portada del artículo" /> }
+                    @if (current.contentType === 'x_thread' && caption()) {
+                      <ol class="social-thread" aria-label="Vista previa del hilo">
+                        @for (part of threadParts(caption()); track $index) { <li><span aria-hidden="true">{{ $index + 1 }}</span><p>{{ part }}</p></li> }
+                      </ol>
+                    } @else if (channel() === 'instagram' && current.contentType === 'instagram_story' && caption()) {
+                      <div class="preview-stage preview-stage--story"><div class="slide-content"><div class="story-slide">
+                        <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-share" /></svg><h3>{{ current.title || current.projectTitle }}</h3><p>{{ caption() }}</p>
+                      </div></div></div>
+                    } @else if (caption()) {
+                      <div class="caption-preview"><p>{{ caption() }}</p></div>
+                    } @else {
+                      <div class="empty-state">La vista previa aparecerá cuando termine la generación.</div>
+                    }
+                    @if (canAddSlide) {
+                      <button class="secondary-action" type="button" [disabled]="busy()" (click)="showDialog('slide', dialogElement)">Añadir diapositiva</button>
+                    }
+                  }
+                </section>
+
+                <section class="inspector-panel" aria-label="Detalles de la publicación">
+                  <div class="inspector-tabs" role="group" aria-label="Secciones de edición">
+                    @for (tab of inspectors; track tab.id) {
+                      <button class="inspector-tab" type="button" [class.active]="inspector() === tab.id" [attr.aria-pressed]="inspector() === tab.id" (click)="inspector.set(tab.id)">
+                        <svg class="ico" aria-hidden="true"><use [attr.href]="'/social-studio-icons.svg#soc-i-' + tab.icon" /></svg><span>{{ tab.label }}</span>
+                      </button>
+                    }
+                  </div>
+                  <div class="inspector-body">
+                    @switch (inspector()) {
+                      @case ('details') {
+                        <dl class="field-grid social-details">
+                          <div class="field"><dt>Tipo de publicación</dt><dd class="field-value"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-layers" /></svg><span>{{ formatLabels[current.contentType] }} @if (slides(current).length) { ({{ slides(current).length }} imágenes) }</span></dd></div>
+                          <div class="field"><dt>Estado</dt><dd class="field-value tinted"><span class="status-dot"></span><span [title]="state(current)">{{ state(current) }}</span></dd></div>
+                          <div class="field"><dt>Cuenta de {{ channelLabel() }}</dt><dd class="field-value">@if (channel() === 'instagram') { <span class="mini-instagram" aria-hidden="true"></span> }<span>{{ current.publication?.account?.displayName || 'Sin cuenta asignada' }}</span></dd></div>
+                          <div class="field"><dt>Fecha de creación</dt><dd class="field-value social-created"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-calendar" /></svg><span>{{ current.createdAt | date: 'd MMM yyyy, HH:mm' }}</span></dd></div>
+                        </dl>
+                        <div class="inspector-divider"></div>
+                        <h3 class="caption-heading">Vista previa del caption</h3>
+                        <div class="caption-preview">
+                          <p>{{ caption() || 'Sin texto' }}</p>
+                          @if (channel() === 'instagram') { <span class="caption-counter">{{ caption().length }} / 2.200</span> }
+                        </div>
+                        @if (isDraft(current)) {
+                          <div class="inline-tip"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-info" /></svg><span>Revisa el texto y las etiquetas antes de aprobar la publicación.</span></div>
+                          <button class="secondary-action social-spaced" type="button" (click)="inspector.set('caption')">Revisar publicación</button>
+                        }
+                        @if (current.publication?.status === 'published' && current.publication?.externalUrl; as url) {
+                          <a class="outline-button social-spaced" [href]="url" target="_blank" rel="noopener">Ver publicación</a>
+                        }
+                      }
+                      @case ('caption') {
+                        <h3 class="panel-title">Texto de la publicación</h3>
+                        @if (current.contentType === 'x_thread') { <p class="panel-description">Separa los posts del hilo con una línea en blanco.</p> }
+                        <textarea class="text-area" aria-label="Texto de la publicación" [ngModel]="caption()"
+                          (ngModelChange)="caption.set($event)" [attr.maxlength]="channel() === 'instagram' ? 2200 : null" [readOnly]="!isDraft(current)"></textarea>
+                        @if (channel() === 'instagram') { <div class="caption-editor-count"><span>Caracteres</span><span>{{ caption().length }} / 2.200</span></div> }
+                        @if (isDraft(current)) { <button class="secondary-action social-spaced" type="button" [disabled]="busy() || caption() === current.body" (click)="saveCaption(current)">Guardar texto</button> }
+                      }
+                      @case ('hashtags') {
+                        <h3 class="panel-title">Hashtags</h3>
+                        <div class="hashtag-list" aria-label="Hashtags actuales">
+                          @for (tag of current.hashtags ?? []; track $index) {
+                            @if (isDraft(current)) {
+                              <button class="hashtag-chip" type="button" [disabled]="busy()" [attr.aria-label]="'Quitar ' + tag" (click)="changeHashtag(current, tag, true)">{{ tag }} ×</button>
+                            } @else { <span class="hashtag-chip">{{ tag }}</span> }
+                          } @empty { <span class="panel-description">Sin hashtags.</span> }
+                        </div>
+                        @if (isDraft(current)) {
+                          <div class="input-row">
+                            <input #tagInput class="form-control" aria-label="Nuevo hashtag" placeholder="#Tema" maxlength="64" (keydown.enter)="changeHashtag(current, tagInput.value)" />
+                            <button class="secondary-action" type="button" [disabled]="busy()" (click)="changeHashtag(current, tagInput.value)">Añadir</button>
+                          </div>
+                        }
+                      }
+                      @case ('schedule') {
+                        <h3 class="panel-title">Programación</h3>
+                        @if (current.publication?.scheduledFor; as at) { <p class="schedule-note">{{ at | date: 'EEE d MMM yyyy, HH:mm' }} · {{ state(current) }}</p> }
+                        @if (canSchedule(current)) {
+                          <div class="schedule-fields"><div>
+                            <label for="social-scheduled-for">Fecha y hora ({{ browserZone }})</label>
+                            <input id="social-scheduled-for" type="datetime-local" class="form-control" [ngModel]="scheduleTime()" (ngModelChange)="scheduleTime.set($event)" />
+                          </div></div>
+                          <div class="social-schedule-actions">
+                            <button class="primary-button" type="button" [disabled]="busy() || !scheduleTime()" (click)="schedule(current)">Guardar fecha</button>
+                            @if (current.publication; as delivery) {
+                              @if (delivery.account && ['ready', 'scheduled', 'failed'].includes(delivery.status)) {
+                                <button class="outline-button" type="button" [disabled]="busy()" (click)="publishNow(delivery.id)">Publicar ahora</button>
+                              }
+                              @if (delivery.status === 'scheduled') {
+                                <button class="secondary-action" type="button" [disabled]="busy()" (click)="cancelSchedule(delivery.id)">Cancelar programación</button>
+                              }
+                            }
+                          </div>
+                        } @else if (current.editorialStatus === 'draft') {
+                          <p class="schedule-note">Aprueba la publicación para elegir una fecha.</p>
+                        }
+                      }
+                    }
+                  </div>
+                </section>
+              </div>
+            </article>
+          }
+        } @else {
+          <div class="empty-state">
+            <svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-share" /></svg>
+            @if (postId()) {
+              <strong>La publicación no está disponible</strong>
+              <a class="outline-button" routerLink="/studio/social" [queryParams]="{ tab: channel() }">Ver todas</a>
+            } @else if (filter() !== 'all' || view() === 'drafts') {
+              <strong>No hay publicaciones que coincidan</strong>
+              <button class="outline-button" type="button" (click)="showPosts()">Ver todas</button>
+            } @else {
+              <strong>Aún no hay publicaciones en {{ channelLabel() }}</strong>
+              <p>Abre un artículo y genera una publicación desde su pestaña social.</p>
+              <a class="outline-button" routerLink="/studio/content">Ver artículos</a>
+            }
+          </div>
+        }
+      </section>
+    </div>
+  </div>
+
+  <dialog #dialogElement class="confirm-dialog" aria-labelledby="social-dialog-title" (cancel)="busy() && $event.preventDefault()">
+    @if (selected(); as post) {
+      <form (ngSubmit)="submitDialog(dialogElement, post, dialogTitle.value, dialogBody.value)">
+        <div class="dialog-top">
+          <span class="dialog-icon"><svg class="ico" aria-hidden="true"><use [attr.href]="'/social-studio-icons.svg#soc-i-' + (dialog() === 'delete' ? 'trash' : dialog() === 'slide' ? 'image' : 'edit')" /></svg></span>
+          <button class="dialog-close" type="button" aria-label="Cerrar" [disabled]="busy()" (click)="dialogElement.close()"><svg class="ico" aria-hidden="true"><use href="/social-studio-icons.svg#soc-i-x" /></svg></button>
+        </div>
+        <h3 id="social-dialog-title">{{ dialog() === 'rename' ? 'Renombrar publicación' : dialog() === 'slide' ? 'Añadir diapositiva' : '¿Eliminar borrador?' }}</h3>
+        <div class="schedule-fields">
+          <div [hidden]="dialog() === 'delete'"><label for="social-dialog-input">Título</label>
+            <input #dialogTitle id="social-dialog-input" class="form-control" [value]="dialog() === 'rename' ? post.title || post.projectTitle : ''"
+              [required]="dialog() !== 'delete'" [attr.maxlength]="dialog() === 'slide' ? 60 : 200" />
+          </div>
+          <div [hidden]="dialog() !== 'slide'"><label for="social-dialog-body">Texto de la diapositiva</label>
+            <textarea #dialogBody id="social-dialog-body" class="form-control" rows="3" maxlength="180"></textarea>
+          </div>
+        </div>
+        @if (dialog() === 'delete') { <p>Se eliminará «{{ post.title || post.projectTitle }}» del estudio.</p> }
+        <div class="dialog-buttons">
+          <button class="outline-button" type="button" [disabled]="busy()" (click)="dialogElement.close()">Cancelar</button>
+          <button [class.primary-button]="dialog() !== 'delete'" [class.danger-button]="dialog() === 'delete'" type="submit" [disabled]="busy()">{{ dialog() === 'delete' ? 'Eliminar' : 'Guardar' }}</button>
+        </div>
+      </form>
+    }
+  </dialog>
+</div>

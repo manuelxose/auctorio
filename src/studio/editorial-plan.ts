@@ -21,13 +21,13 @@ import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPla
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
-import { collectKeywordCandidates, type KeywordCandidate } from "./keyword-candidates";
-import { normalizeKeyword } from "../infrastructure/seo/dataforseo";
+import { MAX_STORED_CANDIDATES, collectKeywordCandidates, emptyKeywordResearch, type KeywordCandidate, type KeywordResearch } from "./keyword-candidates";
+import { normalizeKeyword } from "../infrastructure/seo/contract";
 import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
 import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
-const CHANNELS = ["website", "x", "instagram"] as const;
+const CHANNELS = ["website", "x", "instagram", "facebook"] as const;
 type PlanChannel = (typeof CHANNELS)[number];
 
 export type GenerateEditorialPlanInput = {
@@ -56,6 +56,10 @@ export type GenerateEditorialPlanInput = {
   slotRequest?: PlanSlotRequest;
   /** Extend an existing plan instead of creating one: only `slots` are generated, everything else is kept. */
   append?: PlanAppendMode;
+  /** What started the run; recorded on its operation. */
+  trigger?: "autopilot" | "manual";
+  /** YYYY-MM for the rolling plan Autopilot keeps per month. */
+  automaticMonth?: string;
 };
 
 type StoredPlanOutput = {
@@ -64,7 +68,32 @@ type StoredPlanOutput = {
   warnings?: string[];
   requestedCount?: number;
   unfilledSlots?: UnfilledSlot[];
+  /** One entry per run, newest last: what was measured and why keywords were kept or dropped. */
+  keywordResearch?: PlanResearch[];
 };
+
+/** Keyword trace plus the strategy it ran under. */
+export type PlanResearch = KeywordResearch & {
+  strategy: { mode: string; priorityTopics: string[]; excludedTopics: string[]; approvedVersion: number | null; pillars: string[]; siteIntelligenceVersion: number | null };
+};
+const MAX_STORED_RESEARCH = 6;
+
+/** metadata.selection: why this item has this keyword. */
+export type PlanItemSelection = {
+  /** Provider that measured the keyword, "model" (unmeasured) or "user". */
+  source: string;
+  researchId: string | null;
+  score: number | null;
+  rank: number | null;
+  intent: string | null;
+  parts: KeywordCandidate["parts"] | null;
+  origin: KeywordCandidate["origin"];
+};
+
+export function readPlanItemSelection(metadata: unknown): PlanItemSelection | null {
+  const value = metadata && typeof metadata === "object" && !Array.isArray(metadata) ? (metadata as Record<string, unknown>).selection : null;
+  return value && typeof value === "object" ? (value as PlanItemSelection) : null;
+}
 
 type PlanAppendMode = {
   previousStatus: "ready" | "partial";
@@ -102,16 +131,21 @@ export function assignBriefsToSlots(items: EditorialPlanBriefV2[], slots: PlanSl
   };
 }
 
+/** The searches a brief competes for: two briefs sharing one are the same article. */
+function searchKeys(item: Pick<EditorialPlanBriefV2, "targetQuery" | "primaryKeyword">): string[] {
+  return [...new Set([item.targetQuery, item.primaryKeyword].filter((value): value is string => Boolean(value)).map(normalizeSlug))];
+}
+
 /** Merges a validated batch into the running set, dropping cross-batch duplicates and anything beyond `limit`. */
 export function mergePlanBatches(existing: PostValidationResult, batch: PostValidationResult, limit: number): PostValidationResult {
   const seenTitles = new Set(existing.kept.map((item) => normalizeSlug(item.workingTitle)));
-  const seenQueries = new Set(existing.kept.map((item) => (item.targetQuery ? normalizeSlug(item.targetQuery) : "")));
+  const seenQueries = new Set(existing.kept.flatMap(searchKeys));
   const keptTitles = existing.kept.map((item) => item.workingTitle);
   const extras: EditorialPlanBriefV2[] = [];
   const dropped = [...existing.dropped, ...batch.dropped];
   for (const item of batch.kept) {
     const titleKey = normalizeSlug(item.workingTitle);
-    const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : "";
+    const queryKeys = searchKeys(item);
     if (seenTitles.has(titleKey)) {
       dropped.push({ title: item.workingTitle, reason: "duplicate title across generation batches" });
       continue;
@@ -120,12 +154,12 @@ export function mergePlanBatches(existing: PostValidationResult, batch: PostVali
       dropped.push({ title: item.workingTitle, reason: "near-duplicate topic across generation batches" });
       continue;
     }
-    if (queryKey && seenQueries.has(queryKey)) {
-      dropped.push({ title: item.workingTitle, reason: `duplicate target query ${item.targetQuery}` });
+    if (queryKeys.some((key) => seenQueries.has(key))) {
+      dropped.push({ title: item.workingTitle, reason: `duplicate target query ${item.targetQuery ?? item.primaryKeyword}` });
       continue;
     }
     seenTitles.add(titleKey);
-    if (queryKey) seenQueries.add(queryKey);
+    for (const key of queryKeys) seenQueries.add(key);
     keptTitles.push(item.workingTitle);
     extras.push(item);
   }
@@ -216,7 +250,8 @@ export function postValidatePlanItems(
   const dropped: Array<{ title: string; reason: string }> = [];
   const warnings: string[] = [];
   const seenTitles = new Set<string>();
-  const seenQueries = new Set<string>();
+  // A search another planned article already targets is never planned twice, whichever plan holds it.
+  const seenQueries = new Set<string>(context.existingPlanQueries.map(normalizeSlug));
   const allowedEvidenceUrls = new Set<string>([
     ...context.evidence.map((entry) => entry.url).filter((url): url is string => Boolean(url)),
     ...context.indexedUrlInventory,
@@ -309,14 +344,12 @@ export function postValidatePlanItems(
     }
 
     // 9. Duplicate target queries inside the same batch.
-    const queryKey = item.targetQuery ? normalizeSlug(item.targetQuery) : null;
-    if (queryKey && seenQueries.has(queryKey)) {
-      dropped.push({ title, reason: `duplicate target query ${item.targetQuery}` });
+    const queryKeys = searchKeys(item);
+    if (queryKeys.some((key) => seenQueries.has(key))) {
+      dropped.push({ title, reason: `duplicate target query ${item.targetQuery ?? item.primaryKeyword}` });
       continue;
     }
-    if (queryKey) {
-      seenQueries.add(queryKey);
-    }
+    for (const key of queryKeys) seenQueries.add(key);
 
     kept.push({
       ...item,
@@ -433,7 +466,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
       })
     : [];
   if (accounts.length !== requestedAccountIds.length) throw new Error("editorial_plan_invalid_account");
-  if (accounts.some((account) => !input.channels.includes(account.platform))) {
+  if (accounts.some((account) => !(input.channels as string[]).includes(account.platform))) {
     throw new Error("editorial_plan_account_channel_mismatch");
   }
 
@@ -451,7 +484,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
       tenantId: input.tenantId,
       siteId: input.siteId,
       briefId: input.briefId ?? null,
-      name: input.strategy?.campaignName || `Editorial plan ${input.slotRequest?.dateFrom ?? input.dateFrom.toISOString().slice(0, 10)}`,
+      name: input.automaticMonth ? automaticPlanName(input.automaticMonth, input.language) : input.strategy?.campaignName || `Editorial plan ${input.slotRequest?.dateFrom ?? input.dateFrom.toISOString().slice(0, 10)}`,
       status: "generating",
       dateFrom: input.dateFrom,
       dateTo: input.dateTo,
@@ -481,6 +514,7 @@ async function prepareEditorialPlan(input: GenerateEditorialPlanInput): Promise<
         market: strategy.market ?? null,
         campaignName: strategy.campaignName ?? null,
         cadence: input.slotRequest ? (input.slotRequest as unknown as Prisma.InputJsonObject) : null,
+        ...(input.automaticMonth ? { automaticMonth: input.automaticMonth } : {}),
       } as Prisma.InputJsonObject,
       promptVersion: EDITORIAL_PLAN_PROMPT_VERSION,
     },
@@ -537,8 +571,20 @@ ${SOURCE_DATA_RULES}`;
     let lastProvider = "unknown";
     let lastModel = "unknown";
 
-    // Measured keywords (DataForSEO) are handed out to calls in score order; none → the model picks (previous flow).
-    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, input.publicationCount * 2).catch(() => [] as KeywordCandidate[]);
+    // Measured keywords (SEO provider) are handed out to calls in score order; none → the model picks (previous flow).
+    const research = emptyKeywordResearch();
+    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, Math.max(input.publicationCount * 2, MAX_STORED_CANDIDATES), undefined, research).catch(() => [] as KeywordCandidate[]);
+    const planResearch: PlanResearch = {
+      ...research,
+      strategy: {
+        mode: strategy.mode,
+        priorityTopics: strategy.priorityTopics ?? [],
+        excludedTopics: [...(strategy.excludedTopics ?? []), ...(context.approvedStrategy?.exclusions ?? [])],
+        approvedVersion: context.approvedStrategy?.version ?? null,
+        pillars: context.approvedStrategy?.config.pillars.filter((pillar) => pillar.included).map((pillar) => pillar.name) ?? [],
+        siteIntelligenceVersion: context.profile?.version ?? null,
+      },
+    };
     const measured = new Map(keywordPool.map((candidate) => [candidate.keyword, candidate]));
     let keywordCursor = 0;
     const takeKeywords = (count: number) => {
@@ -769,6 +815,15 @@ ${SOURCE_DATA_RULES}`;
       }
       for (const item of items) {
         const metrics = measured.get(normalizeKeyword(item.primaryKeyword ?? ""));
+        const selection: PlanItemSelection = {
+          source: metrics?.source ?? "model",
+          researchId: research.id,
+          score: metrics?.score ?? null,
+          rank: metrics ? keywordPool.indexOf(metrics) + 1 : null,
+          intent: metrics?.intent ?? null,
+          parts: metrics?.parts ?? null,
+          origin: metrics?.origin ?? null,
+        };
         await tx.editorialPlanItem.create({
           data: {
             tenantId: input.tenantId,
@@ -830,7 +885,7 @@ ${SOURCE_DATA_RULES}`;
             imageRequirements: item.imageRequirements ?? null,
             priority: item.priority,
             status: "proposed",
-            metadata: { relevanceReasons: undefined } as Prisma.InputJsonObject,
+            metadata: { selection } as unknown as Prisma.InputJsonObject,
           },
         });
       }
@@ -851,7 +906,8 @@ ${SOURCE_DATA_RULES}`;
             warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
             requestedCount: requestedTotal,
             filledCount: filledTotal,
-            keywordSource: keywordPool.length ? "dataforseo" : "model",
+            keywordSource: keywordPool[0]?.source ?? "model",
+            keywordResearch: [...(append?.previous.keywordResearch ?? []), planResearch].slice(-MAX_STORED_RESEARCH),
             unfilledSlots,
           } as unknown as Prisma.InputJsonObject,
           error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
@@ -956,7 +1012,7 @@ async function runPlanGenerationInBackground(
     initiatorUserId: input.userId ?? null,
     entityType: "editorial_plan",
     entityId: plan.id,
-    metadata: { strategy: input.strategy ?? null, slots: input.publicationCount, replaceItemId: input.append?.replaceItemId ?? null },
+    metadata: { strategy: input.strategy ?? null, slots: input.publicationCount, replaceItemId: input.append?.replaceItemId ?? null, ...(input.trigger ? { trigger: input.trigger } : {}) },
   });
   await startOperation(operation.id, "generating");
   const reportProgress = (planned: number, total: number) =>
@@ -1175,6 +1231,91 @@ export async function enqueueExtendPlan(tenantId: string, planId: string, input:
   return { ...accepted, skippedPast: skippedPast.length };
 }
 
+function automaticPlanName(month: string, language = "es"): string {
+  const label = new Intl.DateTimeFormat(language, { month: "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${month}-01T00:00:00Z`));
+  return `Plan automático · ${label}`;
+}
+
+/**
+ * Fills `slots` (all in `monthKey`) in the site's automatic plan for that month, creating it when missing.
+ * Existing items are untouched; a plan left empty by a failed run is reused.
+ */
+export async function enqueuePlanSlots(input: {
+  tenantId: string;
+  siteId: string;
+  monthKey: string;
+  slots: PlanSlot[];
+  timezone: string;
+  cadence: Omit<PlanSlotRequest, "now">;
+  language: string;
+  priorityTopics: string[];
+  excludedTopics: string[];
+  userId?: string | null;
+  trigger: "autopilot" | "manual";
+}) {
+  const { tenantId, siteId, monthKey, slots, timezone } = input;
+  const [year, month] = monthKey.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+  const bounds = planRangeBounds(`${monthKey}-01`, lastDay, timezone);
+  const generation: GenerateEditorialPlanInput = {
+    tenantId,
+    siteId,
+    dateFrom: bounds.from,
+    dateTo: bounds.to,
+    channels: ["website"],
+    publicationCount: slots.length,
+    slots,
+    slotRequest: { ...input.cadence, dateFrom: `${monthKey}-01`, dateTo: lastDay },
+    frequency: `${input.cadence.articlesPerDay}/day`,
+    timezone,
+    language: input.language,
+    userId: input.userId,
+    strategy: { mode: "balanced", language: input.language, audience: null, objective: null, priorityTopics: input.priorityTopics, excludedTopics: input.excludedTopics },
+    trigger: input.trigger,
+    automaticMonth: monthKey,
+  };
+  const existing = await prisma.editorialPlan.findFirst({
+    where: { tenantId, siteId, status: { in: ["ready", "partial", "failed"] }, configuration: { path: ["automaticMonth"], equals: monthKey } },
+    orderBy: { createdAt: "desc" },
+    include: { _count: { select: { items: true } } },
+  });
+  if (existing?.status === "failed" && existing._count.items === 0) {
+    const claimed = await prisma.editorialPlan.updateMany({ where: { id: existing.id, status: "failed" }, data: { status: "generating", error: null } });
+    if (claimed.count !== 1) throw new Error("editorial_plan_busy");
+    return runPlanGenerationInBackground(existing, generation, generation.strategy!, [], "editorial_plan_generation");
+  }
+  if (existing && existing.status !== "failed" && existing._count.items + slots.length <= MAX_PLAN_SLOTS) {
+    const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, existing.id, input.userId);
+    const previousStatus = plan.status as "ready" | "partial";
+    const times = new Set(slots.map((slot) => slot.scheduledFor.toISOString()));
+    // Slots already behind us can no longer be filled.
+    const keepUnfilled = (previous.unfilledSlots ?? []).filter((slot) => !times.has(slot.scheduledFor) && new Date(slot.scheduledFor) > new Date());
+    const future = await prisma.editorialPlanItem.findMany({ where: { tenantId, siteId, scheduledFor: { gte: new Date() }, status: { notIn: ["rejected", "canceled"] } }, select: { title: true }, take: MAX_PLAN_SLOTS });
+    await claimPlan(plan.id, previousStatus);
+    return runPlanGenerationInBackground(
+      plan,
+      {
+        ...base,
+        publicationCount: slots.length,
+        slots,
+        trigger: input.trigger,
+        append: {
+          previousStatus,
+          previous,
+          totalRequested: plan.items.length + keepUnfilled.length + slots.length,
+          avoidTitles: [...new Set([...plan.items, ...future].map((item) => item.title))],
+          keepUnfilled,
+        },
+      },
+      strategy,
+      accounts,
+      "editorial_plan_fill",
+    );
+  }
+  const { accounts, strategy, plan } = await prepareEditorialPlan(generation);
+  return runPlanGenerationInBackground(plan, generation, strategy, accounts, "editorial_plan_generation");
+}
+
 /** Rename and/or archive a plan. Archiving is refused while a generation run owns the plan. */
 export async function updateEditorialPlan(tenantId: string, planId: string, input: { name?: string; status?: "archived" }, userId?: string | null) {
   const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId } });
@@ -1335,6 +1476,11 @@ export async function updateEditorialPlanItem(
   const nextKeyword = input.primaryKeyword === undefined ? undefined : input.primaryKeyword?.trim() || null;
   // A new keyword invalidates the measured demand of the old one.
   const keywordChanged = nextKeyword !== undefined && nextKeyword !== item.primaryKeyword;
+  if (keywordChanged && nextKeyword) {
+    const history = Array.isArray(metadata.keywordHistory) ? metadata.keywordHistory : [];
+    metadata.selection = { source: "user", researchId: null, score: null, rank: null, intent: null, parts: null, origin: null } satisfies PlanItemSelection;
+    metadata.keywordHistory = [...history, { from: item.primaryKeyword, to: nextKeyword, at: new Date().toISOString(), userId: null }];
+  }
   const updated = await prisma.editorialPlanItem.update({
     where: { id: item.id },
     data: {
@@ -1345,7 +1491,7 @@ export async function updateEditorialPlanItem(
       suggestedSlug: input.suggestedSlug === undefined ? undefined : input.suggestedSlug?.trim() || null,
       sourceEvidence: input.sourceEvidence === undefined ? undefined : input.sourceEvidence?.length ? (input.sourceEvidence as unknown as Prisma.InputJsonArray) : Prisma.JsonNull,
       metadata: input.generation === undefined
-        ? undefined
+        ? keywordChanged ? (metadata as Prisma.InputJsonObject) : undefined
         : ({ ...metadata, generation: input.generation === null ? undefined : { ...(metadata.generation && typeof metadata.generation === "object" ? metadata.generation : {}), ...input.generation } } as Prisma.InputJsonObject),
       title: input.title?.trim() || undefined,
       workingTitle: input.workingTitle === undefined ? undefined : input.workingTitle?.trim() || null,

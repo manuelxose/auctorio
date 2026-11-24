@@ -49,6 +49,7 @@ type SessionPayload = {
   sessions?: GlobalSessionEntry[];
   sites?: GlobalSite[];
   activeSiteId?: string | null;
+  activeTenantId?: string;
 };
 
 type StudioSessionView = {
@@ -59,6 +60,8 @@ type StudioSessionView = {
     avatarUrl: string | null;
   };
   role: 'admin' | 'editor' | 'viewer';
+  permissions: string[];
+  workspaceUserId: string | null;
   sites: Array<{
     id: string;
     key: string;
@@ -189,6 +192,7 @@ type InternalValidatedSession = {
   userId: string;
   permissions: string[];
   session: SessionResponse;
+  sites?: GlobalSite[];
 };
 
 type AuthStatePayload = {
@@ -493,7 +497,8 @@ function decryptSession(value: string | undefined): SessionPayload | null {
       user: payload.user,
       sessions: payload.sessions,
       sites: Array.isArray(payload.sites) ? payload.sites : [],
-      activeSiteId: payload.activeSiteId ?? payload.sites?.[0]?.id ?? null,
+      activeSiteId: payload.activeSiteId === undefined ? payload.sites?.[0]?.id ?? null : payload.activeSiteId,
+      activeTenantId: payload.activeTenantId,
     };
   }
 
@@ -863,12 +868,8 @@ async function redeemInternalLaunchTicket(launchId: string): Promise<RedeemedLau
 
 async function validateSessionToken(
   sessionToken: string,
+  includeSites = false,
 ): Promise<InternalValidatedSession | null> {
-  const cached = sessionValidationCache.get(sessionToken);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.value;
-  }
-
   try {
     const response = await fetch(new URL('/internal/session/validate', backendBaseUrl), {
       method: 'POST',
@@ -876,7 +877,7 @@ async function validateSessionToken(
         ...getInternalHeaders(),
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ sessionToken }),
+      body: JSON.stringify({ sessionToken, includeSites }),
     });
 
     // Only a definite rejection ends a session; an API that is down or restarting must not log people out.
@@ -887,12 +888,7 @@ async function validateSessionToken(
       return null;
     }
 
-    const value = (await response.json()) as InternalValidatedSession;
-    sessionValidationCache.set(sessionToken, {
-      value,
-      expiresAt: Date.now() + 60_000,
-    });
-    return value;
+    return (await response.json()) as InternalValidatedSession;
   } catch (error) {
     if (error instanceof StudioBackendUnavailable) throw error;
     throw new StudioBackendUnavailable();
@@ -919,12 +915,7 @@ function sendBackendUnavailable(res: express.Response, json: boolean): void {
     .send('<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="5"><title>Auctorio</title><p style="font:16px system-ui;margin:20vh auto;max-width:28rem;text-align:center">Auctorio is restarting. This page reloads in a few seconds.</p>');
 }
 
-const sessionValidationCache = new Map<
-  string,
-  { value: InternalValidatedSession; expiresAt: number }
->();
-
-function buildSessionView(payload: SessionPayload): StudioSessionView {
+function buildSessionView(payload: SessionPayload, validated?: SessionResponse): StudioSessionView {
   const sites = (payload.sites ?? []).map((site) => ({
     id: site.id,
     key: site.key,
@@ -934,7 +925,9 @@ function buildSessionView(payload: SessionPayload): StudioSessionView {
     role: site.role,
   }));
 
-  const activeSite = sites.find((site) => site.id === payload.activeSiteId) ?? sites[0] ?? null;
+  const activeSite = sites.find((site) => site.id === payload.activeSiteId) ??
+    (payload.activeSiteId === undefined ? sites[0] : null);
+  const activeTenant = payload.sites?.find((site) => site.id === activeSite?.id)?.tenantId;
   const role =
     activeSite?.role ??
     sites.reduce<'admin' | 'editor' | 'viewer'>((best, site) => {
@@ -955,6 +948,11 @@ function buildSessionView(payload: SessionPayload): StudioSessionView {
       avatarUrl: null,
     },
     role,
+    permissions: validated
+      ? validated.permissions ?? []
+      : payload.sites?.find((site) => site.id === activeSite?.id)?.permissions ?? [],
+    workspaceUserId: validated?.user?.id ??
+      payload.sessions?.find((entry) => entry.tenantId === activeTenant)?.studioUserId ?? null,
     sites,
     activeSiteId: activeSite?.id ?? null,
   };
@@ -993,7 +991,20 @@ function resolveTargetSite(
     return sites.find((site) => site.id === requested) ?? null;
   }
 
-  return sites.find((site) => site.id === payload.activeSiteId) ?? sites[0] ?? null;
+  return sites.find((site) => site.id === payload.activeSiteId) ??
+    (payload.activeSiteId === undefined ? sites[0] ?? null : null);
+}
+
+function refreshWorkspaceSites(
+  payload: SessionPayload, validated: InternalValidatedSession, requested = payload.activeSiteId,
+): SessionPayload {
+  if (!validated.sites) return payload;
+  return {
+    ...payload,
+    activeTenantId: validated.tenantId,
+    sites: [...(payload.sites ?? []).filter((site) => site.tenantId !== validated.tenantId), ...validated.sites],
+    activeSiteId: (validated.sites.find((site) => site.id === requested) ?? validated.sites[0])?.id ?? null,
+  };
 }
 
 async function revokeSessionToken(sessionToken: string): Promise<void> {
@@ -1062,6 +1073,7 @@ function decodeJwtPayload(token: string): Record<string, unknown> {
 
 async function resolveStudioSession(
   req: express.Request,
+  includeSites = false,
 ): Promise<
   | {
       payload: SessionPayload;
@@ -1088,28 +1100,22 @@ async function resolveStudioSession(
     Array.isArray(payload.sessions)
   ) {
     const site = resolveTargetSite(payload, req);
-    if (!site) {
-      return null;
-    }
-    const entry = payload.sessions.find((item) => item.tenantId === site.tenantId);
+    if (!site && resolveRequestSiteId(req)) return null;
+    const tenantId = site?.tenantId ?? payload.activeTenantId ?? payload.sessions[0]?.tenantId;
+    const entry = payload.sessions.find((item) => item.tenantId === tenantId);
     if (!entry) {
       return null;
     }
 
-    const validated = await validateSessionToken(entry.sessionToken);
-    if (!validated) {
+    const validated = await validateSessionToken(entry.sessionToken, includeSites);
+    if (!validated || validated.tenantId !== entry.tenantId || validated.userId !== entry.studioUserId) {
       return null;
     }
 
     return {
       payload,
       session: validated.session,
-      validatedOidcSession: {
-        ...validated,
-        userId: entry.studioUserId,
-        permissions: entry.permissions,
-        tenantId: entry.tenantId,
-      },
+      validatedOidcSession: validated,
     };
   }
 
@@ -1901,7 +1907,7 @@ app.post(`${studioBasePath}/api/session/logout`, (req, res) => {
 
 app.get(`${studioBasePath}/api/session/me`, (req, res) => {
   void (async () => {
-    const resolved = await resolveStudioSession(req);
+    const resolved = await resolveStudioSession(req, true);
     if (!resolved) {
       clearSessionCookie(res, req);
       res.status(401).json({
@@ -1911,7 +1917,11 @@ app.get(`${studioBasePath}/api/session/me`, (req, res) => {
       return;
     }
 
-    res.json(buildSessionView(resolved.payload));
+    const payload = resolved.validatedOidcSession?.sites
+      ? refreshWorkspaceSites(resolved.payload, resolved.validatedOidcSession)
+      : resolved.payload;
+    if (payload !== resolved.payload) setSessionCookie(res, req, payload);
+    res.json(buildSessionView(payload, resolved.session));
   })().catch((error) => {
     if (error instanceof StudioBackendUnavailable) {
       sendBackendUnavailable(res, true);
@@ -1928,6 +1938,7 @@ app.post(
   `${studioBasePath}/api/session/active-site`,
   express.json({ limit: '16kb' }),
   (req, res) => {
+    void (async () => {
     const payload = readSession(req);
     if (!payload || !Array.isArray(payload.sites)) {
       res.status(401).json({ error: 'unauthorized', message: 'Missing studio session' });
@@ -1941,12 +1952,23 @@ app.post(
       return;
     }
 
-    const nextPayload: SessionPayload = {
-      ...payload,
-      activeSiteId: site.id,
-    };
+    const entry = payload.sessions?.find((candidate) => candidate.tenantId === site.tenantId);
+    const validated = entry ? await validateSessionToken(entry.sessionToken, true) : null;
+    if (!entry || !validated || validated.tenantId !== entry.tenantId || validated.userId !== entry.studioUserId ||
+        (validated.sites && !validated.sites.some((candidate) => candidate.id === siteId))) {
+      res.status(403).json({ error: 'forbidden', message: 'site_not_authorized' });
+      return;
+    }
+    const nextPayload = refreshWorkspaceSites({ ...payload, activeSiteId: site.id }, validated);
     setSessionCookie(res, req, nextPayload);
-    res.json(buildSessionView(nextPayload));
+    res.json(buildSessionView(nextPayload, validated.session));
+    })().catch((error) => {
+      if (error instanceof StudioBackendUnavailable) {
+        sendBackendUnavailable(res, true);
+        return;
+      }
+      res.status(500).json({ error: 'internal_error', message: 'site_switch_failed' });
+    });
   },
 );
 

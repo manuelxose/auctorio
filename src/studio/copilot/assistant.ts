@@ -35,6 +35,14 @@ export function routeIntent(message: string): { tool: ToolName; args: ToolArgs }
   const text = message.trim();
   const lower = text.toLowerCase();
   const date = /\b(\d{4}-\d{2}-\d{2})\b/.exec(text)?.[1];
+  const platform = /\b(reddit|quora)\b/.exec(lower)?.[1];
+  if (/\b(marca|marcar|mark)\b.*\b(respondid[ao]|replied)\b/i.test(lower) && (platform || /\b(oportunidad|opportunity)\b/.test(lower))) {
+    const opportunityId = /\b[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\b/i.exec(text)?.[0];
+    return { tool: "mark_engagement_replied", args: { opportunityId } };
+  }
+  if (/\b(oportunidades? pendientes?|por responder|pending opportunities)\b/.test(lower)) {
+    return { tool: "pending_engagement", args: { platform } };
+  }
 
   // Explicit write commands first.
   const domain = /\b((?:https?:\/\/)?(?:www\.)?[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,63})\b/i.exec(text)?.[1];
@@ -103,7 +111,7 @@ function contextFacts(ctx: AssistantContext): string {
 const TOOL_SYSTEM = [
   "You route requests inside an editorial Studio to exactly one tool, or \"none\" for general questions.",
   `Tools: ${TOOL_NAMES.map((name) => `${name}: ${findTool(name)!.description}`).join(" | ")}`,
-  "Only choose a write tool (update_proposal, regenerate_proposal, fill_missing_slots, propose_source) when the user explicitly asks for that change.",
+  "Only choose a write tool when the user explicitly asks for that change.",
   "Ids default to the context selection; never invent ids. Answer with a single JSON object.",
   SOURCE_DATA_RULES,
 ].join("\n");

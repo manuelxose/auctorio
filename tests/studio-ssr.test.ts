@@ -11,15 +11,56 @@ type MockBackend = {
   url: string;
   close: () => Promise<void>;
   getLastAuthorizationHeader: () => string | undefined;
+  getLastStudioPermissionsHeader: () => string | undefined;
+  setHumanPermissions: (permissions: string[] | null) => void;
+  setHumanSiteIds: (ids: string[]) => void;
 };
 
 async function createMockBackendServer(): Promise<MockBackend> {
   let lastAuthorizationHeader: string | undefined;
+  let lastStudioPermissionsHeader: string | undefined;
+  let humanPermissions: string[] | null = ["users.manage"];
+  const human = { id: "user-1", email: "human@example.test", displayName: "Human", avatarUrl: null };
+  const site = { id: "site-1", key: "example", name: "Example", type: "website", tenantId: "tenant-1", role: "admin", permissions: ["users.manage"] };
+  let humanSiteIds = [site.id];
 
   const server = http.createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const chunks: Buffer[] = [];
     for await (const chunk of req) {
       chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+
+    if (req.url === "/internal/session/global-login/password" && req.method === "POST") {
+      res.setHeader("content-type", "application/json");
+      res.end(JSON.stringify({
+        user: human, activeSiteId: site.id, sites: [site],
+        sessions: [{ tenantId: site.tenantId, studioUserId: human.id, sessionToken: "human-session", permissions: site.permissions }],
+      }));
+      return;
+    }
+
+    if (req.url === "/internal/session/validate" && req.method === "POST") {
+      res.setHeader("content-type", "application/json");
+      if (!humanPermissions) {
+        res.statusCode = 401;
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+      res.end(JSON.stringify({
+        tenantId: site.tenantId, userId: human.id, sessionId: "session-1", permissions: humanPermissions,
+        session: { user: human, permissions: humanPermissions },
+        sites: JSON.parse(Buffer.concat(chunks).toString()).includeSites
+          ? humanSiteIds.map((id) => ({ ...site, id, permissions: humanPermissions }))
+          : undefined,
+      }));
+      return;
+    }
+
+    if (req.url === "/v2/human-permissions" && req.method === "GET") {
+      lastStudioPermissionsHeader = req.headers["x-studio-permissions"] as string | undefined;
+      res.setHeader("content-type", "application/json");
+      res.end("{}");
+      return;
     }
 
     if (req.url === "/v2/session/me" && req.method === "GET") {
@@ -96,6 +137,9 @@ async function createMockBackendServer(): Promise<MockBackend> {
       });
     },
     getLastAuthorizationHeader: () => lastAuthorizationHeader,
+    getLastStudioPermissionsHeader: () => lastStudioPermissionsHeader,
+    setHumanPermissions: (permissions) => { humanPermissions = permissions; },
+    setHumanSiteIds: (ids) => { humanSiteIds = ids; },
   };
 }
 
@@ -146,11 +190,12 @@ async function startStudioServer(backendUrl: string): Promise<{
   close: () => Promise<void>;
 }> {
   const port = await getFreePort();
+  const studioRoot = path.resolve("apps/studio-web");
   const child = spawn(
     "node",
-    [path.resolve(__dirname, "../../apps/studio-web/dist/studio-web/server/server.mjs")],
+    [path.join(studioRoot, "dist/studio-web/server/server.mjs")],
     {
-      cwd: path.resolve(__dirname, "../../apps/studio-web"),
+      cwd: studioRoot,
       env: {
         ...process.env,
         PORT: String(port),
@@ -315,6 +360,62 @@ test("studio login stores an encrypted HttpOnly cookie and session/me returns th
   assert.equal(payload.role, "viewer");
   assert.ok(Array.isArray(payload.sites));
   assert.equal(payload.activeSiteId, null);
+});
+
+test("Studio proxy uses current human permissions and rejects the revoked session immediately", async () => {
+  const login = await fetch(`${studio.baseUrl}/studio/api/auth/login/password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "human@example.test", password: "fixture-password" }),
+  });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(cookie);
+  const headers = { cookie };
+  const url = `${studio.baseUrl}/studio/api/backend/v2/human-permissions`;
+  assert.equal((await fetch(url, { headers })).status, 200);
+  assert.equal(backend.getLastStudioPermissionsHeader(), "users.manage");
+
+  backend.setHumanPermissions(["analytics.read"]);
+  assert.equal((await fetch(url, { headers })).status, 200);
+  assert.equal(backend.getLastStudioPermissionsHeader(), "analytics.read");
+  const session = await fetch(`${studio.baseUrl}/studio/api/session/me`, { headers });
+  assert.deepEqual((await session.json()).permissions, ["analytics.read"]);
+
+  backend.setHumanPermissions(null);
+  assert.equal((await fetch(url, { headers })).status, 401);
+  const switchSite = await fetch(`${studio.baseUrl}/studio/api/session/active-site`, {
+    method: "POST", headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({ siteId: "site-1" }),
+  });
+  assert.equal(switchSite.status, 403);
+  backend.setHumanPermissions(["users.manage"]);
+});
+
+test("global session follows the workspace inventory through deletion and first site setup", async () => {
+  const login = await fetch(`${studio.baseUrl}/studio/api/auth/login/password`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "human@example.test", password: "fixture-password" }),
+  });
+  const signedIn = login.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(signedIn);
+  const sessionUrl = `${studio.baseUrl}/studio/api/session/me`;
+  backend.setHumanSiteIds([]);
+  const empty = await fetch(sessionUrl, { headers: { cookie: signedIn } });
+  assert.equal(empty.status, 200);
+  const emptyView = await empty.json();
+  assert.deepEqual(emptyView.sites, []);
+  assert.equal(emptyView.activeSiteId, null);
+  const updatedCookie = empty.headers.get("set-cookie")?.split(";")[0];
+  assert.ok(updatedCookie);
+  const headers = { cookie: updatedCookie };
+  assert.equal((await fetch(`${studio.baseUrl}/studio/api/backend/v2/human-permissions`, { headers })).status, 200);
+  backend.setHumanSiteIds(["new-site"]);
+  const ready = await fetch(sessionUrl, { headers });
+  assert.equal(ready.status, 200);
+  assert.equal((await ready.json()).activeSiteId, "new-site");
+  backend.setHumanSiteIds(["site-1"]);
 });
 
 test("studio backend proxy injects Authorization from the encrypted session cookie and logout clears the session", async () => {

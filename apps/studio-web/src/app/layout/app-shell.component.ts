@@ -1,7 +1,8 @@
 import { CommonModule, isPlatformBrowser } from '@angular/common';
 import { Component, ElementRef, HostListener, OnDestroy, OnInit, PLATFORM_ID, ViewChild, inject, signal } from '@angular/core';
-import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
-import { Subscription, filter, startWith } from 'rxjs';
+import { FormsModule } from '@angular/forms';
+import { ActivatedRouteSnapshot, NavigationEnd, Router, RouterLink, RouterOutlet, type UrlTree } from '@angular/router';
+import { Observable, Subscription, catchError, filter, map, of, shareReplay, startWith } from 'rxjs';
 import { AdminApiService } from '../services/admin-api.service';
 import { AppContextService } from '../services/app-context.service';
 import { SeoService } from '../services/seo.service';
@@ -13,7 +14,7 @@ import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppPopoverComponent } from '../components/ui/app-popover.component';
 import { CopilotPanelComponent } from '../components/copilot/copilot-panel.component';
 import { CommandPaletteComponent } from './command-palette.component';
-import { STUDIO_NAV, activeNavItem, canSeeNavItem, sectionFor, type StudioNavGroup } from './studio-nav';
+import { STUDIO_NAV, activeNavItem, canSeeNavItem, sectionFor, type StudioNavGroup, type StudioNavItem } from './studio-nav';
 import type { StudioNotification, StudioSession, StudioSite } from '../models/studio.models';
 
 const COLLAPSE_KEY = 'auctorio.studio.sidebar.collapsed';
@@ -27,10 +28,13 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
 @Component({
   selector: 'app-app-shell',
   standalone: true,
-  imports: [CommonModule, RouterLink, RouterLinkActive, RouterOutlet, AppIconComponent, AppPopoverComponent, CopilotPanelComponent, CommandPaletteComponent],
+  imports: [CommonModule, FormsModule, RouterLink, RouterOutlet, AppIconComponent, AppPopoverComponent, CopilotPanelComponent, CommandPaletteComponent],
   template: `
     <div
       class="au-app au-shell"
+      [class.au-shell--workspace]="workspaceArea()"
+      [class.au-shell--profile-reference]="usesAdvancedReference()"
+      [class.shows-studio-toolbar]="profileToolbarOpen()"
       *ngIf="!loading; else bootState"
       [class.is-collapsed]="collapsed()"
       [class.has-copilot]="copilot.open()"
@@ -38,8 +42,19 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
     >
       <a class="au-skip" href="#studio-main">Skip to content</a>
 
+      <ng-template #siteMark let-site>
+        <span class="au-top__site-mark" aria-hidden="true">
+          @let logo = siteLogo(site) | async;
+          @if (logo && !failedSiteLogos().has(logo)) {
+            <img [src]="logo" alt="" width="20" height="20" (error)="hideSiteLogo(logo)" />
+          } @else {
+            {{ initialsOf(site?.name ?? 'All sites') }}
+          }
+        </span>
+      </ng-template>
+
       <!-- Navigation A: global top bar -->
-      <header class="au-top">
+      <header class="au-top" id="studio-global-toolbar">
         <button
           #navToggle
           class="au-icon-button"
@@ -67,7 +82,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
           aria-haspopup="menu"
           [attr.aria-label]="'Site: ' + activeSiteName + '. Switch site'"
         >
-          <span class="au-top__site-mark" aria-hidden="true">{{ siteInitials }}</span>
+          <ng-container *ngTemplateOutlet="siteMark; context: { $implicit: activeSite }"></ng-container>
           <span class="au-top__site-name">{{ activeSiteName }}</span>
           <app-icon name="chevron-down"></app-icon>
         </button>
@@ -83,7 +98,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               [class.is-active]="site.id === activeSiteId"
               (click)="selectSite(site.id, siteMenu)"
             >
-              <span class="au-top__site-mark" aria-hidden="true">{{ siteInitialsOf(site) }}</span>
+              @if (siteMenu.isOpen()) { <ng-container *ngTemplateOutlet="siteMark; context: { $implicit: site }"></ng-container> }
               {{ site.name }}
               <span class="au-menu__meta">{{ site.role }}</span>
             </button>
@@ -191,7 +206,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       </header>
 
       <!-- Primary navigation: areas -->
-      <nav class="au-areas" aria-label="Areas">
+      <nav class="au-areas" id="studio-global-areas" aria-label="Areas">
         <ul class="au-areas__list">
           <li *ngFor="let area of areas" [class.au-areas__end]="area.end">
             <a
@@ -210,11 +225,11 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       <!-- Contextual sidebar: the area's tools, then the assistant -->
       <aside id="studio-sidebar" class="au-sb" aria-label="Studio sidebar" (keydown)="onSidebarKey($event)">
         <nav class="au-sb__nav" [attr.aria-label]="activeArea().label + ' tools'">
-          <p class="au-sb__heading">{{ activeArea().label }}</p>
+          <p class="au-sb__heading">{{ usesAdvancedReference() ? 'Herramientas Advanced' : activeArea().label }}</p>
           <ul class="au-sb__list">
-            <li *ngFor="let item of sidebarItems(); let first = first">
-              <p class="au-sb__heading au-sb__heading--sub" *ngIf="item.heading && !first">{{ item.heading }}</p>
-              <a class="au-sb__item" [routerLink]="item.path" routerLinkActive="is-active" ariaCurrentWhenActive="page" [attr.title]="item.hint || null">
+            <li *ngFor="let item of sidebarItems(); let first = first; let index = index">
+              <p class="au-sb__heading au-sb__heading--sub" *ngIf="item.heading && (workspaceArea() || !first) && item.heading !== sidebarItems()[index - 1]?.heading">{{ item.heading }}</p>
+              <a class="au-sb__item" [routerLink]="toolLink(item)" [class.is-active]="activePath() === item.path || activeToolPath() === item.path" [attr.aria-current]="activePath() === item.path || activeToolPath() === item.path ? 'page' : null" [attr.title]="item.hint || null">
                 <app-icon [name]="item.icon"></app-icon>
                 <span class="au-sb__label">{{ item.label }}</span>
               </a>
@@ -222,7 +237,10 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
                 <ul class="au-sb__sub" [attr.aria-label]="item.label + ' sections'">
                   @for (section of item.sections; track section.id) {
                     <li>
-                      <a class="au-sb__item au-sb__item--sub" [routerLink]="item.path" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">
+                      <a class="au-sb__item au-sb__item--sub" [routerLink]="section.path ?? item.path"
+                        [queryParams]="section.path ? null : section.queryParam === 'view' ? { view: section.id, post: null } : { tab: section.id }"
+                        [queryParamsHandling]="section.queryParam === 'view' ? 'merge' : 'replace'"
+                        [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">
                         <span class="au-sb__label">{{ section.label }}</span>
                       </a>
                     </li>
@@ -232,6 +250,24 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
             </li>
           </ul>
         </nav>
+
+        @if (workspaceArea()) {
+          <a class="au-sb__item workspace-area-link" [routerLink]="activeArea().id === 'advanced' ? '/studio/connections' : workspaceSibling.items[0].path">
+            <app-icon [name]="workspaceSibling.icon"></app-icon>
+            <span class="au-sb__label">{{ activeArea().id === 'advanced' ? 'Configuración y permisos' : workspaceSibling.label }}</span>
+          </a>
+        }
+
+        @if (activeArea().id === 'settings' && canViewWorkspaceAudit) {
+          <a class="au-sb__item workspace-footer-link" routerLink="/studio/operations" [queryParams]="{ tab: 'audit' }">
+            <app-icon name="activity"></app-icon><span class="au-sb__label">Auditoría</span>
+          </a>
+        }
+        @if (activeArea().id === 'advanced') {
+          <a class="au-sb__item workspace-footer-link" routerLink="/studio/overview">
+            <app-icon name="overview"></app-icon><span class="au-sb__label">Volver al Overview</span>
+          </a>
+        }
 
         @if (copilot.open()) {
           <!-- The panel is the labelled region; a second landmark here would announce "Assistant" twice. -->
@@ -253,16 +289,55 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
 
       <main id="studio-main" class="au-main" tabindex="-1">
         <div class="au-content">
-          <!-- The icon rail hides the sidebar's section list, so it moves here. -->
+          @if (workspaceArea()) {
+            <nav class="workspace-mobile-nav" [attr.aria-label]="activeArea().label + ' navigation'">
+              <select class="au-select" [attr.aria-label]="activeArea().label + ' tool'" [ngModel]="activePath()"
+                (ngModelChange)="navigateWorkspaceTool($event)">
+                @if (!activePath()) { <option value="" disabled>Choose a tool</option> }
+                @for (item of sidebarItems(); track item.path) {
+                  <option [value]="item.path">{{ item.label }}</option>
+                }
+              </select>
+              @if (activeSections(); as sections) {
+                @if (usesAdvancedReference()) {
+                  <div class="profile-section-pills" role="group" [attr.aria-label]="'Opciones de ' + workspaceToolTitle">
+                    @for (section of sections; track section.id) {
+                      <a [routerLink]="activePath()" [queryParams]="{ tab: section.id }"
+                        [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
+                    }
+                  </div>
+                } @else {
+                  <select class="au-select" aria-label="Page section" [ngModel]="activeSection()"
+                    (ngModelChange)="navigateWorkspaceSection($event)">
+                    @if (!activeSection()) { <option value="" disabled>Choose a section</option> }
+                    @for (section of sections; track section.id) {
+                      <option [value]="section.id">{{ section.label }}</option>
+                    }
+                  </select>
+                }
+              }
+            </nav>
+            <div class="workspace-location">
+              @if (!usesAdvancedReference()) { <a class="workspace-location__root" routerLink="/studio/overview">Auctorio</a> <span aria-hidden="true">/</span> }
+              {{ activeArea().label }} <span aria-hidden="true">{{ usesAdvancedReference() ? '›' : '/' }}</span>
+              @if (usesAdvancedReference()) {
+                <strong>{{ workspaceToolTitle }}</strong>
+                <button type="button" class="profile-toolbar-toggle" [attr.aria-expanded]="profileToolbarOpen()"
+                  aria-controls="studio-global-toolbar studio-global-areas" (click)="profileToolbarOpen.set(!profileToolbarOpen())">Controles de Studio</button>
+              } @else { {{ workspaceToolTitle }} }
+            </div>
+          }
           @if (collapsed() && !isPhone() && activeSections(); as sections) {
             <nav class="au-sectionbar" aria-label="Page sections">
               @for (section of sections; track section.id) {
-                <a [routerLink]="activePath()" [queryParams]="{ tab: section.id }" [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
+                <a [routerLink]="section.path ?? activePath()"
+                  [queryParams]="section.path ? null : section.queryParam === 'view' ? { view: section.id, post: null } : { tab: section.id }"
+                  [queryParamsHandling]="section.queryParam === 'view' ? 'merge' : 'replace'"
+                  [class.is-active]="activeSection() === section.id" [attr.aria-current]="activeSection() === section.id ? 'location' : null">{{ section.label }}</a>
               }
             </nav>
           }
-          <!-- Re-created per site so pages reload their data instead of showing the previous site's. -->
-          @for (siteKey of [activeSiteId]; track siteKey) {
+          @for (siteKey of [outletSiteKey()]; track siteKey) {
             <router-outlet (activate)="revealActiveArea()"></router-outlet>
           }
         </div>
@@ -314,16 +389,17 @@ export class AppShellComponent implements OnInit, OnDestroy {
   private notificationTimer: ReturnType<typeof setTimeout> | null = null;
   private notificationFallbackTimer: ReturnType<typeof setInterval> | null = null;
   private phoneQuery: MediaQueryList | null = null;
+  private hasCopilotPreference = false;
   private paletteReturnFocus: HTMLElement | null = null;
 
   session: StudioSession | null = null;
   isPlatformAdmin = false;
-  sidebarItems = () => this.activeArea().items.filter((item) => canSeeNavItem(item, this.appContext.role(), this.isPlatformAdmin));
+  sidebarItems = () => this.activeArea().items.filter((item) => item.sidebar !== false && canSeeNavItem(item, this.appContext.permissions(), this.isPlatformAdmin));
   get sites(): StudioSite[] {
     return this.appContext.sites();
   }
   get activeSiteId(): string | null {
-    return this.appContext.session()?.activeSiteId ?? this.sites[0]?.id ?? null;
+    return this.appContext.session()?.activeSiteId ?? null;
   }
   loading = true;
   unreadCount = 0;
@@ -333,26 +409,68 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   /** User preference wins; without one, the sidebar starts collapsed below 1200px. */
   readonly collapsed = signal(false);
+  readonly profileToolbarOpen = signal(false);
   readonly drawerOpen = signal(false);
   readonly isPhone = signal(false);
   readonly paletteOpen = signal(false);
   readonly location = signal<{ group: string; title: string }>({ group: 'Workspace', title: 'Overview' });
   /** Area of the current route; routes outside the nav (settings) keep the last one. */
   readonly activeArea = signal<StudioNavGroup>(STUDIO_NAV[0]);
+  readonly workspaceArea = () => ['advanced', 'settings'].includes(this.activeArea().id);
   /** Nav path of the current page and its open section, for the sidebar's section list. */
   readonly activePath = signal('');
+  readonly activeToolPath = signal('');
+  // These settings pages own site switching so the shell does not discard their forms.
+  readonly outletSiteKey = () => ['/studio/settings/writing', '/studio/automation'].includes(this.activePath()) ? null : this.activeSiteId;
+  get canViewWorkspaceAudit(): boolean {
+    return this.appContext.permissions().includes('workspace.manage');
+  }
+
+  get workspaceToolTitle(): string {
+    return activeNavItem(this.activePath())?.item.label ?? this.location().title;
+  }
+
+  get workspaceSibling(): StudioNavGroup {
+    return STUDIO_NAV.find((area) => area.id === (this.activeArea().id === 'settings' ? 'advanced' : 'settings'))!;
+  }
+
+  toolLink(item: StudioNavItem): UrlTree {
+    const first = this.workspaceArea() ? item.sections?.[0] : undefined;
+    return this.router.createUrlTree([first?.path ?? item.path], {
+      queryParams: first && !first.path ? { tab: first.id } : undefined,
+    });
+  }
+
+  navigateWorkspaceTool(path: string): void {
+    const item = this.sidebarItems().find((entry) => entry.path === path);
+    if (item) void this.router.navigateByUrl(this.toolLink(item));
+  }
+
+  navigateWorkspaceSection(id: string): void {
+    const section = this.activeSections()?.find((entry) => entry.id === id);
+    if (!section) return;
+    if (section.path) {
+      void this.router.navigateByUrl(section.path);
+      return;
+    }
+    void this.router.navigate([this.activePath()], section.queryParam === 'view'
+      ? { queryParams: { view: id, post: null }, queryParamsHandling: 'merge' }
+      : { queryParams: { tab: id } });
+  }
+
   readonly activeSection = signal('');
+  usesAdvancedReference = () => this.activeArea().id === 'advanced';
   activeSections = () => this.sidebarItems().find((item) => item.path === this.activePath())?.sections ?? null;
 
   readonly shortcut = this.isMac() ? '⌘K' : 'Ctrl K';
   readonly copilotShortcut = this.isMac() ? '⌘J' : 'Ctrl J';
 
-  get activeSiteName(): string {
-    return this.sites.find((site) => site.id === this.activeSiteId)?.name ?? 'All sites';
+  get activeSite(): StudioSite | null {
+    return this.appContext.activeSite();
   }
 
-  get siteInitials(): string {
-    return this.initialsOf(this.activeSiteName);
+  get activeSiteName(): string {
+    return this.activeSite?.name ?? 'All sites';
   }
 
   get initials(): string {
@@ -389,8 +507,16 @@ export class AppShellComponent implements OnInit, OnDestroy {
         const url = this.router.url.split(/[?#]/)[0];
         const match = activeNavItem(url);
         if (match) this.activeArea.set(match.group);
-        this.activePath.set(match?.item.path === url ? url : '');
-        this.activeSection.set(match ? sectionFor(match.item.path, this.router.parseUrl(this.router.url).queryParamMap.get('tab')) : '');
+        if (this.phoneQuery && !this.hasCopilotPreference) {
+          const openByDefault = !this.isPhone() && !this.workspaceArea();
+          if (this.copilot.open() !== openByDefault) this.copilot.toggle(openByDefault);
+        }
+        const routedSection = match?.item.sections?.find((section) => section.path === url);
+        const toolPath = url === '/studio/settings/social' ? '/studio/connections' : (match?.item.path ?? '');
+        this.activeToolPath.set(toolPath);
+        this.activePath.set(routedSection || url === toolPath || url === '/studio/settings/social' ? toolPath : '');
+        const params = this.router.parseUrl(this.router.url).queryParamMap;
+        this.activeSection.set(routedSection?.id ?? (toolPath ? sectionFor(toolPath, params.get('tab'), params.get('view')) : ''));
       });
 
     void this.bootstrap();
@@ -414,7 +540,9 @@ export class AppShellComponent implements OnInit, OnDestroy {
     this.phoneQuery = window.matchMedia('(max-width: 860px)');
     this.isPhone.set(this.phoneQuery.matches);
     this.phoneQuery.addEventListener('change', this.onPhoneChange);
-    if (localStorage.getItem(COPILOT_KEY) !== '0' && window.matchMedia('(min-width: 861px)').matches) {
+    const copilotPreference = localStorage.getItem(COPILOT_KEY);
+    this.hasCopilotPreference = copilotPreference !== null;
+    if (copilotPreference === '1' && !this.isPhone()) {
       this.copilot.toggle(true);
     }
   }
@@ -448,7 +576,10 @@ export class AppShellComponent implements OnInit, OnDestroy {
   toggleCopilot(force?: boolean): void {
     const wasOpen = this.copilot.open();
     this.copilot.toggle(force);
-    if (isPlatformBrowser(this.platformId)) localStorage.setItem(COPILOT_KEY, this.copilot.open() ? '1' : '0');
+    if (isPlatformBrowser(this.platformId)) {
+      this.hasCopilotPreference = true;
+      localStorage.setItem(COPILOT_KEY, this.copilot.open() ? '1' : '0');
+    }
     if (this.copilot.open() && !wasOpen) {
       this.collapsed.set(false);
       if (this.isPhone()) this.drawerOpen.set(true);
@@ -590,11 +721,28 @@ export class AppShellComponent implements OnInit, OnDestroy {
     return params;
   }
 
-  siteInitialsOf(site: StudioSite): string {
-    return this.initialsOf(site.name);
+  private readonly siteLogos = new Map<string, Observable<string | null>>();
+  readonly failedSiteLogos = signal(new Set<string>());
+
+  siteLogo(site: StudioSite | null): Observable<string | null> | null {
+    if (!site) return null;
+    let logo = this.siteLogos.get(site.id);
+    if (!logo) {
+      logo = this.api.getSiteLogo(site.id).pipe(
+        map((response) => response.logoUrl),
+        catchError(() => of(null)),
+        shareReplay(1),
+      );
+      this.siteLogos.set(site.id, logo);
+    }
+    return logo;
   }
 
-  private initialsOf(name: string): string {
+  hideSiteLogo(logo: string): void {
+    this.failedSiteLogos.update((failed) => new Set(failed).add(logo));
+  }
+
+  initialsOf(name: string): string {
     return (
       name
         .trim()

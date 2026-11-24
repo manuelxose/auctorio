@@ -6,6 +6,7 @@ import type { FastifyInstance } from "fastify";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import {
   badRequest,
+  isOneOf,
   isUuid,
   notFound,
   parseBody,
@@ -78,7 +79,14 @@ export function registerEditorialEngineRoutes(fastify: FastifyInstance) {
       pageSize?: string;
       siteId?: string;
       clusterId?: string;
+      review?: string;
+      decision?: string;
+      outcome?: string;
     };
+    const { review, decision, outcome } = query;
+    if (review !== undefined && !isOneOf(review, ["pending", "history"] as const)) return badRequest(reply, "invalid review");
+    if (decision !== undefined && !isOneOf(decision, ["create_new", "update_existing", "skip"] as const)) return badRequest(reply, "invalid decision");
+    if (outcome !== undefined && !isOneOf(outcome, ["review", "hold", "auto_publish", "reject"] as const)) return badRequest(reply, "invalid outcome");
     const page = Math.max(1, Number.parseInt(query.page ?? "1", 10) || 1);
     const pageSize = Math.min(100, Math.max(1, Number.parseInt(query.pageSize ?? "20", 10) || 20));
     return reply.send(
@@ -87,6 +95,7 @@ export function registerEditorialEngineRoutes(fastify: FastifyInstance) {
         pageSize,
         siteId: query.siteId || null,
         clusterId: query.clusterId || null,
+        review, decision, outcome,
       }),
     );
   });

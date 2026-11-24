@@ -74,6 +74,8 @@ export type StudioSession = {
     avatarUrl: string | null;
   };
   role: StudioRole;
+  permissions?: string[];
+  workspaceUserId?: string | null;
   sites: StudioSite[];
   activeSiteId: string | null;
 };
@@ -220,6 +222,7 @@ export type StudioSiteSummary = {
   updatedAt: string;
   projectCount: number;
   publishedProjectCount: number;
+  websiteConnection?: { stage: NonNullable<StudioOverview['connections'][number]['stage']>; lastVerifiedAt: string | null } | null;
   latestPublicationJob: Pick<
     PublicationExecutionState,
     'id' | 'status' | 'externalUrl' | 'createdAt' | 'publishedAt' | 'error'
@@ -485,6 +488,7 @@ export type StudioInvitationSummary = {
   createdAt: string;
   updatedAt: string;
   userId: string | null;
+  delivery?: 'sent' | 'not_configured' | 'failed';
 };
 
 export type StudioPromptVersionSummary = {
@@ -917,8 +921,8 @@ export type StudioEditorialProfile = {
   articleStats: { articleCount: number; avgTitleTokens: number } | null;
 };
 
-export type SocialChannel = 'x' | 'instagram';
-export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post';
+export type SocialChannel = 'x' | 'instagram' | 'facebook';
+export type SocialContentType = 'x_post' | 'x_thread' | 'instagram_caption' | 'instagram_story' | 'social_post' | 'instagram_carousel' | 'facebook_post';
 
 export type StudioSocialContent = {
   id: string;
@@ -940,7 +944,29 @@ export type StudioSocialContent = {
   updatedAt: string;
 };
 
-export type PublicationChannel = 'website' | 'x' | 'instagram';
+export type SiteSocialSettings = {
+  siteId: string;
+  workflow: 'auto' | 'approve' | 'manual';
+  postDays: number[];
+  postTime: string;
+  timezone: string;
+  categories: string[];
+  imageStyle: 'photo' | 'sketch';
+  fontFamily: 'sans' | 'serif' | 'mono';
+  highlightStyle: 'color' | 'marker' | 'underline' | 'none';
+  useLogo: boolean;
+  showBrandMark: boolean;
+};
+
+export type SiteSocialPost = StudioSocialContent & {
+  projectTitle: string;
+  publication: {
+    id: string; status: string; scheduledFor: string | null; externalUrl?: string | null;
+    account?: { displayName: string } | null;
+  } | null;
+};
+
+export type PublicationChannel = 'website' | 'x' | 'instagram' | 'facebook';
 export type PublicationState =
   | 'draft'
   | 'ready'
@@ -1009,11 +1035,12 @@ export type EditorialPlanGenerationAccepted = {
 
 /** One schedule projection: plan items until their content has a publication, then the publication. */
 export type CalendarEvent = {
-  kind: 'plan_item' | 'publication';
+  kind: 'plan_item' | 'publication' | 'social_draft';
   id: string;
   projectId: string | null;
   planId: string | null;
   planItemId: string | null;
+  socialContentId?: string | null;
   priority: number | null;
   contentType: string | null;
   /** Plan items only. Volume/difficulty are null unless a provider measured them (never estimated). */
@@ -1046,7 +1073,7 @@ export type ArticleChip = 'queued' | 'drafting' | 'review' | 'published' | 'fail
 
 export type PublishingAccount = {
   id: string;
-  platform: 'website' | 'x' | 'instagram';
+  platform: 'website' | 'x' | 'instagram' | 'facebook';
   displayName: string;
   externalAccountId: string | null;
   enabled: boolean;
@@ -1071,7 +1098,7 @@ export type SocialConnectionState =
 
 export type SocialConnection = {
   id: string;
-  platform: 'x' | 'instagram' | 'website';
+  platform: 'x' | 'instagram' | 'facebook' | 'website';
   provider: string;
   displayName: string;
   externalAccountId: string | null;
@@ -1172,7 +1199,7 @@ export type EditorialPlanItem = {
   pillarPage: string | null;
   angle: string | null;
   editorialObjective: string | null;
-  channel: 'website' | 'x' | 'instagram';
+  channel: 'website' | 'x' | 'instagram' | 'facebook';
   scheduledFor: string | null;
   primaryKeyword: string | null;
   secondaryKeywords: unknown;
@@ -1412,10 +1439,12 @@ export type AutomationStatus = {
     maximumQueueSize: number;
   };
   nextSlots: Array<{ channel: string; at: string }>;
+  pipeline?: { planDueNow: number; planUpcoming: number; awaitingReview: number; activeSources: number; candidateStories: number; minQaScore: number; leadMinutes: number; keywordPlan: { upcoming: Array<{ id: string; keyword: string; scheduledFor: string | null; status: string; searchVolume: number | null }>; withVolume: number; metricsProvider: boolean } };
   warnings: string[];
 };
 
 export type StudioOverview = {
+  siteLogoUrl?: string | null;
   today: {
     articlesPlanned: number;
     articlesPublished: number;
@@ -1432,7 +1461,7 @@ export type StudioOverview = {
   sources: { total: number; enabled: number; degraded: number; failing: number };
   connections: Array<{
     id: string;
-    platform: 'website' | 'x' | 'instagram';
+    platform: 'website' | 'x' | 'instagram' | 'facebook';
     displayName: string;
     enabled: boolean;
     status: string;
@@ -1459,6 +1488,7 @@ export type StudioOverview = {
   };
   automation: {
     enabled: boolean;
+    mode?: AutomationPolicy['mode'];
     state: string;
     pausedReason: string | null;
     warnings: string[];
@@ -1562,7 +1592,7 @@ export type CostControlsView = {
 
 // ── Magic Installer, Activity Center and Notification models ───────────
 
-export type ConnectorKind = 'website' | 'x' | 'instagram';
+export type ConnectorKind = 'website' | 'x' | 'instagram' | 'facebook';
 
 export type ConnectorAuthMethodView = {
   id: string;
@@ -1642,6 +1672,7 @@ export type ConnectorInstallation = {
   discovered: WebsiteDiscoveryResult | Record<string, unknown> | null;
   capabilities: Record<string, unknown> | null;
   hasCredentials: boolean;
+  verificationStage?: NonNullable<StudioOverview['connections'][number]['stage']>;
   credentialsRef: string | null;
   lastError: string | null;
   verifiedAt: string | null;
