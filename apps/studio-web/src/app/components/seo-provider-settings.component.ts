@@ -4,21 +4,15 @@ import { FormsModule } from '@angular/forms';
 import { AdminApiService, AdminSeo, AdminSeoProvider } from '../services/admin-api.service';
 import { ConfirmService } from '../services/confirm.service';
 import { ToastService } from '../services/toast.service';
+import { SeoGovernorSettingsComponent } from './seo-governor-settings.component';
+import { SEO_CAPABILITY_LABELS as CAPABILITY_LABELS } from './seo-labels';
 
 const MODE_LABELS: Record<string, string> = {
   disabled: 'SEO externo desactivado',
   dataforseo_only: 'Solo DataForSEO',
   anyapi_only: 'Solo AnyAPI',
   manual: 'Elegir por capacidad',
-  cost_optimized: 'Optimizado por coste (bloqueado hasta que haya presupuestos)',
-};
-const CAPABILITY_LABELS: Record<string, string> = {
-  keyword_metrics: 'Métricas de palabras clave',
-  keyword_suggestions: 'Descubrimiento de palabras',
-  ranked_keywords: 'Posiciones de un dominio',
-  serp_organic: 'Resultados de Google',
-  search_volume: 'Volumen de búsqueda (respaldo)',
-  youtube_search: 'Resultados de YouTube',
+  cost_optimized: 'Optimizado por coste (bloqueado hasta cumplir las condiciones de producción)',
 };
 const REASONS: Record<string, string> = {
   external_disabled: 'llamadas externas desactivadas',
@@ -26,15 +20,17 @@ const REASONS: Record<string, string> = {
   not_configured: 'sin credenciales',
   not_selected: 'sin proveedor elegido',
   unsupported_capability: 'no disponible',
-  paid_automation_locked: 'automatización bloqueada hasta SEO-V2-02',
-  automatic_routing_locked: 'enrutado automático bloqueado hasta SEO-V2-02',
+  emergency_stop: 'parada de emergencia',
+  license_prohibited: 'su licencia no lo permite',
+  paid_automation_locked: 'automatización bloqueada: faltan condiciones de producción',
+  automatic_routing_locked: 'enrutado automático bloqueado: faltan condiciones de producción',
 };
 
 /** External SEO providers: mode, kill switch, credentials, priority and authorized live tests (platform admins). */
 @Component({
   selector: 'app-seo-provider-settings',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [CommonModule, FormsModule, SeoGovernorSettingsComponent],
   styles: ['.au-row { flex-wrap: wrap; } .au-row__title { min-width: 160px; } .seo-select { width: 200px; } .au-row__meta { white-space: normal; }'],
   template: `
     <section class="au-panel au-panel--padded" *ngIf="seo as s">
@@ -56,13 +52,15 @@ const REASONS: Record<string, string> = {
       </div>
     </section>
 
+    <app-seo-governor-settings *ngIf="seo" class="au-mt-4" style="display: block" (changed)="load()" />
+
     <section class="au-panel au-panel--padded au-mt-4" *ngFor="let p of seo?.providers">
       <h2 class="au-panel__title">{{ p.label }}</h2>
       <div class="au-row">
         <span class="au-badge" [ngClass]="p.enabled ? 'au-badge--brand' : 'au-badge--neutral'">{{ p.enabled ? 'Activado' : 'Desactivado' }}</span>
         <span class="au-badge au-badge--outline">{{ p.configured ? 'Con credenciales' : 'Sin credenciales' }}</span>
         <span class="au-badge au-badge--outline">Verificación real: {{ verificationLabel(p.liveVerification) }}</span>
-        <span class="au-badge au-badge--neutral" *ngIf="p.automationLocked">Automatización bloqueada hasta SEO-V2-02</span>
+        <span class="au-badge au-badge--neutral" *ngIf="p.automationLocked">Automatización bloqueada: faltan condiciones de producción</span>
         <label class="au-row__meta">Prioridad
           <input class="au-input" style="width: 80px" type="number" min="1" max="999" [ngModel]="p.priority" (change)="setPriority(p, $event)" [name]="'prio-' + p.id" />
         </label>
@@ -74,6 +72,10 @@ const REASONS: Record<string, string> = {
         <input class="au-input au-flex-1" type="password" autocomplete="off" [placeholder]="c.envName" [(ngModel)]="drafts[c.envName]" [name]="'cred-' + c.envName" [attr.aria-label]="p.label + ' ' + c.label" />
         <button class="au-btn" type="button" [disabled]="!drafts[c.envName]" (click)="saveCredential(p, c.envName, drafts[c.envName])">Guardar</button>
         <button class="au-btn" type="button" *ngIf="c.source === 'ui'" (click)="saveCredential(p, c.envName, '')">Quitar</button>
+      </div>
+      <div class="au-row" *ngIf="p.health.circuit as circuit">
+        <span class="au-badge au-badge--warning">En pausa hasta {{ circuit.until | date: 'short' }} ({{ circuit.reason }})</span>
+        <button class="au-btn au-btn--sm" type="button" (click)="resetCircuit(p)">Reintentar ya</button>
       </div>
       <p class="au-muted au-mt-2" *ngIf="p.health.lastErrorAt">Último error {{ p.health.lastErrorAt | date: 'short' }}: {{ p.health.lastErrorCode }} — {{ p.health.lastErrorMessage }}</p>
       <p class="au-muted au-mt-2" *ngIf="p.health.lastSuccessAt">Último acierto {{ p.health.lastSuccessAt | date: 'short' }}</p>
@@ -129,7 +131,7 @@ export class SeoProviderSettingsComponent implements OnInit {
   providerLabel = (id: string) => this.seo?.providers.find((p) => p.id === id)?.label ?? id;
   supporting = (capability: string) => this.seo?.providers.filter((p) => p.capabilities[capability].supported) ?? [];
 
-  private load(): void {
+  load(): void {
     this.api.seo().subscribe({
       next: (seo) => {
         for (const p of seo.providers) this.test[p.id] ??= { capability: 'keyword_metrics', locale: 'es-ES', maxSpendUsd: null };
@@ -166,6 +168,10 @@ export class SeoProviderSettingsComponent implements OnInit {
     this.api.updateSeoProvider(p.id, { priority: Number((event.target as HTMLInputElement).value) }).subscribe(this.after('Prioridad guardada.'));
   }
 
+  resetCircuit(p: AdminSeoProvider): void {
+    this.api.updateSeoProvider(p.id, { resetCircuit: true }).subscribe(this.after(`${p.label}: se volverá a intentar.`));
+  }
+
   saveCredential(p: AdminSeoProvider, envName: string, value: string): void {
     this.drafts[envName] = '';
     this.api.setSeoCredential(p.id, envName, value).subscribe(this.after(value ? 'Guardada.' : 'Quitada.'));
@@ -176,7 +182,7 @@ export class SeoProviderSettingsComponent implements OnInit {
     const ok = await this.confirm.confirm({ title: `¿Llamar ahora a ${p.label}?`, message: `Una petición real (${this.capabilityLabel(input.capability)}). Puede costar hasta ${input.maxSpendUsd} USD.`, confirmLabel: 'Autorizar y probar' });
     if (!ok) return;
     this.testing = true;
-    this.api.testSeoProvider(p.id, { capability: input.capability, locale: input.locale, maxSpendUsd: Number(input.maxSpendUsd), authorize: true }).subscribe({
+    this.api.testSeoProvider(p.id, { capability: input.capability, locale: input.locale, maxSpendUsd: Number(input.maxSpendUsd), authorize: true, requestId: crypto.randomUUID() }).subscribe({
       next: (r) => { this.testing = false; this.toast.success(`${r.rows} filas; coste ${r.costUsd ?? 'no informado'} USD.`); this.load(); },
       error: (e) => { this.testing = false; this.toast.error(e?.error?.message ?? 'La prueba ha fallado.'); this.load(); },
     });

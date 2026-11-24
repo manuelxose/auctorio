@@ -36,7 +36,7 @@ export type SeoBudgetPeriod = (typeof SEO_BUDGET_PERIODS)[number];
 export const SEO_BUDGET_ALLOWANCES = ["any", "onboarding", "recurring"] as const;
 export type SeoAllowance = "onboarding" | "recurring" | "admin_test";
 export type SeoBudgetKey = { scope: SeoBudgetScope; scopeId: string; operation: string; allowance: string; period: SeoBudgetPeriod };
-export type SeoBudgetLimit = SeoBudgetKey & { limitUsd: number; extraUsd: number; source: "default" | "custom" };
+export type SeoBudgetLimit = SeoBudgetKey & { limitUsd: number; extraUsd: number; source: "default" | "custom"; /** Plan budgets are per workspace: whose. */ tenantId?: string };
 export type SeoPriority = "interactive" | "planning" | "background";
 
 const limit = (scope: SeoBudgetScope, scopeId: string, period: SeoBudgetPeriod, limitUsd: number, patch: Partial<SeoBudgetKey> = {}) => ({ scope, scopeId, operation: "*", allowance: "any", period, limitUsd, ...patch });
@@ -77,7 +77,7 @@ export async function applicableBudgets(client: Client | typeof prisma, context:
     if (!id || (key.scopeId !== "*" && key.scopeId !== id)) return;
     if (key.operation !== "*" && key.operation !== context.operation) return;
     if (key.allowance !== "any" && key.allowance !== context.allowance) return;
-    const concrete = { scope: key.scope, scopeId: id, operation: key.operation, allowance: key.allowance, period: key.period };
+    const concrete = { scope: key.scope, scopeId: id, operation: key.operation, allowance: key.allowance, period: key.period, ...(key.scope === "plan" ? { tenantId: context.tenantId } : {}) };
     const rank = (key.scopeId === id ? 2 : 0) + (source === "custom" ? 1 : 0);
     const current = chosen.get(budgetKeyOf(concrete));
     if (!current || rank > current.rank) chosen.set(budgetKeyOf(concrete), { ...concrete, limitUsd, extraUsd: 0, source, rank });
@@ -100,6 +100,7 @@ export async function budgetUse(client: Client | typeof prisma, budgets: SeoBudg
     const conditions = [Prisma.sql`created_at >= ${sqlTime(periodStart(budget.period, now))}`];
     if (budget.scope === "provider") conditions.push(Prisma.sql`provider_id = ${budget.scopeId}`);
     if (budget.scope === "tenant") conditions.push(Prisma.sql`tenant_id = ${budget.scopeId}::uuid`);
+    if (budget.scope === "plan") conditions.push(Prisma.sql`tenant_id = ${budget.tenantId}::uuid`);
     if (budget.scope === "site") conditions.push(Prisma.sql`target_site_id = ${budget.scopeId}::uuid`);
     if (budget.operation !== "*") conditions.push(Prisma.sql`operation = ${budget.operation}`);
     if (budget.allowance !== "any") conditions.push(Prisma.sql`allowance = ${budget.allowance}`);
@@ -282,6 +283,8 @@ export type SettleInput = {
   assumed?: boolean;
   /** The request failed but was billed. */
   errorCode?: string | null;
+  /** Leases of what a partial answer left out: asked again only after a cool-down. */
+  unanswered?: string[];
   resolution?: string;
   resolvedByUserId?: string | null;
 };
@@ -302,7 +305,8 @@ export async function settleSeoReservation(id: string, input: SettleInput, from:
     if (input.actualUsd > 0 && tenant) {
       await tx.aiSpendEvent.create({ data: { tenantId: row.tenantId, siteId: site?.id ?? null, kind: row.kind, provider: row.providerId, model: row.resource, costUsd: Number(row.actualUsd), reservationId: id } });
     }
-    await closeLeases(tx, id, input.errorCode ? { status: "cooldown", errorCode: input.errorCode } : { status: "done" }, now);
+    if (!input.errorCode) await tx.seoAcquisitionLease.deleteMany({ where: { reservationId: id, key: { notIn: input.unanswered ?? [] } } });
+    await closeLeases(tx, id, input.errorCode || input.unanswered?.length ? { status: "cooldown", errorCode: input.errorCode ?? "partial_answer" } : { status: "done" }, now);
     return true;
   }, { maxWait: 60_000, timeout: 60_000 });
 }

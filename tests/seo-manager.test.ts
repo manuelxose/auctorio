@@ -406,6 +406,15 @@ test("every applicable limit holds: platform, provider, plan, tenant, site, oper
     assert.equal(await codeOf(reserveSeoSpend(reserveInput(ws, ["k"]))), "budget_exhausted", `${scope} ${period}`);
     await prisma.seoBudget.delete({ where: { id: row.id } });
   }
+  // A plan allowance is per workspace: what others spend does not use it up.
+  const other = await workspace();
+  await reserveSeoSpend({ ...reserveInput(other, ["theirs"]), siteId: other.siteId });
+  const plan = await limitTo("plan", "*", "monthly", 0.015);
+  assert.equal(await codeOf(reserveSeoSpend(reserveInput(ws, ["plan"]))), "none");
+  assert.equal(await codeOf(reserveSeoSpend(reserveInput(ws, ["plan2"]))), "budget_exhausted");
+  await prisma.seoSpendReservation.deleteMany({ where: { tenantId: ws.tenantId } });
+  await prisma.seoBudget.delete({ where: { id: plan.id } });
+  await other.remove();
   // Limits that are somebody else's do not apply; a specific limit wins over the general one.
   await limitTo("tenant", randomUUID(), "daily", 0);
   await limitTo("site", "*", "monthly", 0, { operation: "youtube_search" });
@@ -659,6 +668,24 @@ test("an unknown price spends nothing until an administrator records a ceiling; 
   assert.deepEqual((await ws.spend()).map((row) => row.costUsd), [0.001, 0.2], "the real bill is in the ledger");
   assert.equal(await codeOf(ask("c", 0.001)), "unknown_price");
   assert.equal(calls.length, 2);
+}));
+
+test("what a partial answer leaves out is unknown, and is not bought again at once", () => governed(async (ws) => {
+  process.env.ANYAPI_API_KEY = "aa_test";
+  try {
+    const calls: string[] = [];
+    await prisma.seoControlSetting.create({ data: { mode: "anyapi_only" } });
+    await prisma.seoProviderState.create({ data: { providerId: "anyapi", enabled: true, priority: 20 } });
+    const fetchImpl = answering(calls, () => ({ output: { found: true, data: { keywords: [{ keyword: "guia tv", searchVolume: 5 }, { broken: true }] } }, costUsd: 0.0145 }));
+    const route = (await seoRoute("keyword_metrics", "es-ES", { locks: NO_LOCKS })) as SeoRoute;
+    const ask = (keywords: string[]) => acquireSeo(route, "keyword_metrics", { keywords }, scopeOf(ws, fetchImpl, { locks: NO_LOCKS }));
+    const { data, meta } = await ask(["guia tv", "rota"]);
+    assert.deepEqual([data.map((row) => row.keyword), meta.unresolved, meta.partial], [["guia tv"], ["rota"], true]);
+    assert.deepEqual([(await ask(["guia tv"])).data.length, await codeOf(ask(["rota"])), calls.length], [1, "retry_cooldown", 1]);
+    assert.equal(await prisma.providerCacheEntry.count({ where: { tenantId: ws.tenantId, isNegative: true } }), 0);
+  } finally {
+    process.env.ANYAPI_API_KEY = "";
+  }
 }));
 
 test("metrics that came with discovery are reused: the overview is not bought, and only missing keywords are", () => governed(async (ws) => {

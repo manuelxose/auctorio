@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { SEO_CAPABILITIES, normalizeDomain, seoMarket, type KeywordMetrics, type SeoMarket } from "../src/infrastructure/seo/contract";
 import { DEFAULT_SEO_POLICY, freshnessDays, freshnessOf, readSeoPolicy, retentionDays, seoCacheKey } from "../src/infrastructure/seo/policy";
 import { SEO_PRICES, effectiveQuote, priceQuote, seoPriceStatus } from "../src/infrastructure/seo/pricing";
@@ -67,4 +69,17 @@ test("a metric is replaced by a newer value, never by 'not returned', and keeps 
   const second = mergeKeywordMetrics(first, row({ volume: 120, cpc: 0.4 }), by("2026-02-01T00:00:00.000Z", "keyword_metrics"));
   assert.deepEqual([second.payload.volume, second.payload.difficulty, second.payload.cpc, second.payload.intent], [120, 20, 0.4, null]);
   assert.deepEqual([second.meta.fields!.volume!.via, second.meta.fields!.difficulty!.via, second.meta.fields!.intent!.at], ["keyword_metrics", "keyword_suggestions", "2026-02-01T00:00:00.000Z"]);
+});
+
+test("there is one way to a provider and one way to spend: the manager and the governor", () => {
+  const root = process.cwd();
+  const files = ["src", "scripts"].flatMap((dir) => readdirSync(join(root, dir), { recursive: true, withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith(".ts")).map((entry) => join(entry.parentPath, entry.name)));
+  const using = (pattern: RegExp) => files.filter((file) => pattern.test(readFileSync(file, "utf8"))).map((file) => relative(root, file).replace(/\\/g, "/")).sort();
+  assert.ok(files.length > 100);
+  assert.deepEqual(using(/from "[^"]*(infrastructure\/seo|\.)\/(dataforseo|anyapi)"/), ["src/infrastructure/seo/registry.ts"]);
+  assert.deepEqual(using(/\bprovider\.run\(/), ["src/studio/seo-manager.ts"]);
+  assert.deepEqual(using(/api\.dataforseo\.com|api\.getanyapi\.com\/v1/), ["src/infrastructure/seo/anyapi.ts", "src/infrastructure/seo/dataforseo.ts"]);
+  assert.deepEqual(using(/seoSpendReservation\.(create|update|delete|upsert)|(UPDATE|INSERT INTO|DELETE FROM) seo_spend_reservations/), ["src/studio/seo-governor.ts"]);
+  // No GET route buys: routes never call the manager to acquire.
+  assert.deepEqual(using(/\bacquireSeo\(/), ["src/studio/keyword-candidates.ts", "src/studio/keyword-metrics.ts", "src/studio/serp-sources.ts", "src/studio/youtube-videos.ts"]);
 });

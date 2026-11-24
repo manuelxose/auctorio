@@ -178,6 +178,7 @@ async function sendReserved<C extends SeoCapability>(
   reservation: SeoReservation,
   scope: SeoScope,
   keep: (result: SeoAdapterResult<C>, fetchedAt: Date) => Promise<void> = async () => undefined,
+  unanswered: (result: SeoAdapterResult<C>) => string[] = () => [],
 ): Promise<{ result: SeoAdapterResult<C>; fetchedAt: Date; billedUsd: number | null }> {
   const trace = { tenantId: scope.tenantId, siteId: scope.siteId, provider: provider.id, capability, reservationId: reservation.id };
   // Accounting that fails leaves the reservation in flight: it is recovered as uncertain and keeps holding its maximum.
@@ -216,7 +217,7 @@ async function sendReserved<C extends SeoCapability>(
   const { billedUsd } = result;
   // Not reported: account for the most it could have charged, never for zero.
   if (billedUsd === null) structuredEvent("seo.cost_unreported", { ...trace, assumedUsd: reservation.maxUsd }, "warn");
-  await account(() => settleSeoReservation(reservation.id, { actualUsd: billedUsd ?? reservation.maxUsd, assumed: billedUsd === null }));
+  await account(() => settleSeoReservation(reservation.id, { actualUsd: billedUsd ?? reservation.maxUsd, assumed: billedUsd === null, unanswered: unanswered(result) }));
   if (billedUsd !== null && billedUsd > reservation.maxUsd * 1.001) {
     structuredEvent("seo.billed_over_quote", { ...trace, billedUsd, maxUsd: reservation.maxUsd }, "error");
     result.notes.push("billed_over_quote");
@@ -365,7 +366,11 @@ async function acquireNow<C extends SeoCapability>(route: SeoRoute, capability: 
           return;
         }
         const sent = requestFor(capability, request, still.map(({ subject }) => subject));
-        const outcome = await sendReserved(provider, capability, sent, reserved.reservation, scope, (result, at) => keepAnswer(route, capability, still, sent, result, reserved.reservation!.id, at, scope.tenantId));
+        const outcome = await sendReserved(provider, capability, sent, reserved.reservation, scope, (result, at) => keepAnswer(route, capability, still, sent, result, reserved.reservation!.id, at, scope.tenantId), (result) => {
+          if (!result.partial) return [];
+          const answered = new Set((result.data as Array<{ keyword?: string }>).map((row) => row.keyword));
+          return still.filter(({ subject }) => (keywordsOf(request) ? !answered.has(subject) : result.data.length === 0)).map(({ leaseKey }) => leaseKey);
+        });
         bought.push(outcome.result);
         reservationIds.push(reserved.reservation.id);
         boughtKeys += still.length;
