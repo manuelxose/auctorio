@@ -54,12 +54,13 @@ Pendiente: CI y fusión en `main`.
 |---|---|
 | 45 migraciones en base limpia y `migrate diff` | Sin diferencias |
 | Typecheck, build y build de Studio | Correctos |
-| Suite completa de backend | 701 de 701 |
+| Suite completa de backend | 702 de 702 |
 | Specs de Studio (Karma) | 46 de 46 |
 | Panel en navegador, 1280 y 390 px, base de pruebas | Límite, autorización, resolución y parada persisten y quedan auditados; sin errores ni desbordes |
 
-Dos pasadas anteriores de la suite dieron fallos. La primera, `autopilot-planner` y `studio-rbac-matrix` (un 500 de causa no determinada): ambos pasan tres veces
-aislados y no se han repetido. La segunda fue un defecto de este hito, ya corregido (véase abajo). Una pasada previa se colgó por compartir Redis con el entorno de desarrollo local.
+Dos pasadas anteriores de la suite dieron fallos. La primera, `autopilot-planner` y `studio-rbac-matrix` (un 500 de causa no determinada, que
+no se ha repetido). El de `autopilot-planner` volvió en CI: era un error previo de `editorial-plan.ts`, un rechazo sin capturar cuando la operación de un plan
+desaparece mientras se genera; corregido y con prueba. La segunda fue un defecto de este hito, ya corregido (véase abajo). Una pasada previa se colgó por compartir Redis con el entorno de desarrollo local.
 
 | Prueba adversaria | Resultado |
 |---|---|

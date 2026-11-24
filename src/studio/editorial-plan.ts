@@ -1032,7 +1032,7 @@ async function runPlanGenerationInBackground(
         errorCode: "plan_generation_failed",
         errorSummary: error instanceof Error ? error.message : String(error),
         retryable: true,
-      });
+      }).catch(() => undefined); // the operation may be gone with its workspace; nobody awaits this
       structuredEvent(
         "editorial_plan.generation.background_error",
         { tenantId: input.tenantId, siteId: input.siteId, planId: plan.id, normalizedError: error instanceof Error ? error.message : String(error) },
