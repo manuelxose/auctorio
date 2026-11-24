@@ -23,7 +23,7 @@ const list = (value: string): string[] => value.split(',').map((entry) => entry.
       .reg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 12px; }
       .reg-recommendations .reg-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       @media (max-width: 1080px) { .reg-recommendations .reg-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-      @media (max-width: 760px) { .reg-recommendations .reg-grid { grid-template-columns: 1fr; }
+      @media (max-width: 760px) { .reg-recommendations .reg-grid { grid-template-columns: 1fr; } }
       .reg-card { border: 1px solid var(--au-border); border-radius: 12px; padding: var(--au-s3); background: var(--au-surface-solid); display: flex; flex-direction: column; gap: 8px; }
       .reg-card h3, .reg-table h3 { margin: 0; font-size: var(--au-fs-body); overflow-wrap: anywhere; }
       .reg-table { border: 1px solid var(--au-border); border-radius: 10px; }

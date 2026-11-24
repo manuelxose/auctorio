@@ -11,7 +11,7 @@ State after SEO-V2-01. Sections marked *(later)* are not built.
 | Registry | `src/infrastructure/seo/registry.ts` | Providers, modes, selection rules, locks. Pure |
 | Contract | `src/infrastructure/seo/contract.ts` | Capabilities, requests, results, quotes, errors, licensing |
 | Adapters | `src/infrastructure/seo/dataforseo.ts`, `anyapi.ts` | Everything provider-specific |
-| Control plane | `src/studio/routes-admin-seo.ts`, Studio → Settings → SEO providers (`/studio/admin/seo`) | Platform administrators only |
+| Control plane | `src/studio/routes-admin-seo.ts`, Studio → Ajustes → Administración global → Proveedores SEO (`/studio/admin/seo`) | Platform administrators only |
 
 The Cost Governor and the Knowledge & Opportunity Repository of the owner's diagram are *(later)*: SEO-V2-02 and on.
 

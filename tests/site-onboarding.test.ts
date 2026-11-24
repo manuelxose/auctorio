@@ -83,10 +83,14 @@ async function waitForRun(tenantId: string, siteId: string) {
   throw new Error("onboarding did not finish");
 }
 
+/** Activation requires a recorded successful destination check. */
+const markVerified = (id: string) => prisma.connectorInstallation.update({ where: { id }, data: { verifiedAt: new Date() } });
+
 async function readyWebsiteInstallation(tenantId: string) {
   const installation = await createInstallation({ tenantId, siteId: null, kind: "website", provider: "generic_rest", displayName: "Cocina" });
   await storeInstallationCredentials(tenantId, installation.id, { secrets: { apiToken: "test-token" }, config: { baseUrl: "https://cocina.example.test" } });
   await transitionInstallation(tenantId, installation.id, "ready", {});
+  await markVerified(installation.id);
   return installation;
 }
 
@@ -150,6 +154,7 @@ test("ONB-02: re-activation and repeated starts never duplicate the site, run or
   await transitionInstallation(tenant.id, installation.id, "expired", {});
   await transitionInstallation(tenant.id, installation.id, "credentials_required", {});
   await transitionInstallation(tenant.id, installation.id, "ready", {});
+  await markVerified(installation.id);
   const second = await server.inject({ method: "POST", url: `/v2/connector-installations/${installation.id}/activate`, payload: {} });
   assert.equal(second.statusCode, 200, second.body);
   assert.equal((second.json() as { initialization: { siteId: string } }).initialization.siteId, siteId);

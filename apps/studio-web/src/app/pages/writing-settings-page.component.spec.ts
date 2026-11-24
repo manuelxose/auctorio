@@ -13,6 +13,7 @@ describe('Writing settings site changes', () => {
     const reads: Record<string, Subject<any>> = {};
     const writes: Array<{ site: string; result: Subject<any> }> = [];
     const api = {
+      getDetectedBrand: () => new Subject<any>(),
       getPlanningSettings: (id: string) => (reads[id] = new Subject<any>()),
       putPlanningSettings: (site: string) => { const result = new Subject<any>(); writes.push({ site, result }); return result; },
     };

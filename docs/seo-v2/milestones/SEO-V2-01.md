@@ -95,5 +95,10 @@ SEO-V2-02: un timeout que el proveedor sí factura no se registra como gasto.
 1. Clave de AnyAPI y presupuesto autorizado (una pasada completa de las seis capacidades cuesta como máximo unos 0,16 USD).
 2. Confirmación escrita de AnyAPI sobre almacenamiento y licencia de origen.
 3. Mercado es-ES de AnyAPI sin verificar.
-4. `feat/studio-settings-advanced-integration` (16 commits sin fusionar) entra en conflicto en seis archivos; la guía está en
-   [production-readiness.md](../production-readiness.md).
+
+## Unificación con el rediseño de Studio
+
+A petición del responsable, `feat/studio-settings-advanced-integration` (16 commits: ajustes, avanzado, redes y plan mensual de
+Autopilot) está fusionada en esta rama. Conflictos resueltos en seis archivos: navegación y su spec, página de administración, `editorial-plan.ts`,
+`keyword-candidates.ts` y `routes-editorial.ts`. Además, `automation.ts`, `autopilot-plan.ts`, `plan-item-keyword.ts` y el plan del mes
+pasan a usar el gestor SEO, y la página de proveedores queda en español dentro de «Administración global».

@@ -20,15 +20,18 @@
 
 ## Operating
 
-- Stop everything: Studio → Settings → SEO providers → **Disable all external SEO calls** (or `PUT /v2/admin/seo/control` with `{"mode":"disabled"}`).
+- Stop everything: Studio → Ajustes → Administración global → Proveedores SEO → **Desactivar todo el SEO externo** (or `PUT /v2/admin/seo/control` with `{"mode":"disabled"}`).
   Requests already sent are not recalled.
 - Health: last success and last error per provider on the same page.
 - Log events: `seo.cost_unreported`, `seo.cost_unknown_after_error`, `seo.billed_over_quote`, `seo.spend_not_recorded`, `seo.notes`, `seo.health_not_recorded`,
   `keyword_metrics.skipped`.
-- Live test: enable the provider, then **Authorize and test** with a ceiling. Automation stays locked while doing it.
+- Live test: enable the provider, then **Autorizar y probar** with a ceiling. Automation stays locked while doing it.
 
-## Merging with `feat/studio-settings-advanced-integration`
+## Unified with the Studio redesign
 
-That branch (16 commits, not in main when SEO-V2-01 started) edits `keyword-candidates.ts`, `editorial-plan.ts` and
-`routes-editorial.ts`, and adds callers that use the former `fetchers` parameter and the literal `provider: "dataforseo"`.
-When it is merged: replace `fetchers` by `fetchImpl`, take `provider` and `market` from the route, and map the route's `reason` to `skipped`.
+`feat/studio-settings-advanced-integration` (settings, advanced, social and Autopilot month plan) is merged into the SEO-V2-01
+branch. Its month plan, keyword research and automation read the SEO manager instead of DataForSEO; research records the
+provider that measured (`provider`, `selection.source`) or why there was none (`not_configured`, `disabled`, `unsupported_market`,
+`provider_error`, `no_data`). Plans stored earlier keep `"dataforseo"` and are still read.
+
+The unified branch also carries that branch's own migrations, which are dated before `20261124120000_seo_provider_control`.

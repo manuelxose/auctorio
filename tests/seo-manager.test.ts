@@ -159,7 +159,7 @@ test("a disabled provider or the kill switch stops calls at once, even for a rou
 test("keyword research records its provider, or why there was none", async () => {
   const ws = await workspace();
   const calls: string[] = [];
-  const context = (locale: string) => ({ profile: { mainTopics: ["guia tv"] }, clusters: [], site: { id: ws.siteId, name: "Guía TV", type: "guiatv", baseUrl: null, locale }, searchTargets: [], existingPlanQueries: [], existingPlanTitles: [], indexedUrlInventory: [] }) as never;
+  const context = (locale: string) => ({ profile: null, clusters: [{ name: "guia tv" }], site: { id: ws.siteId, name: "Guía TV", type: "guiatv", baseUrl: null, locale }, searchTargets: [], existingPlanQueries: [], existingPlanTitles: [], indexedUrlInventory: [] }) as never;
   const skipped = async (locale: string) => {
     const research = emptyKeywordResearch();
     assert.deepEqual(await collectKeywordCandidates(ws.tenantId, ws.siteId, context(locale), 5, answering(calls, () => ({})), research), []);
@@ -178,7 +178,7 @@ test("keyword research records its provider, or why there was none", async () =>
     const research = emptyKeywordResearch();
     const row = { keyword: "guia tv hoy", keyword_info: { search_volume: 9000 }, keyword_properties: { keyword_difficulty: 10 }, search_intent_info: { main_intent: "informational" } };
     const ranked = await collectKeywordCandidates(ws.tenantId, ws.siteId, context("es-ES"), 5, answering(calls, () => ({ status_code: 20000, cost: 0.024, tasks: [{ status_code: 20000, result: [{ items: [row] }] }] })), research);
-    assert.deepEqual([calls.length, research.market, research.seeds, research.failedCalls, research.rows], [1, "2724|es", [{ keyword: "guia tv", origin: "site_topic" }], 0, 1]);
+    assert.deepEqual([calls.length, research.market, research.seeds, research.failedCalls, research.rows], [1, "2724|es", [{ keyword: "guia tv", origin: "cluster" }], 0, 1]);
     assert.deepEqual([research.provider, research.skipped], ranked.length ? ["dataforseo", null] : [null, "no_data"]);
   } finally {
     process.env.DATAFORSEO_LOGIN = "test";
