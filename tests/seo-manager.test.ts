@@ -123,7 +123,7 @@ test("data cached before SEO-V2 is still read, under the same keys", async () =>
     await storeProviderCache(ws.tenantId, "dataforseo", "youtube_organic", "2724|es|guia tv", [{ id: "abcdefghijk", title: "Vídeo", channel: "Canal", channelUrl: "" }], { ttlMs: 60_000 });
     const facts = await serpSourceFacts({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es-ES", keyword: "Guia TV", exclude: { domains: [], urls: [] }, max: 3 }, fetchImpl, async () => null);
     assert.deepEqual(facts.map((fact) => fact.sourceUrl), ["https://xataka.com/tv"]);
-    const video = await youtubeVideoFor({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es", keyword: "guia tv", youtube: { enabled: true } as never }, fetchImpl);
+    const video = await youtubeVideoFor({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es", keyword: "guia tv", youtube: { enabled: true, channelUrl: "" } as never }, fetchImpl);
     assert.equal(video?.id, "abcdefghijk");
     assert.equal(calls.length, 0);
   } finally {
@@ -227,7 +227,7 @@ test("a live test needs a known maximum price within the authorized ceiling", as
 test("admin control plane: platform admins only, audited, secrets go in and never come out", async () => {
   const ws = await workspace();
   const email = `${randomUUID().slice(0, 8)}@example.test`;
-  const account = await prisma.studioAccount.create({ data: { email, emailNormalized: email, displayName: "SEO admin", status: "active" } as never });
+  const account = await prisma.studioAccount.create({ data: { email, displayName: "SEO admin", status: "active" } });
   const user = await prisma.studioUser.create({ data: { tenantId: ws.tenantId, accountId: account.id, email, displayName: "SEO admin", status: "active" } });
   const app = Fastify();
   registerStudioRoutes(app);

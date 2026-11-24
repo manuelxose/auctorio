@@ -35,6 +35,7 @@ const REASONS: Record<string, string> = {
   selector: 'app-seo-provider-settings',
   standalone: true,
   imports: [CommonModule, FormsModule],
+  styles: ['.au-row { flex-wrap: wrap; } .au-row__title { min-width: 160px; } .seo-select { width: 200px; }'],
   template: `
     <section class="au-panel au-panel--padded" *ngIf="seo as s">
       <h2 class="au-panel__title">Operating mode</h2>
@@ -48,7 +49,7 @@ const REASONS: Record<string, string> = {
       <div class="au-row" *ngFor="let c of s.capabilities">
         <span class="au-row__title">{{ capabilityLabel(c.id) }}</span>
         <span class="au-badge" [ngClass]="c.provider ? 'au-badge--brand' : 'au-badge--neutral'">{{ c.provider ? providerLabel(c.provider) : reason(c.reason) }}</span>
-        <select class="au-input" *ngIf="s.mode === 'manual'" [ngModel]="s.routing[c.id] ?? ''" (ngModelChange)="route(c.id, $event)" [name]="'route-' + c.id" [attr.aria-label]="'Provider for ' + capabilityLabel(c.id)">
+        <select class="au-input seo-select" *ngIf="s.mode === 'manual'" [ngModel]="s.routing[c.id] ?? ''" (ngModelChange)="route(c.id, $event)" [name]="'route-' + c.id" [attr.aria-label]="'Provider for ' + capabilityLabel(c.id)">
           <option value="">None</option>
           <option *ngFor="let p of supporting(c.id)" [value]="p.id">{{ p.label }}</option>
         </select>
@@ -90,7 +91,7 @@ const REASONS: Record<string, string> = {
 
       <h3 class="au-panel__title au-mt-4 au-mb-2">Live test (paid)</h3>
       <div class="au-row">
-        <select class="au-input" [(ngModel)]="test[p.id].capability" [name]="'tc-' + p.id" [attr.aria-label]="'Capability to test on ' + p.label">
+        <select class="au-input seo-select" [(ngModel)]="test[p.id].capability" [name]="'tc-' + p.id" [attr.aria-label]="'Capability to test on ' + p.label">
           <option *ngFor="let id of capabilityIds" [value]="id">{{ capabilityLabel(id) }}</option>
         </select>
         <input class="au-input" style="width: 90px" [(ngModel)]="test[p.id].locale" [name]="'tl-' + p.id" [attr.aria-label]="'Locale to test on ' + p.label" />

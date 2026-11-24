@@ -90,8 +90,15 @@ async function recordHealth(provider: SeoProvider, data: Prisma.SeoProviderState
 async function callProvider<C extends SeoCapability>(provider: SeoProvider, capability: C, request: SeoRequests[C], scope: SeoScope): Promise<SeoResult<C>> {
   const declaration = provider.capabilities[capability];
   const quote = provider.quote(capability, request);
-  const spend = (costUsd: number) => recordAiSpend({ tenantId: scope.tenantId, siteId: scope.siteId, kind: scope.kind, provider: provider.id, model: scope.resource, costUsd });
   const trace = { tenantId: scope.tenantId, siteId: scope.siteId, provider: provider.id, capability };
+  // A ledger failure must not throw away data already paid for, nor hide the provider's own error.
+  const spend = async (costUsd: number) => {
+    try {
+      await recordAiSpend({ tenantId: scope.tenantId, siteId: scope.siteId, kind: scope.kind, provider: provider.id, model: scope.resource, costUsd });
+    } catch (error) {
+      structuredEvent("seo.spend_not_recorded", { ...trace, costUsd, error: error instanceof Error ? error.message : String(error) }, "error");
+    }
+  };
   try {
     const { data, ...meta } = await provider.run(capability, request, scope.fetchImpl ?? fetch);
     if (meta.billedUsd === null) {
