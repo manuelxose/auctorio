@@ -71,7 +71,8 @@
               "buildTarget": "studio-web:build:production"
             },
             "development": {
-              "buildTarget": "studio-web:build:development"
+              "buildTarget": "studio-web:build:development",
+              "hmr": false
             }
           },
           "defaultConfiguration": "development"

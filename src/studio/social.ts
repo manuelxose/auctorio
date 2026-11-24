@@ -5,10 +5,13 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getTextProvider } from "../infrastructure/ai/text";
 import { writeAudit } from "./audit";
 import { buildAssetPublicUrl } from "./orchestration";
+import { getSiteSocialSettings, nextSocialSlot } from "./social-settings";
+import { renderSlideImages, type SlideText } from "./social-slides";
+import { formatXThread, X_POST_LIMIT, xArticleText, xWeightedLength } from "./social-x";
 
 const prisma = getPrismaClient();
 
-export const X_POST_LIMIT = 280;
+export { X_POST_LIMIT } from "./social-x";
 export const X_THREAD_POST_LIMIT = 280;
 export const INSTAGRAM_CAPTION_LIMIT = 2200;
 
@@ -18,6 +21,7 @@ export type SocialGenerateRequest = {
   channels: SocialChannel[];
   threadLength?: number;
   regenerate?: boolean;
+  instagramFormat?: "instagram_carousel" | "instagram_story";
 };
 
 export type GeneratedSocialPiece = {
@@ -27,6 +31,7 @@ export type GeneratedSocialPiece = {
   title: string | null;
   hashtags: string[];
   mentions: string[];
+  slides?: SlideText[];
 };
 
 // ────────────────────────────────────────────────────────────── Validation
@@ -41,8 +46,8 @@ export function validateSocialPiece(piece: GeneratedSocialPiece): { valid: boole
   if (!piece.body.trim()) {
     errors.push("empty body");
   }
-  if (piece.channel === "x" && piece.body.length > X_POST_LIMIT) {
-    errors.push(`x post exceeds ${X_POST_LIMIT} characters (${piece.body.length})`);
+  if (piece.contentType === "x_post" && xWeightedLength(piece.body) > X_POST_LIMIT) {
+    errors.push(`x post exceeds ${X_POST_LIMIT} characters (${xWeightedLength(piece.body)})`);
   }
   if (piece.channel === "instagram" && piece.body.length > INSTAGRAM_CAPTION_LIMIT) {
     errors.push(`instagram caption exceeds ${INSTAGRAM_CAPTION_LIMIT} characters`);
@@ -73,7 +78,24 @@ type SocialPromptContext = {
   siteName: string;
   language: string;
   articleUrl: string | null;
+  category?: string;
+  brandVoice?: string;
+  threadLength?: number;
 };
+
+const CATEGORY_HINTS: Record<string, string> = {
+  educational: "Educational: teach one clear, practical idea from the article step by step.",
+  philosophical: "Philosophical: a reflective angle that makes the reader rethink the topic.",
+  myths: "Myths vs facts: bust common misconceptions the article clears up.",
+  storytelling: "Storytelling: tell it as a short story with a beginning, tension and payoff.",
+};
+
+/** Deterministic pick so regenerations of one article keep the same angle. */
+export function pickSocialCategory(categories: string[], seed: string): string {
+  if (categories.length === 0) return "educational";
+  const hash = crypto.createHash("sha1").update(seed).digest().readUInt32BE(0);
+  return categories[hash % categories.length];
+}
 
 export function buildSocialPrompt(
   channel: SocialChannel,
@@ -81,36 +103,54 @@ export function buildSocialPrompt(
   context: SocialPromptContext,
 ): { systemPrompt: string; userPrompt: string } {
   const locale = context.language === "en" ? "English" : "Spanish";
+  const voice = context.brandVoice ? `\nBrand voice and tone to respect: ${context.brandVoice}` : "";
+  const slidesShape = `{"caption": string, "hashtags": string[], "slides": [{"headline": string, "body": string}]}`;
+  const slidesTask = [
+    `Article title: ${context.title}`,
+    `Article excerpt: ${context.excerpt}`,
+    `Article: ${context.bodyPlain.slice(0, 2400)}`,
+    ``,
+    `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
+    `Write a carousel of 4-7 slides. Slide 1 is a scroll-stopping headline (max 60 characters) with a short body. Middle slides: headline max 50 characters, body max 180 characters. Do NOT add a closing brand slide; it is added automatically.`,
+  ];
   const systemPrompts: Record<string, string> = {
     x: `You are a social media editor for ${context.siteName}. You write original, conversational X/Twitter copy in ${locale}.
 Rules:
 - Never invent facts, numbers or quotes that are not present in the article.
 - Short, immediate, natural language. Use a hook.
-- Return ONLY valid JSON with the shape {"post": string, "hashtags": string[]}.
-- The post must not exceed 280 characters including the URL placeholder [URL].`,
+- Include at most one relevant hashtag in the copy.
+- Output only the JSON shape requested below. Do not write URLs or post numbering.`,
     instagram: `You are a social media editor for ${context.siteName}. You write engaging Instagram captions in ${locale}.
 Rules:
 - Never invent facts, numbers or quotes that are not present in the article.
 - Hook first, useful body, optional CTA, 4-8 hashtags.
 - Return ONLY valid JSON with the shape {"caption": string, "hashtags": string[]}.
-- The caption must not exceed 2200 characters.`,
+- The caption must not exceed 2200 characters.
+- For carousels return ONLY valid JSON with the shape ${slidesShape}.${voice}`,
+    facebook: `You are a social media editor for ${context.siteName}. You write Facebook Page posts in ${locale}.
+Rules:
+- Never invent facts, numbers or quotes that are not present in the article.
+- Conversational hook, 2-4 short paragraphs, a question to spark comments, 0-3 hashtags.
+- Return ONLY valid JSON with the shape ${slidesShape}.${voice}`,
   };
+  systemPrompts.x += voice;
 
   const userPrompts: Record<string, string> = {
     x_post: [
       `Article title: ${context.title}`,
       `Article excerpt: ${context.excerpt}`,
       `Article summary: ${context.bodyPlain.slice(0, 900)}`,
+      `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
       ``,
-      `Write a single X post that promotes this article. End with "[URL]".`,
+      `Write one X post under 250 characters to leave room for the article link. Return {"post": string, "hashtags": string[]}.`,
     ].join("\n"),
     x_thread: [
       `Article title: ${context.title}`,
       `Article: ${context.bodyPlain.slice(0, 1600)}`,
+      `Angle: ${CATEGORY_HINTS[context.category ?? "educational"] ?? CATEGORY_HINTS.educational}`,
       ``,
-      `Write a thread of 3 posts. Each post must be under 280 characters, be self-contained but ordered, and never invent facts.`,
-      `Return ONLY valid JSON with the shape {"posts": [{"body": string}, {"body": string}, {"body": string}], "hashtags": string[]}.`,
-      `The last post ends with "[URL]".`,
+      `Write a thread of ${context.threadLength ?? 3} posts under 240 characters each. Open with a concrete hook. Develop one idea per post in order and end with a reason to read the article.`,
+      `Return {"posts": [{"body": string}], "hashtags": string[]}.`,
     ].join("\n"),
     instagram_caption: [
       `Article title: ${context.title}`,
@@ -119,6 +159,8 @@ Rules:
       ``,
       `Write an Instagram caption with a hook, a useful summary and a question as CTA. Include 5-7 hashtags inside the JSON hashtags array.`,
     ].join("\n"),
+    instagram_carousel: [...slidesTask, `Caption: hook, useful summary, a question as CTA; 5-7 hashtags in the hashtags array.`].join("\n"),
+    facebook_post: [...slidesTask, `Caption: the Facebook post text (max 1500 characters).`].join("\n"),
     instagram_story: [
       `Article title: ${context.title}`,
       ``,
@@ -169,7 +211,8 @@ export function parseGeneratedSocial(
       const hashtags = Array.isArray(parsed?.hashtags) ? parsed.hashtags.map(String) : [];
       return posts
         .map((raw, index): GeneratedSocialPiece | null => {
-          const body = typeof raw === "object" && raw !== null ? String((raw as Record<string, unknown>).body ?? "").trim() : String(raw).trim();
+          const value = typeof raw === "object" && raw !== null ? (raw as Record<string, unknown>).body : raw;
+          const body = typeof value === "string" ? value.trim() : "";
           return body
             ? {
                 channel: "x",
@@ -206,6 +249,16 @@ export function parseGeneratedSocial(
   }
 
   const caption = typeof parsed?.caption === "string" ? parsed.caption.trim() : output.trim();
+  const slides =
+    contentType === "instagram_carousel" || contentType === "facebook_post"
+      ? (Array.isArray(parsed?.slides) ? parsed.slides : [])
+          .map((raw) => {
+            const slide = (raw ?? {}) as Record<string, unknown>;
+            return { headline: String(slide.headline ?? "").trim(), body: String(slide.body ?? "").trim() };
+          })
+          .filter((slide) => slide.headline)
+          .slice(0, 9)
+      : undefined;
   return caption
     ? [
         {
@@ -215,6 +268,7 @@ export function parseGeneratedSocial(
           title: null,
           hashtags: Array.isArray(parsed?.hashtags) ? parsed.hashtags.map(String) : extractHashtags(caption),
           mentions: [],
+          ...(slides ? { slides } : {}),
         },
       ]
     : [];
@@ -227,25 +281,25 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     where: { id: input.versionId, tenantId },
     include: { project: { include: { site: true } } },
   });
-  if (!version) {
+  if (!version || version.projectId !== input.projectId) {
     throw new Error("version_not_found");
   }
 
-  const requested: Array<{ channel: SocialChannel; contentType: SocialContentType; threadPosition?: number }> = [];
-  for (const channel of input.channels) {
+  const threadLength = input.threadLength ?? 1;
+  if (!Number.isInteger(threadLength) || threadLength < 1 || threadLength > 10) {
+    throw new Error("invalid_x_thread_length");
+  }
+  const requested: Array<{ channel: SocialChannel; contentType: SocialContentType }> = [];
+  for (const channel of new Set(input.channels)) {
     if (channel === "x") {
-      const threadLength = Math.max(1, Math.min(10, input.threadLength ?? 0));
-      if (threadLength <= 1) {
-        requested.push({ channel: "x", contentType: "x_post" });
-      } else {
-        for (let index = 0; index < threadLength; index += 1) {
-          requested.push({ channel: "x", contentType: "x_thread", threadPosition: index });
-        }
-      }
+      requested.push({ channel, contentType: threadLength === 1 ? "x_post" : "x_thread" });
     }
     if (channel === "instagram") {
-      requested.push({ channel: "instagram", contentType: "instagram_caption" });
-      requested.push({ channel: "instagram", contentType: "instagram_story" });
+      const formats = input.instagramFormat ? [input.instagramFormat] : ["instagram_carousel", "instagram_story"] as const;
+      for (const contentType of formats) requested.push({ channel, contentType });
+    }
+    if (channel === "facebook") {
+      requested.push({ channel: "facebook", contentType: "facebook_post" });
     }
   }
 
@@ -253,8 +307,10 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     throw new Error("no_channels_requested");
   }
 
+  const socialContentIds = requested.map(() => crypto.randomUUID());
   const created = await prisma.socialContent.createMany({
-    data: requested.map((piece) => ({
+    data: requested.map((piece, index) => ({
+      id: socialContentIds[index],
       tenantId,
       projectId: version.projectId,
       versionId: version.id,
@@ -266,8 +322,7 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
       mediaAssetIds: Prisma.JsonNull,
       generationStatus: "queued",
       editorialStatus: "draft",
-      threadPosition: piece.threadPosition ?? null,
-      metadata: Prisma.JsonNull,
+      metadata: piece.contentType === "x_thread" ? { threadLength } : Prisma.JsonNull,
     })),
   });
 
@@ -295,10 +350,11 @@ export async function createSocialGenerationJobs(tenantId: string, input: Social
     operationId: operation.id,
     projectId: version.projectId,
     versionId: version.id,
-    threadLength: input.threadLength ?? 1,
+    threadLength,
+    socialContentIds,
   });
 
-  return { jobId, socialContentIds: [] };
+  return { jobId, socialContentIds };
 }
 
 export async function regenerateSocial(tenantId: string, socialContentId: string): Promise<{ jobId: string } | null> {
@@ -340,6 +396,7 @@ export async function updateSocialContent(
   socialContentId: string,
   input: {
     body?: string;
+    title?: string;
     hashtags?: string[];
     editorialStatus?: SocialEditorialStatus;
     mediaAssetIds?: string[];
@@ -350,14 +407,34 @@ export async function updateSocialContent(
     return null;
   }
 
+  if (input.title !== undefined && (!input.title.trim() || input.title.trim().length > 200)) {
+    throw new Error("El título debe tener entre 1 y 200 caracteres.");
+  }
+  if (input.body !== undefined && social.channel === "instagram" && input.body.trim().length > INSTAGRAM_CAPTION_LIMIT) {
+    throw new Error("El texto supera el límite de 2200 caracteres.");
+  }
+  if (social.channel === "x" && (input.body !== undefined || input.editorialStatus === "approved")) {
+    const body = (input.body ?? social.body).trim();
+    if (input.editorialStatus === "approved" && social.generationStatus !== "done") {
+      throw new Error("Espera a que termine la generación para aprobar el post.");
+    }
+    if (!body) throw new Error("El texto de X no puede estar vacío.");
+    if (social.contentType === "x_thread" && social.threadPosition === null) {
+      if (formatXThread(body).length < 2) throw new Error("Separa al menos dos posts con una línea en blanco.");
+    } else if (xWeightedLength(body) > X_POST_LIMIT) {
+      throw new Error("El texto del post de X supera el límite de 280 caracteres.");
+    }
+  }
+
   const updated = await prisma.socialContent.update({
     where: { id: social.id },
     data: {
       body: input.body?.trim() ?? undefined,
+      title: input.title?.trim(),
       hashtags: input.hashtags === undefined ? undefined : input.hashtags.length ? (input.hashtags as Prisma.InputJsonValue) : Prisma.JsonNull,
       editorialStatus: input.editorialStatus,
       mediaAssetIds: input.mediaAssetIds === undefined ? undefined : input.mediaAssetIds.length ? (input.mediaAssetIds as Prisma.InputJsonValue) : Prisma.JsonNull,
-      characterCount: input.body ? input.body.trim().length : undefined,
+      characterCount: input.body === undefined ? undefined : social.channel === "x" ? xWeightedLength(input.body.trim()) : input.body.trim().length,
     },
   });
 
@@ -370,6 +447,124 @@ export async function updateSocialContent(
   });
 
   return updated;
+}
+
+export async function duplicateSocialContent(tenantId: string, id: string) {
+  const source = await prisma.socialContent.findFirst({ where: { id, tenantId }, include: { project: { select: { title: true } } } });
+  if (!source) return null;
+  if (source.generationStatus !== "done" || source.threadPosition !== null) {
+    throw new Error("Solo se pueden duplicar publicaciones completas.");
+  }
+  const { projectId, versionId, channel, contentType, body, title, hashtags, mentions, mediaAssetIds,
+    characterCount, metadata, promptPresetVersionId } = source;
+  return prisma.socialContent.create({ data: {
+    tenantId, projectId, versionId, channel, contentType, body, characterCount, promptPresetVersionId,
+    title: `${(title || source.project.title).slice(0, 192)} (copia)`,
+    hashtags: hashtags ?? Prisma.JsonNull, mentions: mentions ?? Prisma.JsonNull,
+    mediaAssetIds: mediaAssetIds ?? Prisma.JsonNull, metadata: metadata ?? Prisma.JsonNull,
+    generationStatus: "done", editorialStatus: "draft",
+  } });
+}
+
+export async function deleteSocialDraft(tenantId: string, id: string) {
+  return prisma.$transaction(async (tx) => {
+    const result = await tx.socialContent.deleteMany({ where: {
+      id, tenantId, threadPosition: null, editorialStatus: { in: ["draft", "rejected"] },
+      generationStatus: { in: ["done", "failed"] }, publications: { none: {} },
+    } });
+    if (result.count) {
+      await writeAudit({ tenantId, action: "social.deleted", entityType: "social_content", entityId: id, actorType: "user" }, tx);
+    }
+    return result.count > 0;
+  }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+}
+
+export async function appendSocialSlide(tenantId: string, id: string, slide: SlideText) {
+  const post = await prisma.socialContent.findFirst({
+    where: { id, tenantId, contentType: "instagram_carousel", generationStatus: "done", editorialStatus: "draft", publications: { none: {} } },
+    include: { project: { include: { site: true } }, version: { select: { contentImage: { select: { storagePath: true } } } } },
+  });
+  if (!post) return null;
+  const metadata = post.metadata as { slides?: SlideText[] } | null;
+  const slides = Array.isArray(metadata?.slides) ? [...metadata.slides] : [];
+  if (slides.length >= 10) throw new Error("El carrusel admite hasta 10 diapositivas.");
+  slides.splice(Math.max(0, slides.length - 1), 0, slide);
+  const site = post.project.site;
+  const settings = await getSiteSocialSettings(tenantId, site.id);
+  const rendered = await renderSlideImages({
+    tenantId, socialContentId: crypto.randomUUID(), slides,
+    style: {
+      fontFamily: settings.fontFamily, highlightStyle: settings.highlightStyle, imageStyle: settings.imageStyle,
+      showBrandMark: settings.showBrandMark, brandName: site.name, accent: brandAccent(site.brandVoice),
+    },
+    backgroundStoragePath: post.version.contentImage?.storagePath,
+  });
+  const result = await prisma.socialContent.updateMany({
+    where: { id, tenantId, updatedAt: post.updatedAt, editorialStatus: "draft", publications: { none: {} } },
+    data: {
+      metadata: { ...metadata, slides: slides.map(({ headline, body }, index) => ({ headline, body, ...rendered[index] })) },
+      mediaAssetIds: rendered.map(({ storagePath }) => storagePath),
+    },
+  });
+  if (!result.count) throw new Error("La publicación cambió. Vuelve a cargarla e inténtalo de nuevo.");
+  return true;
+}
+
+/**
+ * An approved post gets a delivery record at the site's next slot: `scheduled`
+ * (the publication scheduler fires it), or `ready` in manual mode (a human posts it).
+ * Thread replies ride on their head post, so only position 0 is scheduled.
+ */
+export async function scheduleApprovedSocial(tenantId: string, socialContentId: string, now: Date = new Date(), scheduledFor?: Date) {
+  const social = await prisma.socialContent.findFirst({
+    where: { id: socialContentId, tenantId, editorialStatus: "approved", generationStatus: "done", OR: [{ threadPosition: null }, { threadPosition: 0 }] },
+    include: { project: { select: { siteId: true } } },
+  });
+  if (!social) return null;
+  const siteId = social.project.siteId;
+  const settings = await getSiteSocialSettings(tenantId, siteId);
+  const account = await prisma.publishingAccount.findFirst({
+    where: { tenantId, platform: social.channel, enabled: true, OR: [{ siteId }, { siteId: null }] },
+    orderBy: [{ siteId: { sort: "desc", nulls: "last" } }, { createdAt: "asc" }],
+    select: { id: true },
+  });
+  // Without an account the scheduler could only fail; manual posting needs none.
+  if (!account && (scheduledFor || settings.workflow !== "manual")) return null;
+  const { createPublication, updatePublicationSchedule } = await import("./publication");
+  const publication = await createPublication({
+    tenantId,
+    projectId: social.projectId,
+    versionId: social.versionId,
+    channel: social.channel,
+    accountId: account?.id ?? null,
+    siteId,
+    socialContentId: social.id,
+    scheduledFor: scheduledFor ?? nextSocialSlot(settings, now),
+    ...(!scheduledFor && settings.workflow === "manual" ? { status: "ready" as const } : {}),
+  });
+  if (!scheduledFor) return publication;
+  if (!["draft", "ready", "scheduled", "failed", "canceled"].includes(publication.status)) {
+    throw new Error("No se puede reprogramar la publicación en su estado actual.");
+  }
+  if (publication.status === "scheduled" && publication.scheduleLocked && publication.accountId &&
+      publication.scheduledFor?.getTime() === scheduledFor.getTime()) return publication;
+  return updatePublicationSchedule(tenantId, publication.id, { scheduledFor, accountId: publication.accountId ?? account?.id });
+}
+
+export async function listSiteSocialContent(tenantId: string, siteId: string, channel?: SocialChannel, postId?: string | null) {
+  const items = await prisma.socialContent.findMany({
+    where: { tenantId, project: { siteId }, OR: [{ threadPosition: null }, { threadPosition: 0 }], ...(channel ? { channel } : {}), ...(postId ? { id: postId } : {}) },
+    include: {
+      project: { select: { title: true } },
+      publications: { orderBy: { createdAt: "desc" }, take: 1, select: {
+        id: true, status: true, scheduledFor: true, externalUrl: true,
+        account: { select: { displayName: true } },
+      } },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+  return items.map(({ project, publications, ...item }) => ({ ...item, projectTitle: project.title, publication: publications[0] ?? null }));
 }
 
 export async function listSocialContent(tenantId: string, input: { projectId?: string; versionId?: string; channel?: SocialChannel }) {
@@ -392,6 +587,7 @@ export type SocialGenerationJobData = {
   projectId: string;
   versionId: string;
   threadLength?: number;
+  socialContentIds?: string[];
   regenerateIds?: string[];
 };
 
@@ -410,7 +606,7 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
       versionId: version.id,
       ...(data.regenerateIds && data.regenerateIds.length > 0
         ? { id: { in: data.regenerateIds } }
-        : { generationStatus: "queued" }),
+        : { generationStatus: "queued", ...(data.socialContentIds ? { id: { in: data.socialContentIds } } : {}) }),
     },
     orderBy: [{ channel: "asc" }, { createdAt: "asc" }],
   });
@@ -419,16 +615,32 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
     return { generated: 0 };
   }
 
+  const site = version.project.site;
+  const settings = await getSiteSocialSettings(data.tenantId, site.id);
+  const intelligence = await prisma.siteIntelligenceProfile.findFirst({ where: { siteId: site.id }, select: { editorialTone: true } });
+  const brandVoice = [site.brandVoice ? JSON.stringify(site.brandVoice).slice(0, 600) : "", intelligence?.editorialTone ?? ""].filter(Boolean).join(" | ");
+  const cover = await prisma.contentVersion.findFirst({
+    where: { id: version.id },
+    select: { contentImage: { select: { storagePath: true } } },
+  });
   const context: SocialPromptContext = {
+    category: pickSocialCategory(settings.categories, version.id),
+    brandVoice: brandVoice || undefined,
     title: version.title || version.project.title,
     excerpt: version.excerpt || "",
     bodyPlain: toPlainText(version.bodyHtml).slice(0, 4000),
     siteName: version.project.site.name,
     language: version.project.primaryLanguage,
-    articleUrl: null,
+    articleUrl: site.baseUrl ?? null,
   };
 
   const provider = getTextProvider("social");
+  const [articleUrl, xImageUrl] = pending.some((social) => social.channel === "x")
+    ? await Promise.all([
+        findPublishedArticleUrl(data.tenantId, version.projectId),
+        socialAssetUrlForVersion(version.id, data.tenantId),
+      ])
+    : [null, null];
   let generated = 0;
 
   for (const social of pending) {
@@ -437,48 +649,91 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
       data: { generationStatus: "processing" },
     });
 
+    const savedLength = (social.metadata as { threadLength?: number } | null)?.threadLength;
+    const threadLength = data.threadLength ?? savedLength ?? 3;
     try {
-      const prompt = buildSocialPrompt(social.channel, social.contentType, context);
+      const prompt = buildSocialPrompt(social.channel, social.contentType, { ...context, threadLength });
       const result = await provider.generate({
         prompt: prompt.userPrompt,
         systemPrompt: prompt.systemPrompt,
         temperature: 0.7,
-        maxTokens: 600,
+        maxTokens: social.contentType === "instagram_carousel" || social.contentType === "facebook_post" || social.contentType === "x_thread" ? 1800 : 600,
       });
 
       const pieces = parseGeneratedSocial(social.channel, social.contentType, result.output);
-      const piece = pieces[0];
+      const piece = pieces[social.threadPosition ?? 0];
       if (!piece) {
         throw new Error("social_parse_failed");
+      }
+      if (piece.contentType === "x_thread" && social.threadPosition === null) {
+        if (pieces.length < 2) throw new Error("x_thread_requires_two_posts");
+        piece.body = xArticleText(pieces.map(({ body }) => body).join("\n\n"), articleUrl);
+        piece.hashtags = pieces.at(-1)?.hashtags ?? [];
+        formatXThread(piece.body);
+      } else if (piece.contentType === "x_post") {
+        piece.body = xArticleText(piece.body, articleUrl);
       }
       const validation = validateSocialPiece(piece);
       if (!validation.valid) {
         throw new Error(`social_validation_failed: ${validation.errors.join("; ")}`);
       }
 
+      let slides: Array<SlideText & { imageUrl: string | null; storagePath: string }> | undefined;
+      if (piece.slides) {
+        if (piece.slides.length < 1) throw new Error("social_slides_missing");
+        // Closing slide is ours, not the model's: brand + article link.
+        const all = [...piece.slides, { headline: site.name, body: context.articleUrl ?? "" }];
+        const rendered = await renderSlideImages({
+          tenantId: data.tenantId,
+          socialContentId: social.id,
+          slides: all,
+          style: {
+            fontFamily: settings.fontFamily,
+            highlightStyle: settings.highlightStyle,
+            imageStyle: settings.imageStyle,
+            showBrandMark: settings.showBrandMark,
+            brandName: site.name,
+            accent: brandAccent(site.brandVoice),
+          },
+          backgroundStoragePath: cover?.contentImage?.storagePath ?? null,
+        });
+        slides = all.map((slide, index) => ({ ...slide, ...rendered[index] }));
+      }
+      // approve/manual leave a draft waiting for a human; auto approves straight away.
+      const editorialStatus = settings.workflow === "auto" ? "approved" : social.editorialStatus === "rejected" ? "draft" : social.editorialStatus;
       await prisma.socialContent.update({
         where: { id: social.id },
         data: {
           body: piece.body,
           hashtags: piece.hashtags.length ? (piece.hashtags as Prisma.InputJsonValue) : Prisma.JsonNull,
           mentions: piece.mentions.length ? (piece.mentions as Prisma.InputJsonValue) : Prisma.JsonNull,
-          characterCount: piece.body.length,
+          characterCount: piece.channel === "x" ? xWeightedLength(piece.body) : piece.body.length,
           generationStatus: "done",
-          editorialStatus: social.editorialStatus === "rejected" ? "draft" : social.editorialStatus,
+          editorialStatus,
+          mediaAssetIds: slides ? (slides.map((slide) => slide.storagePath) as Prisma.InputJsonValue) : Prisma.JsonNull,
           metadata: {
             provider: result.provider,
             model: result.model,
             generatedAt: new Date().toISOString(),
+            category: context.category,
+            workflow: settings.workflow,
+            ...(piece.contentType === "x_thread" ? { threadLength } : {}),
+            ...(piece.channel === "x" && xImageUrl ? { imageUrl: xImageUrl } : {}),
+            ...(slides ? { slides } : {}),
           } as Prisma.InputJsonObject,
         },
       });
+      if (editorialStatus === "approved") await scheduleApprovedSocial(data.tenantId, social.id);
       generated += 1;
     } catch (error) {
       await prisma.socialContent.update({
         where: { id: social.id },
         data: {
           generationStatus: "failed",
-          metadata: { error: error instanceof Error ? error.message : String(error) } as Prisma.InputJsonObject,
+          metadata: {
+            error: error instanceof Error ? error.message : String(error),
+            ...(social.contentType === "x_thread" ? { threadLength } : {}),
+          },
         },
       });
     }
@@ -494,6 +749,21 @@ export async function runSocialGenerationJob(data: SocialGenerationJobData) {
   });
 
   return { generated };
+}
+
+function brandAccent(brandVoice: unknown): string {
+  const value = (brandVoice as { primaryColor?: unknown; accentColor?: unknown } | null) ?? {};
+  const color = String(value.accentColor ?? value.primaryColor ?? "");
+  return /^#[0-9a-f]{3,8}$/i.test(color) ? color : "#f5b301";
+}
+
+export async function findPublishedArticleUrl(tenantId: string, projectId: string): Promise<string | null> {
+  const article = await prisma.publication.findFirst({
+    where: { tenantId, projectId, channel: "website", status: "published", externalUrl: { not: null } },
+    orderBy: { publishedAt: "desc" },
+    select: { externalUrl: true },
+  });
+  return article?.externalUrl ?? null;
 }
 
 export async function socialAssetUrlForVersion(

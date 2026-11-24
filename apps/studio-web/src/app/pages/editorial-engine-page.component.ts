@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnDestroy, OnInit, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { StudioApiService } from '../services/studio-api.service';
 import { ToastService } from '../services/toast.service';
@@ -44,55 +44,91 @@ const OUTCOME_LABELS: Record<string, string> = {
   standalone: true,
   imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent],
   template: `
-    <section class="au-page">
+    <section class="au-page advanced-page advanced-review">
       <header class="au-page__header">
         <div>
-          <h1 class="au-page__title">Review queue</h1>
+          <p class="au-page__eyebrow">Auctorio / Herramientas avanzadas</p>
+          <h1 class="au-page__title">Cola de revisión editorial</h1>
           <p class="au-page__subtitle">
-            Articles autopilot wrote from your stories. Check the evidence and QA, then approve or reject. To start one, open a story in the Inbox.
+            Decisiones sobre contenido ya generado, con hechos, procedencia, calidad y bloqueos.
           </p>
         </div>
-        <a class="au-btn au-btn--secondary" routerLink="/studio/inbox">
-          <app-icon name="inbox"></app-icon>
-          Open Inbox
-        </a>
+        <div class="au-page__actions">
+          <a class="au-btn au-btn--secondary au-btn--sm" routerLink="/studio/content">Ver editor de artículos</a>
+          <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="loadGenerations()" [disabled]="loadingGenerations"><app-icon name="refresh"></app-icon>Actualizar revisiones</button>
+        </div>
       </header>
 
-      <div class="au-toolbar">
-        <select class="au-select au-filter-select" [(ngModel)]="generationFilters.outcome" (ngModelChange)="loadGenerations()" aria-label="Filter by outcome">
-          <option value="review">Needs review</option>
-          <option value="hold">On hold</option>
-          <option value="auto_publish">Auto-published</option>
-          <option value="reject">Rejected by QA</option>
-          <option value="">All</option>
-        </select>
-        <select class="au-select au-filter-select" [(ngModel)]="generationFilters.decision" (ngModelChange)="loadGenerations()" aria-label="Filter by decision">
-          <option value="">New and updates</option>
-          <option value="create_new">New articles</option>
-          <option value="update_existing">Updates to existing</option>
-          <option value="skip">Skipped</option>
-        </select>
-        <button class="au-btn au-btn--ghost" (click)="loadGenerations()">
-          <app-icon name="refresh"></app-icon>
-          Refresh
-        </button>
-      </div>
+      <p class="workspace-banner" role="note">
+        <app-icon name="info"></app-icon>
+        <span>Una propuesta aprobada en el plan aún requiere la revisión editorial y los controles de publicación del artículo.</span>
+      </p>
 
-      <!-- Generations list -->
-      <ng-container>
+      <dl class="advanced-kpis" aria-label="Resumen de revisión" *ngIf="!loadingGenerations">
+        <div class="au-stat">
+          <dt class="au-stat__label">Generaciones</dt>
+          <dd class="au-stat__value">{{ generationTotal }}</dd>
+          <dd class="au-stat__note">Con los filtros actuales</dd>
+        </div>
+        <div class="au-stat">
+          <dt class="au-stat__label">Pendientes</dt>
+          <dd class="au-stat__value">{{ pendingOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+        <div class="au-stat advanced-stat--good">
+          <dt class="au-stat__label">Aprobadas</dt>
+          <dd class="au-stat__value">{{ approvedOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+        <div class="au-stat advanced-stat--warning">
+          <dt class="au-stat__label">Rechazadas por QA</dt>
+          <dd class="au-stat__value">{{ rejectedByQaOnPage }}</dd>
+          <dd class="au-stat__note">En esta página</dd>
+        </div>
+      </dl>
+
+      <section class="au-panel au-panel--padded" aria-labelledby="review-list">
+        <div class="advanced-card-header">
+          <h2 class="au-panel__title" id="review-list">{{ reviewTab === 'history' ? 'Historial de revisión' : 'Pendientes de revisión' }}</h2>
+          <p>{{ reviewTab === 'history' ? 'Generaciones con una decisión editorial.' : 'Generaciones que requieren una decisión editorial.' }}</p>
+        </div>
+        <div class="au-toolbar advanced-filter-bar" role="group" aria-label="Review queue filters">
+          <select class="au-select au-filter-select" [(ngModel)]="generationFilters.outcome" (ngModelChange)="generationPage = 1; loadGenerations()" aria-label="Filter by outcome">
+            <option value="review">Pendientes de revisión</option>
+            <option value="hold">En espera</option>
+            <option value="auto_publish">Publicación automática</option>
+            <option value="reject">Rechazadas por QA</option>
+            <option value="">Todas</option>
+          </select>
+          <select class="au-select au-filter-select" [(ngModel)]="generationFilters.decision" (ngModelChange)="generationPage = 1; loadGenerations()" aria-label="Filter by decision">
+            <option value="">Nuevos y actualizaciones</option>
+            <option value="create_new">Artículos nuevos</option>
+            <option value="update_existing">Actualizar artículos</option>
+            <option value="skip">Omitidas</option>
+          </select>
+          <button class="au-btn au-btn--ghost" (click)="loadGenerations()">
+            <app-icon name="refresh"></app-icon>
+            Refresh
+          </button>
+        </div>
+
         <app-empty-state
           *ngIf="generations.length === 0 && !loadingGenerations"
-          icon="template"
-          [title]="generationFilters.outcome === 'review' ? 'Nothing waiting for review' : 'No articles match'"
-          message="Open a story in the Inbox and choose Generate article; the draft lands here when it needs a human."
+          icon="content"
+          [title]="generationFilters.outcome === 'review' ? 'No hay contenido pendiente de revisión' : 'Ningún artículo coincide'"
+          text="Los borradores que requieren aprobación aparecen aquí."
         ></app-empty-state>
         <div class="au-feed">
           <article
-            class="au-feed__item au-feed__item--interactive"
+            class="au-feed__item au-feed__item--interactive advanced-review-row"
             *ngFor="let generation of generations"
+            tabindex="0" role="button"
+            (keydown.enter)="openGeneration(generation)"
+            (keydown.space)="$event.preventDefault(); openGeneration(generation)"
             (click)="openGeneration(generation)"
             [attr.aria-label]="'Open generation ' + (generation.title ?? generation.id)"
           >
+            <span class="advanced-row-icon"><app-icon name="check"></app-icon></span>
             <div class="au-feed__body">
               <div class="au-feed__meta">
                 <span class="au-badge" [ngClass]="statusBadgeClass(generation)">{{ generation.status }}</span>
@@ -109,11 +145,20 @@ const OUTCOME_LABELS: Record<string, string> = {
           </article>
         </div>
         <div class="au-pagination" *ngIf="generationTotal > generationPageSize">
-          <button class="au-btn au-btn--ghost" [disabled]="generationPage <= 1" (click)="generationPage = generationPage - 1; loadGenerations()">Previous</button>
+          <button class="au-btn au-btn--ghost" [disabled]="generationPage <= 1" (click)="generationPage = generationPage - 1; loadGenerations()">Anterior</button>
           <span>Page {{ generationPage }}</span>
-          <button class="au-btn au-btn--ghost" [disabled]="generationPage * generationPageSize >= generationTotal" (click)="generationPage = generationPage + 1; loadGenerations()">Next</button>
+          <button class="au-btn au-btn--ghost" [disabled]="generationPage * generationPageSize >= generationTotal" (click)="generationPage = generationPage + 1; loadGenerations()">Siguiente</button>
         </div>
-      </ng-container>
+      </section>
+
+      <section class="au-panel au-panel--padded advanced-followup" aria-labelledby="review-rules">
+        <div class="advanced-card-header"><h2 class="au-panel__title" id="review-rules">Reglas de revisión</h2><p>Revisa los requisitos de publicación desde el detalle de cada generación.</p></div>
+        <div class="advanced-grid-3">
+          <div class="advanced-callout"><strong>Hechos y procedencia</strong><p>Comprueba las fuentes y su uso autorizado.</p></div>
+          <div class="advanced-callout"><strong>Calidad editorial</strong><p>Consulta el informe de QA y los bloqueos.</p></div>
+          <div class="advanced-callout"><strong>Decisión</strong><p>El historial conserva las revisiones anteriores.</p></div>
+        </div>
+      </section>
 
       <!-- Detail drawer -->
       <div class="au-story-drawer" *ngIf="detail" role="dialog" aria-modal="true" aria-label="Generation review">
@@ -351,11 +396,13 @@ const OUTCOME_LABELS: Record<string, string> = {
   ],
 })
 export class EditorialEnginePageComponent implements OnInit, OnDestroy {
+  private readonly route = inject(ActivatedRoute);
   private readonly api = inject(StudioApiService);
   private readonly toast = inject(ToastService);
   private readonly sanitizer = inject(DomSanitizer);
   private readonly appContext = inject(AppContextService);
   private subscription: Subscription | null = null;
+  private loadVersion = 0;
 
   readonly USAGE_LABELS = USAGE_LABELS;
   readonly DECISION_LABELS = DECISION_LABELS;
@@ -363,10 +410,20 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   Math = Math;
 
   generations: StudioGenerationSummary[] = [];
+
+  get pendingOnPage(): number {
+    return this.generations.filter((generation) => !['approved', 'rejected'].includes(generation.status)).length;
+  }
+  get approvedOnPage(): number {
+    return this.generations.filter((generation) => generation.status === 'approved').length;
+  }
+  get rejectedByQaOnPage(): number {
+    return this.generations.filter((generation) => generation.publicationOutcome === 'reject').length;
+  }
+  reviewTab: 'pending' | 'history' = 'pending';
   generationTotal = 0;
   generationPage = 1;
-  // shortcut: the API cannot filter by outcome, so filters run on the 100 most recent; add server-side filters if the queue outgrows that.
-  generationPageSize = 100;
+  generationPageSize = 20;
   generationFilters = { decision: '', outcome: 'review', siteId: this.appContext.activeSite()?.id ?? '' };
   loadingGenerations = false;
 
@@ -376,7 +433,12 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   safeBody: SafeHtml = '';
 
   ngOnInit(): void {
-    this.loadGenerations();
+    this.subscription = this.route.queryParamMap.subscribe((params) => {
+      this.reviewTab = params.get('tab') === 'history' ? 'history' : 'pending';
+      this.generationFilters.outcome = this.reviewTab === 'history' ? '' : 'review';
+      this.generationPage = 1;
+      this.loadGenerations();
+    });
   }
 
   ngOnDestroy(): void {
@@ -384,28 +446,24 @@ export class EditorialEnginePageComponent implements OnInit, OnDestroy {
   }
 
   loadGenerations(): void {
+    const version = ++this.loadVersion;
     this.loadingGenerations = true;
     this.api
       .listGenerations(this.generationPage, this.generationPageSize, {
         siteId: this.generationFilters.siteId || undefined,
+        review: this.reviewTab,
+        decision: this.generationFilters.decision || undefined,
+        outcome: this.generationFilters.outcome || undefined,
       })
       .subscribe({
         next: (response) => {
-          const outcomeFilter = this.generationFilters.outcome;
-          const decisionFilter = this.generationFilters.decision;
+          if (version !== this.loadVersion) return;
           this.generationTotal = response.total;
-          this.generations = response.items.filter((generation) => {
-            if (decisionFilter && generation.decision !== decisionFilter) {
-              return false;
-            }
-            if (outcomeFilter && generation.publicationOutcome !== outcomeFilter) {
-              return false;
-            }
-            return true;
-          });
+          this.generations = response.items;
           this.loadingGenerations = false;
         },
         error: () => {
+          if (version !== this.loadVersion) return;
           this.loadingGenerations = false;
           this.toast.error('Could not load generations');
         },

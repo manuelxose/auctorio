@@ -4,7 +4,9 @@ import Fastify from "fastify";
 import { getPrismaClient } from "../src/infrastructure/db/prisma";
 import { sha256 } from "../src/shared/utils/hash";
 import { registerStudioRoutes } from "../src/studio/routes";
-import { createInstallation, storeInstallationCredentials, transitionInstallation } from "../src/studio/connectors/installation";
+import { activateWebsiteInstallation, createInstallation, isWebsiteDestinationDisconnected, storeInstallationCredentials, transitionInstallation } from "../src/studio/connectors/installation";
+import { startWebsiteAttempt } from "../src/studio/publication";
+import { processConnectionJob } from "../src/infrastructure/workers/worker-connection";
 import { createOperation } from "../src/studio/operations";
 import { notify } from "../src/studio/notifications";
 
@@ -93,13 +95,75 @@ test("installation detail never exposes credential material", async () => {
   const installation = await createInstallation({ tenantId: fixture.tenantId, siteId: null, kind: "website", provider: "generic_rest" });
   await storeInstallationCredentials(fixture.tenantId, installation.id, {
     secrets: { apiToken: "do-not-leak-this-token" },
-    config: { baseUrl: "https://example.com" },
+    config: { baseUrl: "https://example.com/?key=private-query-value", apiToken: "private-config-value", feedKeyHash: "private-hash" },
   });
   const response = await server.inject({ method: "GET", url: `/v2/connector-installations/${installation.id}` });
   assert.equal(response.statusCode, 200);
   const raw = response.body;
   assert.ok(!raw.includes("do-not-leak-this-token"), "credential material never returned");
   assert.ok(!raw.includes("credentialsCiphertext"));
+  assert.ok(!raw.includes("private-query-value") && !raw.includes("private-config-value") && !raw.includes("private-hash"));
+  const list = await server.inject({ method: "GET", url: "/v2/connector-installations" });
+  assert.equal(list.statusCode, 200);
+  assert.equal(list.json().items.find((item: { id: string }) => item.id === installation.id).verificationStage, "stored");
+  assert.ok(!list.body.includes("private-query-value") && !list.body.includes("private-hash"));
+});
+
+test("disconnecting an active install stops new deliveries, including the site's legacy fallback", async (t) => {
+  const { tenantId } = await createFixture();
+  const { tenantId: otherTenant } = await createFixture();
+  const api = buildServer(tenantId);
+  const foreign = buildServer(otherTenant);
+  t.after(async () => {
+    await Promise.all([api.close(), foreign.close()]);
+    await prisma.publication.deleteMany({ where: { tenantId } });
+    await prisma.contentVersion.deleteMany({ where: { tenantId } });
+    await prisma.contentProject.deleteMany({ where: { tenantId } });
+    await prisma.connectorInstallation.deleteMany({ where: { tenantId } });
+    await prisma.site.deleteMany({ where: { tenantId } });
+    await prisma.tenant.deleteMany({ where: { id: { in: [tenantId, otherTenant] } } });
+  });
+  const site = await prisma.site.create({
+    data: { tenantId, name: "Website test", key: "website", type: "webhook", baseUrl: "https://example.test", publishingCredentialsRef: "TEST_ONLY_REFERENCE" },
+  });
+  const install = await prisma.connectorInstallation.create({
+    data: { tenantId, siteId: site.id, kind: "website", provider: "generic_webhook", state: "active", verifiedAt: new Date() },
+  });
+  const older = await prisma.connectorInstallation.create({
+    data: { tenantId, kind: "website", provider: "generic_webhook", state: "active", config: { baseUrl: "https://www.example.test" } },
+  });
+  const url = `/v2/connector-installations/${install.id}/disconnect`;
+  assert.equal((await foreign.inject({ method: "POST", url })).statusCode, 404);
+  const response = await api.inject({ method: "POST", url });
+  assert.equal(response.statusCode, 200, response.body);
+  assert.equal(response.json().state, "disabled");
+  assert.equal((await api.inject({ method: "POST", url })).statusCode, 200);
+  assert.equal((await prisma.connectorInstallation.findUniqueOrThrow({ where: { id: older.id } })).state, "disabled");
+  assert.equal(await isWebsiteDestinationDisconnected(tenantId, site.id), true);
+
+  const project = await prisma.contentProject.create({ data: { tenantId, siteId: site.id, title: "Test", brief: "Test", goal: "article" } });
+  const version = await prisma.contentVersion.create({ data: { tenantId, projectId: project.id, versionNumber: 1 } });
+  const delivery = await prisma.publication.create({ data: { tenantId, siteId: site.id, projectId: project.id, versionId: version.id, channel: "website" } });
+  await assert.rejects(startWebsiteAttempt(delivery.id, { requestedBy: "test" }), /website_destination_disconnected/);
+  assert.equal(await prisma.publicationAttempt.count({ where: { publicationId: delivery.id } }), 0);
+
+  const replacement = await prisma.connectorInstallation.create({ data: { tenantId, siteId: site.id, kind: "website", provider: "generic_rest", state: "ready", verifiedAt: new Date() } });
+  assert.equal(await isWebsiteDestinationDisconnected(tenantId, site.id), true, "setup must finish before delivery resumes");
+  await storeInstallationCredentials(tenantId, replacement.id, { secrets: { apiToken: "new-test-token" }, config: { baseUrl: site.baseUrl } });
+  const activation = { tenantId, siteId: site.id, installationId: replacement.id, displayName: site.name, userId: null, transport: { type: "generic_rest" as const, baseUrl: "https://example.test" } };
+  await assert.rejects(activateWebsiteInstallation(activation), /installation_not_verified/);
+  await prisma.connectorInstallation.update({ where: { id: replacement.id }, data: { state: "ready", verifiedAt: new Date() } });
+  await activateWebsiteInstallation(activation);
+  assert.equal((await prisma.site.findUniqueOrThrow({ where: { id: site.id } })).type, "generic_rest");
+  assert.equal(await isWebsiteDestinationDisconnected(tenantId, site.id), false);
+
+  const operation = await createOperation({ tenantId, siteId: site.id, type: "connection_verification", entityType: "connector_installation", entityId: replacement.id });
+  await processConnectionJob({ kind: "verify", tenantId, siteId: site.id, installationId: replacement.id, operationId: operation.id, recheck: true }, {
+    discoverWebsite: async () => assert.fail("should not discover"),
+    verifyWebsiteConnector: async () => ({ verified: true, reversible: true, summary: "checked", probes: [] }),
+  });
+  assert.equal((await prisma.operation.findUniqueOrThrow({ where: { id: operation.id } })).status, "succeeded");
+  assert.equal((await prisma.connectorInstallation.findUniqueOrThrow({ where: { id: replacement.id } })).state, "active");
 });
 
 test("invalid state transitions return conflict", async () => {

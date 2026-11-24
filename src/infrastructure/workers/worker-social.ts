@@ -1,10 +1,11 @@
 import { withAiTenant } from "../ai/ai-settings";
-import { Worker } from "bullmq";
+import { UnrecoverableError, Worker } from "bullmq";
 import { getNumberEnv } from "../../shared/utils/env";
 import { getPrismaClient } from "../db/prisma";
 import { QUEUE_NAMES } from "../queue/queues";
 import { getRedisConnectionOptions } from "../queue/redis";
-import { runSocialGenerationJob, type SocialGenerationJobData } from "../../studio/social";
+import { findPublishedArticleUrl, runSocialGenerationJob, type SocialGenerationJobData } from "../../studio/social";
+import { formatXThread, xArticleText } from "../../studio/social-x";
 import { failAttempt, startAttempt, succeedAttempt } from "../../studio/publication";
 import { buildDryRunResult, dryRunGate, getSocialPublisher, readSocialCredentials } from "../../studio/social-publishers";
 import { socialAssetUrlForVersion } from "../../studio/social";
@@ -12,7 +13,7 @@ import { writeAudit } from "../../studio/audit";
 import { structuredEvent } from "../../shared/utils/logger";
 import { completeOperationForJob, failOperationForJob } from "./operation-hooks";
 import { bullWorkerOptions, registerBullWorkerShutdown } from "./worker-runtime";
-import { getSocialIntegrationProvider, type SocialPublishInput } from "../../studio/social-provider";
+import { getSocialIntegrationProvider, validateXPayload, type SocialPublishInput } from "../../studio/social-provider";
 import { resolveAccountCredentials, runConnectionHealthCheck } from "../../studio/social-connections";
 import { assertRedisConfigured } from "../queue/redis";
 
@@ -34,30 +35,53 @@ type SocialUnpublishJobData = {
 
 type SocialJobData = SocialGenerateJobData | SocialPublishJobData | SocialUnpublishJobData;
 
+function slideImageUrls(metadata: unknown): string[] {
+  const slides = (metadata as { slides?: Array<{ imageUrl?: unknown }> } | null)?.slides;
+  return Array.isArray(slides) ? slides.map((slide) => slide.imageUrl).filter((url): url is string => typeof url === "string" && url.length > 0) : [];
+}
+
 async function buildPublishInput(publication: Awaited<ReturnType<typeof loadPublication>>): Promise<SocialPublishInput> {
   const imageUrl = await socialAssetUrlForVersion(publication.versionId, publication.tenantId);
-  const thread = await prisma.socialContent.findMany({
-    where: { tenantId: publication.tenantId, versionId: publication.versionId, channel: "x", contentType: "x_thread" },
-    orderBy: { threadPosition: "asc" },
-  });
-
   const text = publication.socialContent?.body ?? "";
-  const mediaType =
-    publication.account.platform === "x"
-      ? publication.socialContent?.contentType === "x_thread" && thread.length > 0
-        ? "text"
-        : imageUrl
-          ? "photo"
-          : "text"
-      : publication.socialContent?.contentType === "instagram_story"
-        ? "story"
-        : "photo";
+  if (publication.account.platform === "x") {
+    let thread: SocialPublishInput["thread"];
+    const social = publication.socialContent;
+    if (social?.contentType === "x_thread") {
+      let body = text;
+      if (social.threadPosition !== null) {
+        const replies = await prisma.socialContent.findMany({
+          where: {
+            tenantId: publication.tenantId,
+            versionId: publication.versionId,
+            channel: "x",
+            contentType: "x_thread",
+            createdAt: social.createdAt,
+            threadPosition: { gt: 0 },
+          },
+          orderBy: { threadPosition: "asc" },
+        });
+        if (!replies.length || replies.some((reply) => reply.generationStatus !== "done")) {
+          throw new Error("x_thread_incomplete");
+        }
+        body = [text, ...replies.map((reply) => reply.body)].join("\n\n");
+      }
+      const articleUrl = await findPublishedArticleUrl(publication.tenantId, publication.projectId);
+      if (!articleUrl) throw new Error("x_thread_requires_published_article");
+      thread = formatXThread(xArticleText(body, articleUrl));
+      if (thread.length < 2) throw new Error("x_thread_requires_two_posts");
+    }
+    return { text, mediaUrls: imageUrl ? [imageUrl] : [], mediaType: imageUrl ? "photo" : "text", thread };
+  }
+  const slideUrls = slideImageUrls(publication.socialContent?.metadata);
+  if (slideUrls.length > 0) {
+    return { text, mediaUrls: slideUrls, mediaType: slideUrls.length > 1 ? "carousel" : "photo" };
+  }
+  const mediaType = publication.socialContent?.contentType === "instagram_story" ? "story" : "photo";
 
   return {
     text,
     mediaUrls: imageUrl ? [imageUrl] : [],
     mediaType,
-    thread: thread.length > 0 ? thread.map((entry) => ({ body: entry.body })) : undefined,
   };
 }
 
@@ -65,18 +89,19 @@ type LoadedPublication = {
   id: string;
   tenantId: string;
   versionId: string;
+  projectId: string;
   channel: string;
   externalId: string | null;
   account: {
     id: string;
-    platform: "x" | "instagram" | "website";
+    platform: "x" | "instagram" | "facebook" | "website";
     credentialsRef: string | null;
     provider: string;
     providerProfileId: string | null;
     providerAccountId: string | null;
     credentialsCiphertext: string | null;
   };
-  socialContent: { body: string; contentType: string } | null;
+  socialContent: { body: string; contentType: string; metadata: unknown; threadPosition: number | null; createdAt: Date } | null;
 };
 
 async function loadPublication(publicationId: string): Promise<LoadedPublication> {
@@ -96,17 +121,21 @@ async function processPublish(data: SocialPublishJobData) {
 
   await startAttempt(publication.tenantId, data.attemptId);
 
+  const payload = await buildPublishInput(publication);
+  if (account.platform === "x") {
+    const errors = validateXPayload(payload);
+    if (errors.length) throw new Error(`platform_content_validation_failed: ${errors.join("; ")}`);
+  }
+  const dryRunSeed = JSON.stringify(payload);
   let result;
   if (account.provider && account.provider !== "legacy") {
     const provider = getSocialIntegrationProvider(account.provider);
     const credentials = resolveAccountCredentials(account as never);
     const dryRun = dryRunGate(Boolean(credentials));
     if (dryRun.enabled || !credentials) {
-      const payload = await buildPublishInput(publication);
-      result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
+      result = buildDryRunResult(account.platform, dryRunSeed);
     } else {
-      const payload = await buildPublishInput(publication);
-      const validation = provider.validateContent(payload, account.platform as "x" | "instagram");
+      const validation = provider.validateContent(payload, account.platform as "x" | "instagram" | "facebook");
       if (!validation.valid) {
         throw new Error(`platform_content_invalid: ${validation.errors.join("; ")}`);
       }
@@ -115,10 +144,9 @@ async function processPublish(data: SocialPublishJobData) {
   } else {
     const credentials = readSocialCredentials(account.credentialsRef);
     const dryRun = dryRunGate(Boolean(credentials));
-    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
-    const payload = await buildPublishInput(publication);
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     if (dryRun.enabled || !credentials) {
-      result = buildDryRunResult(account.platform, `${payload.text}|${payload.mediaUrls.join(",")}`);
+      result = buildDryRunResult(account.platform, dryRunSeed);
     } else {
       const legacyPayload = {
         text: payload.text,
@@ -154,6 +182,16 @@ async function processUnpublish(data: SocialUnpublishJobData) {
   }
 
   await startAttempt(publication.tenantId, data.attemptId);
+  const externalIds = [publication.externalId];
+  if (account.platform === "x") {
+    const published = await prisma.publicationAttempt.findFirst({
+      where: { publicationId: publication.id, status: "succeeded", externalId: publication.externalId },
+      orderBy: { attemptNumber: "desc" },
+      select: { responsePayload: true },
+    });
+    const tweetIds = (published?.responsePayload as { tweetIds?: string[] } | null)?.tweetIds;
+    if (tweetIds?.[0] === publication.externalId) externalIds.splice(0, 1, ...[...tweetIds].reverse());
+  }
 
   let result;
   if (account.provider && account.provider !== "legacy") {
@@ -163,22 +201,23 @@ async function processUnpublish(data: SocialUnpublishJobData) {
     if (dryRun.enabled || !credentials) {
       result = buildDryRunResult(account.platform, `delete:${publication.externalId}`);
     } else {
-      result = await provider.deletePublication(publication.externalId, credentials, account);
+      for (const id of externalIds) result = await provider.deletePublication(id, credentials, account);
     }
   } else {
     const credentials = readSocialCredentials(account.credentialsRef);
     const dryRun = dryRunGate(Boolean(credentials));
-    const publisher = getSocialPublisher(account.platform as "x" | "instagram");
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     if (!publisher.capabilities.delete && !publisher.capabilities.unpublish) {
       throw new Error(`${account.platform}_unpublish_not_supported`);
     }
     if (dryRun.enabled || !credentials) {
       result = buildDryRunResult(account.platform, `delete:${publication.externalId}`);
     } else {
-      result = await publisher.delete(publication.externalId, credentials);
+      for (const id of externalIds) result = await publisher.delete(id, credentials);
     }
   }
 
+  if (!result) throw new Error("missing_delete_result");
   await succeedAttempt(publication.tenantId, data.attemptId, {
     externalId: null,
     externalUrl: null,
@@ -215,7 +254,14 @@ export async function runSocialWorker() {
         await processUnpublish(data);
         return;
       }
-      await processPublish(data);
+      try {
+        await processPublish(data);
+      } catch (error) {
+        if (error instanceof Error && /^x_(thread_cleanup_failed|post_delivery_uncertain)/.test(error.message)) {
+          throw new UnrecoverableError(error.message);
+        }
+        throw error;
+      }
     }),
     {
       connection: getRedisConnectionOptions(),

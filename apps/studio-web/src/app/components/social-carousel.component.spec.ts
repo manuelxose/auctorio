@@ -1,0 +1,34 @@
+import { TestBed } from '@angular/core/testing';
+import { SocialCarouselComponent } from './social-carousel.component';
+
+describe('SocialCarouselComponent', () => {
+  it('wraps in both directions and resets when the number of slides changes', () => {
+    const fixture = TestBed.createComponent(SocialCarouselComponent);
+    fixture.componentRef.setInput('slides', [{ headline: 'Portada' }, { headline: 'Cierre' }]);
+    const carousel = fixture.componentInstance;
+    carousel.move(-1);
+    expect(carousel.position()).toBe(1);
+    carousel.move(1);
+    expect(carousel.position()).toBe(0);
+    carousel.move(1);
+    fixture.componentRef.setInput('slides', [{ headline: 'Nueva portada' }]);
+    carousel.move(-1);
+    expect(carousel.position()).toBe(0);
+  });
+
+  it('stops at the first and last slides in the Social Studio gallery', () => {
+    const fixture = TestBed.createComponent(SocialCarouselComponent);
+    fixture.componentRef.setInput('slides', [{ headline: 'Portada' }, { headline: 'Cierre' }]);
+    fixture.componentRef.setInput('studioGallery', true);
+    fixture.detectChanges();
+
+    const previous = fixture.nativeElement.querySelector('.stage-arrow.previous') as HTMLButtonElement;
+    const next = fixture.nativeElement.querySelector('.stage-arrow.next') as HTMLButtonElement;
+    expect(previous.disabled).toBeTrue();
+    next.click();
+    fixture.detectChanges();
+    expect(next.disabled).toBeTrue();
+    fixture.componentInstance.move(1);
+    expect(fixture.componentInstance.position()).toBe(1);
+  });
+});

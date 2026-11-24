@@ -6,6 +6,7 @@ export type HttpRequestOptions = {
   body?: BodyInit | JsonRecord | null;
   timeoutMs?: number;
   retries?: number;
+  redirect?: RequestRedirect;
 };
 
 function sleep(ms: number): Promise<void> {
@@ -49,6 +50,7 @@ export async function fetchWithTimeout(
       headers: options.headers,
       body: normalizeBody(options.body),
       signal: controller.signal,
+      redirect: options.redirect,
     });
 
     if (!response.ok && retries > 0 && response.status >= 500) {

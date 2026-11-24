@@ -147,9 +147,30 @@ test("live recovery schedules publications for approved autopilot projects", asy
 
     // Idempotent: running again does not duplicate publications.
     const second = await recoverStuckAutoProjects({ tenantId: tenant.tenantId, siteId: tenant.siteId, dryRun: false });
-    assert.equal(second.acted, 1);
+    assert.equal(second.acted, 0);
     assert.equal(second.items[0]!.result, "already_scheduled");
     assert.equal(await prisma.publication.count({ where: { tenantId: tenant.tenantId, projectId } }), 1);
+  } finally {
+    await cleanup(tenant.tenantId);
+  }
+});
+
+test("recovery respects disabled schedules, pauses and open circuits", async () => {
+  const tenant = await createTenant(`rec-paused-${Date.now()}`);
+  try {
+    await seedPolicy(tenant.tenantId, tenant.siteId);
+    const projectId = await seedProject(tenant.tenantId, tenant.siteId, "paused", "auto", "approved");
+    const where = { tenantId_siteId: { tenantId: tenant.tenantId, siteId: tenant.siteId } };
+    const recover = () => recoverStuckAutoProjects({ tenantId: tenant.tenantId, siteId: tenant.siteId, dryRun: false });
+    await prisma.automationPolicy.update({ where, data: { state: "paused" } });
+    assert.equal((await recover()).items[0]?.result, "automation_inactive");
+    await prisma.automationPolicy.update({ where, data: { state: "active", circuitOpen: true } });
+    assert.equal((await recover()).items[0]?.result, "circuit_open");
+    await prisma.automationPolicy.update({ where, data: { circuitOpen: false, publishingWindows: [] } });
+    const noWindow = await recover();
+    assert.equal(noWindow.items[0]?.result, "no_available_window");
+    assert.equal(noWindow.acted, 0);
+    assert.equal(await prisma.publication.count({ where: { projectId } }), 0);
   } finally {
     await cleanup(tenant.tenantId);
   }

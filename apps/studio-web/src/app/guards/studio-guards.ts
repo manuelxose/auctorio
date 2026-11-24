@@ -2,6 +2,7 @@ import { isPlatformServer } from '@angular/common';
 import { Injector, PLATFORM_ID, inject } from '@angular/core';
 import type { ActivatedRouteSnapshot, CanActivateFn, RouterStateSnapshot } from '@angular/router';
 import { Router } from '@angular/router';
+import { activeNavItem, canSeeNavItem } from '../layout/studio-nav';
 
 /**
  * The SSR server only renders /studio pages after validating the session cookie itself,
@@ -42,8 +43,8 @@ export const studioAuthGuard: CanActivateFn = async (
   }
 };
 
-export const studioRoleGuard: CanActivateFn = async (
-  route: ActivatedRouteSnapshot,
+export const studioPermissionGuard: CanActivateFn = async (
+  _route: ActivatedRouteSnapshot,
   state: RouterStateSnapshot,
 ) => {
   if (onServer()) {
@@ -51,10 +52,8 @@ export const studioRoleGuard: CanActivateFn = async (
   }
   const router = inject(Router);
   const injector = inject(Injector);
-  // `adminSections` lets one `settings/:section` route keep some tabs admin-only.
-  const adminSection = (route.data['adminSections'] as string[] | undefined)?.includes(route.params['section']);
-  const requiredRole = (route.data['requiredRole'] ?? (adminSection ? 'admin' : undefined)) as 'admin' | 'editor' | 'viewer' | undefined;
-
+  const item = activeNavItem(state.url)?.item;
+  if (!item?.permissions) return true;
   const appContext = await studioContext(injector);
   try {
     await appContext.ensureSession();
@@ -62,15 +61,5 @@ export const studioRoleGuard: CanActivateFn = async (
     return loginRedirect(router, state.url);
   }
 
-  if (!requiredRole) {
-    return true;
-  }
-
-  const role = appContext.role();
-  const rank: Record<string, number> = { viewer: 0, editor: 1, admin: 2 };
-  if ((rank[role] ?? 0) >= (rank[requiredRole] ?? 0)) {
-    return true;
-  }
-
-  return router.createUrlTree(['/studio/overview']);
+  return canSeeNavItem(item, appContext.permissions()) || router.createUrlTree(['/studio/overview']);
 };

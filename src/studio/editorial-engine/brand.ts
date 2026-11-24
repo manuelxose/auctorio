@@ -4,6 +4,12 @@
 // (semantic HTML, inline brand colours, no JS) so publishers get the same block.
 
 import { load } from "cheerio";
+import type { ArticleSections } from "./structure";
+
+export const CARD_STYLES = ["classic", "editorial", "soft", "minimal", "bold", "ink", "frame"] as const;
+export type CardStyle = (typeof CARD_STYLES)[number];
+export const CARD_CORNERS = ["rounded", "square"] as const;
+export type CardCorners = (typeof CARD_CORNERS)[number];
 
 export type BrandOffer = { name: string; price: string; url: string };
 
@@ -22,6 +28,9 @@ export type BrandSettings = {
   linkCard: { headline: string; text: string; url: string; buttonText: string };
   contactCard: { headline: string; text: string; email: string; phone: string; url: string; buttonText: string };
   mapCard: { headline: string; address: string; url: string };
+  /** Look of the three CTA cards: one of CARD_STYLES, with rounded or square corners. */
+  cardStyle: CardStyle;
+  cardCorners: CardCorners;
   /** What the brand promo paragraph before the FAQ must convey. */
   promo: string;
 };
@@ -38,6 +47,8 @@ export const DEFAULT_BRAND: BrandSettings = {
   linkCard: { headline: "", text: "", url: "", buttonText: "" },
   contactCard: { headline: "", text: "", email: "", phone: "", url: "", buttonText: "" },
   mapCard: { headline: "", address: "", url: "" },
+  cardStyle: "classic",
+  cardCorners: "rounded",
   promo: "",
 };
 
@@ -89,6 +100,8 @@ export function readBrandSettings(value: unknown): BrandSettings {
       buttonText: text(contact.buttonText, 30),
     },
     mapCard: { headline: text(map.headline, 80), address: text(map.address, 200), url: httpUrl(map.url) },
+    cardStyle: (CARD_STYLES as readonly string[]).includes(raw.cardStyle as string) ? (raw.cardStyle as CardStyle) : "classic",
+    cardCorners: raw.cardCorners === "square" ? "square" : "rounded",
     promo: text(raw.promo, 500),
   };
 }
@@ -122,9 +135,9 @@ export const hasContactCard = (brand: BrandSettings) => Boolean(brand.contactCar
 export const hasMapCard = (brand: BrandSettings) => Boolean(brand.mapCard.address);
 
 /** Writer guidance: the business facts, offers and CTA wording. */
-export function renderBrandGuidance(brand: ResolvedBrand): string[] {
+export function renderBrandGuidance(brand: ResolvedBrand, sections: Pick<ArticleSections, "linkCard" | "promo"> | null = { linkCard: true, promo: true }): string[] {
   const lines = [brand.domain ? `Site name: ${brand.siteName} — domain: ${brand.domain} — home URL (allowed link): ${brand.homeUrl}` : `Site name: ${brand.siteName}`];
-  if (brand.positioning) lines.push(`Brand positioning (use it for the intro's value proposition and the promo block): ${brand.positioning}`);
+  if (brand.positioning) lines.push(`Brand positioning: ${brand.positioning}`);
   if (brand.audience.length) lines.push(`Target audience: ${brand.audience.join("; ")}`);
   const place = [brand.location.cities.join(", "), brand.location.country].filter(Boolean).join(" — ");
   if (place) lines.push(`Business location: ${place}`);
@@ -133,8 +146,8 @@ export function renderBrandGuidance(brand: ResolvedBrand): string[] {
   }
   if (brand.blogPath) lines.push(`The site's blog lives under ${brand.blogPath}.`);
   const card = brand.linkCard;
-  if (card.headline || card.text) lines.push(`Link card wording (use verbatim): headline «${card.headline || "(write one)"}», sentence «${card.text || "(write one)"}».`);
-  if (brand.promo) lines.push(`The brand promo block must convey: ${brand.promo}`);
+  if (sections?.linkCard && (card.headline || card.text)) lines.push(`Link card wording (use verbatim): headline «${card.headline || "(write one)"}», sentence «${card.text || "(write one)"}».`);
+  if (sections?.promo && brand.promo) lines.push(`The brand promo block must convey: ${brand.promo}`);
   return lines;
 }
 
@@ -161,25 +174,66 @@ export function tint(color: string, amount: number): string {
 const isDark = (color: string) => readableOn(color) === "#ffffff";
 
 /**
- * BLG-style CTA card in inline styles only (no JS, no classes, so every publisher renders it the same): a dark
- * header with the brand pill and domain, a white body with the headline, a brand-colour accent bar, the sentence
- * and the button, inside a soft halo of the brand colour. Stacked, so it also reads on mobile.
+ * CTA card in inline styles only (no JS, no classes, so every publisher renders it the same). Seven looks, all
+ * limited to the properties the sanitizer keeps (html-sanitizer STYLE_PROPERTIES: no shadows, gradients or fonts),
+ * each with one clear primary action and text contrast of at least 4.5:1 on its own background:
+ * - classic: dark header with the brand pill and domain, accent bar, soft halo of the brand colour (BLG).
+ * - editorial: magazine rule on top, kicker, large headline and an underlined text link.
+ * - soft: brand-tinted panel with a thick accent edge.
+ * - minimal: white card with a hairline border and an outlined button.
+ * - bold: the brand colour as background with a contrasting button.
+ * - ink: near-black panel with a brand accent line and a white button.
+ * - frame: centred card inside a brand-colour frame with a pill button.
+ * Stacked, so it also reads on mobile.
  */
 function renderCard(brand: ResolvedBrand, card: CardContent): string {
   const primary = brand.primaryColor || "#2563eb";
+  const square = brand.cardCorners === "square";
+  const radius = (rounded: number) => (square ? 0 : rounded);
+  const style = brand.cardStyle ?? "classic";
+  const ink = isDark(primary) ? primary : "#111827";
+  const logo = (margin: string) => (brand.logoUrl ? `<img src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.siteName)}" width="28" height="28" loading="lazy" style="display:inline-block;margin:${margin};border-radius:${radius(6)}px"> ` : "");
+  const lines = (color: string, gutter = 24) => card.lines.map((line) => `<p style="margin:12px ${gutter}px 0;color:${color};line-height:1.6">${line}</p>`).join("");
+  const button = (background: string, color: string, border = "", gutter = 24, pill = false) =>
+    card.button
+      ? `<p style="margin:20px ${gutter}px 0"><a href="${escapeHtml(card.button.href)}" style="display:inline-block;padding:12px 24px;${border ? `border:${border};` : ""}border-radius:${pill ? radius(999) : radius(10)}px;background-color:${background};color:${color};font-weight:700;text-decoration:none">${escapeHtml(card.button.label)} →</a></p>`
+      : "";
+  const label = (color: string, gutter = 24, top = 22) =>
+    `<p style="margin:0;padding:${top}px ${gutter}px 0;color:${color};font-size:13px;font-weight:700;letter-spacing:1px;text-transform:uppercase;line-height:1.6">${logo("0 10px 0 0")}${escapeHtml(brand.siteName)}</p>`;
+  const title = (color: string, gutter = 24, top = 12, size = 22) =>
+    card.title ? `<p style="margin:0;padding:${top}px ${gutter}px 0;color:${color};font-size:${size}px;font-weight:700;line-height:1.3">${escapeHtml(card.title)}</p>` : "";
+  const shell = (css: string, inner: string) => `<aside data-block="${card.kind}" style="margin:32px 0;${css};overflow:hidden">${inner}</aside>`;
+
+  if (style === "editorial") {
+    const link = card.button ? `<p style="margin:16px 0 0;padding:0 0 4px"><a href="${escapeHtml(card.button.href)}" style="display:inline-block;padding:10px 0;color:${ink};font-size:17px;font-weight:700;text-decoration:underline">${escapeHtml(card.button.label)} →</a></p>` : "";
+    return shell(`padding:0 0 12px;border-top:4px solid ${ink};background-color:#ffffff`, `${label(ink, 0, 16)}${title("#111827", 0, 8, 28)}${lines("#374151", 0)}${link}`);
+  }
+  if (style === "soft") {
+    return shell(`padding:0 0 24px;border-left:6px solid ${primary};border-radius:0 ${radius(14)}px ${radius(14)}px 0;background-color:${tint(primary, 0.9)}`, `${label(ink)}${title("#111827")}${lines("#374151")}${button(primary, readableOn(primary))}`);
+  }
+  if (style === "minimal") {
+    return shell(`padding:0 0 24px;border:1px solid #e5e7eb;border-radius:${radius(12)}px;background-color:#ffffff`, `${label("#6b7280")}${title("#111827")}${lines("#4b5563")}${button("#ffffff", ink, `2px solid ${primary}`)}`);
+  }
+  if (style === "bold") {
+    const fg = readableOn(primary);
+    return shell(`padding:0 0 24px;border-radius:${radius(20)}px;background-color:${primary}`, `${label(fg)}${title(fg)}${lines(fg)}${button(fg, primary)}`);
+  }
+  if (style === "ink") {
+    const base = brand.secondaryColor && isDark(brand.secondaryColor) ? brand.secondaryColor : "#0f172a";
+    return shell(`padding:0 0 28px;border-top:5px solid ${primary};border-radius:0 0 ${radius(16)}px ${radius(16)}px;background-color:${base}`, `${label(tint(primary, 0.6))}${title("#ffffff")}${lines("#e2e8f0")}${button("#ffffff", "#0f172a", `2px solid ${primary}`)}`);
+  }
+  if (style === "frame") {
+    const rule = `<p style="margin:14px auto 0;width:48px;border-top:3px solid ${primary}"></p>`;
+    return shell(`padding:0 0 28px;border:2px solid ${primary};border-radius:${radius(18)}px;background-color:#ffffff;text-align:center`, `${label(ink)}${title("#111827", 24, 10, 24)}${rule}${lines("#4b5563")}${button(primary, readableOn(primary), "", 24, true)}`);
+  }
+
   const dark = brand.secondaryColor && isDark(brand.secondaryColor) ? brand.secondaryColor : isDark(primary) ? primary : "#111827";
-  const logo = brand.logoUrl ? `<img src="${escapeHtml(brand.logoUrl)}" alt="${escapeHtml(brand.siteName)}" width="28" height="28" loading="lazy" style="display:inline-block;margin:0 10px 0 0;border-radius:6px"> ` : "";
   const header =
-    `<p style="margin:0;padding:20px 24px ${brand.domain ? "6px" : "20px"};background-color:${dark};color:#ffffff;line-height:1.6">${logo}` +
-    `<strong style="display:inline-block;padding:4px 14px;border-radius:999px;background-color:#ffffff;color:${dark};font-size:13px;letter-spacing:1px;text-transform:uppercase">${escapeHtml(brand.siteName)}</strong></p>` +
+    `<p style="margin:0;padding:20px 24px ${brand.domain ? "6px" : "20px"};background-color:${dark};color:#ffffff;line-height:1.6">${logo("0 10px 0 0")}` +
+    `<strong style="display:inline-block;padding:4px 14px;border-radius:${radius(999)}px;background-color:#ffffff;color:${dark};font-size:13px;letter-spacing:1px;text-transform:uppercase">${escapeHtml(brand.siteName)}</strong></p>` +
     (brand.domain ? `<p style="margin:0;padding:0 24px 20px;background-color:${dark};color:#d1d5db;font-size:13px">${escapeHtml(brand.domain)}</p>` : "");
-  const title = card.title ? `<p style="margin:0;padding:24px 24px 0;color:#111827;font-size:22px;font-weight:700;line-height:1.3">${escapeHtml(card.title)}</p>` : "";
-  const accent = `<p style="margin:12px 24px 0;width:56px;border-top:5px solid ${primary};border-radius:4px"></p>`;
-  const body = card.lines.map((line) => `<p style="margin:12px 24px 0;color:#4b5563;line-height:1.6">${line}</p>`).join("");
-  const button = card.button
-    ? `<p style="margin:20px 24px 0"><a href="${escapeHtml(card.button.href)}" style="display:inline-block;padding:12px 24px;border-radius:10px;background-color:${primary};color:${readableOn(primary)};font-weight:700;text-decoration:none">${escapeHtml(card.button.label)} →</a></p>`
-    : "";
-  return `<aside data-block="${card.kind}" style="margin:32px 0;padding:0 0 24px;border:10px solid ${tint(primary, 0.82)};border-radius:24px;background-color:#ffffff;overflow:hidden">${header}${title}${accent}${body}${button}</aside>`;
+  const accent = `<p style="margin:12px 24px 0;width:56px;border-top:5px solid ${primary};border-radius:${radius(4)}px"></p>`;
+  return shell(`padding:0 0 24px;border:10px solid ${tint(primary, 0.82)};border-radius:${radius(24)}px;background-color:#ffffff`, `${header}${title("#111827", 24, 24)}${accent}${lines("#4b5563")}${button(primary, readableOn(primary))}`);
 }
 
 const visitLabel = (language: "es" | "en") => (language === "es" ? "Visitar" : "Visit");
@@ -264,4 +318,36 @@ export function applyBrandCards(
       : null,
   );
   return $.html();
+}
+
+/** The three cards as the article will show them, with sample wording where the site left a field empty (Settings preview). */
+export function previewBrandCards(brand: ResolvedBrand, language: "es" | "en" = "es"): Record<CardContent["kind"], string> {
+  const es = language === "es";
+  const { linkCard: link, contactCard: contact, mapCard: map } = brand;
+  const home = link.url || brand.homeUrl || "https://example.com";
+  const address = map.address || (es ? "Calle Mayor 1, Madrid" : "1 Main Street, London");
+  return {
+    link_card: renderCard(brand, {
+      kind: "link_card",
+      title: link.headline || (es ? "Titular de la llamada a la acción" : "Call-to-action headline"),
+      lines: [escapeHtml(link.text || (es ? "Una frase que invita al lector a dar el siguiente paso." : "A sentence inviting the reader to take the next step."))],
+      button: { href: home, label: link.buttonText || visitLabel(language) },
+    }),
+    contact_card: renderCard(brand, {
+      kind: "contact_card",
+      title: contact.headline || (es ? "Contacto" : "Contact"),
+      lines: [
+        contact.text ? escapeHtml(contact.text) : "",
+        `<a href="mailto:${escapeHtml(contact.email || "hola@ejemplo.com")}">${escapeHtml(contact.email || "hola@ejemplo.com")}</a>`,
+        contact.phone ? `<a href="tel:${escapeHtml(contact.phone.replace(/[^\d+]/g, ""))}">${escapeHtml(contact.phone)}</a>` : "",
+      ].filter(Boolean),
+      button: { href: contact.url || home, label: contact.buttonText || (es ? "Contactar" : "Contact us") },
+    }),
+    map_card: renderCard(brand, {
+      kind: "map_card",
+      title: map.headline || (es ? "Dónde estamos" : "Where to find us"),
+      lines: [escapeHtml(address)],
+      button: { href: map.url || `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, label: es ? "Cómo llegar" : "Get directions" },
+    }),
+  };
 }

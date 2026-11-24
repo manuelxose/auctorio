@@ -1,0 +1,36 @@
+.ov .ov__setup { padding: 0; }
+.ov__setup summary {
+  display: flex;
+  align-items: center;
+  min-height: 62px;
+  gap: 10px;
+  padding: 12px var(--pad);
+  border-radius: 15px;
+  list-style: none;
+}
+.ov__setup summary::-webkit-details-marker { display: none; }
+.ov__setup summary:hover { background: var(--au-surface-2); }
+.ov__setup summary > app-icon { color: var(--au-brand); }
+.ov__setup details[open] summary > app-icon { transform: rotate(180deg); }
+.ov__checklist {
+  padding: 12px var(--pad) var(--pad);
+  border-top: 1px solid var(--au-border);
+}
+.ov__checklist h3 {
+  margin-block: 8px;
+  color: var(--au-muted);
+  font-size: .72rem;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.ov__step {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  gap: 8px;
+  padding-block: 4px;
+  border-bottom: 1px solid var(--au-border);
+}
+.ov__step > app-icon { color: var(--au-brand); }
+.ov__step.is-done > app-icon { color: var(--au-success); }
+.ov__checklist > button { margin-top: 8px; }

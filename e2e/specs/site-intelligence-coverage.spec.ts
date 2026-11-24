@@ -18,10 +18,10 @@ test('Pages & crawl states what was read, never claims Google indexation, and is
   await page.goto('/studio/site-intelligence', { waitUntil: 'networkidle' });
   // Sections live in the sidebar (or the strip above the page when the sidebar is an icon rail).
   const section = (name: string) => page.getByRole('link', { name, exact: true });
-  await expect(section('Profile & strategy')).toHaveAttribute('aria-current', 'location');
+  await expect(section('Perfil y estrategia')).toHaveAttribute('aria-current', 'location');
 
   // Keyboard: focus Pages & crawl and activate it with Enter.
-  const crawl = section('Pages & crawl');
+  const crawl = section('Páginas y rastreo');
   await crawl.focus();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/tab=crawl/);
@@ -39,14 +39,14 @@ test('Pages & crawl states what was read, never claims Google indexation, and is
   await expect(page.getByRole('heading', { name: /^Indexed pages$/ })).toHaveCount(0);
 
   // SEO signals: facts about our sample, with the no-Search-Console caveat; never rankings or traffic.
-  await section('SEO signals').click();
+  await section('Señales SEO').click();
   const seo = page.locator('section.au-panel', { hasText: 'On-page signals' });
   await expect(seo).toContainText('connect Search Console');
   await expect(seo.getByRole('row', { name: /No H1/ })).toBeVisible();
   await expect(seo).not.toContainText(/ranking position|clicks|impressions/i);
 
   // Content gaps (under Pillars & gaps): inferential, labelled with confidence or an explicit "no pillars" explanation.
-  await section('Pillars & gaps').click();
+  await section('Pilares y brechas').click();
   const opp = page.locator('section.au-panel', { hasText: 'Content gaps' });
   await expect(opp).toBeVisible();
   await expect(opp).toContainText(/Confidence|No pillars with subtopics|No uncovered subtopics/);

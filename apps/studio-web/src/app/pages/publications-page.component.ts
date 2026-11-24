@@ -267,7 +267,7 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   private readonly queryParams = inject(ActivatedRoute, { optional: true })?.snapshot.queryParamMap;
   readonly projectId = this.queryParams?.get('projectId') ?? '';
   filters = {
-    channel: '' as '' | PublicationChannel,
+    channel: (this.projectId ? 'website' : '') as '' | PublicationChannel,
     siteId: this.appContext.activeSite()?.id ?? '',
     search: '',
   };
@@ -285,6 +285,8 @@ export class PublicationsPageComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
+    const status = this.stateFilters.find((state) => state.key === this.queryParams?.get('status'));
+    if (status) this.stateKey = status.key;
     this.refresh();
     const id = this.queryParams?.get('id');
     if (id) this.inspect({ id } as StudioPublication);

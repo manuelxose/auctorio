@@ -41,10 +41,10 @@ const STEP_LABELS: Record<OnboardingStepId, { title: string; text: string }> = {
     `,
   ],
   template: `
-    <section class="au-panel au-panel--padded" aria-live="polite">
+    <section [class]="embedded ? 'tl__embedded' : 'au-panel au-panel--padded'" aria-live="polite">
       <div class="tl__head">
         <div>
-          <h2 class="au-panel__title">Website onboarding</h2>
+          <h2 class="au-panel__title" *ngIf="!embedded">Website onboarding</h2>
           <p class="au-muted" *ngIf="run">{{ run.completedSteps }} of {{ run.totalSteps }} steps · {{ statusLabel(run.status) }}</p>
         </div>
         <span class="au-badge" *ngIf="run" [class.au-badge--success]="run.status === 'succeeded'" [class.au-badge--danger]="run.status === 'failed'" [class.au-badge--info]="run.status === 'running'">{{ statusLabel(run.status) }}</span>
@@ -100,6 +100,7 @@ export class OnboardingTimelineComponent implements OnChanges, OnDestroy {
   @Input({ required: true }) siteId = '';
   /** Offer "Run onboarding" when the site has never been onboarded (sites connected before this feature). */
   @Input() allowStart = false;
+  @Input() embedded = false;
   @Input() showStrategyLink = false;
   /** Emits the latest run whenever it changes state (e.g. so a page can refresh its data). */
   @Output() readonly runChange = new EventEmitter<OnboardingRun | null>();

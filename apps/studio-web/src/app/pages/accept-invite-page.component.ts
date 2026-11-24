@@ -17,7 +17,7 @@ import { StudioApiService } from '../services/studio-api.service';
           <span class="au-brand__name">Auctorio</span>
         </a>
         <h1 class="au-auth__title">Accept your invitation</h1>
-        <p class="au-auth__hint">Choose a password to activate your account.</p>
+        <p class="au-auth__hint">Use your current password if you already have an Auctorio account. Otherwise, choose a password to activate it.</p>
 
         <form class="au-auth__form" (ngSubmit)="submit()">
           <label class="au-field">
@@ -26,7 +26,7 @@ import { StudioApiService } from '../services/studio-api.service';
           </label>
           <p class="au-error" *ngIf="error">{{ error }}</p>
           <button class="au-btn au-btn--primary au-btn--block" type="submit" [disabled]="busy">
-            {{ busy ? 'Activating…' : 'Activate account' }}
+            {{ busy ? 'Accepting…' : 'Accept invitation' }}
           </button>
         </form>
 

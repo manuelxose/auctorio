@@ -260,6 +260,7 @@ export type CreateStudioInvitationInput = {
 export type UpdateStudioUserInput = {
   displayName?: string;
   status?: StudioUserStatus;
+  roleIds?: string[];
 };
 
 export type StudioInvitationSummary = Pick<
@@ -267,6 +268,7 @@ export type StudioInvitationSummary = Pick<
   "id" | "email" | "displayName" | "status" | "acceptedAt" | "createdAt" | "updatedAt"
 > & {
   userId: string | null;
+  delivery: "sent" | "not_configured" | "failed";
 };
 
 export type StudioRoleSummary = Pick<
@@ -281,7 +283,7 @@ export type CreateStudioRoleInput = {
   key?: string;
   name: string;
   description?: string | null;
-  permissions: StudioPermission[];
+  permissions?: StudioPermission[];
   cloneFromRoleId?: string | null;
 };
 
@@ -407,6 +409,7 @@ export type StudioSiteSummary = Pick<
 > & {
   projectCount: number;
   publishedProjectCount: number;
+  websiteConnection: { stage: import("./destination-readiness").DestinationStage; lastVerifiedAt: Date | null } | null;
   latestPublicationJob: Pick<
     PublicationExecutionState,
     "id" | "status" | "externalUrl" | "createdAt" | "publishedAt" | "error"

@@ -1,17 +1,16 @@
 import { Prisma } from "@prisma/client";
-import type { AutomationPolicy, FactSourceType, PublicationChannel } from "@prisma/client";
+import type { AutomationPolicy, FactSourceType } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { structuredEvent } from "../shared/utils/logger";
 import { writeAudit } from "./audit";
 import { approveVersion, createProject, ensureProjectTopic } from "./repository";
-import { createSocialGenerationJobs } from "./social";
 import { createPublication } from "./publication";
 import { findDuplicateCoverage } from "./editorial";
 import {
   countChannelPublicationsToday,
   generateEditorialSlots,
   getOrCreatePolicy,
-  isDayActive,
+  nextPolicyDay,
   startOfLocalDay,
 } from "./automation";
 import { countQaWarnings, countWordsFromHtml, isHeroImageReady } from "./review";
@@ -19,6 +18,7 @@ import { runQualityRepairCycle } from "./quality-repair";
 import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import type { QaReportV2 } from "./qa";
 import { PLAN_LEAD_TIME_MINUTES, type AutomationMode } from "./automation-mode";
+import { ensureMonthlyPlan } from "./autopilot-plan";
 import { bulkApproveEditorialPlanItems } from "./editorial-plan";
 import { startProductionForPlanItem, startProductionForProject } from "./production/pipeline";
 
@@ -248,7 +248,7 @@ async function selectCandidates(
   tenantId: string,
   limit: number,
 ): Promise<string[]> {
-  if (limit <= 0 || !policy.autoGenerate) {
+  if (limit <= 0 || !policy.autoGenerate || !policy.siteId) {
     return [];
   }
 
@@ -257,7 +257,7 @@ async function selectCandidates(
     processingStatus: "candidate",
     score: { gte: policy.minimumStoryScore },
     discoveredAt: { gte: new Date(Date.now() - 72 * 3_600_000) },
-    ...(policy.siteId ? { source: { siteId: policy.siteId } } : {}),
+    source: { siteId: policy.siteId, enabled: true, archivedAt: null },
     projects: { none: {} },
   };
 
@@ -278,9 +278,6 @@ async function selectCandidates(
   for (const candidate of candidates) {
     if (selected.length >= limit) {
       break;
-    }
-    if (!policy.siteId) {
-      continue;
     }
     const categories = Array.isArray(candidate.categories) ? candidate.categories.map(String) : [];
     if (excludedCategories.some((category) => categories.includes(category))) {
@@ -391,7 +388,6 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
         take: 1,
         include: { contentImage: { include: { assetVariants: true } } },
       },
-      socialContents: true,
       publications: { where: { status: { not: "deleted" } } },
       site: true,
       topic: true,
@@ -429,21 +425,6 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
       if (policy.autoApprove && isAutomaticApprovalQualityReady(latestVersion)) {
         await approveVersion(tenantId, project.id, latestVersion.id, "automation", null);
         progress.approvals += 1;
-        continue;
-      }
-
-      const socialReady = !policy.socialRequired || project.socialContents.length > 0;
-      const socialChannelsWanted =
-        (policy.xPostsPerDay > 0 ? ["x"] : []).concat(policy.instagramPostsPerDay > 0 ? ["instagram"] : []);
-
-      if (!socialReady && socialChannelsWanted.length > 0 && latestVersion.bodyHtml) {
-        await createSocialGenerationJobs(tenantId, {
-          projectId: project.id,
-          versionId: latestVersion.id,
-          channels: socialChannelsWanted as Array<"x" | "instagram">,
-        });
-        progress.socialJobsCreated += 1;
-        continue;
       }
     } catch (error) {
       structuredEvent(
@@ -554,27 +535,8 @@ async function advanceAutopilotProject(
     return progress;
   }
 
-  // Approved → social derivatives, then scheduling.
   if (latestVersion.status === "approved") {
-    const socialReady = !policy.socialRequired || project.socialContents.length > 0;
-    const socialChannelsWanted =
-      (policy.xPostsPerDay > 0 ? ["x"] : []).concat(policy.instagramPostsPerDay > 0 ? ["instagram"] : []);
-
-    if (!socialReady && socialChannelsWanted.length > 0 && latestVersion.bodyHtml) {
-      await createSocialGenerationJobs(tenantId, {
-        projectId: project.id,
-        versionId: latestVersion.id,
-        channels: socialChannelsWanted as Array<"x" | "instagram">,
-      });
-      await prisma.contentProject.update({
-        where: { id: project.id },
-        data: { automationSubstate: "social_generating" },
-      });
-      progress.socialJobsCreated += 1;
-      return progress;
-    }
-
-    if (policy.autoSchedule && (socialReady || !policy.socialRequired)) {
+    if (policy.autoSchedule) {
       const created = await ensureAutoPublications(policy, tenantId, project.id, latestVersion.id);
       progress.publicationsCreated += created;
       await prisma.contentProject.update({
@@ -606,7 +568,6 @@ export type AutopilotProjectView = {
       assetVariants: Array<{ kind: string }>;
     } | null;
   }>;
-  socialContents: Array<{ id: string }>;
   publications: Array<{ id: string }>;
   metadata: unknown;
   topic: { id: string } | null;
@@ -688,103 +649,38 @@ export async function ensureAutoPublications(
   projectId: string,
   versionId: string,
 ): Promise<number> {
-  const existing = await prisma.publication.findMany({
-    where: { tenantId, projectId, versionId, status: { not: "deleted" } },
+  if (!policy.siteId) return 0;
+  const existing = await prisma.publication.findFirst({
+    where: { tenantId, projectId, versionId, channel: "website", status: { not: "deleted" } },
+    select: { id: true },
   });
-  const existingChannels = new Set(existing.map((publication) => publication.channel));
-  let created = 0;
+  if (existing) return 0;
 
-  const occupied: Date[] = [];
-  const dayStart = startOfLocalDay(policy);
-
-  if (!existingChannels.has("website") && policy.siteId) {
-    const slot = await nextFreeSlot(policy, "website", tenantId, occupied, dayStart);
-    if (slot) {
-      occupied.push(slot);
-      await createPublication({
-        tenantId,
-        projectId,
-        versionId,
-        channel: "website",
-        siteId: policy.siteId,
-        scheduledFor: slot,
-      });
-      created += 1;
-    }
-  }
-
-  if (!existingChannels.has("x") && policy.xPostsPerDay > 0) {
-    const account = await pickAccount(tenantId, "x", policy.siteId);
-    if (account) {
-      const slot = await nextFreeSlot(policy, "x", tenantId, occupied, dayStart);
-      if (slot) {
-        occupied.push(slot);
-        await createPublication({
-          tenantId,
-          projectId,
-          versionId,
-          channel: "x",
-          accountId: account.id,
-          siteId: policy.siteId,
-          scheduledFor: slot,
-        });
-        created += 1;
-      }
-    }
-  }
-
-  if (!existingChannels.has("instagram") && policy.instagramPostsPerDay > 0) {
-    const account = await pickAccount(tenantId, "instagram", policy.siteId);
-    if (account) {
-      const slot = await nextFreeSlot(policy, "instagram", tenantId, occupied, dayStart);
-      if (slot) {
-        occupied.push(slot);
-        await createPublication({
-          tenantId,
-          projectId,
-          versionId,
-          channel: "instagram",
-          accountId: account.id,
-          siteId: policy.siteId,
-          scheduledFor: slot,
-        });
-        created += 1;
-      }
-    }
-  }
-
-  return created;
-}
-
-async function pickAccount(tenantId: string, platform: "x" | "instagram", siteId: string | null) {
-  const account = await prisma.publishingAccount.findFirst({
-    where: {
-      tenantId,
-      platform,
-      enabled: true,
-      status: { in: ["active", "pending"] },
-      ...(siteId ? { siteId } : {}),
-    },
+  const scheduledFor = await nextFreeSlot(policy, tenantId, startOfLocalDay(policy));
+  if (!scheduledFor) return 0;
+  await createPublication({
+    tenantId,
+    projectId,
+    versionId,
+    channel: "website",
+    siteId: policy.siteId,
+    scheduledFor,
   });
-  return account;
+  return 1;
 }
 
 async function nextFreeSlot(
   policy: AutomationPolicy,
-  channel: PublicationChannel,
   tenantId: string,
-  alreadyOccupied: Date[],
   dayStart: Date,
 ): Promise<Date | null> {
   const now = new Date();
   const minimumSpacingMs = Math.max(15, policy.minimumMinutesBetweenArticles) * 60_000;
 
-  for (let dayOffset = 0; dayOffset < 3; dayOffset += 1) {
-    const day = new Date(dayStart.getTime() + dayOffset * 24 * 3_600_000);
-    if (!isDayActive(policy, day)) {
-      continue;
-    }
-    const slots = generateEditorialSlots(policy, day).filter((slot) => slot.channel === channel);
+  let day = dayStart;
+  for (let dayOffset = 0; dayOffset < 8; dayOffset += 1, day = nextPolicyDay(policy, day)) {
+    const slots = generateEditorialSlots(policy, day).filter((slot) => slot.channel === "website");
+    if (!slots.length || await countChannelPublicationsToday(tenantId, "website", day, nextPolicyDay(policy, day), policy.siteId) >= policy.maxArticlesPerDay) continue;
     for (const slot of slots) {
       if (slot.at.getTime() <= now.getTime() + 60_000) {
         continue;
@@ -792,7 +688,8 @@ async function nextFreeSlot(
       const conflicts = await prisma.publication.findFirst({
         where: {
           tenantId,
-          channel,
+          ...(policy.siteId ? { siteId: policy.siteId } : {}),
+          channel: "website",
           status: { in: ["scheduled", "queued", "publishing"] },
           scheduledFor: {
             gte: new Date(slot.at.getTime() - minimumSpacingMs),
@@ -803,18 +700,11 @@ async function nextFreeSlot(
       if (conflicts) {
         continue;
       }
-      const conflictsWithBatch = alreadyOccupied.some(
-        (at) => Math.abs(at.getTime() - slot.at.getTime()) < minimumSpacingMs,
-      );
-      if (conflictsWithBatch) {
-        continue;
-      }
       return slot.at;
     }
   }
 
-  // Fallback: keep planning running even when windows are exhausted.
-  return new Date(now.getTime() + 10 * 60_000);
+  return null;
 }
 
 const PLAN_ITEMS_PER_TICK = 3;
@@ -856,12 +746,16 @@ export async function progressDuePlanItems(
 }
 
 async function hasActiveSources(tenantId: string, siteId: string | null): Promise<boolean> {
-  return (await prisma.contentSource.count({ where: { tenantId, enabled: true, ...(siteId ? { siteId } : {}) } })) > 0;
+  return Boolean(siteId && await prisma.contentSource.findFirst({
+    where: { tenantId, siteId, enabled: true, archivedAt: null },
+    select: { id: true },
+  }));
 }
 
 export type AutomationTickResult = {
   policiesProcessed: number;
   planItemsStarted: number;
+  monthPlansStarted: number;
   candidatesSelected: number;
   projectsAdvanced: number;
   socialJobsCreated: number;
@@ -874,6 +768,7 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
   const result: AutomationTickResult = {
     policiesProcessed: 0,
     planItemsStarted: 0,
+    monthPlansStarted: 0,
     candidatesSelected: 0,
     projectsAdvanced: 0,
     socialJobsCreated: 0,
@@ -897,11 +792,17 @@ export async function runAutomationTick(): Promise<AutomationTickResult> {
 
     // Safety limits.
     const dayStart = startOfLocalDay(policy);
-    const websitePlanned = await countChannelPublicationsToday(tenantId, "website", dayStart);
+    const websitePlanned = await countChannelPublicationsToday(tenantId, "website", dayStart, nextPolicyDay(policy, dayStart), policy.siteId);
     const pendingQueue = await prisma.publication.count({
-      where: { tenantId, status: { in: ["draft", "ready", "scheduled"] } },
+      where: { tenantId, ...(policy.siteId ? { siteId: policy.siteId } : {}), channel: "website", status: { in: ["draft", "ready", "scheduled"] } },
     });
 
+    // Autopilot keeps the next month planned; a failing plan must not stop the articles that are already due.
+    try {
+      if ((await ensureMonthlyPlan(policy)).started) result.monthPlansStarted += 1;
+    } catch (error) {
+      structuredEvent("planner.month_plan_failed", { tenantId, siteId: policy.siteId, error: error instanceof Error ? error.message : String(error) }, "error");
+    }
     result.planItemsStarted += await progressDuePlanItems(policy);
 
     // News sources are an Advanced feature: only sites with active Sources draft from SourceItems.

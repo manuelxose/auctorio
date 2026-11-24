@@ -65,14 +65,18 @@ export async function generateArticleFromCluster(
 
 export async function listGenerations(
   tenantId: string,
-  input: { page: number; pageSize: number; siteId?: string | null; clusterId?: string | null },
+  input: { page: number; pageSize: number; siteId?: string | null; clusterId?: string | null; review?: "pending" | "history"; decision?: string; outcome?: string },
 ) {
   const skip = (input.page - 1) * input.pageSize;
   const where: Prisma.ArticleGenerationWhereInput = {
     tenantId,
     ...(input.siteId ? { siteId: input.siteId } : {}),
     ...(input.clusterId ? { clusterId: input.clusterId } : {}),
+    ...(input.decision ? { decision: input.decision } : {}),
+    ...(input.outcome ? { publicationDecision: { path: ["decision"], equals: input.outcome } } : {}),
   };
+  if (input.review === "history") where.status = { in: ["approved", "rejected"] };
+  if (input.review === "pending") where.status = { notIn: ["approved", "rejected"] };
   const [total, rows] = await prisma.$transaction([
     prisma.articleGeneration.count({ where }),
     prisma.articleGeneration.findMany({

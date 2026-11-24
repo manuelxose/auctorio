@@ -57,6 +57,7 @@ const ADMIN_ONLY: Array<{ method: Method; url: string }> = [
   { method: "GET", url: "/v2/health/workers" },
   { method: "PATCH", url: "/v2/automation" },
   { method: "POST", url: "/v2/automation/pause" },
+  { method: "POST", url: "/v2/automation/resume" },
   { method: "POST", url: "/v2/automation/recover" },
   { method: "PUT", url: "/v2/cost-controls" },
   { method: "POST", url: "/v2/roles" },

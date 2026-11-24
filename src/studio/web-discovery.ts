@@ -121,23 +121,40 @@ export async function recordWebUsage(input: {
   tokensIn?: number;
   tokensOut?: number;
   estimatedCostUsd?: number;
-}): Promise<void> {
-  await prisma.webUsageRecord.create({
-    data: {
-      tenantId: input.tenantId,
-      siteId: input.siteId,
-      provider: input.provider,
-      operation: input.operation,
-      queries: input.queries ?? 0,
-      urlsScraped: input.urlsScraped ?? 0,
-      tokensIn: input.tokensIn ?? 0,
-      tokensOut: input.tokensOut ?? 0,
-      estimatedCostUsd: new Prisma.Decimal(input.estimatedCostUsd ?? 0),
-    },
+  maxDailySearches?: number;
+}): Promise<boolean> {
+  const data = {
+    tenantId: input.tenantId,
+    siteId: input.siteId,
+    provider: input.provider,
+    operation: input.operation,
+    queries: input.queries ?? 0,
+    urlsScraped: input.urlsScraped ?? 0,
+    tokensIn: input.tokensIn ?? 0,
+    tokensOut: input.tokensOut ?? 0,
+    estimatedCostUsd: new Prisma.Decimal(input.estimatedCostUsd ?? 0),
+  };
+  if (input.operation !== "search") {
+    await prisma.webUsageRecord.create({ data });
+    return true;
+  }
+  return prisma.$transaction(async (tx) => {
+    await tx.$queryRaw`SELECT id FROM tenants WHERE id = ${input.tenantId}::uuid FOR UPDATE`;
+    if (input.maxDailySearches !== undefined) {
+      const midnight = new Date();
+      midnight.setHours(0, 0, 0, 0);
+      const { _sum } = await tx.webUsageRecord.aggregate({
+        where: { tenantId: input.tenantId, provider: input.provider, createdAt: { gte: midnight } },
+        _sum: { queries: true },
+      });
+      if ((_sum.queries ?? 0) + data.queries > input.maxDailySearches) return false;
+    }
+    await tx.webUsageRecord.create({ data });
+    return true;
   });
 }
 
-function estimateSearchCost(queryCount: number): number {
+export function estimateSearchCost(queryCount: number): number {
   // Firecrawl /search: $1 per 1,000 requests (documented list price). Kept
   // conservative and configurable.
   return (queryCount * getNumberEnv("WEB_SEARCH_COST_USD_PER_QUERY", 0.001));

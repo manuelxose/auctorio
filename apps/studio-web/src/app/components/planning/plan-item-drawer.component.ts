@@ -4,11 +4,12 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Observable, Subject, Subscription, debounceTime, distinctUntilChanged, switchMap } from 'rxjs';
 import { AppIconComponent } from '../ui/app-icon.component';
+import { KeywordWhyComponent } from './keyword-why.component';
 import { ProductionStatusComponent } from '../production/production-status.component';
 import { ConfirmService } from '../../services/confirm.service';
 import { PlanningApiService, apiMessage, isRunning } from '../../services/planning-api.service';
 import type { OperationItem } from '../../models/studio.models';
-import type { PlanEvidenceEntry, PlanItem, PlanOutlineEntry, PlanningInventory } from '../../models/planning.models';
+import type { PlanEvidenceEntry, PlanItem, PlanItemSelectionView, PlanOutlineEntry, PlanningInventory } from '../../models/planning.models';
 import { channelLabel, evidenceOf, itemTitle, localDate, localTime, outlineOf, statusLabel, statusTone, stringList, zonedToUtc } from './planning-utils';
 
 const CONTENT_TYPES = ['guide', 'news', 'ranking', 'comparison', 'analysis', 'explainer', 'tutorial', 'faq', 'review', 'preview', 'match-preview', 'match-report', 'schedule', 'where-to-watch', 'streaming-recommendation', 'evergreen-pillar', 'cluster-article'];
@@ -55,7 +56,7 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
 @Component({
   selector: 'app-plan-item-drawer',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, ProductionStatusComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, KeywordWhyComponent, ProductionStatusComponent],
   styles: [
     `
       .pd-backdrop { position: fixed; inset: 0; background: var(--au-overlay); z-index: 40; }
@@ -64,6 +65,9 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
       .pd__head h2 { margin: 0; font-size: var(--au-fs-section); line-height: 1.3; overflow-wrap: anywhere; }
       .pd__meta { display: flex; flex-wrap: wrap; gap: var(--au-s2); align-items: center; margin-top: var(--au-s1); font-size: var(--au-fs-body-sm); color: var(--au-muted); }
       .pd__body { flex: 1; overflow-y: auto; padding: var(--au-s4); display: grid; gap: var(--au-s4); align-content: start; }
+      .pd__why { padding: var(--au-s3); border: 1px solid var(--au-border); border-radius: var(--au-r-md); background: var(--au-table-head); }
+      .pd__why summary { cursor: pointer; font-weight: 600; }
+      .pd__why[open] summary { margin-bottom: var(--au-s3); }
       .pd__foot { display: flex; flex-wrap: wrap; gap: var(--au-s2); align-items: center; padding: var(--au-s3) var(--au-s4); border-top: 1px solid var(--au-border); }
       .pd__foot-spacer { flex: 1; }
       .pd fieldset { border: 0; margin: 0; padding: 0; min-width: 0; display: grid; gap: var(--au-s3); }
@@ -112,6 +116,11 @@ const fromTri = (value: Draft['includeFaq']) => (value === 'yes' ? true : value 
       </header>
 
       <form class="pd__body" id="pd-form" (ngSubmit)="save()">
+        <details class="pd__why" (toggle)="loadWhy($event)">
+          <summary>Por qué se eligió esta palabra</summary>
+          <p class="au-hint" *ngIf="whyError" role="alert">{{ whyError }}</p>
+          <app-keyword-why *ngIf="why?.item?.id === item.id" [view]="why"></app-keyword-why>
+        </details>
         <fieldset>
           <legend>Headline</legend>
           <label class="au-field">
@@ -359,6 +368,8 @@ export class PlanItemDrawerComponent implements OnChanges, AfterViewInit, OnDest
   private confirming = false;
   status = '';
   statusIsError = false;
+  why: PlanItemSelectionView | null = null;
+  whyError = '';
   inventoryQuery = '';
   inventory: PlanningInventory | null = null;
   readonly search$ = new Subject<string>();
@@ -375,6 +386,16 @@ export class PlanItemDrawerComponent implements OnChanges, AfterViewInit, OnDest
         .pipe(debounceTime(250), distinctUntilChanged(), switchMap((q) => this.api.inventory(this.siteId!, q.trim())))
         .subscribe({ next: (inventory) => (this.inventory = inventory), error: () => (this.inventory = { indexedPages: [], sourceItems: [] }) }),
     );
+  }
+
+  loadWhy(event: Event): void {
+    if (!(event.target as HTMLDetailsElement).open) return;
+    const id = this.item.id;
+    this.whyError = '';
+    this.api.getItemSelection(id).subscribe({
+      next: (view) => { if (id === this.item.id) this.why = view; },
+      error: (err) => (this.whyError = apiMessage(err, 'No se pudo cargar el motivo.')),
+    });
   }
 
   get busy(): boolean {

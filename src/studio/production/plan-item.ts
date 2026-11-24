@@ -10,7 +10,7 @@ import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
 import { serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
-import { formatInternalUrl, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings } from "../editorial-engine/structure";
+import { formatInternalUrl, LENGTH_MODES, readArticleTargetsOverride, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings, wordTargetRange } from "../editorial-engine/structure";
 import { youtubeVideoFor } from "../youtube-videos";
 import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, resolveBrand, type ResolvedBrand } from "../editorial-engine/brand";
 import { crawlBrand, withCrawledBrand } from "../brand-colors";
@@ -248,8 +248,8 @@ export function planGuidance(item: EditorialPlanItem): string[] {
 }
 
 /** Brand data for the guide's intro, link card and promo block (business details and CTA wording when configured). */
-export function siteGuidance(site: { name: string; baseUrl: string | null }, brand: ResolvedBrand = resolveBrand(readBrandSettings(null), site)): string[] {
-  return renderBrandGuidance(brand);
+export function siteGuidance(site: { name: string; baseUrl: string | null }, brand: ResolvedBrand = resolveBrand(readBrandSettings(null), site), sections?: Parameters<typeof renderBrandGuidance>[1]): string[] {
+  return renderBrandGuidance(brand, sections);
 }
 
 export async function preparePlanItemInput(
@@ -269,12 +269,13 @@ export async function preparePlanItemInput(
   const language = options.language ?? (generation.language === "en" ? "en" : "es");
   const headline = item.finalSuggestedTitle || item.workingTitle || item.title;
   const keyword = item.primaryKeyword || item.targetQuery || headline;
+  const isGuide = mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide";
   const planEvidence = planEvidenceToLedger(item.sourceEvidence);
   // Links are primary (BLG parity M4): enough internal candidates for the target, and the pages Google ranks
   // for the keyword as citable external sources (own site and accepted competitors excluded).
   const targets = resolveArticleTargets(planningSettings?.articleTargets, generation.articleTargets);
   const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId: site.id, status: "accepted" }, select: { domain: true } });
-  const serpFacts = item.primaryKeyword && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide"
+  const serpFacts = item.primaryKeyword && isGuide
     ? await serpSourceFacts({
         tenantId,
         siteId: site.id,
@@ -287,9 +288,8 @@ export async function preparePlanItemInput(
         max: targets.externalLinks + 5, // a few spare so the writer picks the relevant ones
       })
     : [];
-  const isGuide = Boolean(item.primaryKeyword) && mapArticleType(item as unknown as Record<string, unknown>, generation) === "guide";
-  const youtube = isGuide
-    ? await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword: item.primaryKeyword!, youtube: resolveVisualSettings(planningSettings?.articleTargets).youtube })
+  const youtube = isGuide && item.primaryKeyword
+    ? await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword: item.primaryKeyword, youtube: resolveVisualSettings(planningSettings?.articleTargets).youtube })
     : null;
   const facts = [...planEvidence.facts, ...serpFacts];
   const evidence = { facts, groups: new Set(facts.map((fact) => fact.publisherGroup)).size };
@@ -330,7 +330,7 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: [...planGuidance(item), ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language)],
+      guidance: [...planGuidance(item), ...siteGuidance(site, brand, isGuide ? targets.sections : null), ...renderWritingGuidance(writing, language, { summary: isGuide && targets.sections.summary })],
       brand,
       disclaimer: writing.disclaimer,
       youtube,
@@ -373,9 +373,10 @@ export async function prepareManualInput(
     indexedPageTitles: await indexedTitles(tenantId, site.id),
     siteFitScore: null,
     primaryEntityNames: [request.title],
+    siteArticleTargets: planningSettings?.articleTargets ?? null,
     ownProjectId: request.projectId ?? null,
     cluster: null,
-    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`, ...siteGuidance(site, brand), ...renderWritingGuidance(writing, language, { summary: false })] },
+    plan: { planItemId: null, planId: null, record: {}, generation: {}, guidance: [`Editor brief:\n${request.brief}`, ...siteGuidance(site, brand, null), ...renderWritingGuidance(writing, language, { summary: false })] },
     options,
   };
 }
@@ -437,9 +438,15 @@ export function buildPlanBrief(input: PreparedInput, factSafety: FactSafetyRepor
     articleTargets.sections.contactCard &&= hasContactCard(brand);
     articleTargets.sections.mapCard &&= hasMapCard(brand);
   }
-  const typeLength = articleTargets ? { min: Math.round(articleTargets.words * 0.87), max: Math.round(articleTargets.words * 1.13) } : LENGTH_BY_TYPE[articleType];
+  const siteWriting = resolveWritingSettings(input.siteArticleTargets);
+  const words = articleTargets?.words ?? readArticleTargetsOverride(plan.generation.articleTargets).words ?? LENGTH_MODES[siteWriting.length];
+  const typeLength = words ? wordTargetRange(words) : LENGTH_BY_TYPE[articleType];
   const min = Number(record.recommendedWordCountMin ?? plan.generation.wordCountMin) || typeLength.min;
-  const max = Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || Math.max(min, typeLength.max);
+  const max = Math.max(min, Number(record.recommendedWordCountMax ?? plan.generation.wordCountMax) || typeLength.max);
+  if (articleTargets) {
+    articleTargets.words = Math.max(min, Math.min(max, articleTargets.words));
+    if (!siteWriting.internalLinks.enabled) articleTargets.internalLinks = 0;
+  }
   const keywords = [...stringList(record.secondaryKeywords), ...stringList(record.semanticKeywords)];
   const brief = {
     ...base,

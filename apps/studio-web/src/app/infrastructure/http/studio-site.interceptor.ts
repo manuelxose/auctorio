@@ -7,7 +7,7 @@ import { ActiveSiteStore } from '../../services/active-site.store';
  * tenant context per request. Site switching happens without reauthentication.
  */
 export const studioSiteInterceptor: HttpInterceptorFn = (req: HttpRequest<unknown>, next: HttpHandlerFn) => {
-  if (!req.url.includes('/backend/')) {
+  if (!req.url.includes('/backend/') || req.headers.has('x-studio-site-id')) {
     return next(req);
   }
 

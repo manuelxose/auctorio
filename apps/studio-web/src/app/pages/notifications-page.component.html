@@ -1,0 +1,114 @@
+<section class="au-page notifications">
+  <header class="notifications__header">
+    <div>
+      <p class="nt-kicker">Centro de operaciones</p>
+      <h1>Notificaciones</h1>
+      <p class="nt-muted">Avisos del sistema, publicaciones y actividad de tu espacio editorial.</p>
+    </div>
+    <button class="au-btn nt-button" type="button" (click)="markAll()" [disabled]="markingAll || unread === 0 || archived">
+      <app-icon name="check"></app-icon>{{ markingAll ? 'Marcando…' : 'Marcar todas como leídas' }}
+    </button>
+  </header>
+
+  <div class="notifications__banner" role="status">
+    <span class="nt-icon" data-tone="violet"><app-icon name="bell"></app-icon></span>
+    <div>
+      <strong>{{ hasLoaded ? unread === 1 ? '1 notificación sin leer' : unread + ' notificaciones sin leer' : loadError ? 'Resumen no disponible' : 'Cargando notificaciones…' }}</strong>
+      <p class="nt-muted">Bandeja de entrada del espacio de trabajo</p>
+    </div>
+    <button class="nt-link nt-banner-action" type="button" [disabled]="unread === 0" (click)="showUnread()">Ver sin leer <app-icon name="chevron-right"></app-icon></button>
+  </div>
+
+  <div class="notifications__columns">
+    <section class="nt-panel" aria-labelledby="nt-inbox">
+      <div class="nt-panel-heading">
+        <div><p class="nt-kicker">Actividad</p><h2 id="nt-inbox">Bandeja de entrada</h2></div>
+        <div class="nt-filters" role="group" aria-label="Estado de lectura">
+          <button type="button" [attr.aria-pressed]="!unreadOnly && !archived" (click)="setUnreadOnly(false)">Todas</button>
+          <button type="button" [attr.aria-pressed]="unreadOnly" (click)="setUnreadOnly(true)">Sin leer</button>
+          <button type="button" [attr.aria-pressed]="archived" (click)="setArchived(true)">Archivadas</button>
+        </div>
+      </div>
+
+      <div class="nt-filters nt-categories" role="group" aria-label="Categorías de notificaciones">
+        @for (tab of tabs; track tab.id) {
+          <button type="button" [attr.aria-pressed]="activeCategory === tab.id" (click)="selectCategory(tab.id)">
+            {{ tab.label }}
+            @if (!archived && counts[tab.id]) { <span class="nt-count">{{ counts[tab.id] }}</span> }
+          </button>
+        }
+      </div>
+
+      @if (loading) {
+        <p class="nt-muted nt-list-status" role="status">Cargando avisos…</p>
+      } @else if (loadError) {
+        <div class="nt-error" role="alert"><app-icon name="warning"></app-icon><span>{{ loadError }}</span>
+          <button class="nt-link" type="button" (click)="load()">Reintentar</button>
+        </div>
+      } @else if (!items.length) {
+        <app-empty-state icon="bell" [title]="archived ? 'No hay notificaciones archivadas' : unreadOnly ? 'No hay notificaciones sin leer' : 'No hay notificaciones en esta categoría'"></app-empty-state>
+      } @else {
+        <ul class="nt-list">
+          @for (item of items; track item.id) {
+            <li class="au-notification nt-row" [class.nt-row--unread]="!item.readAt">
+              <span class="nt-icon" [attr.data-tone]="item.severity"><app-icon [name]="severity[item.severity].icon"></app-icon></span>
+              <div class="nt-row-content">
+                <div class="nt-row-head">
+                  <div class="nt-tags">
+                    <span class="nt-tag" [attr.data-tone]="item.severity">{{ severity[item.severity].label }}</span>
+                    <span class="nt-muted">{{ categoryLabel(item.category) }}</span>
+                    @if (!item.readAt) { <span class="nt-tag" data-tone="violet">Sin leer</span> }
+                  </div>
+                  <time class="nt-muted" [attr.datetime]="item.createdAt">{{ item.createdAt | date:'d MMM y, HH:mm':undefined:'es' }}</time>
+                </div>
+                <h3>{{ item.title }}</h3>
+                @if (item.message) { <p class="nt-message">{{ item.message }}</p> }
+                <div class="nt-actions">
+                  @if (item.actionUrl) {
+                    <a class="au-link nt-link" [routerLink]="linkPath(item.actionUrl)" [queryParams]="linkQuery(item.actionUrl)" (click)="openAction(item)">{{ actionLabel(item.category) }} <app-icon name="chevron-right"></app-icon></a>
+                  }
+                  <button class="nt-link nt-link--muted" type="button" (click)="toggleRead(item)">{{ item.readAt ? 'Marcar como no leída' : 'Marcar como leída' }}</button>
+                  <button class="nt-link nt-link--muted" type="button" (click)="toggleArchive(item)">{{ item.archivedAt ? 'Restaurar' : 'Archivar' }}</button>
+                </div>
+              </div>
+            </li>
+          }
+        </ul>
+        <footer class="nt-footer">
+          <span class="nt-muted">{{ items.length }} de {{ total }} {{ total === 1 ? 'notificación' : 'notificaciones' }}</span>
+          @if (totalPages > 1) {
+            <nav class="nt-filters" aria-label="Páginas de notificaciones">
+              <button type="button" aria-label="Página anterior" (click)="goPage(page - 1)" [disabled]="page <= 1"><app-icon name="chevron-left"></app-icon></button>
+              <span class="nt-muted">Página {{ page }} de {{ totalPages }}</span>
+              <button type="button" aria-label="Página siguiente" (click)="goPage(page + 1)" [disabled]="page >= totalPages"><app-icon name="chevron-right"></app-icon></button>
+            </nav>
+          }
+        </footer>
+      }
+    </section>
+
+    <section class="nt-panel nt-preferences" aria-labelledby="nt-preferences">
+      <div class="nt-panel-heading">
+        <div><p class="nt-kicker">Configuración</p><h2 id="nt-preferences">Preferencias</h2></div>
+        <span class="nt-icon" data-tone="violet"><app-icon name="settings"></app-icon></span>
+      </div>
+      <p class="nt-muted">Elige qué avisos llegan a tu bandeja.</p>
+      @if (preferencesLoading) {
+        <p class="nt-muted" role="status">Cargando preferencias…</p>
+      } @else if (preferencesError) {
+        <div class="nt-error" role="alert"><span>No se pudieron cargar las preferencias.</span>
+          <button class="nt-link" type="button" (click)="loadPreferences()">Reintentar</button>
+        </div>
+      } @else {
+        @for (preference of preferences; track preference.category) {
+          <label class="nt-preference">
+            <span>{{ categoryLabel(preference.category) }}</span>
+            <input type="checkbox" role="switch" [checked]="preference.enabled" [disabled]="savingPreferences.has(preference.category)" (change)="togglePreference(preference, $event)" />
+          </label>
+        } @empty {
+          <p class="nt-muted">No hay preferencias disponibles.</p>
+        }
+      }
+    </section>
+  </div>
+</section>

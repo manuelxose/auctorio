@@ -142,3 +142,16 @@ Diferencias: BLG es más largo y usa más H3; nosotros citamos más fuentes dist
 - Incidencias de la sesión: Docker parado y el puerto 55432 dentro de un rango reservado de Windows (el usuario movió Postgres
   a 55543); los tests de BD reescriben la cuenta QA local, que se volvió a sembrar con `scripts/qa-visual-login.ts`.
 - No ejecutado: publicación real, aceptación con Sonnet escribiendo (sin saldo), revisión independiente.
+
+## Cierre de Social SEO M5 — Reddit y Quora (2026-11-19)
+
+**Aceptado en local.** La implementación está en `e32ba55`. Se aplicaron las migraciones de la bandeja y de puntuación. La API y el worker de discovery se reiniciaron con Tavily como proveedor de búsqueda y la credencial en el `.env` local ignorado por Git.
+
+| Plataforma | Oportunidades nuevas en GuiaProgramacionTV | Borrador y estado |
+| --- | ---: | --- |
+| Reddit | 24 | Borrador generado, guardado y recuperado con estado «Respondida». |
+| Quora | 35 | Borrador generado, guardado y recuperado con estado «Respondida». |
+
+- Se ejecutó el refresco real mediante operaciones del backend con las palabras clave del sitio de pruebas. Ambas operaciones terminaron en `succeeded`. La búsqueda directa de Reddit devolvió HTTP 403 y Tavily aportó resultados para ambas plataformas.
+- La generación recibió el tono de marca configurado para el sitio de pruebas. Anthropic rechazó las peticiones por falta de saldo y el proveedor alternativo configurado, DeepSeek, generó ambos textos. Tras comprobar la persistencia de «Respondida», los dos borradores volvieron a «Por responder» para revisión manual.
+- La validación de M5 incluyó 54 pruebas de backend, 6 de navegación de Studio, la comprobación de tipos y la compilación de producción de Studio. Chrome permitió inspeccionar las dos bandejas con una sesión existente. Los casos de Playwright en [engagement.spec.ts](../../e2e/specs/engagement.spec.ts) se enumeraron, pero el acceso automatizado con las credenciales de prueba devolvió HTTP 403. La aceptación con datos reales se verificó mediante el backend y PostgreSQL.

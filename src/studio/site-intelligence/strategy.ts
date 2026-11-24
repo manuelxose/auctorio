@@ -353,7 +353,8 @@ async function recentPagesPerWeek(tenantId: string, siteId: string): Promise<num
 }
 
 async function ensureStrategyRow(tenantId: string, siteId: string) {
-  return prisma.siteEditorialStrategy.upsert({ where: { siteId }, create: { tenantId, siteId }, update: {} });
+  await prisma.siteEditorialStrategy.createMany({ data: { tenantId, siteId }, skipDuplicates: true });
+  return prisma.siteEditorialStrategy.findUniqueOrThrow({ where: { siteId, tenantId }, select: { id: true } });
 }
 
 /** Regenerate the suggested layer from the current profile. Never touches the approved layer. */

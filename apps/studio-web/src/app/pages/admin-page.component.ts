@@ -29,7 +29,7 @@ type AdminSection = 'overview' | 'workspaces' | 'ai' | 'seo';
 
       <div class="au-admin" *ngIf="!denied">
         <app-seo-provider-settings *ngIf="section === 'seo'" (forbidden)="denied = true"></app-seo-provider-settings>
-
+        <p class="workspace-caption" *ngIf="section === 'overview' && overview">Platform overview · all workspaces</p>
         <div class="au-stats" *ngIf="section === 'overview' && overview">
           <div class="au-stat"><span class="au-stat__label">Workspaces</span><span class="au-stat__value">{{ overview.tenants }}</span><span class="au-stat__note">{{ overview.suspended }} suspended</span></div>
           <div class="au-stat"><span class="au-stat__label">Sites</span><span class="au-stat__value">{{ overview.sites }}</span></div>
@@ -98,7 +98,7 @@ export class AdminPageComponent implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly toast = inject(ToastService);
 
-  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers', seo: 'SEO providers' };
+  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers', seo: 'Proveedores SEO' };
   section: AdminSection = 'overview';
   denied = false;
   overview: AdminOverview | null = null;

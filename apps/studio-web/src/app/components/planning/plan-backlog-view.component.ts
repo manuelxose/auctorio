@@ -28,11 +28,11 @@ type SortKey = 'date-asc' | 'date-desc' | 'priority' | 'title';
       .pb__shift input { width: 72px; }
       .pb__group { margin: var(--au-s3) 0 var(--au-s1); font-size: var(--au-fs-body-sm); font-weight: 600; color: var(--au-text-2); display: flex; gap: var(--au-s2); align-items: baseline; }
       .pb__group small { color: var(--au-muted); font-weight: 400; }
-      .pb__list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--au-border); border-radius: var(--au-r-md); overflow: hidden; background: var(--au-surface); }
-      .pb__row { display: grid; grid-template-columns: 28px 112px minmax(0, 1fr) 120px 90px; gap: var(--au-s3); align-items: center; padding: 8px var(--au-s3); border-top: 1px solid var(--au-border); }
+      .pb__list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--au-border); border-radius: 10px; overflow-x: auto; background: var(--au-surface); }
+      .pb__row { display: grid; grid-template-columns: 22px minmax(185px, 1fr) 105px 105px 82px; gap: 11px; align-items: center; padding: 11px; min-width: 545px; border-top: 1px solid var(--au-border); }
       .pb__row:first-child { border-top: 0; }
       .pb__row.is-selected { background: var(--au-surface-selected); }
-      .pb__row--head { font-size: var(--au-fs-caption); color: var(--au-muted); font-weight: 600; background: var(--au-surface-2); }
+      .pb__row--head { font-size: 11px; color: #81798c; font-weight: 770; background: #f8f6fa; }
       .pb__when { font-variant-numeric: tabular-nums; font-size: var(--au-fs-body-sm); color: var(--au-text-2); }
       .pb__title:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 2px; }
       .pb__title { text-align: left; border: 0; background: transparent; font: inherit; color: var(--au-text); cursor: pointer; padding: 2px 0; min-width: 0; }
@@ -41,14 +41,7 @@ type SortKey = 'date-asc' | 'date-desc' | 'priority' | 'title';
       .pb__title:hover strong { color: var(--au-brand); }
       .pb__check { width: 18px; height: 18px; }
       .pb__count { display: flex; align-items: center; gap: var(--au-s2); font-size: var(--au-fs-body-sm); margin: 0 0 var(--au-s2); }
-      @media (max-width: 767px) {
-        .pb__row { grid-template-columns: 28px minmax(0, 1fr); row-gap: 4px; }
-        .pb__row--head { display: none; }
-        .pb__row > .pb__when, .pb__row > .pb__status, .pb__row > .pb__channel { grid-column: 2; }
-        .pb__row > .pb__when { order: 3; }
-        .pb__status, .pb__channel { display: inline; }
-        .pb__check { width: 22px; height: 22px; }
-      }
+      .pb__list:focus-visible { outline: 2px solid var(--au-brand); outline-offset: 2px; }
     `,
   ],
   template: `
@@ -123,19 +116,19 @@ type SortKey = 'date-asc' | 'date-desc' | 'priority' | 'title';
 
     <ng-container *ngFor="let group of groups">
       <h3 class="pb__group" *ngIf="groupBy !== 'none'">{{ group.label }} <small>{{ group.items.length }}</small></h3>
-      <ul class="pb__list">
+      <ul class="pb__list" tabindex="0" aria-label="Propuestas del plan">
         <li class="pb__row pb__row--head">
           <input class="pb__check" type="checkbox" [checked]="allSelected(group.items)" (change)="toggleAll(group.items, $event)" [attr.aria-label]="'Select all ' + group.items.length + (group.label ? ' in ' + group.label : '')" />
-          <span aria-hidden="true">Proposed date</span><span aria-hidden="true">Brief</span><span aria-hidden="true">Status</span><span aria-hidden="true">Channel</span>
+          <span aria-hidden="true">Brief / palabra clave</span><span aria-hidden="true">Estado</span><span aria-hidden="true">Fecha propuesta</span><span aria-hidden="true">Canal</span>
         </li>
         <li class="pb__row" *ngFor="let item of group.items; trackBy: trackId" [class.is-selected]="selected.has(item.id)">
           <input class="pb__check" type="checkbox" [checked]="selected.has(item.id)" (change)="toggle(item.id)" [attr.aria-label]="'Select ' + title(item)" />
-          <span class="pb__when">{{ when(item) }}</span>
           <button type="button" class="pb__title" (click)="open.emit(item)">
             <strong>{{ title(item) }}</strong>
             <small>{{ [item.topicCluster, item.contentType, item.primaryKeyword].filter(truthy).join(' · ') || 'No cluster or keyword yet' }}</small>
           </button>
           <span class="pb__status"><span class="au-badge" [class]="'au-badge au-badge--' + tone(item.status)">{{ label(item.status) }}</span></span>
+          <span class="pb__when">{{ when(item) }}</span>
           <span class="pb__channel au-muted">{{ channel(item.channel) }}</span>
         </li>
       </ul>

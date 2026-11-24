@@ -26,38 +26,38 @@ import { WEEKDAYS } from './planning-utils';
   ],
   template: `
     <section class="au-panel au-panel--padded au-mb-3" aria-labelledby="asc-title">
-      <h2 class="au-panel__title" id="asc-title">Articles</h2>
+      <h2 class="au-panel__title" id="asc-title">Artículos</h2>
       <p class="au-panel__subtitle au-mb-3">{{ summary }}</p>
       @if (!settings) {
-        <p class="au-muted au-mb-0">{{ message || 'Loading…' }}</p>
+        <p class="au-muted au-mb-0">{{ message || 'Cargando…' }}</p>
       } @else {
         <fieldset class="asc__days">
-          <legend>Publishing days</legend>
+          <legend>Días de publicación</legend>
           @for (day of weekdays; track day.value) {
             <button type="button" class="asc__day" [attr.aria-pressed]="settings.weekdays.includes(day.value)" [attr.aria-label]="day.long" (click)="toggleDay(day.value)">{{ day.short }}</button>
           }
         </fieldset>
 
-        <p class="au-hint au-mb-0">Sections, length and writing rules live in <a class="au-link" routerLink="/studio/settings/writing">Settings › Writing</a>.</p>
+        <p class="au-hint au-mb-0">Las secciones, la extensión y las reglas de redacción están en <a class="au-link" routerLink="/studio/settings/writing">Configuración › Escritura</a>.</p>
 
         <details class="asc__more">
-          <summary>More: articles per day and publish time</summary>
+          <summary>Más: artículos por día y hora de publicación</summary>
           <div class="au-field-grid au-mt-2">
             <label class="au-field">
-              <span class="au-field__label">Articles per day</span>
+              <span class="au-field__label">Artículos por día</span>
               <input class="au-input" type="number" min="1" max="8" name="apd" [(ngModel)]="settings.articlesPerDay" />
             </label>
             <label class="au-field">
-              <span class="au-field__label">Publish times</span>
+              <span class="au-field__label">Horas de publicación</span>
               <input class="au-input" name="times" [(ngModel)]="times" placeholder="09:00" aria-describedby="asc-times" />
-              <span class="au-field__hint" id="asc-times">24 h, comma-separated. Empty: 09:00.</span>
+              <span class="au-field__hint" id="asc-times">Formato 24 h, separadas por comas. Vacío: 09:00.</span>
             </label>
           </div>
         </details>
 
         <div class="au-form__actions au-mb-0">
-          <button class="au-btn au-btn--primary" type="button" [disabled]="saving || !settings.weekdays.length" (click)="save()">{{ saving ? 'Saving…' : 'Save articles' }}</button>
-          <span role="status" aria-live="polite" class="au-muted">{{ settings.weekdays.length ? message : 'Pick at least one day.' }}</span>
+          <button class="au-btn au-btn--primary" type="button" [disabled]="saving || !settings.weekdays.length" (click)="save()">{{ saving ? 'Guardando…' : 'Guardar artículos' }}</button>
+          <span role="status" aria-live="polite" class="au-muted">{{ settings.weekdays.length ? message : 'Elige al menos un día.' }}</span>
         </div>
       }
     </section>
@@ -74,9 +74,9 @@ export class ArticleSettingsCardComponent implements OnInit {
   message = '';
 
   get summary(): string {
-    if (!this.settings) return 'How often articles go out and which blocks a guide has.';
-    const days = this.settings.weekdays.length === 7 ? 'every day' : `${this.settings.weekdays.length} day${this.settings.weekdays.length === 1 ? '' : 's'} a week`;
-    return `${this.settings.articlesPerDay} article${this.settings.articlesPerDay === 1 ? '' : 's'} a day, ${days}.`;
+    if (!this.settings) return 'Con qué frecuencia salen los artículos y qué bloques tiene una guía.';
+    const days = this.settings.weekdays.length === 7 ? 'todos los días' : `${this.settings.weekdays.length} ${this.settings.weekdays.length === 1 ? 'día' : 'días'} a la semana`;
+    return `${this.settings.articlesPerDay} ${this.settings.articlesPerDay === 1 ? 'artículo' : 'artículos'} al día, ${days}.`;
   }
 
   ngOnInit(): void {
@@ -85,7 +85,7 @@ export class ArticleSettingsCardComponent implements OnInit {
         this.settings = { ...settings, weekdays: [...settings.weekdays], articleTargets: { ...(settings.articleTargets ?? {}), sections: { ...(settings.articleTargets?.sections ?? {}) } } };
         this.times = settings.publishTimes.join(', ');
       },
-      error: (err) => (this.message = apiMessage(err, 'Article settings could not be loaded.')),
+      error: (err) => (this.message = apiMessage(err, 'No se pudo cargar la configuración de artículos.')),
     });
   }
 
@@ -108,11 +108,11 @@ export class ArticleSettingsCardComponent implements OnInit {
       .subscribe({
         next: () => {
           this.saving = false;
-          this.toast.success('Article settings saved.');
+          this.toast.success('Configuración de artículos guardada.');
         },
         error: (err) => {
           this.saving = false;
-          this.message = apiMessage(err, 'Article settings could not be saved.');
+          this.message = apiMessage(err, 'No se pudo guardar la configuración de artículos.');
         },
       });
   }

@@ -1,5 +1,5 @@
 import { Routes } from '@angular/router';
-import { studioAuthGuard, studioRoleGuard } from './guards/studio-guards';
+import { studioAuthGuard, studioPermissionGuard } from './guards/studio-guards';
 
 /**
  * Simplified product routes. Old editorial surface routes redirect to the
@@ -21,17 +21,17 @@ export const routes: Routes = [
       {
         path: 'content',
         loadComponent: () => import('./pages/content-list-page.component').then((m) => m.ContentListPageComponent),
-        data: { studioMeta: { section: 'Content', title: 'Content' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'Artículos' } },
       },
       {
         path: 'content/new',
         loadComponent: () => import('./pages/content-new-page.component').then((m) => m.ContentNewPageComponent),
-        data: { studioMeta: { section: 'Content', title: 'New content' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'New content' } },
       },
       {
         path: 'content/:id',
         loadComponent: () => import('./pages/content-workspace-page.component').then((m) => m.ContentWorkspacePageComponent),
-        data: { studioMeta: { section: 'Content', title: 'Article' } },
+        data: { studioMeta: { section: 'Publicaciones', title: 'Artículo' } },
       },
       {
         path: 'calendar',
@@ -52,6 +52,16 @@ export const routes: Routes = [
         path: 'site-intelligence',
         loadComponent: () => import('./pages/site-intelligence-page.component').then((m) => m.SiteIntelligencePageComponent),
         data: { studioMeta: { section: 'Site Intelligence', title: 'Site Intelligence' } },
+      },
+      {
+        path: 'social',
+        loadComponent: () => import('./pages/social-page.component').then((m) => m.SocialPageComponent),
+        data: { studioMeta: { section: 'Publicaciones', title: 'Redes' } },
+      },
+      {
+        path: 'opportunities',
+        loadComponent: () => import('./pages/opportunities-page.component').then((m) => m.OpportunitiesPageComponent),
+        data: { studioMeta: { section: 'Home', title: 'Oportunidades' } },
       },
       {
         path: 'results',
@@ -85,6 +95,11 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Media', title: 'Media' } },
       },
       {
+        path: 'settings/social',
+        loadComponent: () => import('./pages/social-settings-page.component').then((m) => m.SocialSettingsPageComponent),
+        data: { studioMeta: { section: 'Settings', title: 'Ajustes de redes' } },
+      },
+      {
         path: 'connections',
         loadComponent: () => import('./pages/connections-page.component').then((m) => m.ConnectionsPageComponent),
         data: { studioMeta: { section: 'Connections', title: 'Connections' } },
@@ -107,8 +122,8 @@ export const routes: Routes = [
       {
         path: 'operations',
         loadComponent: () => import('./pages/operations-page.component').then((m) => m.OperationsPageComponent),
-        canActivate: [studioRoleGuard],
-        data: { requiredRole: 'admin', studioMeta: { section: 'Operations', title: 'System health' } },
+        canActivate: [studioPermissionGuard],
+        data: { studioMeta: { section: 'Operations', title: 'System health' } },
       },
       {
         path: 'notifications',
@@ -136,8 +151,8 @@ export const routes: Routes = [
       {
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),
-        canActivate: [studioRoleGuard],
-        data: { adminSections: ['team', 'roles'], studioMeta: { section: 'Settings', title: 'Settings' } },
+        canActivate: [studioPermissionGuard],
+        data: { studioMeta: { section: 'Settings', title: 'Settings' } },
       },
 
       // ── Compatibility redirects (old surface → new destination) ─────

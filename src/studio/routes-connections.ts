@@ -21,7 +21,7 @@ import {
   verifySocialConnection,
 } from "./social-connections";
 
-const SOCIAL_PLATFORMS = ["x", "instagram"] as const;
+const SOCIAL_PLATFORMS = ["x", "instagram", "facebook"] as const;
 
 function callbackBase(): string {
   return `${getEnv("PUBLIC_BASE_URL", "http://localhost:3000")}/v2/social-connections/callback`;
@@ -166,7 +166,7 @@ export function registerConnectionRoutes(fastify: FastifyInstance) {
         tenantId: context.tenantId,
         userId: context.userId,
         siteId: account.siteId,
-        platform: account.platform as "x" | "instagram",
+        platform: account.platform as "x" | "instagram" | "facebook",
         redirectUri: callbackBase(),
       });
       return reply.send(session);

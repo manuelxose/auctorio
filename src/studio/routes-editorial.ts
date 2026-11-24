@@ -1,5 +1,5 @@
 import { Prisma } from "@prisma/client";
-import type { FastifyInstance, FastifyReply } from "fastify";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import { QUEUE_NAMES } from "../infrastructure/queue/queues";
 import {
@@ -32,6 +32,7 @@ import {
 import { listStoryClusters, setClusterStatus } from "./editorial";
 import { getSourceHealth } from "./source-health";
 import { createProjectFromSourceItem } from "./planner";
+import { getSiteSocialSettings, putSiteSocialSettings, type SiteSocialSettingsInput } from "./social-settings";
 import {
   createPublication,
   deletePublication,
@@ -56,6 +57,8 @@ import {
   updatePlanPreset,
 } from "./planning-settings";
 import { MAX_PLAN_KEYWORDS, addPlanKeywords } from "./plan-keywords";
+import { ensureMonthlyPlan, getMonthPlan } from "./autopilot-plan";
+import { changePlanItemKeyword, getPlanItemSelection } from "./plan-item-keyword";
 import { seoCapabilityAvailable } from "./seo-manager";
 import { listWorkerHeartbeats } from "./worker-health";
 import { recoverStuckAutoProjects } from "./automation-recovery";
@@ -68,9 +71,15 @@ import {
   updatePolicy,
   type UpdatePolicyInput,
 } from "./automation";
+import { normalizeAutomationMode } from "./automation-mode";
 import {
+  appendSocialSlide,
   createSocialGenerationJobs,
+  deleteSocialDraft,
+  duplicateSocialContent,
   listSocialContent,
+  listSiteSocialContent,
+  scheduleApprovedSocial,
   regenerateSocial,
   updateSocialContent,
 } from "./social";
@@ -78,6 +87,10 @@ import { listAudit } from "./audit";
 import { writeAudit } from "./audit";
 import { computeConnectionState } from "./social-connections";
 import { dedupeLegacyWebsiteAccounts, loadWebsiteDestinations } from "./destination-readiness";
+import { crawlBrand, withCrawledBrand } from "./brand-colors";
+import { resolveBrandSettings } from "./editorial-engine/structure";
+import { previewBrandCards, readBrandSettings, resolveBrand } from "./editorial-engine/brand";
+import { sanitizeEditorialHtml } from "./html-sanitizer";
 import { buildAssetPublicUrl } from "./orchestration";
 import {
   bulkApproveEditorialPlanItems,
@@ -102,6 +115,12 @@ import { startProductionForPlanItem } from "./production/pipeline";
 
 const prisma = getPrismaClient();
 
+async function resolveSiteLogo(tenantId: string, baseUrl: string | null, articleTargets: unknown): Promise<string | null> {
+  return resolveBrandSettings(articleTargets).logoUrl
+    || (await crawlBrand(tenantId, baseUrl).catch(() => null))?.logoUrl
+    || null;
+}
+
 const SOURCE_TYPES = ["rss", "atom", "html", "sitemap", "api", "htmllist", "imdb", "manual"] as const;
 const SOURCE_ITEM_STATUSES = [
   "discovered",
@@ -115,7 +134,7 @@ const SOURCE_ITEM_STATUSES = [
   "failed",
 ] as const;
 const CLUSTER_STATUSES = ["open", "selected", "covered", "rejected", "archived"] as const;
-const PUBLICATION_CHANNELS = ["website", "x", "instagram"] as const;
+const PUBLICATION_CHANNELS = ["website", "x", "instagram", "facebook"] as const;
 const PUBLICATION_STATES = [
   "draft",
   "ready",
@@ -128,9 +147,9 @@ const PUBLICATION_STATES = [
   "deleted",
   "unpublished",
 ] as const;
-const ACCOUNT_PLATFORMS = ["website", "x", "instagram"] as const;
+const ACCOUNT_PLATFORMS = ["website", "x", "instagram", "facebook"] as const;
 const ACCOUNT_STATUSES = ["pending", "active", "error", "disabled"] as const;
-const SOCIAL_CHANNELS = ["x", "instagram"] as const;
+const SOCIAL_CHANNELS = ["x", "instagram", "facebook"] as const;
 const SOCIAL_EDITORIAL_STATUSES = ["draft", "approved", "rejected"] as const;
 
 function parseIsoDate(value: unknown): Date | null {
@@ -1008,7 +1027,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
     const social = await listSocialContent(context.tenantId, {
       projectId,
-      channel: channel as "x" | "instagram" | undefined,
+      channel: channel as (typeof SOCIAL_CHANNELS)[number] | undefined,
     });
     return reply.send({ items: social });
   });
@@ -1026,12 +1045,19 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       channels?: string[];
       threadLength?: number;
       versionId?: string;
+      instagramFormat?: "instagram_carousel" | "instagram_story";
     }>(request);
-    const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is "x" | "instagram" =>
+    if (body.instagramFormat !== undefined && !isOneOf(body.instagramFormat, ["instagram_carousel", "instagram_story"] as const)) {
+      return badRequest(reply, "invalid Instagram format");
+    }
+    if (body.channels !== undefined && !Array.isArray(body.channels)) {
+      return badRequest(reply, "channels must be an array");
+    }
+    const channels = (body.channels ?? ["x", "instagram"]).filter((channel): channel is (typeof SOCIAL_CHANNELS)[number] =>
       isOneOf(channel, SOCIAL_CHANNELS),
     );
     if (channels.length === 0) {
-      return badRequest(reply, "channels must include x and/or instagram");
+      return badRequest(reply, "channels must include x, instagram and/or facebook");
     }
 
     const project = await prisma.contentProject.findFirst({
@@ -1052,6 +1078,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
         versionId,
         channels,
         threadLength: body.threadLength ?? 1,
+        instagramFormat: body.instagramFormat,
       });
       return reply.code(202).send({ job_id: result.jobId, status: "queued" });
     } catch (error) {
@@ -1070,6 +1097,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     }
     const body = parseBody<{
       body?: string;
+      title?: string;
       hashtags?: string[];
       editorialStatus?: string;
       mediaAssetIds?: string[];
@@ -1077,16 +1105,109 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (body.editorialStatus && !isOneOf(body.editorialStatus, SOCIAL_EDITORIAL_STATUSES)) {
       return badRequest(reply, `editorialStatus must be one of: ${SOCIAL_EDITORIAL_STATUSES.join(", ")}`);
     }
-    const social = await updateSocialContent(context.tenantId, socialId, {
-      body: body.body,
-      hashtags: body.hashtags,
-      editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
-      mediaAssetIds: body.mediaAssetIds,
-    });
+    if (body.body !== undefined && typeof body.body !== "string") return badRequest(reply, "invalid social body");
+    if (body.title !== undefined && typeof body.title !== "string") return badRequest(reply, "invalid social title");
+    if (body.hashtags !== undefined && (!Array.isArray(body.hashtags) || body.hashtags.some((tag) => typeof tag !== "string"))) {
+      return badRequest(reply, "invalid social hashtags");
+    }
+    if (body.mediaAssetIds !== undefined && (!Array.isArray(body.mediaAssetIds) || body.mediaAssetIds.some((id) => typeof id !== "string"))) {
+      return badRequest(reply, "invalid social media assets");
+    }
+    let social;
+    try {
+      social = await updateSocialContent(context.tenantId, socialId, {
+        body: body.body,
+        title: body.title,
+        hashtags: body.hashtags,
+        editorialStatus: body.editorialStatus as "draft" | "approved" | "rejected" | undefined,
+        mediaAssetIds: body.mediaAssetIds,
+      });
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
     if (!social) {
       return notFound(reply, "social content not found");
     }
-    return reply.send(social);
+    const publication = body.editorialStatus === "approved" ? await scheduleApprovedSocial(context.tenantId, social.id) : null;
+    // approved but unscheduled ⇒ no connected account for this channel yet.
+    return reply.send({ ...social, publication, needsAccount: body.editorialStatus === "approved" && !publication });
+  });
+
+  fastify.get("/v2/sites/:id/social", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) {
+      return;
+    }
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) {
+      return badRequest(reply, "invalid site id");
+    }
+    const query = request.query as { channel?: string; postId?: string };
+    const channel = parseOptionalString(query.channel);
+    if (channel && !isOneOf(channel, SOCIAL_CHANNELS)) {
+      return badRequest(reply, `channel must be one of: ${SOCIAL_CHANNELS.join(", ")}`);
+    }
+    const postId = parseOptionalString(query.postId);
+    if (postId && !isUuid(postId)) return badRequest(reply, "invalid social content id");
+    const items = await listSiteSocialContent(context.tenantId, siteId, channel as (typeof SOCIAL_CHANNELS)[number] | undefined, postId);
+    return reply.send({ items });
+  });
+
+  fastify.post("/v2/social/:id/duplicate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    try {
+      const copy = await duplicateSocialContent(context.tenantId, id);
+      return copy ? reply.code(201).send(copy) : notFound(reply, "social content not found");
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.delete("/v2/social/:id", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    if (!await deleteSocialDraft(context.tenantId, id)) return conflict(reply, "Solo se pueden eliminar borradores sin historial de publicación.");
+    return reply.code(204).send();
+  });
+
+  fastify.post("/v2/social/:id/slides", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    const { headline, body } = parseBody<{ headline?: string; body?: string }>(request);
+    if (typeof headline !== "string" || !headline.trim() || headline.trim().length > 60 ||
+        typeof body !== "string" || body.trim().length > 180) {
+      return badRequest(reply, "Escribe un título de hasta 60 caracteres y un texto de hasta 180.");
+    }
+    try {
+      if (!await appendSocialSlide(context.tenantId, id, { headline: headline.trim(), body: body.trim() })) {
+        return conflict(reply, "Solo se pueden añadir diapositivas a un carrusel en borrador.");
+      }
+      return reply.code(204).send();
+    } catch (error) {
+      return badRequest(reply, error instanceof Error ? error.message : String(error));
+    }
+  });
+
+  fastify.post("/v2/social/:id/schedule", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "publishing.manage");
+    if (!context) return;
+    const id = (request.params as { id: string }).id;
+    if (!isUuid(id)) return badRequest(reply, "invalid social content id");
+    const scheduledFor = parseIsoDate(parseBody<{ scheduledFor?: string }>(request).scheduledFor);
+    if (!scheduledFor || isPastSchedule(scheduledFor)) return badRequest(reply, "Elige una fecha y hora futuras.");
+    try {
+      const publication = await scheduleApprovedSocial(context.tenantId, id, new Date(), scheduledFor);
+      return publication ? reply.send(publication) : conflict(reply, "Aprueba el contenido y conecta una cuenta para programarlo.");
+    } catch (error) {
+      return conflict(reply, error instanceof Error ? error.message : String(error));
+    }
   });
 
   fastify.post("/v2/social/:id/regenerate", async (request, reply) => {
@@ -1328,7 +1449,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return reply.send({ ok: false, message: "credentials_not_resolved" });
     }
     const { getSocialPublisher } = await import("./social-publishers");
-    const publisher = getSocialPublisher(account.platform);
+    const publisher = getSocialPublisher(account.platform as "x" | "instagram" | "facebook");
     const result = await publisher.validateCredentials(credentials);
     await prisma.publishingAccount.update({
       where: { id: account.id },
@@ -1351,14 +1472,29 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
 
   // ──────────────────────────────────────────────────────────── Automation
 
+  async function automationSiteId(tenantId: string, value: unknown, reply: FastifyReply): Promise<string | null | undefined> {
+    if (value === undefined || value === null) return null;
+    if (typeof value !== "string" || !isUuid(value.trim())) {
+      badRequest(reply, "invalid site id");
+      return;
+    }
+    const site = await prisma.site.findFirst({ where: { id: value.trim(), tenantId }, select: { id: true } });
+    if (!site) {
+      notFound(reply, "site not found");
+      return;
+    }
+    return site.id;
+  }
+
   fastify.get("/v2/automation", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) {
       return;
     }
-    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    const siteId = await automationSiteId(context.tenantId, (request.query as { siteId?: string }).siteId, reply);
+    if (siteId === undefined) return;
     const policy = await getOrCreatePolicy(context.tenantId, siteId);
-    return reply.send(policy);
+    return reply.send({ ...policy, mode: normalizeAutomationMode(policy.mode, policy) });
   });
 
   fastify.patch("/v2/automation", async (request, reply) => {
@@ -1367,10 +1503,12 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const body = parseBody<UpdatePolicyInput & { siteId?: string }>(request);
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
     try {
       const policy = await updatePolicy(
         context.tenantId,
-        parseOptionalString(body.siteId) ?? null,
+        siteId,
         {
           enabled: body.enabled,
           timezone: body.timezone,
@@ -1408,6 +1546,9 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       );
       return reply.send(policy);
     } catch (error) {
+      if (error instanceof Error && error.message === "publication_circuit_open") {
+        return reply.code(409).send({ error: "conflict", message: error.message });
+      }
       return badRequest(reply, error instanceof Error ? error.message : String(error));
     }
   });
@@ -1417,7 +1558,8 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     if (!context) {
       return;
     }
-    const siteId = parseOptionalString((request.query as { siteId?: string }).siteId) ?? null;
+    const siteId = await automationSiteId(context.tenantId, (request.query as { siteId?: string }).siteId, reply);
+    if (siteId === undefined) return;
     return reply.send(await getAutomationStatus(context.tenantId, siteId));
   });
 
@@ -1427,9 +1569,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const body = parseBody<{ siteId?: string; reason?: string }>(request);
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
     const policy = await pauseAutomation(
       context.tenantId,
-      parseOptionalString(body.siteId) ?? null,
+      siteId,
       parseOptionalString(body.reason) ?? "paused_manually",
       context.userId,
     );
@@ -1442,8 +1586,16 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const body = parseBody<{ siteId?: string }>(request);
-    const policy = await resumeAutomation(context.tenantId, parseOptionalString(body.siteId) ?? null, context.userId);
-    return reply.send(policy);
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
+    try {
+      return reply.send(await resumeAutomation(context.tenantId, siteId, context.userId));
+    } catch (error) {
+      if (error instanceof Error && error.message === "publication_circuit_open") {
+        return reply.code(409).send({ error: "conflict", message: error.message });
+      }
+      throw error;
+    }
   });
 
   fastify.get("/v2/automation/health", async (request, reply) => {
@@ -1481,9 +1633,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return;
     }
     const body = parseBody<{ siteId?: string; dryRun?: boolean; statuses?: string[] }>(request);
+    const siteId = await automationSiteId(context.tenantId, body.siteId, reply);
+    if (siteId === undefined) return;
     const report = await recoverStuckAutoProjects({
       tenantId: context.tenantId,
-      siteId: parseOptionalString(body.siteId) ?? null,
+      siteId,
       dryRun: body.dryRun === true,
       statuses: Array.isArray(body.statuses) ? body.statuses : undefined,
     });
@@ -1805,6 +1959,31 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     return reply.send(deleted);
   });
 
+  fastify.get("/v2/sites/:id/social-settings", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    try {
+      return reply.send(await getSiteSocialSettings(context.tenantId, siteId));
+    } catch {
+      return notFound(reply, "site not found");
+    }
+  });
+
+  fastify.put("/v2/sites/:id/social-settings", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    try {
+      return reply.send(await putSiteSocialSettings(context.tenantId, siteId, parseBody<SiteSocialSettingsInput>(request)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message === "site_not_found" ? notFound(reply, message) : badRequest(reply, message);
+    }
+  });
+
   fastify.get("/v2/sites/:id/planning-settings", async (request, reply) => {
     const context = await requireStudioContext(request, reply);
     if (!context) return;
@@ -1816,6 +1995,34 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       return notFound(reply, "site not found");
     }
   });
+
+  // Settings › Writing › CTAs: the three cards exactly as articles will render them (same renderer, same sanitizer) for the draft brand.
+  fastify.post("/v2/sites/:id/cta-preview", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { name: true, baseUrl: true, locale: true } });
+    if (!site) return notFound(reply, "site not found");
+    const { brand } = parseBody<{ brand?: unknown }>(request);
+    // Same precedence as production: what Settings › Brand sets wins, empty colours/logo take the crawled site palette.
+    const crawled = await crawlBrand(context.tenantId, site.baseUrl).catch(() => null);
+    const cards = previewBrandCards(resolveBrand(withCrawledBrand(readBrandSettings(brand), crawled), site), site.locale?.toLowerCase().startsWith("en") ? "en" : "es");
+    return reply.send({ cards: Object.fromEntries(Object.entries(cards).map(([kind, html]) => [kind, sanitizeEditorialHtml(html)])) });
+  });
+
+  // Settings › Brand: the palette and logo read from the site itself (cached 30 days); POST re-crawls it now.
+  const detectedBrand = async (request: FastifyRequest, reply: FastifyReply, refresh: boolean) => {
+    const context = refresh ? await requireStudioPermission(request, reply, "projects.manage") : await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { baseUrl: true } });
+    if (!site) return notFound(reply, "site not found");
+    return reply.send({ source: site.baseUrl, detected: await crawlBrand(context.tenantId, site.baseUrl, { refresh }).catch(() => null) });
+  };
+  fastify.get("/v2/sites/:id/brand-detected", (request, reply) => detectedBrand(request, reply, false));
+  fastify.post("/v2/sites/:id/brand-detected/refresh", (request, reply) => detectedBrand(request, reply, true));
 
   fastify.put("/v2/sites/:id/planning-settings", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "projects.manage");
@@ -1864,6 +2071,61 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { id: true } });
     if (!site) return notFound(reply, "site not found");
     return reply.send(await addPlanKeywords(context.tenantId, siteId, keywords as string[], context.userId));
+  });
+
+  // Modo y ritmo › Plan del mes: the next 30 days, the research behind them and the slots still empty.
+  fastify.get("/v2/sites/:id/month-plan", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { id: true } });
+    if (!site) return notFound(reply, "site not found");
+    return reply.send(await getMonthPlan(context.tenantId, siteId));
+  });
+
+  fastify.post("/v2/sites/:id/month-plan/generate", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+    const site = await prisma.site.findFirst({ where: { id: siteId, tenantId: context.tenantId }, select: { id: true } });
+    if (!site) return notFound(reply, "site not found");
+    const policy = await getOrCreatePolicy(context.tenantId, siteId);
+    try {
+      const result = await ensureMonthlyPlan(policy, { manual: true, userId: context.userId });
+      return reply.code(result.started ? 202 : 200).send(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return message === "editorial_plan_busy" ? conflict(reply, message) : badRequest(reply, message);
+    }
+  });
+
+  fastify.get("/v2/editorial-plan-items/:id/selection", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    const selection = await getPlanItemSelection(context.tenantId, itemId);
+    return selection ? reply.send(selection) : notFound(reply, "editorial plan item not found");
+  });
+
+  fastify.post("/v2/editorial-plan-items/:id/keyword", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "projects.manage");
+    if (!context) return;
+    const itemId = (request.params as { id: string }).id;
+    if (!isUuid(itemId)) return badRequest(reply, "invalid editorial plan item id");
+    const { keyword } = parseBody<{ keyword?: unknown }>(request);
+    if (typeof keyword !== "string" || !keyword.trim() || keyword.length > 160) return badRequest(reply, "keyword must be 1-160 characters");
+    try {
+      return reply.send(await changePlanItemKeyword(context.tenantId, itemId, keyword, context.userId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === "editorial_plan_item_not_found") return notFound(reply, message);
+      if (message === "editorial_plan_item_keyword_locked") return conflict(reply, message);
+      if (message.startsWith("editorial_plan_keyword_")) return badRequest(reply, message);
+      throw error;
+    }
   });
 
   // Inventory the drawer may pick internal links / evidence from; PATCH re-validates every new URL server-side.
@@ -2230,6 +2492,21 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     );
   });
 
+  fastify.get("/v2/sites/:id/logo", async (request, reply) => {
+    const context = await requireStudioContext(request, reply);
+    if (!context) return;
+    const siteId = (request.params as { id: string }).id;
+    if (!isUuid(siteId)) return badRequest(reply, "invalid site id");
+
+    const site = await prisma.site.findFirst({
+      where: { id: siteId, tenantId: context.tenantId },
+      select: { baseUrl: true, planningSettings: { select: { articleTargets: true } } },
+    });
+    if (!site) return notFound(reply, "site not found");
+
+    return { logoUrl: await resolveSiteLogo(context.tenantId, site.baseUrl, site.planningSettings?.articleTargets) };
+  });
+
   // ──────────────────────────────────────────────────────────── Dashboard overview
 
   fastify.get("/v2/overview", async (request, reply) => {
@@ -2240,11 +2517,13 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
     const tenantId = context.tenantId;
     // Optional active-site scope: counts must not present tenant-wide numbers as the active site's.
     const rawSite = (request.query as { siteId?: string }).siteId;
-    const siteScope =
-      rawSite && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawSite) &&
-      (await prisma.site.findFirst({ where: { id: rawSite, tenantId }, select: { id: true } }))
-        ? { siteId: rawSite }
-        : {};
+    const site = rawSite && isUuid(rawSite)
+      ? await prisma.site.findFirst({
+          where: { id: rawSite, tenantId },
+          select: { id: true, baseUrl: true, planningSettings: { select: { articleTargets: true } } },
+        })
+      : null;
+    const siteScope = site ? { siteId: site.id } : {};
     const dayStart = new Date();
     dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(dayStart.getTime() + 24 * 3_600_000);
@@ -2267,6 +2546,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       weekPlanItems,
       todayPlanCount,
       websiteInstallations,
+      siteLogoUrl,
     ] = await Promise.all([
       prisma.publication.count({
         where: { tenantId, ...siteScope, channel: "website", scheduledFor: { gte: dayStart, lt: dayEnd }, status: { notIn: ["deleted", "canceled"] } },
@@ -2338,9 +2618,11 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       }),
       // Website destinations (connector_installations) joined with site, probes and last publication.
       loadWebsiteDestinations(tenantId),
+      resolveSiteLogo(tenantId, site?.baseUrl ?? null, site?.planningSettings?.articleTargets),
     ]);
 
     return reply.send({
+      siteLogoUrl,
       today: {
         articlesPlanned: todayPlannedArticles,
         articlesPublished: todayPublishedArticles,
@@ -2362,6 +2644,7 @@ export function registerEditorialRoutes(fastify: FastifyInstance) {
       },
       automation: {
         enabled: automation.enabled,
+        mode: automation.mode,
         state: automation.state,
         pausedReason: automation.pausedReason,
         warnings: automation.warnings,

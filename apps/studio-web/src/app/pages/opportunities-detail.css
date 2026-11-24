@@ -1,0 +1,60 @@
+.opp-detail { display: flex; flex-direction: column; min-height: 600px; overflow: hidden; scroll-margin-top: 16px; border-radius: 16px; }
+.opp-detail-header, .opp-context, .opp-editor, .opp-detail-footer { min-width: 0; padding: 20px; }
+.opp-detail-header { padding-inline: 22px; }
+.opp-detail-header h2 { margin-top: 16px; line-height: 1.38; font-size: clamp(16px, 1.3vw, 20px); letter-spacing: -.025em; font-weight: 800; }
+.opp-detail-top, .opp-actions, .opp-badges, .opp-detail-footer, .opp-thread-meta { flex-wrap: wrap; }
+.opp-identity { min-width: 0; overflow-wrap: anywhere; }
+.opp-identity .opp-avatar { width: 40px; height: 40px; }
+.opp-state { color: var(--au-warning); background: var(--au-warning-soft); }
+.opp-detail-columns { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(340px, .95fr); border-top: 1px solid var(--au-border); flex: 1; }
+.opp-context, .opp-editor { display: grid; align-content: start; gap: 13px; }
+.opp-editor { border-left: 1px solid var(--au-border); background: var(--opp-editor-bg); }
+.opp-context h3, .opp-editor h3 { color: var(--au-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.opp-reply-head, .opp-reply-head h3, .opp-draft-meta, .opp-draft-meta > span { display: flex; align-items: center; gap: 7px; }
+.opp-reply-head, .opp-draft-meta { justify-content: space-between; }
+.opp-reply-head .opp-pill { color: var(--au-muted); background: var(--au-surface-2); }
+.opp-reply-settings { display: grid; grid-template-columns: minmax(0, 1fr) minmax(92px, .45fr); gap: 10px; font-size: 11px; font-weight: 700; }
+.opp-reply-settings > *, .opp-reply-settings label { display: grid; gap: 5px; min-width: 0; }
+.opp-reply-settings select { min-height: 36px; border-radius: 8px; background-color: var(--opp-card); font-size: 12px; }
+.opp-tones { display: flex; flex-wrap: wrap; gap: 3px; padding: 3px; border: 1px solid var(--au-border); border-radius: 9px; background: var(--opp-card); }
+.opp-tones button { min-height: 29px; flex: 1; border: 0; border-radius: 6px; padding-inline: 5px; color: var(--au-muted); background: transparent; font-size: 11px; }
+.opp-tones [aria-pressed="true"] { color: var(--au-brand-strong); background: var(--au-brand-soft); font-weight: 700; }
+.opp-editor .au-field { margin: 0; }
+.opp-editor textarea { resize: vertical; min-height: 185px; line-height: 1.7; padding: 13px; border-radius: 11px; background: var(--opp-card); font-size: 12px; }
+.opp-draft-meta { flex-wrap: wrap; color: var(--au-muted); font-size: 11px; }
+.opp-characters { margin-inline-start: auto; font-size: inherit; }
+.opp-thread { display: grid; gap: 10px; padding: 16px; border: 1px solid var(--au-border); border-radius: 13px; }
+.opp-thread p { color: var(--au-text-2); line-height: 1.72; white-space: pre-line; font-size: 13px; }
+.opp-thread-meta { justify-content: space-between; color: var(--au-muted); font-size: 12px; }
+.opp-thread-meta > span { display: inline-flex; align-items: center; gap: 4px; }
+.opp-source-link { display: inline-flex; align-items: center; width: fit-content; gap: 5px; min-height: 44px; color: var(--au-brand-strong); font-size: 13px; font-weight: 700; }
+.opp-notice {
+  display: flex; flex-wrap: wrap; align-items: flex-start; gap: 7px; padding: 10px;
+  background: var(--au-surface-2); border: 1px solid var(--au-border); border-radius: 10px; color: var(--au-text-2); font-size: 12px;
+}
+.opp-notice > :is(div, p) { flex: 1; }
+.opp-notice p { line-height: 1.45; }
+.opp-notice strong + p { margin-top: 3px; }
+.opp-guidance, .opp-draft-button { color: var(--au-brand-strong); background: var(--au-brand-soft); }
+.opp-detail-footer { border-top: 1px solid var(--au-border); padding: 15px 20px; }
+.opp-discard { color: var(--au-danger); background: transparent; }
+.opp-discard:hover { background: var(--au-danger-soft); }
+.opp-empty { display: grid; place-content: center; justify-items: center; gap: 9px; text-align: center; padding: 24px 12px; color: var(--au-muted); }
+.opp-empty h2 { color: var(--au-text); font-size: 17px; }
+.opp-detail > .opp-empty { flex: 1; }
+
+@container (max-width: 1180px) {
+  .opp-detail-columns { grid-template-columns: minmax(0, 1fr) minmax(300px, .95fr); }
+  .opp-detail-header, .opp-context, .opp-editor { padding: 16px; }
+}
+
+@container (max-width: 1000px) {
+  .opp-detail-columns { grid-template-columns: 1fr; }
+  .opp-editor { border-left: 0; border-top: 1px solid var(--au-border); }
+}
+
+@container (max-width: 700px) {
+  .opp-detail { min-height: 220px; }
+  .opp-detail-header h2 { font-size: 18px; }
+  .opp-detail-footer { padding: 11px; }
+}

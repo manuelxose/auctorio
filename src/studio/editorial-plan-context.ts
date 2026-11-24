@@ -188,7 +188,7 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
     topIndexedPages: topPages.map((page) => ({ url: page.url, title: page.title ?? page.url, contentType: page.contentType })),
     indexedUrlInventory: indexedUrls.map((page) => page.url),
     searchTargets: searchTargets.map((target) => target.query),
-    existingPlanQueries: futureItems.map((item) => item.targetQuery).filter((value): value is string => Boolean(value)),
+    existingPlanQueries: [...new Set(futureItems.flatMap((item) => [item.targetQuery, item.primaryKeyword]).filter((value): value is string => Boolean(value)))],
     existingPlanTitles: futureItems.map((item) => item.title),
     recentProjectTitles: recentProjects.map((project) => project.title),
     sourceTitles: [...siteSources, ...sharedSources].map((source) => ({ title: source.name, trustScore: source.trustScore })),

@@ -8,6 +8,7 @@ import {
   updateProjectStatus,
 } from "../../studio/repository";
 import { getPublisher } from "../../studio/publishers";
+import { isWebsiteDestinationDisconnected } from "../../studio/connectors/installation";
 import { buildAssetPublicUrl } from "../../studio/orchestration";
 import type { PublishResult } from "../../studio/types";
 import { getPrismaClient } from "../db/prisma";
@@ -49,6 +50,7 @@ type PublishingDependencies = {
   getLatestPublishedExternalId: typeof getLatestPublishedExternalId;
   buildAssetPublicUrl: typeof buildAssetPublicUrl;
   getPublisher: typeof getPublisher;
+  isDisconnected?: typeof isWebsiteDestinationDisconnected;
   markProjectPublished: typeof markProjectPublished;
   clearProjectPublicationState: typeof clearProjectPublicationState;
   verifyWebsitePublication: typeof verifyWebsitePublication;
@@ -62,6 +64,7 @@ const defaultDependencies: PublishingDependencies = {
   getLatestPublishedExternalId,
   buildAssetPublicUrl,
   getPublisher,
+  isDisconnected: isWebsiteDestinationDisconnected,
   markProjectPublished,
   clearProjectPublicationState,
   verifyWebsitePublication,
@@ -84,6 +87,9 @@ export async function processPublishingJob(data: Pick<PublishingJobData, "attemp
   await dependencies.startAttempt(publication.tenantId, data.attemptId);
 
   const { unpublish, targetStatus } = readRequest(publication);
+  if (!unpublish && await dependencies.isDisconnected?.(publication.tenantId, publication.siteId)) {
+    throw new Error("website_destination_disconnected");
+  }
   // The row's own remote id first (a failed attempt may have created the post), then any earlier delivery of the project.
   // A dry-run id was never created remotely: updating it would hit a post that does not exist.
   const ownId = publication.externalId?.startsWith("dryrun-") ? null : publication.externalId;

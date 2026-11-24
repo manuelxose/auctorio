@@ -245,7 +245,7 @@ test("editorial slots spread articles across the window with social offsets", ()
 
   assert.equal(articles.length, 3);
   assert.equal(xPosts.length, 3);
-  assert.equal(igPosts.length, 3);
+  assert.equal(igPosts.length, 2);
   assert.ok(articles[0].at < articles[1].at && articles[1].at < articles[2].at);
   assert.ok(xPosts[0].at.getTime() > articles[0].at.getTime());
 });
@@ -260,6 +260,25 @@ test("active day filtering respects configured days of week", () => {
   assert.equal(isDayActive(policy as never, monday), true);
   assert.equal(isDayActive(policy as never, sunday), false);
   assert.equal(readPublishingWindows(policy as never).length, 1);
+});
+
+test("slots use both website windows and restrict the social preview to channel hours and caps", () => {
+  const policy = {
+    timezone: "UTC", articlesPerDay: 3, maxArticlesPerDay: 3, xPostsPerDay: 1, instagramPostsPerDay: 3,
+    maximumDailySocial: 2, socialTimingMinutesX: 10, socialTimingMinutesInstagram: 10,
+    activeDaysOfWeek: [1],
+    publishingWindows: [
+      { channel: "website", days: [1], from: "08:00", to: "09:00" },
+      { channel: "website", days: [1], from: "18:00", to: "19:00" },
+      { channel: "x", days: [1], from: "08:00", to: "19:30" },
+      { channel: "instagram", days: [1], from: "18:00", to: "19:30" },
+    ],
+  } as never;
+  const slots = generateEditorialSlots(policy, new Date("2026-08-24T00:00:00Z"));
+  const times = (channel: string) => slots.filter((slot) => slot.channel === channel).map((slot) => slot.at.toISOString().slice(11, 16));
+  assert.deepEqual(times("website"), ["08:00", "18:00", "19:00"]);
+  assert.deepEqual(times("x"), ["08:10"]);
+  assert.deepEqual(times("instagram"), ["18:10"]);
 });
 
 // ── Body normalization regression (M22 golden path fix) ──

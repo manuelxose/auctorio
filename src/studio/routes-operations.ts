@@ -22,7 +22,7 @@ import { publishEvent } from "./events";
 import { notify } from "./notifications";
 import { structuredEvent } from "../shared/utils/logger";
 
-const STATUSES = ["queued", "running", "retrying", "succeeded", "partial", "failed", "cancelled", "all"] as const;
+const STATUSES = ["queued", "running", "retrying", "succeeded", "partial", "failed", "cancelled", "all", "active", "history"] as const;
 
 export function registerOperationRoutes(fastify: FastifyInstance) {
   fastify.get("/v2/operations", async (request, reply) => {

@@ -32,7 +32,7 @@ import {
 } from "./repository";
 import {
   acceptStudioInvitation,
-  assignStudioRoleToUser,
+  changeStudioUserRole,
   buildApiKeyStudioSession,
   completeStudioSsoLogin,
   createStudioLaunchTicket,
@@ -47,9 +47,10 @@ import {
   getStudioSessionBySessionId,
   getStudioSessionByToken,
   inviteStudioUser,
+  listStudioSessionSites,
   listStudioRoles,
   listStudioUsers,
-  removeStudioRoleFromUser,
+  revokeStudioInvitation,
   revokeStudioSessionByToken,
   redeemStudioLaunchTicket,
   resetStudioPassword,
@@ -851,7 +852,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return;
     }
 
-    const body = parseBody<{ sessionToken?: string }>(request);
+    const body = parseBody<{ sessionToken?: string; includeSites?: boolean }>(request);
     const token = body.sessionToken?.trim();
     if (!token) {
       return badRequest(reply, "sessionToken is required");
@@ -862,7 +863,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return reply.code(401).send({ error: "unauthorized", message: "Invalid session token" });
     }
 
-    return reply.send(record);
+    const sites = body.includeSites === true
+      ? await listStudioSessionSites(record.tenantId, record.session.roles, record.permissions)
+      : undefined;
+    return reply.send({ ...record, sites });
   });
 
   fastify.post("/internal/session/revoke", async (request, reply) => {
@@ -1910,6 +1914,23 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     return reply.send(await listStudioUsers(context.tenantId));
   });
 
+  function accessMutationError(reply: FastifyReply, error: unknown) {
+    if (!(error instanceof Error)) throw error;
+    if (["access_delegation_forbidden", "self_suspension_forbidden"].includes(error.message)) {
+      return reply.code(403).send({ error: "forbidden", message: error.message });
+    }
+    if (["last_admin", "last_owner", "system_role_locked", "member_already_exists", "invitation_not_pending", "invitation_not_accepted"].includes(error.message)) {
+      return reply.code(409).send({ error: "conflict", message: error.message });
+    }
+    if (["user_or_role_not_found", "role_not_found"].includes(error.message)) {
+      return notFound(reply, "user or role not found");
+    }
+    if (error.message.startsWith("permissions must be one of:")) {
+      return badRequest(reply, error.message);
+    }
+    throw error;
+  }
+
   fastify.post("/v2/users/invitations", async (request, reply) => {
     const context = await requireStudioPermission(request, reply, "users.manage");
     if (!context) {
@@ -1917,13 +1938,14 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     const body = parseBody<CreateStudioInvitationInput>(request);
-    if (!body.email?.trim()) {
-      return badRequest(reply, "email is required");
+    const email = parseOptionalString(body.email);
+    if (!email || !/^[^\s@]+@[^\s@]+$/.test(email)) {
+      return badRequest(reply, "valid email is required");
     }
 
     try {
-      const invitation = await inviteStudioUser(context.tenantId, context.userId, {
-        email: body.email.trim(),
+      const invitation = await inviteStudioUser(context.tenantId, context, {
+        email,
         displayName: parseOptionalString(body.displayName) ?? undefined,
         roleKeys: Array.isArray(body.roleKeys)
           ? body.roleKeys.map((item) => String(item).trim()).filter(Boolean)
@@ -1931,7 +1953,21 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       });
       return reply.code(201).send(invitation);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      return accessMutationError(reply, error);
+    }
+  });
+
+  fastify.delete("/v2/users/:id/invitation", async (request, reply) => {
+    const context = await requireStudioPermission(request, reply, "users.manage");
+    if (!context) return;
+    const userId = (request.params as { id: string }).id;
+    if (!isUuid(userId)) return badRequest(reply, "invalid user id");
+    try {
+      const revoked = await revokeStudioInvitation(context.tenantId, context, userId);
+      if (!revoked) return notFound(reply, "invitation not found");
+      return reply.code(204).send();
+    } catch (error) {
+      return accessMutationError(reply, error);
     }
   });
 
@@ -1947,21 +1983,26 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     const body = parseBody<UpdateStudioUserInput>(request);
-    if (body.status && !isOneOf(body.status, STUDIO_USER_STATUSES)) {
+    if (body.status !== undefined && !isOneOf(body.status, STUDIO_USER_STATUSES)) {
       return badRequest(reply, `status must be one of: ${STUDIO_USER_STATUSES.join(", ")}`);
     }
 
+    if (body.roleIds !== undefined && (!Array.isArray(body.roleIds) || body.roleIds.some((id) => typeof id !== "string" || !isUuid(id)))) {
+      return badRequest(reply, "roleIds must be an array of role ids");
+    }
+
     try {
-      const user = await updateStudioUser(context.tenantId, userId, {
-        displayName: body.displayName?.trim(),
+      const user = await updateStudioUser(context.tenantId, context, userId, {
+        displayName: parseOptionalString(body.displayName) ?? undefined,
         status: body.status,
+        roleIds: body.roleIds,
       });
       if (!user) {
         return notFound(reply, "user not found");
       }
       return reply.send(user);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      return accessMutationError(reply, error);
     }
   });
 
@@ -1977,20 +2018,16 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     const body = parseBody<{ roleId?: string }>(request);
-    const roleId = body.roleId?.trim();
+    const roleId = parseOptionalString(body.roleId);
     if (!roleId || !isUuid(roleId)) {
       return badRequest(reply, "roleId is required");
     }
 
     try {
-      await assignStudioRoleToUser(context.tenantId, userId, roleId);
+      await changeStudioUserRole(context.tenantId, context, userId, roleId, true);
       return reply.code(204).send();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message === "user_or_role_not_found") {
-        return notFound(reply, "user or role not found");
-      }
-      return badRequest(reply, message);
+      return accessMutationError(reply, error);
     }
   });
 
@@ -2006,14 +2043,10 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     try {
-      await removeStudioRoleFromUser(context.tenantId, userId, roleId);
+      await changeStudioUserRole(context.tenantId, context, userId, roleId, false);
       return reply.code(204).send();
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message === "user_or_role_not_found") {
-        return notFound(reply, "user or role not found");
-      }
-      return badRequest(reply, message);
+      return accessMutationError(reply, error);
     }
   });
 
@@ -2040,21 +2073,26 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     }
 
     const body = parseBody<CreateStudioRoleInput>(request);
-    if (!body.name?.trim()) {
+    const name = parseOptionalString(body.name);
+    const cloneFromRoleId = parseOptionalString(body.cloneFromRoleId);
+    if (!name) {
       return badRequest(reply, "name is required");
+    }
+    if (cloneFromRoleId && !isUuid(cloneFromRoleId)) {
+      return badRequest(reply, "invalid role id");
     }
 
     try {
-      const role = await createStudioRole(context.tenantId, {
+      const role = await createStudioRole(context.tenantId, context, {
         key: parseOptionalString(body.key) ?? undefined,
-        name: body.name.trim(),
+        name,
         description: parseOptionalString(body.description) ?? undefined,
-        permissions: parsePermissionList(body.permissions),
-        cloneFromRoleId: parseOptionalString(body.cloneFromRoleId),
+        permissions: body.permissions === undefined ? undefined : parsePermissionList(body.permissions),
+        cloneFromRoleId,
       });
       return reply.code(201).send(role);
     } catch (error) {
-      return badRequest(reply, error instanceof Error ? error.message : String(error));
+      return accessMutationError(reply, error);
     }
   });
 
@@ -2072,8 +2110,8 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
     const body = parseBody<UpdateStudioRoleInput>(request);
 
     try {
-      const role = await updateStudioRole(context.tenantId, roleId, {
-        name: body.name?.trim(),
+      const role = await updateStudioRole(context.tenantId, context, roleId, {
+        name: parseOptionalString(body.name) ?? undefined,
         description: parseOptionalString(body.description),
         permissions: body.permissions === undefined ? undefined : parsePermissionList(body.permissions),
       });
@@ -2082,11 +2120,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       }
       return reply.send(role);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      if (message === "system_role_locked") {
-        return reply.code(409).send({ error: "conflict", message });
-      }
-      return badRequest(reply, message);
+      return accessMutationError(reply, error);
     }
   });
 
