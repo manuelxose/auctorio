@@ -17,10 +17,12 @@ import {
 } from "../keyword-candidates";
 import { enrichPlanItemsWithKeywordMetrics, getKeywordMetrics } from "../keyword-metrics";
 import { analyzeSite } from "../seo-intelligence";
+import { purgeExpiredSeoData } from "../seo-cache";
 import { readSeoControl } from "../seo-control";
 import { acquireSeo, seoRoute, type SeoRoute } from "../seo-manager";
+import { sharableNow } from "../seo-licensing";
 import { serpInsight } from "../serp-sources";
-import { knownKeywordMetrics, sharableProviders, storeSiteKeywords, type SiteKeywordInput } from "./knowledge";
+import { knownKeywordMetrics, storeSiteKeywords, type SiteKeywordInput } from "./knowledge";
 import { SEO_RESEARCH_DONE, readResearchPolicy, type ResearchPolicy } from "./policy";
 import { getResearchProfile, researchTopics, type ResearchProfile } from "./profile";
 import { reconcileReservoir, reservoirCoverage, stageOf, storeResearchOpportunities, type Coverage, type OpportunityEvidence } from "./reservoir";
@@ -56,6 +58,11 @@ const REFUSED: ReadonlySet<SeoErrorCode> = new Set([
 ]);
 
 // ---- Requesting ----
+
+/** The platform does not let research start by itself on this site or its workspace, whatever the site's policy says. */
+export async function researchHold(tenantId: string, siteId: string): Promise<{ scope: string; reason: string } | null> {
+  return prisma.seoResearchHold.findFirst({ where: { OR: [{ scope: "tenant", scopeId: tenantId }, { scope: "site", scopeId: siteId }] }, select: { scope: true, reason: true } });
+}
 
 export type RunView = Awaited<ReturnType<typeof getResearchRun>>;
 
@@ -113,14 +120,14 @@ export async function requestPlanningResearch(tenantId: string, siteId: string, 
     if (coverage.available >= articles) return outcome("sufficient");
     if (profile.policy.mode !== "automatic") return outcome("turned_off");
     if (!(await providerAvailable(profile.markets.value?.[0] ?? ""))) return outcome("no_provider");
-    if (options.unattended && !(await readSeoControl()).policy.automaticResearch) return outcome("not_authorized");
+    if (options.unattended && (!(await readSeoControl()).policy.automaticResearch || (await researchHold(tenantId, siteId)))) return outcome("not_authorized");
     const recent = await prisma.seoResearchRun.findFirst({ where: { tenantId, siteId, status: { in: [...SEO_RESEARCH_DONE] }, finishedAt: { gte: new Date(Date.now() - profile.policy.cooldownDays * DAY_MS) } }, select: { id: true } });
     if (recent) return outcome("researched_recently", recent.id);
     const focus = coverage.gaps.length ? { topics: coverage.gaps.slice(0, 3) } : {};
     const { runId } = await requestResearch({ tenantId, siteId, userId, trigger: "pending_decision", triggerKey: null, detail: `Un plan necesita ${articles} artículos y hay ${coverage.available} oportunidades de calidad.`, focus });
     await advanceResearchRun(runId, { deadlineMs: 90_000, fetchImpl: options.fetchImpl });
     const run = await prisma.seoResearchRun.findUnique({ where: { id: runId }, select: { status: true } });
-    return outcome((SEO_RESEARCH_DONE as readonly string[]).includes(run?.status ?? "") ? "finished" : run?.status === "failed" || run?.status === "canceled" ? "failed" : "in_progress", runId);
+    return outcome((SEO_RESEARCH_DONE as readonly string[]).includes(run?.status ?? "") ? "finished" : run?.status === "failed" || run?.status === "cancelled" ? "failed" : "in_progress", runId);
   } catch (error) {
     structuredEvent("seo_research.planning_request_failed", { tenantId, siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
     return outcome("failed");
@@ -226,7 +233,7 @@ async function screen(work: Workspace, market: string): Promise<Screened> {
   const place = seoMarket(market);
   // A keyword its own provider has no figures for may have been measured through another one; its figures stay its own.
   const blank = stored.rows.filter((row) => row.volume === null && row.difficulty === null).map((row) => row.keyword);
-  const known = place ? await knownKeywordMetrics(tenantId, place, blank, { maxAgeDays: 90, sharable: sharableProviders((await readSeoControl()).policy.shareMarketData) }) : new Map();
+  const known = place ? await knownKeywordMetrics(tenantId, place, blank, { maxAgeDays: 90, sharable: await sharableNow((await readSeoControl()).policy.shareMarketData) }) : new Map();
   const rows = stored.rows.map((row) => {
     const metric = row.volume === null && row.difficulty === null ? known.get(normalizeKeyword(row.keyword)) : undefined;
     return metric && metric.volume !== null ? { ...row, volume: metric.volume, difficulty: metric.difficulty, cpc: metric.cpc, intent: metric.intent, source: metric.source, collectedAt: metric.confirmedAt.toISOString() } : row;
@@ -612,7 +619,7 @@ export async function checkSiteResearch(tenantId: string, siteId: string, now = 
   const profile = await getResearchProfile(tenantId, siteId, { now });
   await prisma.siteResearchProfile.update({ where: { siteId }, data: { nextCheckAt: new Date(now.getTime() + CHECK_EVERY_MS) } });
   // Nobody is asking: the platform must have allowed it, and the site must not have opted out.
-  if (profile.policy.mode !== "automatic" || !(await readSeoControl()).policy.automaticResearch) return null;
+  if (profile.policy.mode !== "automatic" || !(await readSeoControl()).policy.automaticResearch || (await researchHold(tenantId, siteId))) return null;
   const coverage = await reservoirCoverage(tenantId, siteId, profile.policy, researchTopics(profile), now);
   const [first] = await evaluateTriggers(tenantId, siteId, profile, coverage, now);
   // Nothing to gain from a run that can neither buy nor read anything new.
@@ -623,6 +630,7 @@ export async function checkSiteResearch(tenantId: string, siteId: string, now = 
 /** Continues open runs and looks for justified ones in sites with editorial activity. */
 export async function runResearchTick(options: { fetchImpl?: typeof fetch; now?: Date } = {}): Promise<{ advanced: number; checked: number }> {
   const now = options.now ?? new Date();
+  await purgeExpiredSeoData(); // retention does not wait for the next purchase
   if ((await readSeoControl()).emergencyStop) return { advanced: 0, checked: 0 };
   const due = await prisma.seoResearchRun.findMany({
     where: { tenant: { status: "active" }, OR: [{ status: "queued", AND: [{ OR: [{ nextAt: null }, { nextAt: { lte: now } }] }] }, { status: "running", leaseUntil: { lt: now } }] },

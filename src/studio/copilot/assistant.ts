@@ -69,6 +69,15 @@ export function routeIntent(message: string): { tool: ToolName; args: ToolArgs }
   if (moveTo) update.scheduledFor = moveTo;
   if (Object.keys(update).length) return { tool: "update_proposal", args: update };
 
+  // SEO. Starting research needs the verb and the subject; asking about it only reads.
+  const about = /\b(?:sobre|about)\s+(.{3,200}?)[?.!]*$/i.exec(text)?.[1];
+  if (/^(?:please |por favor,? )?(?:lanza|inicia|empieza|pide|start|launch|request)\b.*\b(?:investigaci[oó]n|research)\b/i.test(lower)) return { tool: "request_seo_research", args: about ? { title: about } : {} };
+  if (/\b(investigaci[oó]n|investigar|research|asignaci[oó]n|allowance)/i.test(lower) && /\b(seo|estado|status|necesari|necessary|needed|hace falta|bloquead|blocked|queda|left|asignaci[oó]n|allowance)/i.test(lower)) return { tool: "seo_research_status", args: {} };
+  if (/\b(why|por qu[eé]|explica|explain)(?=\s|$)/i.test(lower) && /\b(oportunidad|opportunity)\b/i.test(lower)) return { tool: "explain_seo_opportunity", args: about ? { title: about } : {} };
+  if (/\b(mejorar|improve|optimi[sz]\w*)\b/i.test(lower) && /\b(contenidos?|content|art[ií]culos?|articles?|p[aá]ginas?|pages?)\b/i.test(lower)) return { tool: "seo_content_to_improve", args: {} };
+  if (/\b(qu[eé] (?:sabe|conoce)|what (?:do you|does auctorio) know)/i.test(lower)) return { tool: "seo_site_knowledge", args: {} };
+  if (/\b(oportunidades|opportunities) seo\b|\bseo opportunities\b/i.test(lower)) return { tool: "seo_opportunities", args: {} };
+
   // Read intents.
   if (/\b(fail|failed|failure|error|falló|fallo|fallido|error(es)?)\b/i.test(lower) && /\b(job|operation|task|generation|tarea|operaci[oó]n|trabajo|why|por qu[eé])\b/i.test(lower)) return { tool: "explain_failed_job", args: {} };
   if (/\b(cadence|frequency|how often|cadencia|frecuencia|cada cu[aá]nto)\b/i.test(lower)) return { tool: "suggest_cadence", args: {} };

@@ -115,7 +115,7 @@ export async function recordAiSpend(input: AiSpendInput): Promise<void> {
 
 export async function getAiSpend(
   tenantId: string,
-  input: { siteId?: string | null; period?: "daily" | "monthly"; since?: Date } = {},
+  input: { siteId?: string | null; period?: "daily" | "monthly"; since?: Date; /** Leaves out external SEO data: its wholesale cost is not shown to workspaces. */ withoutSeo?: boolean } = {},
 ): Promise<{ spentUsd: number; events: number }> {
   const since = input.since ?? periodStart(input.period ?? "daily");
   const aggregate = await prisma.aiSpendEvent.aggregate({
@@ -123,6 +123,7 @@ export async function getAiSpend(
       tenantId,
       createdAt: { gte: since },
       ...(input.siteId ? { siteId: input.siteId } : {}),
+      ...(input.withoutSeo ? { reservationId: null } : {}),
     },
     _sum: { costUsd: true },
     _count: { _all: true },

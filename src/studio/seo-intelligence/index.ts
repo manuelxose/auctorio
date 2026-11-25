@@ -243,11 +243,15 @@ export async function listSeoOpportunities(tenantId: string, siteId: string, fil
       actions: { select: { id: true, actedAt: true, url: true, evaluations: true, baseline: true, seoCostUsd: true, contentCostUsd: true } },
     },
   });
-  return rows.map(({ evidence, reservedUntil, ...row }) => ({ ...row, stage: stageOf({ ...row, evidence, reservedUntil }, policy), level: levelOf({ ...row, evidence, reservedUntil }) }));
+  const intentOf = (evidence: unknown) => {
+    const { provider, firstParty } = (evidence ?? {}) as OpportunityEvidence;
+    return provider?.intent ?? firstParty?.intent ?? null;
+  };
+  return rows.map(({ evidence, reservedUntil, ...row }) => ({ ...row, intent: intentOf(evidence), stage: stageOf({ ...row, evidence, reservedUntil }, policy), level: levelOf({ ...row, evidence, reservedUntil }) }));
 }
 
 /** Statuses a person may set; planning and completing have their own operations. */
-export const OPPORTUNITY_DECISIONS = ["approved", "dismissed", "open"] as const;
+export const OPPORTUNITY_DECISIONS = ["approved", "dismissed", "deferred", "open"] as const;
 
 export async function decideSeoOpportunity(tenantId: string, siteId: string, id: string, decision: (typeof OPPORTUNITY_DECISIONS)[number], userId: string | null) {
   const row = await prisma.contentOpportunity.findFirst({ where: { id, tenantId, siteId } });

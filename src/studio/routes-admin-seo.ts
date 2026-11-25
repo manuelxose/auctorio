@@ -13,6 +13,7 @@ import {
   DEFAULT_SEO_BUDGETS, SEO_BUDGET_ALLOWANCES, SEO_BUDGET_PERIODS, SEO_BUDGET_SCOPES, budgetKeyOf, budgetUse, recoverSeoReservations, resolveUncertainReservation,
   type SeoBudgetKey, type SeoBudgetLimit,
 } from "./seo-governor";
+import { sharableNow } from "./seo-licensing";
 import { MAX_TEST_SPEND_USD, loadSeoControl, verifySeoProvider } from "./seo-manager";
 
 const prisma = getPrismaClient();
@@ -88,6 +89,8 @@ export function registerAdminSeoRoutes(fastify: FastifyInstance) {
           liveVerification: verified === 0 ? "pending" : verified < supported.length ? "partial" : "verified",
           verifications,
           health: { lastSuccessAt: state?.lastSuccessAt ?? null, lastErrorAt: state?.lastErrorAt ?? null, lastErrorCode: state?.lastErrorCode ?? null, lastErrorMessage: state?.lastErrorMessage ?? null },
+          /** supported: the provider publishes it; value null: never read. Not publishing it is not a balance of zero. */
+          balance: { supported: Boolean(provider.balance), value: state?.balance ?? null },
           circuit: state?.circuitOpenUntil && state.circuitOpenUntil > new Date() ? { until: state.circuitOpenUntil, reason: state.circuitReason } : null,
         };
       }),
@@ -346,6 +349,8 @@ export function registerAdminSeoRoutes(fastify: FastifyInstance) {
     if (!body.policy || typeof body.policy !== "object" || Array.isArray(body.policy) || JSON.stringify(body.policy).length > 10_000) return badRequest(reply, "invalid policy");
     const before = (await prisma.seoControlSetting.findUnique({ where: { id: "global" } }))?.policy ?? null;
     const policy = body.policy as Prisma.InputJsonObject;
+    const turnedOn = policy.shareMarketData === true && (before as { shareMarketData?: unknown } | null)?.shareMarketData !== true;
+    if (turnedOn && !(await sharableNow(true)).length) return reply.code(409).send({ error: "license_required", message: "No provider has an approved licence that permits storing and sharing its data between workspaces." });
     await prisma.seoControlSetting.upsert({ where: { id: "global" }, create: { id: "global", mode: DEFAULT_CONTROL.mode, policy }, update: { policy, updatedByUserId: context.userId } });
     await writeAudit({ tenantId: context.tenantId, action: "seo.policy.updated", entityType: "seo_policy", actorType: "user", actorUserId: context.userId, metadata: { from: before, to: policy } });
     return reply.send(readSeoPolicy(policy));

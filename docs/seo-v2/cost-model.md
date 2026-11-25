@@ -73,3 +73,13 @@ has no reservations. Months and days are UTC. Background work may use 80 % of a 
 - A plan with enough plan sources and a measured intent buys no search results; a template with room for a video buys none.
 - Web search answers last 7 days (6 hours for news): competitor, source and news discovery stop paying twice for the same question.
 - Freshness: keyword data 75 days (60–90), rankings 60 (30–90), SERP and YouTube 21 (14–30), time-sensitive SERP 3. Nothing is refreshed on a schedule.
+
+## Research intensity (SEO-V2-06)
+
+| Intensity | Ceiling per run (USD) | Seed, domain, SERP and metrics batches |
+|---|---|---|
+| light | 0.10 | 1, 1, 1, 1 |
+| balanced (default) | 0.25 | 2, 2, 3, 1 |
+| intensive | 0.50 | 4, 4, 6, 2 |
+
+They are initial assumptions. Workspaces see the names; the amounts are the platform's, and every budget applies on top.

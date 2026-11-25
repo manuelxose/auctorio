@@ -15,6 +15,7 @@ import { listSeoOpportunities } from "../seo-intelligence";
 import type { OpportunityExplanation } from "../seo-intelligence/select";
 import { type AssistantContext, evidenceCount, strings, unfilledSlotsOf } from "./assistant-context";
 import { CopilotError } from "./errors";
+import { explainSeoOpportunity, plain, requestSeoResearch, seoContentToImprove, seoResearchStatus, seoSiteKnowledge } from "./seo-tools";
 
 const prisma = getPrismaClient();
 
@@ -619,7 +620,7 @@ const seoOpportunities: ReadTool = {
     const lines = rows.map((row) => {
       const detail = row.explanation as unknown as OpportunityExplanation | null;
       const observed = (detail?.evidence ?? []).filter((entry) => entry.kind === "observed").slice(0, 4).map((entry) => `${entry.metric}: ${entry.value ?? "unknown"}`);
-      return `- **${row.topic}** → ${row.action} (score ${row.score ?? "unknown"}, confidence ${row.confidence ?? "unknown"}, effort ${detail?.effort ?? "unknown"}). ${row.rationale}${observed.length ? ` Observed: ${observed.join("; ")}.` : ""}${detail?.risks.length ? ` Risk: ${detail.risks[0]}` : ""}`;
+      return `- **${plain(row.topic)}** → ${row.action} (score ${row.score ?? "unknown"}, confidence ${row.confidence ?? "unknown"}, effort ${detail?.effort ?? "unknown"}). ${plain(row.rationale, 400)}${observed.length ? ` Observed: ${observed.join("; ")}.` : ""}${detail?.risks.length ? ` Risk: ${detail.risks[0]}` : ""}`;
     });
     return { content: ["The score orders work; it is not a probability of ranking.", ...lines].join("\n"), sources: [link] };
   },
@@ -627,6 +628,10 @@ const seoOpportunities: ReadTool = {
 
 export const READ_TOOLS = {
   seo_opportunities: seoOpportunities,
+  seo_site_knowledge: seoSiteKnowledge,
+  explain_seo_opportunity: explainSeoOpportunity,
+  seo_content_to_improve: seoContentToImprove,
+  seo_research_status: seoResearchStatus,
   pending_engagement: pendingEngagement,
   explain_strategy: explainStrategy,
   explain_proposal_relevance: explainProposalRelevance,
@@ -642,6 +647,7 @@ export const WRITE_TOOLS = {
   regenerate_proposal: regenerateProposal,
   fill_missing_slots: fillMissingSlots,
   propose_source: proposeSource,
+  request_seo_research: requestSeoResearch,
 } as const;
 
 export type ReadToolName = keyof typeof READ_TOOLS;

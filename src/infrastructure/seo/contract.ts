@@ -214,6 +214,8 @@ export interface SeoProvider {
   /** Cache-key prefix of a market, or null when the provider cannot serve it. */
   marketKey(capability: SeoCapability, market: SeoMarket): string | null;
   quote<C extends SeoCapability>(capability: C, request: SeoRequests[C]): SeoQuote;
+  /** What is left in the account, where the provider publishes a free endpoint for it. Absent = it does not say. */
+  balance?(fetchImpl: typeof fetch): Promise<number>;
   /** One provider request. Throws SeoProviderError. */
   run<C extends SeoCapability>(capability: C, request: SeoRequests[C], fetchImpl: typeof fetch): Promise<SeoAdapterResult<C>>;
 }

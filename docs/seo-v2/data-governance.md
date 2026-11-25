@@ -22,15 +22,19 @@
   site keywords, discoveries, profiles, plans, runs. Every (B) query filters by tenant and site.
 - Sharing (A) between workspaces is off. It needs the platform policy `shareMarketData` **and** a provider whose licence permits storing and sharing (`sharableProviders`), checked when
   the row was collected and again when it is read. No provider qualifies today. Even then only exact keywords are answered: nobody can list another's keywords or learn who collected them.
+- Licence records (`seo_license_records`) name a document and a clause, are approved by a different administrator than the one who wrote them, may expire and can be revoked. They may turn *unverified* into
+  *permitted*; a prohibition, in the code or in a record, always wins. They never lengthen retention, which follows what the code established. `shareMarketData` is refused (409) until a provider qualifies.
+- A workspace never receives amounts, prices or provider names; exports of costs are for platform administrators and audited.
 - Retention of knowledge follows the licence (`retain_until`) and is purged with the cache; a site keyword without any discovery left and no opportunity goes too.
 - Disconnecting Search Console with deletion also clears the derived research profile and the reason of runs that quoted its figures.
 - Credentials: encrypted at rest (AES-256-GCM), server-side only, never in responses, audits, logs or error messages.
 - Audited actions: `seo.control.updated`, `seo.provider.updated`, `seo.credential.set`, `seo.credential.cleared`, `seo.provider.live_test`,
   `seo.budget.updated`, `seo.budget.authorized`, `seo.budget.authorization_revoked`, `seo.reservation.resolved`, `seo.pricing.updated`, `seo.policy.updated`,
   `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`,
+  `seo.costs.exported`, `seo.provider.balance_read`, `seo.research.{pause,resume,cancel,retry}`, `seo.research.held`, `seo.research.hold_lifted`, `seo.license.{recorded,approved,revoked}`, `seo.retention.purged`,
   `search_console.connection_started`, `search_console.connected`, `search_console.property_selected`, `search_console.disconnected`,
   `seo_research.requested`, `seo_research.pause`, `seo_research.resume`, `seo_research.cancel`, `seo_research.retry`, `seo_research.profile_updated`,
-  `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_opportunity.revision_started`, `seo_profile.updated`.
+  `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.deferred`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_opportunity.revision_started`, `seo_profile.updated`.
 
 ## Licensing (2026-11-24)
 

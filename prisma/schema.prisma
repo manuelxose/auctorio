@@ -3170,6 +3170,8 @@ model SeoProviderState {
   /// Circuit breaker: no request is sent to the provider until then.
   circuitOpenUntil DateTime? @map("circuit_open_until")
   circuitReason    String?   @map("circuit_reason")
+  /// Last balance read from the provider's own account endpoint, on request: { usd, at }. null = never read.
+  balance          Json?
   updatedByUserId  String?   @map("updated_by_user_id") @db.Uuid
   createdAt        DateTime  @default(now()) @map("created_at")
   updatedAt        DateTime  @updatedAt @map("updated_at")
@@ -3313,6 +3315,58 @@ model SeoSnapshot {
   @@map("seo_snapshots")
 }
 
+/// What happened to SEO requests per day without a ledger row: answers reused, joined or refused. Platform statistics; no foreign keys.
+model SeoUsageDaily {
+  day        DateTime @db.Date
+  tenantId   String   @map("tenant_id") @db.Uuid
+  /// "" when the request was not for a site.
+  siteKey    String   @map("site_key")
+  providerId String   @map("provider_id")
+  operation  String
+  /// reused | bought | joined | waited | refused:<code> | exhausted:<scope>:<period>
+  metric     String
+  count      Int
+
+  @@id([day, tenantId, siteKey, providerId, operation, metric])
+  @@index([metric, day])
+  @@map("seo_usage_daily")
+}
+
+/// What a provider's licence allows, with the document that says so. Counts only once another administrator approves it.
+model SeoLicenseRecord {
+  id                 String    @id @default(uuid()) @db.Uuid
+  providerId         String    @map("provider_id")
+  commercialUse      String    @map("commercial_use")
+  storage            String
+  crossTenantSharing String    @map("cross_tenant_sharing")
+  documentUrl        String    @map("document_url")
+  notes              String
+  /// pending | approved | revoked
+  status             String    @default("pending")
+  validUntil         DateTime? @map("valid_until")
+  createdByUserId    String    @map("created_by_user_id") @db.Uuid
+  approvedByUserId   String?   @map("approved_by_user_id") @db.Uuid
+  approvedAt         DateTime? @map("approved_at")
+  revokedAt          DateTime? @map("revoked_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+
+  @@index([providerId, status])
+  @@map("seo_license_records")
+}
+
+/// Workspace or site where research never starts by itself, whatever its own policy says.
+model SeoResearchHold {
+  id              String   @id @default(uuid()) @db.Uuid
+  /// tenant | site
+  scope           String
+  scopeId         String   @map("scope_id") @db.Uuid
+  reason          String
+  createdByUserId String?  @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@unique([scope, scopeId])
+  @@map("seo_research_holds")
+}
 /// Authorized Search Console access of one site. Tokens never leave the server.
 model SearchConsoleConnection {
   id                     String    @id @default(uuid()) @db.Uuid

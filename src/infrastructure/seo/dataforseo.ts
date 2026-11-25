@@ -255,6 +255,23 @@ const handlers: Handlers = {
 const METRIC_KINDS = { volume: "provider_reported", cpc: "provider_reported", adsCompetition: "provider_reported", difficulty: "estimated", intent: "estimated" } as const;
 const NO_OPTIONS = { devices: [], pagination: false, degraded: null };
 
+/** appendix/user_data, documented as free. */
+async function balance(fetchImpl: typeof fetch): Promise<number> {
+  assertNetworkAllowed(fetchImpl, ID);
+  const auth = Buffer.from(`${secretOf("DATAFORSEO_LOGIN")}:${secretOf("DATAFORSEO_PASSWORD")}`).toString("base64");
+  try {
+    const response = await fetchImpl("https://api.dataforseo.com/v3/appendix/user_data", { headers: { Authorization: `Basic ${auth}` }, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`dataforseo_http_${response.status}: balance`);
+    const body = (await response.json()) as { tasks?: Array<{ result?: Array<{ money?: { balance?: unknown } }> | null }> };
+    const usd = num(body.tasks?.[0]?.result?.[0]?.money?.balance);
+    if (usd === null) throw new SeoProviderError("malformed_response", `${ID}: response without money.balance`, ID, 0);
+    return usd;
+  } catch (error) {
+    const failure = toSeoError(error);
+    throw new SeoProviderError(failure.code, failure.message, ID, 0); // free endpoint
+  }
+}
+
 export const dataForSeoProvider: SeoProvider = {
   id: ID,
   label: "DataForSEO",
@@ -288,6 +305,7 @@ export const dataForSeoProvider: SeoProvider = {
     const { keywords, limit } = request as { keywords?: string[]; limit?: number };
     return priceQuote(ID, capability, keywords?.length ?? limit ?? 1);
   },
+  balance,
   async run<C extends SeoCapability>(capability: C, request: SeoRequests[C], fetchImpl: typeof fetch): Promise<SeoAdapterResult<C>> {
     const handler = handlers[capability as DataCapability] as unknown as ((request: SeoRequests[C], location: DataForSeoLocation, fetchImpl: typeof fetch) => Promise<SeoAdapterResult<C>>) | undefined;
     if (!handler) throw new SeoProviderError("unsupported_capability", `${ID}: ${capability} is not supported`, ID, 0);

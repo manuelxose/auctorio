@@ -1,6 +1,6 @@
 # SEO V2 architecture
 
-State after SEO-V2-05.
+State after SEO-V2-06.
 
 ## Layers
 
@@ -14,7 +14,8 @@ State after SEO-V2-05.
 | Registry | `src/infrastructure/seo/registry.ts` | Providers, modes, selection rules, locks. Pure |
 | Contract | `src/infrastructure/seo/contract.ts` | Capabilities, requests, results, quotes, errors, licensing |
 | Adapters | `src/infrastructure/seo/dataforseo.ts`, `anyapi.ts`, `web.ts` (Tavily, Firecrawl) | Everything provider-specific |
-| Control plane | `src/studio/routes-admin-seo.ts`, Studio → Ajustes → Administración global → Proveedores SEO (`/studio/admin/seo`) | Platform administrators only |
+| Control plane | `src/studio/routes-admin-seo.ts`, `routes-admin-seo-ops.ts`, `seo-operations.ts`; Studio → Configuración → Administración global → Operaciones SEO (`/studio/admin/seo`) | Platform administrators only |
+| Workspace views | `src/studio/seo-workspace.ts`, `routes-seo-intelligence.ts`; Studio → Advanced → Inteligencia SEO, Configuración → SEO del sitio | What a workspace sees and decides, without amounts |
 
 | First-party data | `src/infrastructure/google/search-console.ts`, `src/studio/search-console.ts` | Authorized Search Console access, incremental synchronization |
 | Intelligence engine | `src/studio/seo-intelligence/` | Detection, scoring, action selection, explanation, attribution |
@@ -205,3 +206,42 @@ Decisions:
 - **Official YouTube Data API is not implemented**: there is no authorized key. oEmbed and the channel feed need none.
 - **Time-sensitive web answers last six hours**; older ones are refused, not served as stale.
 - **Pages read by third parties (`web_extract`) keep no history.**
+
+## Interface and operations
+
+Where each thing lives. One capability has one screen; the others link to it.
+
+| Responsibility | Route | Who |
+|---|---|---|
+| State, performance, next action | `/studio/site-intelligence` (Resumen, the default tab) | analytics.read |
+| Keywords, history and provenance | `/studio/site-intelligence?tab=keywords` | analytics.read |
+| Observed results and executed work | `/studio/site-intelligence?tab=performance` | analytics.read |
+| Strategy, pillars, technical health, crawl | `/studio/site-intelligence?tab=profile,pillars,seo,crawl` | as before |
+| Opportunities: decide, defer, plan, revise | `/studio/seo-opportunities` | read analytics.read; act projects.manage |
+| Competitors, coverage, content gaps | `/studio/competitors` | act integrations.manage; gaps projects.manage |
+| Research: allowance, request, control | `/studio/seo-research` | act projects.manage |
+| Objectives, markets, topics, research intensity, Search Console, priorities | `/studio/settings/seo` | projects.manage, workspace.manage, integrations.manage |
+| Providers, budgets, costs, research, data, economics, emergency stop | `/studio/admin/seo?tab=` | platform administrators |
+
+1. **No amounts for workspaces.** `withoutCosts` removes amounts, prices and provider ids from every customer response, and the amounts inside the governor's messages. A workspace sees its
+   allowance as a percentage of its tightest limit (plan, workspace or site) and a research request as the part of it that the run may use at most. The platform's and the providers' limits only show as
+   `platform_limit`. Workspace cost totals leave SEO charges out.
+2. **Intensity instead of money.** A workspace chooses its goals and `light`, `balanced` or `intensive`; the code turns it into batches and a ceiling per run. Amounts in the request are refused.
+   Whatever it chooses, the governor's budgets apply on top.
+3. **Counters** (`seo_usage_daily`, `seo-usage.ts`). Answers reused, joined, waited for, bought and refused, and which budget was exhausted, per day, tenant, site, provider and operation. They limit nothing;
+   failing to write one fails no request. They exist since SEO-V2-06: earlier reuse is not counted.
+4. **Costs** (`seo-operations.ts`) come from the ledger. Estimated is what was expected before sending the requests that were settled. Avoided spending is reused answers by the mean settled cost per unit of the same
+   provider and operation in the filter, always labelled an estimate. The plan is the workspace's current one: the ledger does not keep the plan of the day. The CSV escapes cells that a spreadsheet would run.
+5. **Research holds** (`seo_research_holds`). Automatic research off for a workspace or a site, whatever its own policy says. They do not stop what a person asks for nor what is already open.
+6. **Balance** is read from the provider's free account endpoint (DataForSEO `appendix/user_data`, AnyAPI `/v1/balance`) only when an administrator asks, never with the provider off, the mode *disabled* or everything
+   stopped. Without such an endpoint there is no figure; it is not zero.
+7. **Assistant** (`copilot/seo-tools.ts`). Four read tools over the same workspace views and one action, `request_seo_research`: prepared with the same preview, run only after the person confirms, with the
+   permission checked again. Topics, queries and rationales are shown as plain text.
+
+Decisions:
+
+- **No new navigation area.** Existing routes are kept; Site Intelligence opens on its summary and `/studio/settings/seo` is a page of Configuración.
+- **Competitor gaps and SEO opportunities are one table** (`content_opportunities`): the competitors page shows them by their competitor evidence and is called *Huecos de contenido*.
+- **Visible text is Spanish in the code**, with the shared vocabulary in `components/seo-labels.ts`: Studio has no translation layer.
+- **Economics without revenue.** There is no billing in Auctorio, so revenue and contribution margin are *not available*. No price per plan is assumed.
+- **Retention runs from the research worker too** (hourly), not only after a purchase.

@@ -297,8 +297,10 @@ test("research API: permissions, validation, control and audit", () => using(asy
     assert.deepEqual([(await call("POST", "/runs", reader, {})).status, (await call("PUT", "/policy", editor, { policy: { mode: "off" } })).status, (await call("PUT", "/profile", reader, { corrections: {} })).status], [403, 403, 403]);
     assert.equal((await call("GET", "", reader, undefined, other.siteId)).status, 404, "another workspace's site");
     assert.deepEqual([(await call("POST", "/runs", editor, { focus: { topics: [1] } })).status, (await call("POST", "/runs", editor, { maxUsd: -1 })).status, (await call("PUT", "/profile", editor, { corrections: { x: 1 } })).status, (await call("PUT", "/policy", ["workspace.manage"], {})).status], [400, 400, 400, 400]);
-    const started = await call("POST", "/runs", editor, { focus: { topics: ["series"] }, maxUsd: 0.05 });
-    assert.deepEqual([started.status, started.body.created, started.body.run.status, started.body.run.maxUsd, started.body.run.progress], [200, true, "queued", 0.05, 0]);
+    assert.equal((await call("POST", "/runs", editor, { focus: { topics: ["series"] }, maxUsd: 0.05 })).status, 400, "the amount of a run is the platform's");
+    const started = await call("POST", "/runs", editor, { focus: { topics: ["series"] } });
+    assert.deepEqual([started.status, started.body.created, started.body.run.status, "maxUsd" in started.body.run, started.body.run.progress], [200, true, "queued", false, 0], "a workspace is never shown an amount");
+    assert.equal((await prisma.seoResearchRun.findUniqueOrThrow({ where: { id: started.body.run.id } })).maxUsd, 0.25);
     const run = `/runs/${started.body.run.id}`;
     assert.equal((await call("POST", "/runs", editor, {})).body.created, false);
     assert.deepEqual([(await call("POST", `${run}/pause`, reader)).status, (await call("POST", `${run}/pause`, editor)).body.status, (await call("POST", `${run}/resume`, editor)).body.status, (await call("POST", `${run}/resume`, editor)).status], [403, "paused", "queued", 409]);

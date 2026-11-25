@@ -98,19 +98,22 @@ export async function writeSeoSnapshot(input: { tenantId: string; providerId: st
 }
 
 let lastPurge = 0;
-/** Deletes SEO data past its retention; at most once an hour per process, after a purchase. */
-export async function purgeExpiredSeoData(now = new Date(), force = false): Promise<void> {
-  if (!force && now.getTime() - lastPurge < 3_600_000) return;
+/** Deletes SEO data past its retention; at most once an hour per process. Returns how many rows went. */
+export async function purgeExpiredSeoData(now = new Date(), force = false): Promise<number> {
+  if (!force && now.getTime() - lastPurge < 3_600_000) return 0;
   lastPurge = now.getTime();
+  let deleted = 0;
+  const gone = (result: { count: number }) => { deleted += result.count; };
   try {
-    await prisma.seoSnapshot.deleteMany({ where: { retainUntil: { lt: now } } });
-    await prisma.providerCacheEntry.deleteMany({ where: { providerKey: { in: SEO_PROVIDERS.map((provider) => provider.id) }, expiresAt: { lt: now } } });
-    await prisma.seoKeywordMetric.deleteMany({ where: { retainUntil: { lt: now } } });
+    gone(await prisma.seoSnapshot.deleteMany({ where: { retainUntil: { lt: now } } }));
+    gone(await prisma.providerCacheEntry.deleteMany({ where: { providerKey: { in: SEO_PROVIDERS.map((provider) => provider.id) }, expiresAt: { lt: now } } }));
+    gone(await prisma.seoKeywordMetric.deleteMany({ where: { retainUntil: { lt: now } } }));
     // What the licence no longer lets be kept, and the site keywords nothing explains any more.
-    await prisma.siteKeywordDiscovery.deleteMany({ where: { retainUntil: { lt: now } } });
-    await prisma.siteKeyword.deleteMany({ where: { opportunityId: null, discoveries: { none: {} }, updatedAt: { lt: new Date(now.getTime() - 86_400_000) } } });
+    gone(await prisma.siteKeywordDiscovery.deleteMany({ where: { retainUntil: { lt: now } } }));
+    gone(await prisma.siteKeyword.deleteMany({ where: { opportunityId: null, discoveries: { none: {} }, updatedAt: { lt: new Date(now.getTime() - 86_400_000) } } }));
     await prisma.seoAcquisitionLease.deleteMany({ where: { until: { lt: new Date(now.getTime() - 2 * 86_400_000) } } });
   } catch (error) {
     structuredEvent("seo.purge_failed", { error: error instanceof Error ? error.message : String(error) }, "warn");
   }
+  return deleted;
 }
