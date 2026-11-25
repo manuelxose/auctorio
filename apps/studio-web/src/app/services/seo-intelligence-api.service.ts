@@ -49,6 +49,27 @@ export type SeoOpportunity = {
 };
 export type SeoProfileView = { profile: string; chosen: boolean; profiles: string[]; priorityTopics: string[]; holdoutPercent: number; weights: Record<string, number>; defaults: Record<string, number> };
 
+export type ProfileField<T> = { value: T | null; source: string };
+export type ResearchControl = 'pause' | 'resume' | 'cancel' | 'retry';
+export type ResearchTask = { id: string; kind: string; subject: string; status: string; reason: string | null; external: boolean; maxUsd: number | null; billedUsd: number | null; result: Record<string, unknown> | null };
+export type ResearchRun = {
+  id: string; trigger: string; reason: { detail?: string } | null; status: string; maxUsd: number; estimatedUsd: number | null; error: string | null; createdAt: string; progress: number;
+  cost: { actualUsd: number; heldUsd: number; uncertain: number; requests: number }; tasks?: ResearchTask[];
+};
+export type ResearchPolicy = { mode: string; maxUsdPerRun: number; targetDays: number; minScore: number };
+export type ResearchOverview = {
+  profile: {
+    kinds: ProfileField<string[]>; businessModel: ProfileField<string>; audience: ProfileField<string>; topics: ProfileField<string[]>; excludedTopics: ProfileField<string[]>; markets: ProfileField<string[]>; languages: ProfileField<string[]>;
+    revenueObjectives: ProfileField<string[]>; corrections: Record<string, unknown>; reviewedAt: string | null; policy: ResearchPolicy;
+  };
+  coverage: { available: number; wanted: number; articlesPerWeek: number | null; days: number | null; needsReplenishment: boolean; stages: Record<string, number>; gaps: string[] };
+  triggers: Array<{ trigger: string; detail: string }>;
+  runs: ResearchRun[];
+  active: ResearchRun | null;
+  keywords: Record<string, number>;
+};
+export type ResearchEstimate = { acquisitions: Array<{ kind: string; subject: string; maxUsd: number | null; blocked: string | null }>; maxUsd: number };
+
 @Injectable({ providedIn: 'root' })
 export class SeoIntelligenceApiService {
   private readonly http = inject(HttpClient);
@@ -99,5 +120,26 @@ export class SeoIntelligenceApiService {
   }
   saveProfile(siteId: string, body: { profile: string; priorityTopics: string[]; holdoutPercent: number; weights: Record<string, number> }): Observable<SeoProfileView> {
     return this.http.put<SeoProfileView>(`${this.site(siteId)}/seo-profile`, body);
+  }
+  research(siteId: string): Observable<ResearchOverview> {
+    return this.http.get<ResearchOverview>(`${this.site(siteId)}/seo-research`);
+  }
+  researchRun(siteId: string, id: string): Observable<ResearchRun> {
+    return this.http.get<ResearchRun>(`${this.site(siteId)}/seo-research/runs/${id}`);
+  }
+  estimateResearch(siteId: string): Observable<ResearchEstimate> {
+    return this.http.post<ResearchEstimate>(`${this.site(siteId)}/seo-research/estimate`, {});
+  }
+  startResearch(siteId: string): Observable<{ created: boolean; run: ResearchRun }> {
+    return this.http.post<{ created: boolean; run: ResearchRun }>(`${this.site(siteId)}/seo-research/runs`, {});
+  }
+  controlResearch(siteId: string, id: string, control: ResearchControl): Observable<ResearchRun> {
+    return this.http.post<ResearchRun>(`${this.site(siteId)}/seo-research/runs/${id}/${control}`, {});
+  }
+  saveResearchProfile(siteId: string, body: { corrections?: Record<string, unknown>; reviewed?: boolean }): Observable<unknown> {
+    return this.http.put(`${this.site(siteId)}/seo-research/profile`, body);
+  }
+  saveResearchPolicy(siteId: string, policy: ResearchPolicy): Observable<unknown> {
+    return this.http.put(`${this.site(siteId)}/seo-research/policy`, { policy });
   }
 }
