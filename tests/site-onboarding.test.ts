@@ -116,7 +116,7 @@ test("ONB-01: activating a website creates one onboarding run whose steps run in
 
   const run = await waitForRun(tenant.id, siteId);
   assert.deepEqual(run.steps.map((step) => step.id), ["index", "profile", "sources", "competitors", "strategy", "research", "first_plan_offer"]);
-  assert.deepEqual(run.steps.map((step) => step.status), ["succeeded", "succeeded", "succeeded", "succeeded", "succeeded", "succeeded"]);
+  assert.deepEqual(run.steps.map((step) => step.status), Array(7).fill("succeeded"));
   assert.equal(run.status, "succeeded");
   assert.ok(run.steps.every((step) => step.status === "skipped" || (step.startedAt && step.finishedAt)));
   assert.ok(run.steps[2].summary, "the registered sources step ran and reported");
@@ -124,8 +124,8 @@ test("ONB-01: activating a website creates one onboarding run whose steps run in
   const operation = await prisma.operation.findUniqueOrThrow({ where: { id: body.initialization.operationId } });
   assert.equal(operation.type, "site_onboarding");
   assert.equal(operation.status, "succeeded");
-  assert.equal(operation.totalSteps, 6);
-  assert.equal(operation.completedSteps, 6);
+  assert.equal(operation.totalSteps, 7);
+  assert.equal(operation.completedSteps, 7);
 
   // Strategy is only suggested, never approved automatically; the plan is only offered.
   const strategy = await prisma.siteEditorialStrategy.findUniqueOrThrow({ where: { siteId } });

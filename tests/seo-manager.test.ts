@@ -780,7 +780,7 @@ const researchFetch = (calls: string[], options: { rows?: number; cost?: number;
     const base = url.includes("ranked_keywords") ? `peliculas ${subject.split(".")[0]}` : subject;
     const keywords: string[] = url.includes("keyword_overview") ? task.keywords : WORDS.slice(0, options.rows ?? 10).map((word) => `${base} ${word}`);
     const items = keywords.map((keyword) => ({ ...labsRow(keyword, options.volume ?? 9000, 10), search_intent_info: { main_intent: "informational" } }));
-    return new Response(JSON.stringify(labs(url.includes("ranked_keywords") ? items.map((item) => ({ keyword_data: item, ranked_serp_element: { serp_item: { rank_group: 3, url: `https://${subject}/x` } } })) : items, options.cost ?? 0.024)));
+    return new Response(JSON.stringify(labs(url.includes("ranked_keywords") ? items.map((item) => ({ keyword_data: item, ranked_serp_element: { serp_item: { rank_absolute: 3, url: `https://${subject}/x` } } })) : items, options.cost ?? 0.024)));
   }) as typeof fetch;
 async function researchSite(ws: Workspace, policy: object = {}) {
   for (const name of ["series", "television", "futbol"]) await prisma.siteTopicCluster.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, name, slug: name, pagesCount: 3 } });
