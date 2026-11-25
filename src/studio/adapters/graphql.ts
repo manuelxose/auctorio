@@ -47,6 +47,7 @@ export class GraphqlAdapter implements SourceAdapter {
               "user-agent": policies.userAgent,
             },
             body,
+            redirect: "error", // a redirect could point anywhere, and the URL was validated once
             signal: controller.signal,
           });
           if (!response.ok) {

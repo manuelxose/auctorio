@@ -1,7 +1,9 @@
 import { XMLParser } from "fast-xml-parser";
 import { load } from "cheerio";
+import dnsCallback, { type LookupAddress, type LookupOptions } from "node:dns";
 import dns from "node:dns/promises";
 import net from "node:net";
+import { Agent } from "undici";
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
 
 export type ScrapeSourceType = "rss" | "html" | "api";
@@ -50,14 +52,64 @@ export async function scrapeSource(input: ScrapeInput): Promise<ScrapeItem[]> {
   return [];
 }
 
-export async function fetchUrl(url: URL, options: { accept: string; headers?: Record<string, string> }) {
+/**
+ * Refuses the connection when the host resolves to a private address at the moment of connecting: validating the name
+ * earlier is not enough, a hostile DNS can answer differently the second time.
+ */
+export function guardedLookup(hostname: string, options: LookupOptions, callback: (error: NodeJS.ErrnoException | null, address: string | LookupAddress[], family?: number) => void): void {
+  dnsCallback.lookup(hostname, options, (error, address, family) => {
+    if (error) return callback(error, "", 0);
+    const addresses = Array.isArray(address) ? address.map((entry) => entry.address) : [address];
+    if (addresses.some(isPrivateIp)) return callback(new Error("private_ip_blocked"), "", 0);
+    callback(null, address, family);
+  });
+}
+
+const guardedAgent = new Agent({ connect: { lookup: guardedLookup as never } });
+const MAX_REDIRECTS = 5;
+
+/** Body as text; stops reading past the limit instead of checking afterwards. */
+export async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  if (!response.body) return response.text();
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  const reader = response.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    bytes += value.byteLength;
+    if (bytes > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`fetch_body_too_large max=${maxBytes}`);
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(Buffer.concat(chunks));
+}
+
+/** Follows redirects itself so that each hop is checked like the first URL. */
+async function fetchGuarded(url: URL, init: RequestInit): Promise<Response> {
+  let current = url;
+  for (let hop = 0; ; hop += 1) {
+    if (hop > 0) await validateScrapeUrl(current);
+    else assertPublicTarget(current);
+    const response = await fetch(current.toString(), { ...init, redirect: "manual", dispatcher: guardedAgent } as RequestInit);
+    const location = response.status >= 300 && response.status < 400 ? response.headers?.get("location") : null;
+    if (!location) return response;
+    await response.arrayBuffer().catch(() => undefined);
+    if (hop >= MAX_REDIRECTS) throw new Error("too_many_redirects");
+    current = new URL(location, current);
+  }
+}
+
+export async function fetchUrl(url: URL, options: { accept: string; headers?: Record<string, string>; maxBytes?: number }) {
   const timeoutMs = getNumberEnv("SCRAPE_TIMEOUT_MS", 10000);
   const userAgent = getEnv("SCRAPE_USER_AGENT", "auctorio-bot");
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url.toString(), {
+    const response = await fetchGuarded(url, {
       headers: {
         accept: options.accept,
         "user-agent": userAgent,
@@ -70,7 +122,7 @@ export async function fetchUrl(url: URL, options: { accept: string; headers?: Re
       throw new Error(`fetch_failed status=${response.status}`);
     }
 
-    const body = await response.text();
+    const body = await readCapped(response, options.maxBytes ?? getNumberEnv("SCRAPE_MAX_BYTES", 10 * 1024 * 1024));
     return { body, contentType: response.headers.get("content-type") ?? "" };
   } finally {
     clearTimeout(timeout);
@@ -311,26 +363,31 @@ function limitChars(input: string): string {
   return input.slice(0, maxChars);
 }
 
-export async function validateScrapeUrl(url: URL) {
+const hostOf = (url: URL) => url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+/** What can be told of a URL without resolving it. */
+function assertPublicTarget(url: URL): void {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new Error("invalid_protocol");
   }
-
-  const hostname = url.hostname.toLowerCase();
-  if (!hostname || hostname === "localhost") {
+  const hostname = hostOf(url);
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".localhost")) {
     throw new Error("invalid_host");
   }
+  if (net.isIP(hostname) && isPrivateIp(hostname)) {
+    throw new Error("private_ip_blocked");
+  }
+}
+
+export async function validateScrapeUrl(url: URL) {
+  assertPublicTarget(url);
+  const hostname = hostOf(url);
 
   if (!isHostAllowed(hostname)) {
     throw new Error("host_not_allowed");
   }
 
-  if (net.isIP(hostname)) {
-    if (isPrivateIp(hostname)) {
-      throw new Error("private_ip_blocked");
-    }
-    return;
-  }
+  if (net.isIP(hostname)) return;
 
   const addresses = await dns.lookup(hostname, { all: true });
   for (const address of addresses) {
@@ -364,43 +421,15 @@ function isHostAllowed(hostname: string): boolean {
   });
 }
 
-function isPrivateIp(ip: string): boolean {
-  if (ip.includes(":")) {
-    const normalized = ip.toLowerCase();
-    if (normalized === "::1") {
-      return true;
-    }
-    if (normalized.startsWith("fc") || normalized.startsWith("fd")) {
-      return true;
-    }
-    if (normalized.startsWith("fe80")) {
-      return true;
-    }
-    return false;
-  }
+/** Private, loopback, link-local, shared, benchmarking, multicast and reserved ranges. */
+const NOT_PUBLIC = new net.BlockList();
+for (const [address, prefix] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12], ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 3]] as const) NOT_PUBLIC.addSubnet(address, prefix, "ipv4");
+// 64:ff9b::/96 and 2002::/16 carry an IPv4 address inside; IPv4-mapped ones are checked against the IPv4 rules.
+for (const [address, prefix] of [["::", 128], ["::1", 128], ["64:ff9b::", 96], ["2002::", 16], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8]] as const) NOT_PUBLIC.addSubnet(address, prefix, "ipv6");
 
-  const [a, b] = ip.split(".").map((segment) => Number.parseInt(segment, 10));
-  if ([a, b].some((segment) => Number.isNaN(segment))) {
-    return true;
-  }
-
-  if (a === 10 || a === 127 || a === 0) {
-    return true;
-  }
-  if (a === 169 && b === 254) {
-    return true;
-  }
-  if (a === 172 && b >= 16 && b <= 31) {
-    return true;
-  }
-  if (a === 192 && b === 168) {
-    return true;
-  }
-  if (a === 100 && b >= 64 && b <= 127) {
-    return true;
-  }
-
-  return false;
+export function isPrivateIp(ip: string): boolean {
+  const family = net.isIP(ip);
+  return family === 0 || NOT_PUBLIC.check(ip, family === 6 ? "ipv6" : "ipv4");
 }
 
 async function enforceRateLimit(hostname: string) {
