@@ -27,6 +27,18 @@ import { acquireSeo, seoCapabilityAvailable, seoRoute, verifySeoProvider, withSe
 import { serpSourceFacts } from "../src/studio/serp-sources";
 import { youtubeVideoFor } from "../src/studio/youtube-videos";
 
+import { setArticleWriterFactory } from "../src/studio/editorial-engine/writer-provider";
+import { enqueueRegeneratePlanItem, generateEditorialPlan, readPlanItemSelection, updateEditorialPlanItem, type PlanShortage } from "../src/studio/editorial-plan";
+import { getOrCreatePolicy } from "../src/studio/automation";
+import { getMonthPlan } from "../src/studio/autopilot-plan";
+import { NEW_CONTENT } from "../src/studio/plan-slots";
+import { progressDuePlanItems } from "../src/studio/planner";
+import { getProductionJob, retryProductionJob, reviewProductionJob, startProduction, startProductionForProject } from "../src/studio/production/pipeline";
+import { setProductionStageOverrides } from "../src/studio/production/stages";
+import { listSeoOpportunities, startOpportunityRevision } from "../src/studio/seo-intelligence";
+import { getWebIntelligenceProvider } from "../src/studio/web-intelligence";
+import { FakeWriter } from "./support/fake-editorial-writer";
+
 // The control state is platform-wide, so everything that depends on it lives in this file (its tests run in order).
 const prisma = getPrismaClient();
 const ENV = ["DATAFORSEO_LOGIN", "DATAFORSEO_PASSWORD", "ANYAPI_API_KEY", "PLATFORM_ADMIN_EMAILS", "SOCIAL_TOKEN_ENCRYPTION_KEY"];
@@ -150,12 +162,13 @@ test("data cached before SEO-V2 is still read, under the same keys", async () =>
   const fetchImpl = answering(calls, () => ({}));
   try {
     await storeProviderCache(ws.tenantId, "dataforseo", "serp_organic", "2724|es|guia tv", [{ url: "https://xataka.com/tv", title: "TV", domain: "xataka.com", description: "Parrilla" }], { ttlMs: 60_000 });
-    await storeProviderCache(ws.tenantId, "dataforseo", "youtube_organic", "2724|es|guia tv", [{ id: "abcdefghijk", title: "Vídeo", channel: "Canal", channelUrl: "" }], { ttlMs: 60_000 });
-    const facts = await serpSourceFacts({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es-ES", keyword: "Guia TV", exclude: { domains: [], urls: [] }, max: 3 }, fetchImpl, async () => null);
-    assert.deepEqual(facts.map((fact) => fact.sourceUrl), ["https://xataka.com/tv"]);
-    const video = await youtubeVideoFor({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es", keyword: "guia tv", youtube: { enabled: true, channelUrl: "" } as never }, fetchImpl);
-    assert.equal(video?.id, "abcdefghijk");
-    assert.equal(calls.length, 0);
+    await storeProviderCache(ws.tenantId, "dataforseo", "youtube_organic", "2724|es|guia tv", [{ id: "abcdefghijk", title: "Guía TV de hoy", channel: "Canal", channelUrl: "" }], { ttlMs: 60_000 });
+    const { facts, serp } = await serpSourceFacts({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es-ES", keyword: "Guia TV", exclude: { domains: [], urls: [] }, max: 3 }, fetchImpl, async () => null);
+    assert.deepEqual(facts.map((fact) => [fact.sourceUrl, fact.statement, fact.evidenceKind]), [["https://xataka.com/tv", "TV", "search_result"]], "a page nobody read is a lead: its snippet is not evidence");
+    assert.deepEqual([serp.state, serp.dataKind], ["reused", "historical"]);
+    const video = await youtubeVideoFor({ tenantId: ws.tenantId, siteId: ws.siteId, locale: "es", keyword: "guia tv", youtube: { enabled: true, channelOnly: false, channelUrl: "", approved: [] }, needed: true }, fetchImpl);
+    assert.deepEqual([video.video?.id, video.state], ["abcdefghijk", "reused"]);
+    assert.deepEqual(calls.filter((url) => !url.includes("youtube.com/oembed")), [], "only the free embed check leaves");
   } finally {
     await ws.remove();
   }
@@ -316,7 +329,7 @@ test("admin control plane: platform admins only, audited, secrets go in and neve
     }
     process.env.PLATFORM_ADMIN_EMAILS = email;
     const first = await call("GET", "/v2/admin/seo");
-    assert.deepEqual([first.status, first.body.mode, first.body.providers.map((p: { id: string; enabled: boolean }) => [p.id, p.enabled])], [200, "dataforseo_only", [["dataforseo", true], ["anyapi", false]]]);
+    assert.deepEqual([first.status, first.body.mode, first.body.providers.map((p: { id: string; enabled: boolean }) => [p.id, p.enabled])], [200, "dataforseo_only", [["dataforseo", true], ["anyapi", false], ["tavily", true], ["firecrawl", true]]]);
     assert.ok(first.body.providers.every((p: { liveVerification: string }) => p.liveVerification === "pending"));
 
     assert.equal((await call("PUT", "/v2/admin/seo/providers/anyapi/credentials", { envName: "DATABASE_URL", value: "x" })).status, 400);
@@ -832,7 +845,7 @@ test("onboarding research is bounded, persistent and not repeated; planning read
   const others = await collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60, { reserveFor: randomUUID(), reserve: 3 });
   assert.equal(others.filter((candidate) => mine.some((held) => held.keyword === candidate.keyword)).length, 0);
   for (let i = 0; i < 5; i += 1) await collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60);
-  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 100, null, { fetchImpl }), null, "researched lately: nothing more is bought for a plan");
+  assert.equal((await requestPlanningResearch(ws.tenantId, ws.siteId, 100, null, { fetchImpl })).state, "researched_recently", "nothing more is bought for a plan");
   assert.equal(calls.length, 5);
 }));
 
@@ -840,14 +853,16 @@ test("a plan without enough knowledge asks for research once; with enough it ask
   await researchSite(ws, { minOpportunities: 5 });
   const calls: string[] = [];
   const fetchImpl = researchFetch(calls);
-  const runId = await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl });
-  const run = await getResearchRun(ws.tenantId, ws.siteId, runId!);
+  assert.equal((await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl, unattended: true })).state, "not_authorized", "automation may not start it unless the platform says so");
+  assert.equal(calls.length, 0);
+  const asked = await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl });
+  const run = await getResearchRun(ws.tenantId, ws.siteId, asked.runId!);
   assert.deepEqual([run.trigger, run.status, calls.length], ["pending_decision", "succeeded", 1]);
   assert.deepEqual([...new Set(run.tasks.filter((task) => task.status === "skipped").map((task) => task.reason))], ["enough_opportunities"], "early stopping");
-  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl }), null);
+  assert.ok(["sufficient", "researched_recently"].includes((await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl })).state));
   assert.equal(calls.length, 1);
   await prisma.siteResearchProfile.update({ where: { siteId: ws.siteId }, data: { policy: { mode: "manual", minOpportunities: 100 } } });
-  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 50, null, { fetchImpl }), null, "only people start it");
+  assert.equal((await requestPlanningResearch(ws.tenantId, ws.siteId, 50, null, { fetchImpl })).state, "turned_off", "only people start it");
 }));
 
 test("a run stays within its own limit and the governor's; what was refused can be retried", () => governed(async (ws) => {
@@ -1035,3 +1050,305 @@ test("governor administration: platform admins only, validated, audited, effecti
     await prisma.studioAccount.delete({ where: { id: account.id } });
   }
 }));
+
+// ---- Editorial integration (SEO-V2-05) ----
+
+const TEXT_ENV = { TEXT_PROVIDER: "openai", TEXT_API_BASE_URL: "https://text.example", TEXT_API_KEY: "fixture", TEXT_MODEL: "test" };
+type Outside = { seo: string[]; pages: string[]; serpStatus: number; serpResults: number };
+
+/** Everything outside, replaced: DataForSEO, Tavily, the text model (writes the keywords it is handed, then its own), and the pages of the results. */
+async function withOutside(run: (outside: Outside) => Promise<void>, env: Record<string, string> = {}) {
+  const outside: Outside = { seo: [], pages: [], serpStatus: 200, serpResults: 8 };
+  const all = { ...TEXT_ENV, TAVILY_API_KEY: "test", WEB_INTELLIGENCE_PROVIDER: "tavily", ...env };
+  const saved = Object.fromEntries(Object.keys(all).map((name) => [name, process.env[name]]));
+  Object.assign(process.env, all);
+  const original = globalThis.fetch;
+  let invented = 0;
+  globalThis.fetch = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = String(input instanceof Request ? input.url : input);
+    if (url.startsWith("https://text.example")) {
+      const prompt = JSON.stringify(JSON.parse(String(init.body)));
+      const count = Number(/Generate exactly (\d+) editorial/.exec(prompt)?.[1] ?? 1);
+      const block = prompt.split("KEYWORDS ARE FIXED")[1] ?? "";
+      const handed = [...block.matchAll(/\\n- \\"(.+?)\\"/g)].map((match) => match[1]);
+      const keywords = [...handed, ...Array.from({ length: Math.max(0, count - handed.length) }, () => `series de television en streaming canal tema ${"abcdefghijklmnopqrstuvwxyz"[invented % 26]}${++invented}`)].slice(0, count);
+      const items = keywords.map((keyword, index) => ({
+        scheduledFor: new Date(Date.now() + (index + 1) * 86_400_000).toISOString(), channel: "website", contentType: "guide", newsOrEvergreen: "evergreen", topic: "series", topicCluster: "series",
+        workingTitle: `${keyword[0].toUpperCase()}${keyword.slice(1)} ${invented}${index}`, primaryIntent: "informational", secondaryIntents: [], targetQuery: keyword, primaryKeyword: keyword, secondaryKeywords: [], semanticKeywords: [], relatedEntities: [], questionsToAnswer: [],
+        suggestedSlug: keyword.replace(/\s+/g, "-"), recommendedWordCountMin: 1200, recommendedWordCountMax: 2000, outline: [{ heading: "Qué es", subpoints: [] }, { heading: "Cómo elegir", subpoints: [] }, { heading: "Preguntas", subpoints: [] }],
+        suggestedInternalLinks: [], suggestedExternalEvidenceTypes: [], faqCandidates: [], schemaTypes: [], suggestedHashtags: [], freshnessRequirement: "low", opportunityScore: 50, relevanceScore: 80, confidence: 0.8, difficultyEstimate: 5, funnelStage: "top", cannibalizationRisk: "none", rationale: "serie con demanda medida", sourceEvidence: [], priority: 1,
+      }));
+      return Response.json({ choices: [{ message: { content: JSON.stringify({ schemaVersion: "2", items }) }, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } });
+    }
+    if (url.includes("dataforseo.com")) {
+      const [task] = JSON.parse(String(init.body));
+      outside.seo.push(`${url.split("/v3/")[1]}:${task.keyword ?? task.target ?? task.keywords?.[0]}`);
+      if (outside.serpStatus !== 200) return new Response("{}", { status: outside.serpStatus });
+      const results = Array.from({ length: outside.serpResults }, (_, index) => ({ type: "organic", url: `https://93.184.216.${30 + index}/a`, title: `Cómo elegir series ${index}`, domain: `93.184.216.${30 + index}`, description: "d" }));
+      return Response.json(labs([{ datetime: "2026-11-20 00:00:00 +00:00", items: results }], 0.002));
+    }
+    if (url.includes("api.tavily.com")) {
+      outside.seo.push(`tavily:${JSON.parse(String(init.body)).query}`);
+      return Response.json({ results: [{ url: "https://found.test/a", title: "F", content: "c" }] });
+    }
+    outside.pages.push(url);
+    return new Response(`<html><body><main><p>${"Las series de misterio de 2026 suman 40 estrenos en España según el recuento anual. ".repeat(30)}</p></main></body></html>`, { status: 200, headers: { "content-type": "text/html" } });
+  }) as typeof fetch;
+  try {
+    await run(outside);
+  } finally {
+    globalThis.fetch = original;
+    for (const [name, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
+/** The price of a stored SERP is unknown until an administrator records a maximum. */
+const pricedSerp = (patch: object = {}) => {
+  const data = { mode: "dataforseo_only", pricing: { "dataforseo:serp_organic": { maxRequestUsd: 0.01, source: "test", verifiedAt: "2026-11-25" } }, ...patch };
+  return prisma.seoControlSetting.upsert({ where: { id: "global" }, create: { id: "global", ...data }, update: data });
+};
+
+async function articleItem(ws: Workspace, patch: object = {}) {
+  const plan = await prisma.editorialPlan.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, name: "p", status: "ready", dateFrom: new Date(), dateTo: new Date(Date.now() + 30 * 86_400_000) } });
+  return prisma.editorialPlanItem.create({
+    data: { tenantId: ws.tenantId, planId: plan.id, siteId: ws.siteId, title: "Guía de series de misterio", channel: "website", status: "approved", scheduledFor: new Date(Date.now() + 5 * 86_400_000), primaryKeyword: "series de misterio", contentType: "guide", newsOrEvergreen: "evergreen", outline: ["Qué ver", "Para quién"], ...patch },
+  });
+}
+
+async function withProduction(run: () => Promise<void>) {
+  setArticleWriterFactory(() => new FakeWriter());
+  setProductionStageOverrides({ requestImage: async () => undefined, requestInlineImages: async () => undefined });
+  try {
+    await run();
+  } finally {
+    setArticleWriterFactory(null);
+    setProductionStageOverrides(null);
+  }
+}
+const dropProduction = async (ws: Workspace) => {
+  const where = { tenantId: ws.tenantId };
+  for (const model of ["productionJob", "articleGeneration", "publicationAttempt", "publication", "contentVersion", "editorialPlanItem", "contentProject", "editorialPlan", "operation", "automationPolicy"] as const) await (prisma[model] as unknown as { deleteMany(args: unknown): Promise<unknown> }).deleteMany({ where });
+};
+const produced = (body: (ws: Workspace, outside: Outside) => Promise<void>, env: Record<string, string> = {}) => governed((ws) => withOutside((outside) => withProduction(async () => {
+  try {
+    await body(ws, outside);
+  } finally {
+    await dropProduction(ws);
+  }
+}), env));
+const settled = async (ws: Workspace, jobId: string) => {
+  for (let i = 0; i < 150; i += 1) {
+    const job = (await getProductionJob(ws.tenantId, jobId))!;
+    if (!["queued", "running"].includes(job.status)) return job;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return assert.fail("the job did not finish");
+};
+type Research = { serp: { state: string; reason: string; code: string | null; dataKind: string | null }; video: { state: string }; pagesRead: number; leads: number };
+const researchOf = (job: { summary: Record<string, unknown> }) => job.summary.research as Research;
+
+test("an article buys its search results once: retry, regeneration, calendar, editing and reading buy nothing", () => produced(async (ws, outside) => {
+  await pricedSerp();
+  const item = await articleItem(ws);
+  const first = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: item.id }, { wait: true });
+  assert.equal(first.job.status, "needs_review", `${first.job.error}`);
+  assert.deepEqual([researchOf(first.job).serp.state, researchOf(first.job).serp.reason, researchOf(first.job).serp.dataKind], ["acquired", "insufficient_sources", "historical"]);
+  assert.ok(researchOf(first.job).pagesRead > 0, JSON.stringify(researchOf(first.job)));
+  assert.equal(outside.seo.length, 1);
+  const [reservation] = await ws.reservations();
+  assert.deepEqual([reservation.operation, reservation.kind, reservation.state], ["serp_organic", "serp_sources", "settled"]);
+  assert.equal((await ws.spend()).length, 1, "and it is in the ledger");
+  const pages = outside.pages.length;
+
+  // Nothing stored can answer any more: what the article already has must be enough.
+  await prisma.providerCacheEntry.deleteMany({ where: { tenantId: ws.tenantId } });
+  await reviewProductionJob(ws.tenantId, first.job.id, { decision: "reject", notes: "otra vez" });
+  const retried = await retryProductionJob(ws.tenantId, first.job.id, { wait: true });
+  assert.deepEqual([retried.status, researchOf(retried).serp.state], ["needs_review", "reused"]);
+  const rerun = await settled(ws, (await startProductionForProject(ws.tenantId, first.job.projectId!, { feedback: "Más corto" })).id);
+  assert.deepEqual([rerun.status, researchOf(rerun).serp.state, researchOf(rerun).pagesRead], ["needs_review", "reused", researchOf(first.job).pagesRead]);
+  await updateEditorialPlanItem(ws.tenantId, item.id, { scheduledFor: new Date(Date.now() + 9 * 86_400_000) } as never);
+  await updateEditorialPlanItem(ws.tenantId, item.id, { angle: "Otro enfoque" } as never);
+  await listSeoOpportunities(ws.tenantId, ws.siteId);
+  await getMonthPlan(ws.tenantId, ws.siteId);
+  assert.deepEqual([outside.seo.length, outside.pages.length], [1, pages], "not one request, not even to read a page again");
+
+  // A person may ask for fresh data; then it is bought, within the limits.
+  const fresh = await settled(ws, (await startProductionForProject(ws.tenantId, first.job.projectId!, { feedback: "x", refreshResearch: true })).id);
+  assert.deepEqual([researchOf(fresh).serp.state, outside.seo.length], ["acquired", 2]);
+}));
+
+test("enough evidence buys nothing; a question that moves is not answered with stored results of another date", () => produced(async (ws, outside) => {
+  await pricedSerp();
+  await prisma.sitePlanningSettings.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, articlesPerDay: 1, weekdays: [1, 3], publishTimes: [], channels: ["website"], articleTargets: { externalLinks: 2 } } });
+  const evidence = [1, 2, 3].map((n) => ({ sourceType: "source", url: `https://medio${n}.test/a`, title: `Dato ${n} sobre series de misterio` }));
+  const measured = await articleItem(ws, { sourceEvidence: evidence, metadata: { selection: { source: "dataforseo", intent: "informational" } } });
+  const done = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: measured.id }, { wait: true });
+  assert.deepEqual([researchOf(done.job).serp.state, researchOf(done.job).serp.reason, outside.seo.length], ["not_needed", "enough_evidence", 0]);
+
+  // Buying a stored snapshot for news is refused; the draft says so and never publishes itself.
+  await prisma.automationPolicy.deleteMany({ where: { tenantId: ws.tenantId } });
+  const policy = await getOrCreatePolicy(ws.tenantId, ws.siteId);
+  await prisma.automationPolicy.update({ where: { id: policy.id }, data: { mode: "autopilot", enabled: true, autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true } });
+  const news = await articleItem(ws, { newsOrEvergreen: "news", contentType: "news", title: "Estreno de hoy", primaryKeyword: "estreno serie hoy" });
+  const held = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: news.id }, { wait: true });
+  assert.equal(outside.seo.length, 0);
+  assert.deepEqual([researchOf(held.job).serp.state, researchOf(held.job).serp.code], ["unavailable", "historical_only"]);
+  if (held.job.status !== "failed") assert.deepEqual([held.job.status, held.job.summary.held], ["needs_review", "no_fresh_evidence"]);
+  assert.ok((held.job.summary.degraded as string[]).includes("no_fresh_evidence"));
+  assert.equal(await prisma.publication.count({ where: { tenantId: ws.tenantId, projectId: held.job.projectId! } }), 0);
+}));
+
+test("every configuration writes its article, and says what it lacked", async () => {
+  type Case = { name: string; control?: object; env?: Record<string, string>; site?: object; prepare?: (ws: Workspace, outside: Outside) => Promise<unknown>; state: string; code?: string | null; calls: number };
+  const cases: Case[] = [
+    { name: "new website, no Search Console", state: "acquired", calls: 1 },
+    { name: "established website", site: { createdAt: new Date(Date.now() - 400 * 86_400_000) }, state: "acquired", calls: 1 },
+    { name: "editorial publisher", site: { type: "tecnoria" }, state: "acquired", calls: 1 },
+    { name: "service business", site: { type: "talkaris" }, state: "acquired", calls: 1 },
+    { name: "disconnected credentials", env: { DATAFORSEO_LOGIN: "", DATAFORSEO_PASSWORD: "" }, state: "unavailable", code: "not_configured", calls: 0 },
+    { name: "exhausted SEO budget", prepare: (ws) => limitTo("site", ws.siteId, "daily", 0), state: "unavailable", code: "budget_exhausted", calls: 0 },
+    { name: "AnyAPI only (automation locked)", control: { mode: "anyapi_only" }, env: { ANYAPI_API_KEY: "aa_test" }, prepare: () => prisma.seoProviderState.create({ data: { providerId: "anyapi", enabled: true, priority: 1 } }), state: "unavailable", code: "paid_automation_locked", calls: 0 },
+    { name: "external providers disabled", control: { mode: "disabled" }, state: "unavailable", code: "external_disabled", calls: 0 },
+    { name: "emergency stop", control: { emergencyStop: true }, state: "unavailable", code: "emergency_stop", calls: 0 },
+    { name: "outage while preparing", prepare: async (_ws, outside) => { outside.serpStatus = 500; }, state: "unavailable", calls: 1 },
+    { name: "no balance", prepare: async (_ws, outside) => { outside.serpStatus = 402; }, state: "unavailable", calls: 1 },
+    { name: "unknown price", control: { pricing: {} }, state: "unavailable", code: "unknown_price", calls: 0 },
+  ];
+  for (const entry of cases) {
+    await produced(async (ws, outside) => {
+      await pricedSerp(entry.control ?? {});
+      if (entry.site) await prisma.site.update({ where: { id: ws.siteId }, data: entry.site });
+      await entry.prepare?.(ws, outside);
+      const item = await articleItem(ws);
+      const { job } = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: item.id }, { wait: true });
+      assert.equal(job.status, "needs_review", `${entry.name}: ${job.errorCode} ${job.error}`);
+      assert.equal(researchOf(job).serp.state, entry.state, `${entry.name}: ${JSON.stringify(researchOf(job))}`);
+      if (entry.code !== undefined) assert.equal(researchOf(job).serp.code, entry.code, entry.name);
+      assert.equal(outside.seo.length, entry.calls, entry.name);
+      assert.equal(entry.state === "unavailable", (job.summary.degraded as string[] | undefined)?.some((code) => code.startsWith("sources_")) ?? false, entry.name);
+      assert.equal((await ws.reservations()).filter((row) => row.state === "reserved" || row.state === "dispatched").length, 0, `${entry.name}: nothing left in flight`);
+    }, entry.env);
+  }
+});
+
+test("what an outage did not give is tried again by a retry; stored data keeps working without a provider", () => produced(async (ws, outside) => {
+  await pricedSerp();
+  outside.serpStatus = 429;
+  const item = await articleItem(ws);
+  const first = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: item.id }, { wait: true });
+  assert.equal(researchOf(first.job).serp.state, "unavailable");
+  outside.serpStatus = 200;
+  await prisma.seoAcquisitionLease.deleteMany({ where: { reservationId: { in: (await ws.reservations()).map((row) => row.id) } } });
+  await prisma.seoProviderState.deleteMany();
+  await reviewProductionJob(ws.tenantId, first.job.id, { decision: "reject" });
+  const retried = await retryProductionJob(ws.tenantId, first.job.id, { wait: true });
+  assert.deepEqual([researchOf(retried).serp.state, outside.seo.length], ["acquired", 2]);
+  // Another article about the same search, everything outside stopped: the stored results serve.
+  await pricedSerp({ emergencyStop: true });
+  const other = await articleItem(ws, { title: "Otra guía de series de misterio" });
+  const second = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: other.id }, { wait: true });
+  assert.deepEqual([researchOf(second.job).serp.state, outside.seo.length], ["reused", 2]);
+}));
+
+test("improving a public page is a new version of it, waits for approval and never takes an article's place", () => produced(async (ws, outside) => {
+  await pricedSerp();
+  const policy = await getOrCreatePolicy(ws.tenantId, ws.siteId);
+  await prisma.automationPolicy.update({ where: { id: policy.id }, data: { mode: "autopilot", enabled: true, autoGenerate: true, autoApprove: true, autoSchedule: true, autoPublish: true, articlesPerDay: 5 } });
+  const item = await articleItem(ws);
+  const first = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: item.id }, { wait: true });
+  const projectId = first.job.projectId!;
+  await prisma.publication.deleteMany({ where: { tenantId: ws.tenantId } });
+  await prisma.publication.create({ data: { tenantId: ws.tenantId, projectId, versionId: first.job.versionId!, siteId: ws.siteId, channel: "website", status: "published", externalId: "42", externalUrl: "https://www.example.test/series-de-misterio/", publishedAt: new Date() } });
+  const calls = outside.seo.length;
+
+  const update = await articleItem(ws, { title: "Mejorar series de misterio", primaryKeyword: null, contentType: "update", scheduledFor: new Date(Date.now() + 60_000), metadata: { origin: "content_opportunity", targetUrl: "https://example.test/series-de-misterio" } });
+  assert.equal(await progressDuePlanItems(await getOrCreatePolicy(ws.tenantId, ws.siteId), { start: async (_tenant, id) => assert.notEqual(id, update.id) }), 0, "automation does not start it");
+  const revision = await startProduction(ws.tenantId, { kind: "plan_item", planItemId: update.id }, { wait: true });
+  assert.deepEqual([revision.job.status, revision.job.projectId, revision.job.summary.held], ["needs_review", projectId, "modifies_published_page"], `${revision.job.error}`);
+  assert.equal(await prisma.contentVersion.count({ where: { projectId } }), 2);
+  assert.equal(await prisma.contentProject.count({ where: { tenantId: ws.tenantId } }), 1, "no second article");
+  assert.equal(await prisma.publication.count({ where: { tenantId: ws.tenantId, versionId: revision.job.versionId! } }), 0, "autopilot does not publish it");
+  const rewritten = await settled(ws, (await startProductionForProject(ws.tenantId, projectId, { feedback: "x" })).id);
+  assert.equal(rewritten.summary.held, "modifies_published_page", "nor a rewrite of a public article");
+
+  const foreign = await articleItem(ws, { title: "Mejorar otra", contentType: "update", metadata: { targetUrl: "https://example.test/not-ours" } });
+  await assert.rejects(startProduction(ws.tenantId, { kind: "plan_item", planItemId: foreign.id }, { wait: true }), /not published with Auctorio/);
+
+  const opportunity = await prisma.contentOpportunity.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, source: "search_console", kind: "low_ctr", topic: "x", query: "series de misterio", dedupeKey: randomUUID(), rationale: "r", action: "improve_metadata", targetUrl: "https://example.test/series-de-misterio", status: "open" } });
+  await assert.rejects(startOpportunityRevision(ws.tenantId, ws.siteId, opportunity.id, null), /opportunity_not_approved/);
+  await prisma.contentOpportunity.update({ where: { id: opportunity.id }, data: { status: "approved" } });
+  const task = await startOpportunityRevision(ws.tenantId, ws.siteId, opportunity.id, null);
+  assert.equal(task.projectId, projectId);
+  assert.equal((await settled(ws, task.jobId)).summary.held, "modifies_published_page");
+  assert.equal(outside.seo.length, calls, "no improvement bought anything");
+
+  // Improvements do not count as planned articles.
+  const planned = await prisma.editorialPlanItem.count({ where: { tenantId: ws.tenantId, ...NEW_CONTENT } });
+  assert.equal(planned, 1);
+}));
+
+test("plans take stored opportunities with their provenance, never the same one twice, and say when there are not enough", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 5 });
+  const run = await requestResearch({ tenantId: ws.tenantId, siteId: ws.siteId, trigger: "manual", triggerKey: null, detail: "x", focus: {} });
+  await advanceResearchRun(run.runId, { fetchImpl: researchFetch([]) });
+  const usable = await prisma.contentOpportunity.count({ where: { tenantId: ws.tenantId, status: "open", action: "create_content", score: { gte: 40 } } });
+  assert.ok(usable >= 4, `${usable}`);
+  await withOutside(async (outside) => {
+    const input = (publicationCount: number) => ({ tenantId: ws.tenantId, siteId: ws.siteId, dateFrom: new Date(), dateTo: new Date(Date.now() + 60 * 86_400_000), publicationCount, channels: ["website" as const], allowWithoutIntelligence: true });
+    try {
+      const plans = await Promise.all([generateEditorialPlan(input(2)), generateEditorialPlan(input(2))]);
+      const items = plans.flatMap((plan) => plan!.items);
+      const selections = items.map((item) => readPlanItemSelection(item.metadata)!);
+      assert.equal(items.length, 4);
+      assert.ok(selections.every((selection) => selection.opportunityId && selection.researchRunId === run.runId && selection.metrics === "measured" && selection.metricsAt), JSON.stringify(selections));
+      assert.equal(new Set(selections.map((selection) => selection.opportunityId)).size, 4, "two simultaneous plans share nothing");
+      assert.equal(await prisma.contentOpportunity.count({ where: { tenantId: ws.tenantId, status: "planned", planItemId: { in: items.map((item) => item.id) } } }), 4);
+      for (const plan of plans) assert.equal((plan!.generatedOutput as { shortage: unknown }).shortage, null);
+
+      // Rewriting a proposal uses what there is.
+      const { operationId } = await enqueueRegeneratePlanItem(ws.tenantId, items[0].id);
+      for (let i = 0; i < 200 && ["queued", "running"].includes((await prisma.operation.findUniqueOrThrow({ where: { id: operationId } })).status); i += 1) await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // More articles than opportunities: the rest is proposed by the model, marked as unmeasured, and the plan says it is short.
+      const big = await generateEditorialPlan({ ...input(60), allowWithoutIntelligence: true });
+      const { shortage } = big!.generatedOutput as { shortage: PlanShortage };
+      const bySource = big!.items.map((item) => readPlanItemSelection(item.metadata)!);
+      assert.deepEqual([shortage.requested, shortage.fromOpportunities, shortage.fromModel, shortage.research.state], [60, bySource.filter((s) => s.opportunityId).length, bySource.filter((s) => s.metrics === "unmeasured").length, "researched_recently"]);
+      assert.ok(shortage.fromModel + shortage.unfilled > 0);
+      assert.ok(big!.items.filter((item) => readPlanItemSelection(item.metadata)!.metrics === "unmeasured").every((item) => item.searchVolume === null && item.keywordDifficulty === null), "no invented figures");
+      assert.deepEqual(outside.seo, [], "no plan bought anything");
+    } finally {
+      await dropProduction(ws);
+    }
+  });
+}));
+
+test("web search goes through the governor: stored answers, limits, stops and ledger", () => governed((ws) => withOutside(async (outside) => {
+  const web = getWebIntelligenceProvider({ tenantId: ws.tenantId, siteId: ws.siteId })!;
+  assert.equal(web.name, "tavily");
+  const ask = (query: string, freshnessHours?: number) => web.search(query, { limit: 5, language: "es", freshnessHours });
+  assert.deepEqual((await ask("series news")).map((row) => row.domain), ["found.test"]);
+  await ask("series news");
+  assert.equal(outside.seo.length, 1, "asked again: stored");
+  await ask("series news", 24);
+  assert.equal(outside.seo.length, 2, "what happened today is another question");
+  const rows = await ws.reservations();
+  assert.ok(rows.length === 2 && rows.every((row) => row.providerId === "tavily" && row.operation === "web_search" && row.state === "settled" && Number(row.actualUsd) === 0.008));
+  assert.equal((await ws.spend()).length, 2);
+  // A day later the daily question is not answered with yesterday's results when no new ones can be had.
+  await prisma.providerCacheEntry.updateMany({ where: { tenantId: ws.tenantId }, data: { fetchedAt: new Date(Date.now() - 86_400_000) } });
+  await pricedSerp({ emergencyStop: true });
+  assert.notEqual(await codeOf(ask("series news", 24)), "none");
+  assert.equal(await codeOf(ask("series news")), "none", "the evergreen one is still good");
+  assert.equal(await codeOf(ask("other")), "emergency_stop");
+  await pricedSerp({ emergencyStop: false, mode: "disabled" });
+  assert.equal(await codeOf(ask("other")), "external_disabled");
+  await pricedSerp({ mode: "anyapi_only" });
+  await limitTo("tenant", ws.tenantId, "monthly", 0.001, { operation: "web_search" });
+  assert.equal(await codeOf(ask("other")), "budget_exhausted");
+  assert.equal(outside.seo.length, 2);
+})));
