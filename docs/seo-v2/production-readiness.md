@@ -1,6 +1,6 @@
 # SEO V2 production readiness
 
-| Gate | State after SEO-V2-04 |
+| Gate | State after SEO-V2-03 |
 |---|---|
 | Provider contract, registry and adapters | Done |
 | Kill switch and per-provider switch, effective on the next call in every process | Done |
@@ -12,10 +12,14 @@
 | Maximum price of DataForSEO `serp_organic` | Pending: an administrator must record it (invoice or tariff) |
 | Search Console live authorization | Synchronization checked live on 2026-11-24. Authorization, refresh and revocation pending: `GOOGLE_CLIENT_SECRET`, the API and the consent screen of the Google project |
 | Google verification of the OAuth app | Pending: `webmasters.readonly` is a sensitive scope; until verified, only test users can connect |
+| Research engine with a paid provider | Pending: never run against a real provider (no budget authorized) |
 | Lifting `SEO_LOCKS` | Pending: licensing, DataForSEO live verification and owner approval |
 
 ## Deploying
 
+- SEO-V2-03 (`20261125120000_seo_persistent_knowledge`) is additive: six tables and new nullable columns. Deploy API and workers together: an older API would still buy while
+  planning. Workers start research by themselves only once an administrator allows it (Proveedores SEO → **Dejar que la investigación SEO empiece sola**, policy
+  `automaticResearch`, off by default); then, at most 0.25 USD per run within the governor's budgets. Onboarding, a plan with too little knowledge and manual runs do not need it.
 - SEO-V2-04 (`20261124220000_first_party_seo`) is additive: five tables and new nullable or defaulted columns in `content_opportunities`. Set
   `GOOGLE_CLIENT_SECRET` for the API and the automation worker; without it Search Console is not offered and everything else works.
 0. SEO-V2-02 (`20261124180000_seo_cost_governor`) is additive: five tables and new nullable or defaulted columns. Deploy API and workers together: an
@@ -33,7 +37,8 @@
 - Requests without a known bill appear in **Peticiones sin confirmar** and hold budget until resolved with the provider's statement.
 - Circuit breaker: 30 min after refused credentials or balance, 1 min after a rate limit, 5–60 min after three failures in a row. Saving credentials or **Reintentar ya** resets it.
 - Health: last success and last error per provider on the same page.
-- Log events: `seo.cost_unreported`, `seo.cost_unknown_after_error`, `seo.billed_over_quote`, `seo.spend_not_recorded`, `seo.notes`, `seo.health_not_recorded`,
+- Research: Studio → Avanzado → Investigación SEO, per site: pause, resume, cancel, retry, limits and mode. The emergency stop halts every run.
+- Log events: `seo_research.finished`, `seo_research.task_retry`, `seo_research.task_failed`, `seo_research.advance_failed`, `seo_research.check_failed`, `seo.cost_unreported`, `seo.cost_unknown_after_error`, `seo.billed_over_quote`, `seo.spend_not_recorded`, `seo.notes`, `seo.health_not_recorded`,
   `search_console.synced`, `search_console.sync_failed`, `seo_intelligence.analyzed`, `seo_intelligence.analysis_failed`, `seo.budget_exhausted`, `seo.circuit_open`, `seo.reservation_uncertain`, `seo.cache_not_written`, `keyword_metrics.skipped`.
 - Live test: enable the provider, then **Autorizar y probar** with a ceiling. Automation stays locked while doing it.
 
