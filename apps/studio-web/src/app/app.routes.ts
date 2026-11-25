@@ -150,6 +150,7 @@ export const routes: Routes = [
         loadComponent: () => import('./pages/writing-settings-page.component').then((m) => m.WritingSettingsPageComponent),
         data: { studioMeta: { section: 'Settings', title: 'Writing' } },
       },
+      { path: 'settings/seo', loadComponent: () => import('./pages/seo-settings-page.component').then((m) => m.SeoSettingsPageComponent), data: { studioMeta: { section: 'Settings', title: 'SEO del sitio' } } },
       {
         path: 'settings/:section',
         loadComponent: () => import('./pages/settings-page.component').then((m) => m.SettingsPageComponent),

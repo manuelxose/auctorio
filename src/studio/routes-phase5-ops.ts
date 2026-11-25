@@ -113,8 +113,8 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
     // AI cost.
     try {
       const [daily, monthly] = await Promise.all([
-        getAiSpend(context.tenantId, { period: "daily" }),
-        getAiSpend(context.tenantId, { period: "monthly" }),
+        getAiSpend(context.tenantId, { period: "daily", withoutSeo: true }),
+        getAiSpend(context.tenantId, { period: "monthly", withoutSeo: true }),
       ]);
       health.aiCost = { dailyUsd: daily.spentUsd, monthlyUsd: monthly.spentUsd };
     } catch {
@@ -176,8 +176,8 @@ export function registerPhase5OpsRoutes(fastify: FastifyInstance) {
     }
     const [budgets, daily, monthly] = await Promise.all([
       listCostBudgets(context.tenantId),
-      getAiSpend(context.tenantId, { period: "daily" }),
-      getAiSpend(context.tenantId, { period: "monthly" }),
+      getAiSpend(context.tenantId, { period: "daily", withoutSeo: true }),
+      getAiSpend(context.tenantId, { period: "monthly", withoutSeo: true }),
     ]);
     return reply.send({
       budgets,

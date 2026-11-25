@@ -32,7 +32,9 @@ import { sha256 } from "../shared/utils/hash";
 import { structuredEvent } from "../shared/utils/logger";
 import { mergeKeywordMetrics, readSeoCache, writeSeoCache, writeSeoSnapshot, type FieldProvenance, type SeoCacheEntry, type SeoCacheRow } from "./seo-cache";
 import { loadSeoControl, readSeoControl } from "./seo-control";
+import { effectiveLicensing } from "./seo-licensing";
 import { recordKeywordMetrics, type MetricRow } from "./seo-research/knowledge";
+import { countSeoUsage } from "./seo-usage";
 import { dispatchSeoReservation, markSeoReservationUncertain, releaseSeoReservation, reserveSeoSpend, settleSeoReservation, waitForSeoLeases, type SeoPriority, type SeoReservation } from "./seo-governor";
 
 export { loadSeoControl } from "./seo-control";
@@ -264,7 +266,8 @@ async function keepAnswer<C extends SeoCapability>(route: SeoRoute, capability: 
   const declaration = provider.capabilities[capability];
   const base = { asOf: result.asOf, upstream: result.upstream, methodology: declaration.supported ? declaration.methodology : "" };
   const store = (cap: SeoCapability, rows: SeoCacheRow[]) => writeSeoCache(tenantId, provider.id, cap, rows, fetchedAt, days);
-  const learn = (rows: MetricRow[]) => recordKeywordMetrics({ tenantId, provider, source: declaration.supported ? declaration.sourceTag : provider.id, market, rows, reservationId, fetchedAt, retentionDays: days });
+  const licensing = await effectiveLicensing(provider);
+  const learn = (rows: MetricRow[]) => recordKeywordMetrics({ tenantId, provider: { id: provider.id, licensing }, source: declaration.supported ? declaration.sourceTag : provider.id, market, rows, reservationId, fetchedAt, retentionDays: days });
 
   if (capability === "search_volume") {
     const volumes = new Map((result.data as KeywordVolume[]).map((row) => [row.keyword, row.volume]));
@@ -422,6 +425,8 @@ async function acquireNow<C extends SeoCapability>(route: SeoRoute, capability: 
   let staleHits = 0;
   const rows: unknown[] = [];
   const unresolved: string[] = [];
+  const arrivedKeys = new Set(busy.map(({ key }) => key));
+  let waited = 0;
   let asOf: string | null = null;
   let upstream: string | null = null;
   for (const { subject, key } of subjects) {
@@ -436,6 +441,7 @@ async function acquireNow<C extends SeoCapability>(route: SeoRoute, capability: 
       unresolved.push(subject);
       continue;
     }
+    if (arrivedKeys.has(key)) waited += 1;
     if (entry.freshness === "stale") {
       staleHits += 1;
       oldest = "stale";
@@ -447,6 +453,9 @@ async function acquireNow<C extends SeoCapability>(route: SeoRoute, capability: 
     else if (keywordsOf(request)) rows.push(entry.payload);
     else rows.push(...(entry.payload as unknown[]));
   }
+  const refused: Record<string, number> = {};
+  for (const code of failures.values()) refused[`refused:${code}`] = (refused[`refused:${code}`] ?? 0) + 1;
+  await countSeoUsage({ tenantId: scope.tenantId, siteId: scope.siteId, providerId: provider.id, operation: capability }, { reused: hits + staleHits - waited, bought: boughtKeys, waited, ...refused });
   if (unresolved.length === subjects.length && !bought.length) {
     const code = failures.get(subjects[0].key) ?? "upstream_error";
     throw lastError ?? new SeoProviderError(code, `${provider.id}: ${capability} not available now (${code})`, provider.id, 0);
@@ -488,7 +497,9 @@ function coalesced<C extends SeoCapability>(route: SeoRoute, capability: C, requ
     batches.set(group, created);
     batch = created;
   }
+  const joined = keywords.filter((keyword) => batch!.keywords.has(keyword)).length;
   for (const keyword of keywords) batch.keywords.add(keyword);
+  if (joined) void countSeoUsage({ tenantId: scope.tenantId, siteId: scope.siteId, providerId: route.provider.id, operation: capability }, { joined });
   return batch.result as Promise<SeoResult<C>>;
 }
 

@@ -333,13 +333,13 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 
 /* Navigation details from the Site Intelligence profile reference. */
 .au-shell--profile-reference .workspace-location {
-  color: #8f899c;
+  color: var(--au-muted);
   font-size: 11px;
   margin: 2px 0 17px;
 }
 .au-shell--profile-reference .workspace-location strong { color: #4b445f; }
 .au-shell--profile-reference .au-sb__nav > .au-sb__heading {
-  color: #9891a4;
+  color: var(--au-muted);
   font: 750 11px/1.5 Inter, ui-sans-serif, sans-serif;
   text-transform: uppercase;
   letter-spacing: .085em;
@@ -379,7 +379,7 @@ html:not([data-theme="dark"]) .au-shell--workspace {
   min-height: 0;
   margin: 0;
   padding: 15px 11px 5px;
-  color: #8d8497;
+  color: var(--au-muted);
   font-size: 10px;
   letter-spacing: .09em;
   font-weight: 780;
@@ -411,7 +411,7 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 }
 .au-shell--profile-reference .au-content .advanced-page .au-page__eyebrow {
   margin: 0 0 7px;
-  color: #958b9e;
+  color: var(--au-muted);
   font-size: 10px;
   font-weight: 820;
   letter-spacing: .09em;
@@ -425,7 +425,7 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 }
 .au-shell--profile-reference .au-content .advanced-page .au-page__subtitle {
   margin: 0;
-  color: #7d778a;
+  color: var(--au-muted);
   font-size: 12px;
 }
 .au-shell--profile-reference .au-content .advanced-page .au-page__actions {
@@ -461,6 +461,9 @@ html:not([data-theme="dark"]) .au-shell--workspace {
   font-size: 11px;
 }
 .advanced-followup { margin-top: 14px; }
+.advanced-page .au-cell-title__name.au-link-button { min-height: 24px; }
+.advanced-page a.au-cell-title__meta { display: inline-block; min-height: 24px; line-height: 24px; }
+.cp-card-title a { display: inline-block; min-height: 24px; line-height: 24px; }
 .advanced-grid-2, .advanced-grid-3 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -488,7 +491,7 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 }
 .advanced-row-list li:last-child { border: 0; }
 .advanced-row-list li > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.advanced-row-list li p { margin: 3px 0 0; color: #81798c; font-size: 11px; }
+.advanced-row-list li p { margin: 3px 0 0; color: var(--au-muted); font-size: 11px; }
 .advanced-row-icon {
   display: grid;
   place-items: center;
@@ -531,3 +534,20 @@ html:not([data-theme="dark"]) .au-shell--workspace {
 
 .workspace-location__root { color: inherit; text-decoration: none; }
 .workspace-location__root:hover { color: var(--au-brand); }
+
+/* The reference styles of Advanced are drawn on paper: in the dark theme they follow the theme's own surfaces. */
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page :is(.au-panel--padded, .advanced-kpis .au-stat) { background: var(--au-surface-solid); border-color: var(--au-border); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content :is(.advanced-page .au-page__title, .advanced-kpis .au-stat__value, .profile-reference > .page-head h1) { color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .profile-reference > .page-head p { color: var(--au-muted); }
+html[data-theme="dark"] .au-shell--profile-reference .workspace-location strong { color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page :is(.au-panel__title, .au-table td) { color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page .advanced-filter-bar :is(.au-select, .au-search, .au-input) { background: var(--au-surface-2); border-color: var(--au-border-strong); color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-callout { background: var(--au-brand-soft); border-color: var(--au-border); color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-callout strong { color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-sb__nav :is(.au-sb__item.is-active, .au-sb__item--sub.is-active) { background: var(--au-brand-soft); border-color: var(--au-border); color: var(--au-brand); }
+html[data-theme="dark"] .au-shell--profile-reference .profile-section-pills a { background: var(--au-surface-2); border-color: var(--au-border); color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .profile-section-pills a[aria-current] { background: var(--au-brand-soft); color: var(--au-brand); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page,
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page :is(.au-drawer, .au-drawer__title, .au-field__label, dd, li, summary) { color: var(--au-text); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content :is(.advanced-page dt, .advanced-page .au-stat__label, .advanced-page .au-tab__count, .profile-reference > .page-head .overline) { color: var(--au-muted); }
+html[data-theme="dark"] .au-shell--profile-reference .au-content .advanced-page .chart text { fill: var(--au-muted); }

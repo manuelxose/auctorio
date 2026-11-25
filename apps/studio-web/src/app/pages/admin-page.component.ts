@@ -5,7 +5,7 @@ import { ActivatedRoute } from '@angular/router';
 import { AdminAi, AdminApiService, AdminOverview, AdminTenant } from '../services/admin-api.service';
 import { ToastService } from '../services/toast.service';
 import { AiProviderSettingsComponent } from '../components/ai-provider-settings.component';
-import { SeoProviderSettingsComponent } from '../components/seo-provider-settings.component';
+import { SeoOperationsCenterComponent } from '../components/admin-seo/seo-operations-center.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 
 type AdminSection = 'overview' | 'workspaces' | 'ai' | 'seo';
@@ -14,21 +14,21 @@ type AdminSection = 'overview' | 'workspaces' | 'ai' | 'seo';
 @Component({
   selector: 'app-admin-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppEmptyStateComponent, AiProviderSettingsComponent, SeoProviderSettingsComponent],
+  imports: [CommonModule, FormsModule, AppEmptyStateComponent, AiProviderSettingsComponent, SeoOperationsCenterComponent],
   template: `
     <section class="au-page">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">All workspaces</p>
+          <p class="au-page__eyebrow">{{ section === 'seo' ? 'Administración global' : 'All workspaces' }}</p>
           <h1 class="au-page__title">{{ titles[section] }}</h1>
-          <p class="au-page__subtitle">Applies to every workspace on Auctorio, not only this one.</p>
+          <p class="au-page__subtitle">{{ section === 'seo' ? 'Vale para todos los workspaces de Auctorio, no solo para este.' : 'Applies to every workspace on Auctorio, not only this one.' }}</p>
         </div>
       </header>
 
-      <app-empty-state *ngIf="denied" icon="lock" title="Platform admins only" text="Your account is not on the platform admin list (PLATFORM_ADMIN_EMAILS)."></app-empty-state>
+      <app-empty-state *ngIf="denied" icon="lock" title="Solo administradores de la plataforma" text="Tu cuenta no tiene acceso a la administración global."></app-empty-state>
 
       <div class="au-admin" *ngIf="!denied">
-        <app-seo-provider-settings *ngIf="section === 'seo'" (forbidden)="denied = true"></app-seo-provider-settings>
+        <app-seo-operations-center *ngIf="section === 'seo'" (forbidden)="denied = true"></app-seo-operations-center>
         <p class="workspace-caption" *ngIf="section === 'overview' && overview">Platform overview · all workspaces</p>
         <div class="au-stats" *ngIf="section === 'overview' && overview">
           <div class="au-stat"><span class="au-stat__label">Workspaces</span><span class="au-stat__value">{{ overview.tenants }}</span><span class="au-stat__note">{{ overview.suspended }} suspended</span></div>
@@ -98,7 +98,7 @@ export class AdminPageComponent implements OnInit {
   private readonly api = inject(AdminApiService);
   private readonly toast = inject(ToastService);
 
-  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers', seo: 'Proveedores SEO' };
+  readonly titles: Record<AdminSection, string> = { overview: 'Usage', workspaces: 'Workspaces', ai: 'AI providers', seo: 'Operaciones SEO' };
   section: AdminSection = 'overview';
   denied = false;
   overview: AdminOverview | null = null;

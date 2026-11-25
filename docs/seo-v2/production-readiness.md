@@ -1,6 +1,6 @@
 # SEO V2 production readiness
 
-| Gate | State after SEO-V2-05 |
+| Gate | State after SEO-V2-06 |
 |---|---|
 | Provider contract, registry and adapters | Done |
 | Kill switch and per-provider switch, effective on the next call in every process | Done |
@@ -15,15 +15,21 @@
 | Research engine with a paid provider | Pending: never run against a real provider (no budget authorized) |
 | Every external SEO call governed, web search included | Done (SEO-V2-05); never run against a real provider in this milestone |
 | Editorial workflows reuse stored intelligence | Done (SEO-V2-05), with simulated providers |
+| Workspace interface without amounts, operations center, export, holds, licence approval | Done (SEO-V2-06), without real provider calls |
+| Revenue and contribution margin | Not available: Auctorio has no billing |
 | Lifting `SEO_LOCKS` | Pending: licensing, DataForSEO live verification and owner approval |
 
 ## Deploying
+
+- SEO-V2-06 (`20261125180000_seo_operations`) is additive: three tables and one nullable column. Deploy API, workers and Studio together. Customer responses lose their amounts (`maxUsd`, `cost`, `seoCostUsd`…): any client
+  that read them must stop. `PUT …/seo-research/policy` no longer takes `maxUsdPerRun` nor batch limits, `POST …/seo-research/runs` no longer takes `maxUsd`, and `GET …/seo-research/keywords` is now `GET …/seo-keywords`.
+  Platforms that want to share market data need two administrators in `PLATFORM_ADMIN_EMAILS`.
 
 - SEO-V2-05 has no migration. Deploy API and workers together. What changes on deployment: web discovery (news, sources, competitors, engagement) spends within the governor (2 USD a month per
   workspace for searches, 1 for pages, inside its 5) and stops with the kill switch and the emergency stop; search results of an article are bought only if needed and once; automation never
   publishes a change to a page that is already public, nor a news item without a current source. Review the web budgets first if a workspace searches a lot.
 - SEO-V2-03 (`20261125120000_seo_persistent_knowledge`) is additive: six tables and new nullable columns. Deploy API and workers together: an older API would still buy while
-  planning. Workers start research by themselves only once an administrator allows it (Proveedores SEO → **Dejar que la investigación SEO empiece sola**, policy
+  planning. Workers start research by themselves only once an administrator allows it (Operaciones SEO → Presupuestos → **Dejar que la investigación SEO empiece sola**, policy
   `automaticResearch`, off by default); then, at most 0.25 USD per run within the governor's budgets. Onboarding, a plan with too little knowledge and manual runs do not need it.
 - SEO-V2-04 (`20261124220000_first_party_seo`) is additive: five tables and new nullable or defaulted columns in `content_opportunities`. Set
   `GOOGLE_CLIENT_SECRET` for the API and the automation worker; without it Search Console is not offered and everything else works.
@@ -36,13 +42,15 @@
 
 ## Operating
 
-- Stop everything: Studio → Ajustes → Administración global → Proveedores SEO → **Desactivar todo el SEO externo** (or `PUT /v2/admin/seo/control` with `{"mode":"disabled"}`).
+- Stop everything: Studio → Ajustes → Administración global → Operaciones SEO → Proveedores → **Desactivar todo el SEO externo** (or `PUT /v2/admin/seo/control` with `{"mode":"disabled"}`).
   Requests already sent are not recalled.
 - Emergency stop: same page, **Parar todo ahora** (or `PUT /v2/admin/seo/emergency-stop` with `{"active":true}`); it keeps the mode.
 - Requests without a known bill appear in **Peticiones sin confirmar** and hold budget until resolved with the provider's statement.
 - Circuit breaker: 30 min after refused credentials or balance, 1 min after a rate limit, 5–60 min after three failures in a row. Saving credentials or **Reintentar ya** resets it.
 - Health: last success and last error per provider on the same page.
-- Research: Studio → Avanzado → Investigación SEO, per site: pause, resume, cancel, retry, limits and mode. The emergency stop halts every run.
+- Research: Studio → Advanced → Investigación SEO, per site: request, pause, resume, cancel, retry. Every workspace: Operaciones SEO → Investigación, with automatic research off by workspace or site. Pausing, cancelling and
+  stopping prevent what has not been sent; what was sent ends, is billed and is accounted for. The emergency stop halts every run and is at the top of every section of Operaciones SEO.
+- Costs, reuse and CSV: Operaciones SEO → Costes. Exhausted budgets and the effective budget of one request: → Presupuestos.
 - Log events: `seo_research.finished`, `seo_research.task_retry`, `seo_research.task_failed`, `seo_research.advance_failed`, `seo_research.check_failed`, `seo.cost_unreported`, `seo.cost_unknown_after_error`, `seo.billed_over_quote`, `seo.spend_not_recorded`, `seo.notes`, `seo.health_not_recorded`,
   `search_console.synced`, `search_console.sync_failed`, `seo_intelligence.analyzed`, `seo_intelligence.analysis_failed`, `seo.budget_exhausted`, `seo.circuit_open`, `seo.reservation_uncertain`, `seo.cache_not_written`, `keyword_metrics.skipped`.
 - Live test: enable the provider, then **Autorizar y probar** with a ceiling. Automation stays locked while doing it.

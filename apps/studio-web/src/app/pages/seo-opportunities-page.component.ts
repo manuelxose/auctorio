@@ -1,41 +1,24 @@
 import { CommonModule } from '@angular/common';
-import { HttpErrorResponse } from '@angular/common/http';
-import { Component, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { SEO_LOCALE, SEO_ACTIONS, SEO_DATA_KINDS, SEO_FACTORS, SEO_INTENTS, SEO_OUTCOMES, SEO_STAGES, SEO_STATUSES, seoError, urlPath } from '../components/seo-labels';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { AppDrawerDirective } from '../components/ui/app-drawer.directive';
 import { AppIconComponent } from '../components/ui/app-icon.component';
+import { AppPagerComponent } from '../components/ui/app-pager.component';
 import { AppContextService } from '../services/app-context.service';
-import { SearchConsoleStatus, SeoEvaluation, SeoIntelligenceApiService, SeoOpportunity, SeoProfileView } from '../services/seo-intelligence-api.service';
+import { SearchConsoleStatus, SeoDecision, SeoEvaluation, SeoIntelligenceApiService, SeoOpportunity } from '../services/seo-intelligence-api.service';
 import { ToastService } from '../services/toast.service';
 
-const ACTIONS: Record<string, string> = {
-  create_content: 'Crear contenido', update_existing: 'Actualizar página', expand_existing: 'Ampliar página', improve_metadata: 'Mejorar título y descripción', improve_internal_linking: 'Mejorar enlaces internos',
-  strengthen_cluster: 'Reforzar tema', investigate_cannibalization: 'Investigar canibalización', resolve_technical: 'Resolver problema técnico', monitor: 'Vigilar', defer: 'Esperar', reject: 'Descartar',
-};
-const STATUSES: Record<string, string> = { open: 'Abierta', approved: 'Aprobada', planned: 'En el plan', completed: 'Hecha', monitoring: 'En seguimiento', deferred: 'En espera', rejected: 'Rechazada', dismissed: 'Descartada', expired: 'Caducada' };
-const DATA: Record<string, string> = { observed: 'Observado', provider_reported: 'Según proveedor', estimated: 'Estimado', historical: 'Histórico', unavailable: 'No disponible', unknown: 'Desconocido' };
-const PROFILES: Record<string, string> = { publisher: 'Medio o blog', corporate: 'Web corporativa', local_business: 'Negocio local', services: 'Servicios', ecommerce: 'Tienda', new_website: 'Sitio nuevo', custom: 'Personalizado' };
-const FACTORS: Record<string, string> = {
-  businessRelevance: 'Relevancia para el negocio', searchDemand: 'Demanda', rankingFeasibility: 'Alcanzable', conversionPotential: 'Potencial de conversión', existingPerformance: 'Rendimiento actual', topicalAuthority: 'Autoridad en el tema',
-  competitiveEvidence: 'Competencia', seasonality: 'Estacionalidad', productionEffort: 'Poco esfuerzo', maintenanceCost: 'Poco mantenimiento', cannibalizationRisk: 'Sin canibalización', expectedValue: 'Valor esperado',
-};
-const CONNECTION: Record<string, string> = {
-  not_connected: 'Sin conectar', pending_property: 'Falta elegir la propiedad', active: 'Conectado', revoked: 'Google retiró el acceso: vuelve a conectar', forbidden: 'La cuenta ya no puede leer la propiedad', disconnected: 'Desconectado',
-};
-const ERRORS: Record<string, string> = {
-  opportunity_conflicts_with_approved: 'Esa página ya tiene otra acción aprobada. Complétala antes.', opportunity_not_open: 'Esta oportunidad ya no está abierta.', search_console_not_configured: 'Falta configurar Google en el servidor.',
-  search_console_syncing: 'Ya se está sincronizando.', external_seo_stopped: 'Un administrador ha parado el SEO externo.', search_console_property_not_allowed: 'Esa propiedad no es de este dominio.', site_base_url_required: 'El sitio no tiene dirección web.',
-  search_console_state_expired: 'La autorización caducó. Vuelve a conectar.', search_console_unknown_state: 'Esa autorización no es de esta sesión.', search_console_forbidden: 'Google no concedió el permiso de lectura.', search_console_quota: 'Google ha limitado las consultas. Se reintentará más tarde.',
-  forbidden: 'No tienes permiso para esta acción.', optimization_page_not_managed: 'Esa página no se publicó con Auctorio: haz el cambio en tu web y márcala como hecha.', generation_in_flight: 'Esa página ya se está redactando.',
-  opportunity_not_approved: 'Aprueba antes la mejora.',
-};
+const PAGE_SIZE = 25;
 
 @Component({
   selector: 'app-seo-opportunities-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, AppIconComponent, AppEmptyStateComponent],
+  providers: SEO_LOCALE,
+  imports: [CommonModule, FormsModule, AppDrawerDirective, RouterLink, AppIconComponent, AppEmptyStateComponent, AppPagerComponent],
   styles: [`
     .so-table { min-width: 860px; }
     .so-title { max-width: 260px; }
@@ -53,20 +36,18 @@ const ERRORS: Record<string, string> = {
     .so-detail li small { margin-left: 4px; }
     .so-table th.au-table__actions { text-align: right; }
     .so-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin-top: 16px; }
-    .so-panels { align-items: start; }
-    .so-panels p { margin: 0 0 8px; font-size: var(--au-fs-body-sm); overflow-wrap: anywhere; }
-    .so-head { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 10px; }
   `],
   template: `
     <section class="au-page advanced-page advanced-jobs">
       <header class="au-page__header">
         <div>
-          <p class="au-page__eyebrow">Auctorio / Investigación</p>
+          <p class="au-page__eyebrow">Auctorio / Inteligencia SEO</p>
           <h1 class="au-page__title">Oportunidades SEO</h1>
           <p class="au-page__subtitle">Qué hacer en tu sitio, con qué datos se decide y con cuánta confianza.</p>
         </div>
         <div class="au-page__actions">
-          <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy()" (click)="analyze()"><app-icon name="refresh"></app-icon>{{ busy() === 'analyze' ? 'Analizando…' : 'Analizar ahora' }}</button>
+          <a class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/settings/seo" [queryParams]="{ tab: 'optimization' }">Qué se valora</a>
+          @if (canManage()) { <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy()" (click)="analyze()"><app-icon name="refresh"></app-icon>{{ busy() === 'analyze' ? 'Analizando…' : 'Analizar ahora' }}</button> }
         </div>
       </header>
 
@@ -76,35 +57,45 @@ const ERRORS: Record<string, string> = {
         <dl class="advanced-kpis" aria-label="Resumen de oportunidades">
           <div class="au-stat"><dt class="au-stat__label">Abiertas</dt><dd class="au-stat__value">{{ count('open') }}</dd><dd class="au-stat__note">Esperan tu decisión</dd></div>
           <div class="au-stat"><dt class="au-stat__label">Aprobadas</dt><dd class="au-stat__value">{{ count('approved') + count('planned') }}</dd><dd class="au-stat__note">Por hacer o en el plan</dd></div>
-          <div class="au-stat"><dt class="au-stat__label">En espera</dt><dd class="au-stat__value">{{ count('deferred') }}</dd><dd class="au-stat__note">Frenadas por las protecciones</dd></div>
+          <div class="au-stat"><dt class="au-stat__label">En espera</dt><dd class="au-stat__value">{{ count('deferred') }}</dd><dd class="au-stat__note">Aplazadas o frenadas por las protecciones</dd></div>
           <div class="au-stat advanced-stat--good"><dt class="au-stat__label">Hechas</dt><dd class="au-stat__value">{{ count('completed') }}</dd><dd class="au-stat__note">Con su resultado en medición</dd></div>
         </dl>
       }
 
-      @if (connection(); as c) { @if (c.status !== 'active') { <ng-container [ngTemplateOutlet]="consolePanel" [ngTemplateOutletContext]="{ $implicit: c }"></ng-container> } }
+      @if (connection(); as c) {
+        @if (c.status !== 'active') {
+          <div class="au-banner au-banner--info" role="status"><app-icon name="info"></app-icon><span class="au-banner__text">{{ c.configured ? 'Search Console no está conectado: solo se ven oportunidades del sitio, los competidores y la investigación.' : 'Esta plataforma no tiene configurado Search Console: solo se ven oportunidades del sitio, los competidores y la investigación.' }}</span><a class="au-banner__action" routerLink="/studio/settings/seo" [queryParams]="{ tab: 'data' }">Ajustes</a></div>
+        }
+      }
 
-      <section class="au-panel au-panel--padded" [class.advanced-followup]="connection()?.status !== 'active'" aria-labelledby="so-list">
+      <section class="au-panel au-panel--padded" aria-labelledby="so-list">
         <div class="advanced-card-header">
           <h2 class="au-panel__title" id="so-list">Trabajo propuesto</h2>
           <p>La puntuación ordena el trabajo; no es una probabilidad de posicionar.</p>
         </div>
         <div class="au-tabs" role="group" aria-label="Estado">
           @for (key of tabs(); track key) {
-            <button class="au-tab" type="button" [class.is-active]="status() === key" [attr.aria-pressed]="status() === key" (click)="status.set(key)">{{ plural(statuses[key]) }} <span class="au-tab__count">{{ count(key) }}</span></button>
+            <button class="au-tab" type="button" [class.is-active]="status() === key" [attr.aria-pressed]="status() === key" (click)="status.set(key); page.set(1)">{{ plural(statuses[key]) }} <span class="au-tab__count">{{ count(key) }}</span></button>
           }
         </div>
         <div class="au-toolbar advanced-filter-bar" role="search">
-          <label class="au-search au-flex-1"><app-icon name="search"></app-icon><input class="au-search__input" type="search" placeholder="Buscar consulta o página…" aria-label="Buscar oportunidades" [ngModel]="search()" (ngModelChange)="search.set($event)" /></label>
-          <select class="au-select" aria-label="Acción" [ngModel]="action()" (ngModelChange)="action.set($event)">
+          <label class="au-search au-flex-1"><app-icon name="search"></app-icon><input class="au-search__input" type="search" placeholder="Buscar consulta o página…" aria-label="Buscar oportunidades" [ngModel]="search()" (ngModelChange)="search.set($event); page.set(1)" /></label>
+          <select class="au-select" aria-label="Crear o mejorar" [ngModel]="work()" (ngModelChange)="work.set($event); page.set(1)"><option value="">Crear y mejorar</option><option value="create">Crear contenido</option><option value="improve">Mejorar lo existente</option></select>
+          <select class="au-select" aria-label="Acción" [ngModel]="action()" (ngModelChange)="action.set($event); page.set(1)">
             <option value="">Todas las acciones</option>
             @for (key of actionKeys(); track key) { <option [value]="key">{{ actions[key] ?? key }}</option> }
           </select>
+          <select class="au-select" aria-label="Intención" [ngModel]="intent()" (ngModelChange)="intent.set($event); page.set(1)"><option value="">Toda intención</option><option value="unknown">Sin intención conocida</option>@for (key of intentKeys(); track key) { <option [value]="key">{{ intents[key] ?? key }}</option> }</select>
+          @if (marketKeys().length > 1) { <select class="au-select" aria-label="Mercado" [ngModel]="market()" (ngModelChange)="market.set($event); page.set(1)"><option value="">Todos los mercados</option>@for (key of marketKeys(); track key) { <option [value]="key">{{ key }}</option> }</select> }
+          <select class="au-select" aria-label="Confianza" [ngModel]="confidence()" (ngModelChange)="confidence.set($event); page.set(1)"><option value="">Toda confianza</option><option value="high">Confianza 50 o más</option><option value="low">Confianza menor de 50</option><option value="unknown">Confianza desconocida</option></select>
+          <select class="au-select" aria-label="Ordenar" [ngModel]="sort()" (ngModelChange)="sort.set($event); page.set(1)"><option value="priority">Prioridad</option><option value="score">Puntuación</option><option value="relevance">Relevancia para el negocio</option><option value="value">Valor potencial</option><option value="confidence">Confianza</option></select>
         </div>
 
         @if (!loaded()) { <div class="au-skeleton-list" aria-label="Cargando oportunidades">@for (row of [1, 2, 3]; track row) { <div class="au-skeleton" style="height: 52px"></div> }</div> }
         @else if (!shown().length && !failed()) {
-          <app-empty-state icon="competency" title="Ninguna oportunidad coincide" [text]="items().length ? 'Cambia el estado, la acción o la búsqueda.' : 'Conecta Search Console o analiza el sitio para encontrar oportunidades.'"></app-empty-state>
+          <app-empty-state icon="competency" title="Ninguna oportunidad coincide" [text]="items().length ? 'Cambia el estado, los filtros o la búsqueda.' : 'Analiza el sitio, conecta Search Console o investiga para encontrar oportunidades.'"></app-empty-state>
         }
+        @if (truncated()) { <p class="so-guard">Se muestran las {{ items().length }} con más prioridad de {{ total() }}.</p> }
         @if (shown().length) {
           <div class="au-panel au-table-wrap au-table-wrap--scrollable" role="region" aria-label="Oportunidades SEO" tabindex="0">
             <table class="au-table au-table--hover au-table--keep-columns so-table">
@@ -112,114 +103,58 @@ const ERRORS: Record<string, string> = {
                 <tr>
                   <th scope="col">Oportunidad</th>
                   <th scope="col">Acción</th>
-                  <th scope="col" class="au-num">Impresiones</th>
-                  <th scope="col" class="au-num">Posición</th>
+                  <th scope="col">Intención</th>
+                  <th scope="col" class="au-num">Relevancia</th>
+                  <th scope="col" class="au-num">Valor potencial</th>
                   <th scope="col">Puntuación</th>
                   <th scope="col">Confianza</th>
                   <th scope="col" class="au-table__actions"><span class="au-visually-hidden">Acciones</span></th>
                 </tr>
               </thead>
               <tbody>
-                @for (item of shown(); track item.id) {
+                @for (item of paged(); track item.id) {
                   <tr [class.is-selected]="open() === item.id">
                     <td class="so-title">
                       <button class="au-cell-title__name au-link-button" type="button" [title]="label(item)" (click)="show(item.id)">{{ label(item) }}</button>
                       @if (item.targetUrl; as url) { <a class="au-cell-title__meta" [href]="url" [title]="url" target="_blank" rel="noopener noreferrer">{{ path(url) }}</a> }
-                      @else { <span class="au-cell-title__meta">Página nueva</span> }
+                      @else { <span class="au-cell-title__meta">Página nueva{{ item.market ? ' · ' + item.market : '' }}</span> }
                       @for (guard of item.explanation?.safeguards ?? []; track guard.code) { <p class="so-guard">{{ guard.detail }}</p> }
                     </td>
                     <td><span class="au-badge" [ngClass]="badge(item)">{{ actions[proposed(item)] ?? proposed(item) }}</span></td>
-                    <td class="au-num">{{ metric(item, 'Impresiones') === null ? '—' : (metric(item, 'Impresiones') | number) }}</td>
-                    <td class="au-num">{{ metric(item, 'Posición media') ?? '—' }}</td>
-                    <td>@if (item.score !== null) { <div class="so-score"><strong>{{ item.score }}</strong><div class="au-progress" aria-hidden="true"><span class="au-progress__bar" [style.width.%]="item.score"></span></div></div> } @else { — }</td>
-                    <td><span class="au-badge" [ngClass]="(item.confidence ?? 0) < 50 ? 'au-badge--warning' : 'au-badge--neutral'">{{ item.confidence ?? '—' }}</span></td>
+                    <td>{{ intentLabel(item) }}</td>
+                    <td class="au-num">{{ relevance(item) === null ? 'Sin dato' : (relevance(item)! * 100 | number: '1.0-0') + ' %' }}</td>
+                    <td class="au-num">{{ potential(item) === null ? 'Sin dato' : '+' + (potential(item) | number) + ' clics' }}</td>
+                    <td>@if (item.score !== null) { <div class="so-score"><strong>{{ item.score }}</strong><div class="au-progress" aria-hidden="true"><span class="au-progress__bar" [style.width.%]="item.score"></span></div></div> } @else { Sin puntuar }</td>
+                    <td><span class="au-badge" [ngClass]="item.confidence === null ? 'au-badge--outline' : item.confidence < 50 ? 'au-badge--warning' : 'au-badge--neutral'">{{ item.confidence ?? 'Desconocida' }}</span></td>
                     <td class="au-table__actions">
-                      <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="show(item.id)">Por qué</button>
-                      @if (item.status === 'open') {
-                        <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, creates(item) ? 'plan' : 'approved')">{{ creates(item) ? 'Al plan' : 'Aprobar' }}</button>
-                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'dismissed')">Descartar</button>
+                      @if (canManage()) {
+                        @if (item.status === 'open') { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, creates(item) ? 'plan' : 'approved')">{{ creates(item) ? 'Al plan' : 'Aprobar' }}</button> }
+                        @if (item.status === 'approved' && creates(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'plan')">Al plan</button> }
+                        @if (item.status === 'approved' && revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
+                        @if (item.status === 'dismissed' || item.status === 'deferred') { <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button> }
                       }
-                      @if (item.status === 'approved') {
-                        @if (revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
-                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="show(item.id)">Completar</button>
-                      }
-                      @if (item.status === 'dismissed') { <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button> }
                     </td>
                   </tr>
                 }
               </tbody>
             </table>
           </div>
+          <app-pager [page]="page()" [pages]="pages()" label="oportunidades" (go)="page.set($event)"></app-pager>
         }
       </section>
 
-      <div class="advanced-grid-2 advanced-followup so-panels">
-        @if (connection(); as c) { @if (c.status === 'active') { <ng-container [ngTemplateOutlet]="consolePanel" [ngTemplateOutletContext]="{ $implicit: c }"></ng-container> } }
-        @if (profile(); as p) {
-          <section class="au-panel au-panel--padded" aria-labelledby="so-profile">
-            <div class="advanced-card-header so-head">
-              <div><h2 class="au-panel__title" id="so-profile">Qué valora este sitio</h2><p>{{ p.chosen ? 'Elegido por tu equipo' : 'Deducido del tipo de sitio: confírmalo o cámbialo' }}</p></div>
-              <button class="au-btn au-btn--secondary au-btn--sm" type="button" [attr.aria-expanded]="editProfile()" (click)="editProfile.set(!editProfile())">{{ editProfile() ? 'Cerrar' : 'Cambiar' }}</button>
-            </div>
-            @if (!editProfile()) { <p><strong>{{ profiles[p.profile] }}</strong></p> }
-            @else {
-              <form (ngSubmit)="saveProfile()">
-                <div class="au-field-grid">
-                  <label class="au-field"><span class="au-field__label">Tipo de negocio</span><select class="au-select" name="profile" [(ngModel)]="form.profile">@for (key of p.profiles; track key) { <option [value]="key">{{ profiles[key] }}</option> }</select></label>
-                  <label class="au-field"><span class="au-field__label">Páginas de control sin tocar (%)</span><input class="au-input" name="holdout" type="number" min="0" max="30" step="1" [(ngModel)]="form.holdout" /></label>
-                  <label class="au-field au-field--wide"><span class="au-field__label">Temas prioritarios (separados por comas)</span><input class="au-input" name="topics" [(ngModel)]="form.topics" /></label>
-                  @if (form.profile === 'custom') {
-                    @for (key of factorKeys; track key) { <label class="au-field"><span class="au-field__label">{{ factors[key] }} (peso 0–3)</span><input class="au-input" [name]="key" type="number" min="0" max="3" step="0.1" [(ngModel)]="form.weights[key]" /></label> }
-                  }
-                </div>
-                <div class="so-actions"><button class="au-btn au-btn--primary au-btn--sm" type="submit" [disabled]="!!busy()">Guardar</button></div>
-              </form>
-            }
-          </section>
-        }
-      </div>
-
-      <ng-template #consolePanel let-c>
-        <section class="au-panel au-panel--padded" aria-labelledby="so-console">
-          <div class="advanced-card-header so-head">
-            <div><h2 class="au-panel__title" id="so-console">Search Console</h2><p>{{ connectionLabel(c) }}@if (c.property) { · {{ c.property }} }</p></div>
-            <div class="so-head">
-              @if (c.status === 'active') {
-                <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy() || c.syncing" (click)="sync()">{{ busy() === 'sync' || c.syncing ? 'Sincronizando…' : 'Sincronizar' }}</button>
-                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="confirmDisconnect.set(!confirmDisconnect())" [attr.aria-expanded]="confirmDisconnect()">Desconectar</button>
-              } @else {
-                <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy() || !c.configured" (click)="connect()">{{ c.status === 'not_connected' ? 'Conectar Search Console' : 'Volver a conectar' }}</button>
-              }
-            </div>
-          </div>
-          @if (!c.configured) { <p>La plataforma no tiene configurado el acceso a Google. Un administrador debe añadirlo en el servidor.</p> }
-          @if (c.syncedThrough) {
-            <p>Datos del {{ c.syncedFrom | date: 'd/MM/y' }} al {{ c.syncedThrough | date: 'd/MM/y' }}{{ c.backfillComplete ? '' : ' (descargando el historial)' }}. Google publica los datos definitivos con dos o tres días de retraso{{ (c.dataAgeDays ?? 0) > 5 ? '; estos tienen ' + c.dataAgeDays + ' días' : '' }}.</p>
-          }
-          @if (c.lastError) { <p class="au-error" role="alert">Último error: {{ c.lastError }}. {{ c.nextSyncAt ? 'Próximo intento: ' + (c.nextSyncAt | date: 'd/MM/y, HH:mm') : 'No se reintentará hasta que vuelvas a conectar.' }}</p> }
-          @if (c.status === 'pending_property') {
-            @if (properties().length) {
-              <div class="so-actions">@for (item of properties(); track item.property) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="select(item.property)">{{ item.property }}</button> }</div>
-            } @else { <p>La cuenta de Google no tiene ninguna propiedad verificada de este dominio.</p> }
-          }
-          @if (confirmDisconnect()) {
-            <div class="so-actions" role="group" aria-label="Confirmar desconexión">
-              <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="disconnect(false)">Desconectar y conservar los datos</button>
-              <button class="au-btn au-btn--danger au-btn--sm" type="button" (click)="disconnect(true)">Desconectar y borrar los datos</button>
-            </div>
-          }
-        </section>
-      </ng-template>
-
       @if (detail(); as item) {
         <div class="au-drawer-backdrop" (click)="close()"></div>
-        <aside class="au-drawer" role="dialog" aria-modal="true" aria-labelledby="so-detail-title" (keydown.escape)="close()">
+        <aside class="au-drawer" appDrawer (closed)="close()" aria-labelledby="so-detail-title">
           <header class="au-drawer__head">
             <h2 class="au-drawer__title" id="so-detail-title">{{ label(item) }}</h2>
-            <button #closeButton class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="close()" aria-label="Cerrar detalle"><app-icon name="close"></app-icon></button>
+            <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="close()" aria-label="Cerrar detalle"><app-icon name="close"></app-icon></button>
           </header>
           <dl class="so-facts">
-            <dt>Estado</dt><dd>{{ statuses[item.status] ?? item.status }}</dd>
+            <dt>Estado</dt><dd>{{ statuses[item.status] ?? item.status }} · {{ stages[item.stage] ?? item.stage }}</dd>
+            <dt>Origen</dt><dd>{{ origins[item.source] ?? item.source }}{{ item.analyzedAt ? ', valorada el ' + (item.analyzedAt | date: 'd/MM/y') : '' }}</dd>
+            <dt>Intención</dt><dd>{{ intentLabel(item) }}</dd>
+            @if (item.market) { <dt>Mercado</dt><dd>{{ item.market }}</dd> }
             <dt>Acción</dt><dd>{{ actions[proposed(item)] ?? proposed(item) }}</dd>
             @if (item.targetUrl; as url) { <dt>Página</dt><dd><a [href]="url" target="_blank" rel="noopener noreferrer">{{ path(url) }}</a></dd> }
             <dt>Puntuación</dt><dd>{{ item.score ?? 'desconocida' }}</dd>
@@ -248,19 +183,25 @@ const ERRORS: Record<string, string> = {
               }
             </div>
           }
-          <div class="so-actions">
-            @if (item.status === 'open') {
-              <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, creates(item) ? 'plan' : 'approved')">{{ creates(item) ? 'Llevar al plan' : 'Aprobar' }}</button>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'dismissed')">Descartar</button>
-            }
-            @if (item.status === 'approved') {
-              @if (revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
-              <label class="au-field"><span class="au-field__label">Fecha del cambio</span><input class="au-input" type="date" [max]="today" [(ngModel)]="doneOn" /></label>
-              <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy() || !doneOn" (click)="act(item, 'done')">Marcar como hecha</button>
-              <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button>
-            }
-            @if (item.status === 'dismissed') { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button> }
-          </div>
+          @if (canManage()) {
+            <div class="so-actions">
+              @if (item.status === 'open') {
+                <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, creates(item) ? 'plan' : 'approved')">{{ creates(item) ? 'Llevar al plan' : 'Aprobar' }}</button>
+                @if (creates(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'approved')">Aprobar sin planificar</button> }
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'deferred')">Aplazar</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'dismissed')">Descartar</button>
+              }
+              @if (item.status === 'approved') {
+                @if (creates(item)) { <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'plan')">Llevar al plan</button> }
+                @if (revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
+                <label class="au-field"><span class="au-field__label">Fecha del cambio</span><input class="au-input" type="date" [max]="today" [(ngModel)]="doneOn" /></label>
+                <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy() || !doneOn" (click)="act(item, 'done')">Marcar como hecha</button>
+                <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button>
+              }
+              @if (item.status === 'dismissed' || item.status === 'deferred') { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button> }
+              @if (researchable(item)) { <a class="au-btn au-btn--ghost au-btn--sm" routerLink="/studio/seo-research" [queryParams]="{ topic: item.query ?? item.topic }">Investigar más</a> }
+            </div>
+          } @else { <p class="so-guard">Tu rol puede consultarlas, pero no decidir sobre ellas.</p> }
         </aside>
       }
     </section>
@@ -273,42 +214,60 @@ export class SeoOpportunitiesPageComponent {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
 
-  readonly actions = ACTIONS;
-  readonly statuses = STATUSES;
-  readonly data = DATA;
-  readonly profiles = PROFILES;
-  readonly factors = FACTORS;
+  readonly actions = SEO_ACTIONS;
+  readonly statuses = SEO_STATUSES;
+  readonly stages = SEO_STAGES;
+  readonly intents = SEO_INTENTS;
+  readonly data = SEO_DATA_KINDS;
+  readonly factors = SEO_FACTORS;
+  readonly outcomes = SEO_OUTCOMES;
+  readonly path = urlPath;
   readonly efforts: Record<string, string> = { low: 'bajo', medium: 'medio', high: 'alto' };
-  readonly outcomes: Record<string, string> = { higher: 'Por encima de las páginas comparables.', lower: 'Por debajo de las páginas comparables.', no_clear_change: 'Sin diferencia clara con las páginas comparables.', insufficient_data: 'Datos insuficientes.' };
+  readonly origins: Record<string, string> = { search_console: 'Search Console', crawl: 'Lectura del sitio', competitor: 'Competidores', provider: 'Proveedor de datos', research: 'Investigación' };
   readonly statusKeys = ['open', 'approved', 'planned', 'completed', 'monitoring', 'deferred', 'rejected', 'dismissed', 'expired'];
-  readonly factorKeys = Object.keys(FACTORS);
   readonly today = new Date().toISOString().slice(0, 10);
 
   readonly connection = signal<SearchConsoleStatus | null>(null);
-  readonly properties = signal<Array<{ property: string }>>([]);
   readonly items = signal<SeoOpportunity[]>([]);
-  readonly profile = signal<SeoProfileView | null>(null);
+  readonly total = signal(0);
+  readonly page = signal(1);
   readonly status = signal('open');
   readonly open = signal<string | null>(null);
   readonly busy = signal('');
   readonly loaded = signal(false);
   readonly failed = signal('');
-  readonly editProfile = signal(false);
-  readonly confirmDisconnect = signal(false);
   readonly search = signal('');
   readonly action = signal('');
+  readonly work = signal('');
+  readonly intent = signal('');
+  readonly market = signal('');
+  readonly confidence = signal('');
+  readonly sort = signal('priority');
+  readonly canManage = computed(() => this.app.can('projects.manage'));
+  readonly truncated = computed(() => this.total() > this.items().length);
   readonly shown = computed(() => {
     const text = this.search().trim().toLowerCase();
-    return this.items().filter((item) => item.status === this.status() && (!this.action() || this.proposed(item) === this.action()) && (!text || `${item.topic} ${item.query ?? ''} ${item.targetUrl ?? ''}`.toLowerCase().includes(text)));
+    const level = this.confidence();
+    const rows = this.items().filter((item) => item.status === this.status() && (!this.action() || this.proposed(item) === this.action())
+      && (!this.work() || this.creates(item) === (this.work() === 'create')) && (!this.intent() || (this.intentOf(item) ?? 'unknown') === this.intent()) && (!this.market() || item.market === this.market())
+      && (!level || (level === 'unknown' ? item.confidence === null : item.confidence !== null && (level === 'low') === item.confidence < 50))
+      && (!text || `${item.topic} ${item.query ?? ''} ${item.targetUrl ?? ''}`.toLowerCase().includes(text)));
+    const key = this.sort();
+    if (key === 'priority') return rows; // as the server ordered them
+    const value = (item: SeoOpportunity) => (key === 'score' ? item.score : key === 'confidence' ? item.confidence : key === 'relevance' ? this.relevance(item) : this.potential(item));
+    // Unknown goes last: it is not a low value.
+    return [...rows].sort((a, b) => (value(b) ?? -Infinity) - (value(a) ?? -Infinity) || 0);
   });
+  readonly pages = computed(() => Math.max(1, Math.ceil(this.shown().length / PAGE_SIZE)));
+  readonly paged = computed(() => this.shown().slice((Math.min(this.page(), this.pages()) - 1) * PAGE_SIZE, Math.min(this.page(), this.pages()) * PAGE_SIZE));
+  readonly intentKeys = computed(() => [...new Set(this.items().flatMap((item) => this.intentOf(item) ?? []))].sort());
+  readonly marketKeys = computed(() => [...new Set(this.items().flatMap((item) => item.market ?? []))].sort());
   readonly tabs = computed(() => this.statusKeys.filter((key) => key === 'open' || key === this.status() || this.count(key) > 0));
   readonly actionKeys = computed(() => [...new Set(this.items().map((item) => this.proposed(item)))].sort());
   readonly detail = computed(() => this.items().find((item) => item.id === this.open()) ?? null);
-  private readonly closeButton = viewChild<ElementRef<HTMLButtonElement>>('closeButton');
-  private opener: HTMLElement | null = null;
   doneOn = this.today;
-  form: { profile: string; topics: string; holdout: number; weights: Record<string, number> } = { profile: 'publisher', topics: '', holdout: 0, weights: {} };
   private siteId: string | null = null;
+  private requested = this.route.snapshot.queryParamMap.get('id');
 
   constructor() {
     void this.finishAuthorization();
@@ -321,12 +280,8 @@ export class SeoOpportunitiesPageComponent {
         void this.load();
       }
     });
-    effect(() => this.closeButton()?.nativeElement.focus());
   }
 
-  connectionLabel(c: SearchConsoleStatus): string {
-    return CONNECTION[c.status] ?? c.status;
-  }
   count(status: string): number {
     return this.items().filter((item) => item.status === status).length;
   }
@@ -349,24 +304,31 @@ export class SeoOpportunitiesPageComponent {
   metric(item: SeoOpportunity, name: string): number | string | null {
     return item.explanation?.evidence.find((entry) => entry.metric === name)?.value ?? null;
   }
-  path(url: string): string {
-    try {
-      return new URL(url).pathname;
-    } catch {
-      return url;
-    }
-  }
   /** A page without a title is named by its address, shown once as a path. */
   label(item: SeoOpportunity): string {
     return item.topic === item.targetUrl ? this.path(item.topic) : item.topic;
   }
+  relevance(item: SeoOpportunity): number | null {
+    return item.explanation?.factors.find((factor) => factor.key === 'businessRelevance')?.value ?? null;
+  }
+  potential(item: SeoOpportunity): number | null {
+    return item.explanation?.expected.clicks28d ?? null;
+  }
+  intentOf(item: SeoOpportunity): string | null {
+    return item.intent;
+  }
+  intentLabel(item: SeoOpportunity): string {
+    const intent = this.intentOf(item);
+    return intent ? (this.intents[intent] ?? intent) : 'Sin dato';
+  }
+  researchable(item: SeoOpportunity): boolean {
+    return ['open', 'approved', 'deferred'].includes(item.status) && (!!item.query || item.topic !== item.targetUrl);
+  }
   show(id: string): void {
-    this.opener = document.activeElement as HTMLElement | null;
     this.open.set(id);
   }
   close(): void {
     this.open.set(null);
-    this.opener?.focus();
   }
   evaluations(value: Record<string, SeoEvaluation> | null): SeoEvaluation[] {
     return Object.values(value ?? {}).sort((a, b) => a.window - b.window);
@@ -384,9 +346,10 @@ export class SeoOpportunitiesPageComponent {
       this.toast.error('No se autorizó el acceso a Search Console.');
       return;
     }
-    await this.work('connect', async () => {
+    await this.run('connect', async () => {
       await firstValueFrom(this.api.complete(state, code));
       this.toast.success('Search Console conectado.');
+      await this.router.navigate(['/studio/settings/seo'], { queryParams: { tab: 'data' } });
     });
   }
 
@@ -394,67 +357,51 @@ export class SeoOpportunitiesPageComponent {
     const siteId = this.siteId;
     if (!siteId) return;
     try {
-      const [connection, opportunities, profile] = await Promise.all([firstValueFrom(this.api.connection(siteId)), firstValueFrom(this.api.opportunities(siteId)), firstValueFrom(this.api.profile(siteId))]);
+      const [connection, opportunities] = await Promise.all([firstValueFrom(this.api.connection(siteId)), firstValueFrom(this.api.opportunities(siteId))]);
       if (siteId !== this.siteId) return;
       this.failed.set('');
       this.connection.set(connection);
       this.items.set(opportunities.items);
-      this.profile.set(profile);
-      this.form = { profile: profile.profile, topics: profile.priorityTopics.join(', '), holdout: profile.holdoutPercent, weights: { ...profile.weights } };
-      this.properties.set(connection.status === 'pending_property' ? (await firstValueFrom(this.api.properties(siteId))).items : []);
+      this.total.set(opportunities.total);
+      this.openRequested();
     } catch (error) {
-      this.failed.set(this.message(error));
+      this.failed.set(seoError(error));
     } finally {
       this.loaded.set(true);
     }
   }
 
-  private message(error: unknown): string {
-    const body = error instanceof HttpErrorResponse ? error.error : null;
-    const code = typeof body?.error === 'string' ? body.error : (body?.error?.code ?? '');
-    return ERRORS[code] ?? ERRORS[body?.message ?? ''] ?? ERRORS[body?.error?.message ?? ''] ?? 'No se pudo completar la acción. Inténtalo de nuevo.';
+  /** A link to one opportunity shows it wherever it is in the list. */
+  private openRequested(): void {
+    const item = this.items().find((entry) => entry.id === this.requested);
+    this.requested = null;
+    if (!item) return;
+    this.status.set(item.status);
+    this.page.set(Math.floor(Math.max(0, this.shown().indexOf(item)) / PAGE_SIZE) + 1);
+    this.show(item.id);
   }
 
-  private async work(name: string, run: (siteId: string) => Promise<void>): Promise<void> {
+  private async run(name: string, action: (siteId: string) => Promise<void>): Promise<void> {
     if (this.busy()) return;
     this.busy.set(name);
     try {
-      await run(this.siteId ?? '');
+      await action(this.siteId ?? '');
     } catch (error) {
-      this.toast.error(this.message(error));
+      this.toast.error(seoError(error));
     } finally {
       this.busy.set('');
       await this.load();
     }
   }
 
-  connect(): Promise<void> {
-    return this.work('connect', async (siteId) => {
-      window.location.href = (await firstValueFrom(this.api.connect(siteId))).url;
-    });
-  }
-  select(property: string): Promise<void> {
-    return this.work('select', async (siteId) => void (await firstValueFrom(this.api.selectProperty(siteId, property))));
-  }
-  sync(): Promise<void> {
-    return this.work('sync', async (siteId) => {
-      const result = await firstValueFrom(this.api.sync(siteId));
-      if (result.status === 'failed') this.toast.error(`Google no respondió bien: ${result.error}`);
-      else this.toast.success(result.days ? `${result.days} día(s) nuevos.` : 'No hay días nuevos.');
-    });
-  }
-  disconnect(deleteData: boolean): Promise<void> {
-    this.confirmDisconnect.set(false);
-    return this.work('disconnect', async (siteId) => void (await firstValueFrom(this.api.disconnect(siteId, deleteData))));
-  }
   analyze(): Promise<void> {
-    return this.work('analyze', async (siteId) => {
+    return this.run('analyze', async (siteId) => {
       const result = await firstValueFrom(this.api.analyze(siteId));
       this.toast.success(`${result.open} oportunidad(es) abiertas${result.firstPartyData ? '' : '. Aún no hay datos suficientes de Search Console'}.`);
     });
   }
-  act(item: SeoOpportunity, action: 'plan' | 'approved' | 'dismissed' | 'open' | 'done' | 'revise'): Promise<void> {
-    return this.work('act', async (siteId) => {
+  act(item: SeoOpportunity, action: SeoDecision | 'plan' | 'done' | 'revise'): Promise<void> {
+    return this.run('act', async (siteId) => {
       if (action === 'revise') {
         const { projectId } = await firstValueFrom(this.api.revise(siteId, item.id));
         this.toast.success('Redactando una versión nueva de la página. No se publica hasta que la apruebes.');
@@ -465,17 +412,6 @@ export class SeoOpportunitiesPageComponent {
       else if (action === 'done') await firstValueFrom(this.api.markDone(siteId, item.id, this.doneOn));
       else await firstValueFrom(this.api.decide(siteId, item.id, action));
       this.open.set(null);
-    });
-  }
-  saveProfile(): Promise<void> {
-    return this.work('profile', async (siteId) => {
-      const { profile, topics, holdout, weights } = this.form;
-      // Only a custom profile carries its own weights; the others follow the product's.
-      const body = { profile, priorityTopics: topics.split(',').map((topic) => topic.trim()).filter(Boolean), holdoutPercent: Number(holdout) || 0, weights: profile === 'custom' ? Object.fromEntries(Object.entries(weights).map(([key, value]) => [key, Number(value)])) : {} };
-      await firstValueFrom(this.api.saveProfile(siteId, body));
-      await firstValueFrom(this.api.analyze(siteId));
-      this.editProfile.set(false);
-      this.toast.success('Guardado. Las oportunidades se han vuelto a valorar.');
     });
   }
 }

@@ -215,6 +215,21 @@ async function call<C extends SeoCapability>(capability: C, request: SeoRequests
 
 const METRIC_KINDS = { volume: "provider_reported", cpc: "provider_reported", adsCompetition: "provider_reported", difficulty: "estimated", intent: "estimated" } as const;
 
+/** GET /v1/balance, documented as free. */
+async function balance(fetchImpl: typeof fetch): Promise<number> {
+  assertNetworkAllowed(fetchImpl, ID);
+  let response: Response;
+  try {
+    response = await fetchImpl("https://api.getanyapi.com/v1/balance", { headers: { Authorization: `Bearer ${secretOf(KEY_ENV)}` }, redirect: "error", signal: AbortSignal.timeout(TIMEOUT_MS) });
+  } catch {
+    throw new SeoProviderError("upstream_error", `${ID}: the balance could not be read`, ID, 0);
+  }
+  if (!response.ok) throw new SeoProviderError(statusCode(response.status), `${ID}_http_${response.status}: balance`, ID, 0);
+  const usd = num(((await response.json().catch(() => null)) as Row | null)?.usd);
+  if (usd === null) throw new SeoProviderError("malformed_response", `${ID}: response without usd`, ID, 0);
+  return usd;
+}
+
 export const anyApiProvider: SeoProvider = {
   id: ID,
   label: "AnyAPI",
@@ -253,5 +268,6 @@ export const anyApiProvider: SeoProvider = {
     const { keywords, limit } = request as { keywords?: string[]; limit?: number };
     return priceQuote(ID, capability, keywords?.length ?? limit ?? 1);
   },
+  balance,
   run: call,
 };

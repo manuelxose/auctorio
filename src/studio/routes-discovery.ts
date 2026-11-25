@@ -41,14 +41,14 @@ export function registerDiscoveryRoutes(fastify: FastifyInstance) {
     }
     const config = await getOrCreateDiscoveryConfig(context.tenantId, null);
     const provider = webIntelligenceAvailability();
-    const usage = await getDailyUsage(context.tenantId, provider.provider);
+    const { searches, scrapes } = await getDailyUsage(context.tenantId, provider.provider); // wholesale cost is not shown to workspaces
     return reply.send({
       config: {
         ...config,
         maxDiscoveryCostPerDay: Number(config.maxDiscoveryCostPerDay ?? 0),
       },
       provider,
-      usageToday: usage,
+      usageToday: { searches, scrapes },
     });
   });
 
@@ -235,10 +235,10 @@ export function registerDiscoveryRoutes(fastify: FastifyInstance) {
     }
     const provider = webIntelligenceAvailability();
     const config = await getOrCreateDiscoveryConfig(context.tenantId, null);
-    const usage = await getDailyUsage(context.tenantId, provider.provider);
+    const { searches, scrapes } = await getDailyUsage(context.tenantId, provider.provider); // wholesale cost is not shown to workspaces
     return reply.send({
       provider,
-      usageToday: usage,
+      usageToday: { searches, scrapes },
       limits: {
         maxSearchesPerDay: config.maxSearchesPerDay,
         maxScrapesPerDay: config.maxScrapesPerDay,

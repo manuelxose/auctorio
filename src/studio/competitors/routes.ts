@@ -3,6 +3,7 @@
 
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { badRequest, isUuid, notFound, parseBody, parseOptionalString, requireStudioContext, requireStudioPermission } from "../http-utils";
+import { competitorKeywordOverlap } from "../seo-workspace";
 import { runAsOperation } from "../source-registry-discovery";
 import {
   addCompetitorManually,
@@ -36,7 +37,8 @@ export function registerCompetitorRoutes(fastify: FastifyInstance) {
     const params = context && ids(request, reply);
     if (!context || !params) return;
     try {
-      return reply.send({ items: await listCompetitors(context.tenantId, params.siteId, { status: parseOptionalString((request.query as { status?: string }).status) ?? undefined }) });
+      const [items, overlap] = [await listCompetitors(context.tenantId, params.siteId, { status: parseOptionalString((request.query as { status?: string }).status) ?? undefined }), await competitorKeywordOverlap(context.tenantId, params.siteId)];
+      return reply.send({ items: items.map((item) => ({ ...item, keywordOverlap: overlap.get(item.id)?.keywords ?? null, keywordsResearchedAt: overlap.get(item.id)?.lastAt ?? null })) });
     } catch (error) {
       return fail(reply, error);
     }

@@ -20,6 +20,7 @@ export type AdminSeoProvider = {
   credentials: { envName: string; label: string; source: 'ui' | 'env' | null }[];
   capabilities: Record<string, { supported: boolean; dataKind?: string; methodology?: string; degraded?: string | null; reason?: string }>;
   licensing: { termsUrl: string; checkedAt: string; commercialUse: string; storage: string; crossTenantSharing: string; upstream: string; notes: string[] };
+  balance: { supported: boolean; value: { usd: number; at: string } | null };
   rateLimit: string | null; liveVerification: 'pending' | 'partial' | 'verified';
   health: { lastSuccessAt: string | null; lastErrorAt: string | null; lastErrorCode: string | null; lastErrorMessage: string | null; circuit: { until: string; reason: string | null } | null };
 };

@@ -16,6 +16,7 @@ import { structuredEvent } from "../shared/utils/logger";
 import { evaluateAiSpend } from "./cost-budgets";
 import { notify } from "./notifications";
 import { readSeoControl } from "./seo-control";
+import { countSeoUsage } from "./seo-usage";
 
 const prisma = getPrismaClient();
 type Client = Prisma.TransactionClient;
@@ -255,6 +256,7 @@ async function reserveNow(input: ReserveInput): Promise<ReserveResult> {
 
 async function reportExhausted(budget: SeoBudgetLimit, input: ReserveInput): Promise<void> {
   structuredEvent("seo.budget_exhausted", { tenantId: input.tenantId, siteId: input.siteId, provider: input.provider.id, capability: input.capability, budget: budgetKeyOf(budget), limitUsd: budget.limitUsd + budget.extraUsd }, "warn");
+  await countSeoUsage({ tenantId: input.tenantId, siteId: input.siteId, providerId: input.provider.id, operation: input.capability }, { [`exhausted:${budget.scope}:${budget.period}`]: 1 });
   if (budget.scope === "global" || budget.scope === "provider") return; // platform limits are not the workspace's business
   await notify({
     tenantId: input.tenantId, siteId: input.siteId, category: "operations", severity: "warning", entityType: "seo_budget", actionUrl: "/studio/operations",

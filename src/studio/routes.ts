@@ -145,6 +145,7 @@ import { registerCopilotRoutes } from "./routes-copilot";
 import { registerAiSettingsRoutes } from "./routes-ai";
 import { registerAdminRoutes } from "./routes-admin";
 import { registerAdminSeoRoutes } from "./routes-admin-seo";
+import { registerAdminSeoOperationsRoutes } from "./routes-admin-seo-ops";
 import { registerSeoIntelligenceRoutes } from "./routes-seo-intelligence";
 import { registerEventRoutes } from "./routes-events";
 import { registerDiscoveryRoutes } from "./routes-discovery";
@@ -412,6 +413,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
   registerAiSettingsRoutes(fastify);
   registerAdminRoutes(fastify);
   registerAdminSeoRoutes(fastify);
+  registerAdminSeoOperationsRoutes(fastify);
   registerSeoIntelligenceRoutes(fastify);
   registerEventRoutes(fastify);
 

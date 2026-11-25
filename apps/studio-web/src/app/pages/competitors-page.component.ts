@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
+import { seoError } from '../components/seo-labels';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppContextService } from '../services/app-context.service';
@@ -28,28 +29,31 @@ const KIND_LABEL: Record<string, string> = {
     <section class="au-page profile-reference cp-page">
       <header class="page-head">
         <div>
-          <p class="overline">Auctorio / Herramientas avanzadas</p>
-          <h1>Investigación de competidores</h1>
+          <p class="overline">Auctorio / Inteligencia SEO</p>
+          <h1>Competidores</h1>
           <p>Comparación documentada: qué cubren, qué falta en tu sitio y qué merece producir.</p>
         </div>
-        <div class="head-actions">
+        <div class="head-actions" *ngIf="canEdit()">
           <button class="btn small" type="button" [disabled]="busy()" (click)="run('coverage')"><app-icon name="refresh"></app-icon>{{ busy() === 'coverage' ? 'Comparando…' : 'Comparar cobertura' }}</button>
           <button class="btn small primary" type="button" [disabled]="busy()" (click)="run('discover')"><app-icon name="search"></app-icon>{{ busy() === 'discover' ? 'Buscando…' : 'Descubrir' }}</button>
         </div>
       </header>
+
+      <div class="au-banner au-banner--error" role="alert" *ngIf="failed() as reason"><app-icon name="warning"></app-icon><span class="au-banner__text">{{ reason }}</span><button class="au-banner__action" type="button" (click)="reload()">Reintentar</button></div>
+      <div class="au-skeleton-list" aria-label="Cargando competidores" *ngIf="!loaded() && !failed()"><div class="au-skeleton" style="height: 72px"></div><div class="au-skeleton" style="height: 72px"></div></div>
 
       <ng-container *ngIf="tab() === 'shortlist'">
         <dl class="kpis" aria-label="Métricas de competidores" *ngIf="loaded()">
           <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Competidores</dt><dd class="number">{{ competitors().length }}</dd><dd class="foot">Lista de trabajo</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="circle-check"></app-icon>Aceptados</dt><dd class="number">{{ acceptedCount() }}</dd><dd class="foot">Aportan cobertura</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="sparkles"></app-icon>Por valorar</dt><dd class="number">{{ suggestedCount() }}</dd><dd class="foot">Pendientes de revisión</dd></div>
-          <div class="kpi"><dt class="top"><app-icon name="activity"></app-icon>Oportunidades</dt><dd class="number">{{ openOpportunities().length }}</dd><dd class="foot">Validación pendiente</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="activity"></app-icon>Huecos de contenido</dt><dd class="number">{{ openOpportunities().length }}</dd><dd class="foot">Por valorar</dd></div>
         </dl>
 
         <section class="card">
           <div class="card-header">
             <div><h2>Competidores observados</h2><p>Descubiertos o añadidos por el usuario, con aceptación explícita</p></div>
-            <button class="btn small" type="button" [attr.aria-expanded]="showAdd()" (click)="showAdd.set(!showAdd())"><app-icon name="plus"></app-icon>Añadir manualmente</button>
+            <button class="btn small" type="button" *ngIf="canEdit()" [attr.aria-expanded]="showAdd()" (click)="showAdd.set(!showAdd())"><app-icon name="plus"></app-icon>Añadir manualmente</button>
           </div>
           <form class="fields cp-form" *ngIf="showAdd()" (ngSubmit)="add()">
             <label class="profile-field"><span>URL o dominio del competidor</span><input class="input" name="url" required [(ngModel)]="draft.url" /></label>
@@ -75,21 +79,23 @@ const KIND_LABEL: Record<string, string> = {
               <div class="cp-actions">
                 <span class="badge" [class.ok]="c.status === 'accepted'" [class.warning]="c.status === 'suggested' || c.status === 'paused'">{{ competitorLabels[c.status] }}</span>
                 <span class="badge">{{ c.snapshotsCount }} páginas</span>
+                <span class="badge">{{ c.keywordOverlap === null ? 'Palabras sin investigar' : c.keywordOverlap + ' palabras en común' }}</span>
+                <span class="badge" [class.warning]="stale(c)">{{ researched(c) }}</span>
               </div>
               <div class="form-footer">
                 <button class="btn small" type="button" [attr.aria-expanded]="detailId() === c.id" (click)="detailId.set(detailId() === c.id ? null : c.id)">Detalles</button>
-                <button class="btn small primary" type="button" *ngIf="c.status === 'suggested' || c.status === 'paused'" (click)="setStatus(c, 'accepted')">{{ c.status === 'paused' ? 'Reanudar' : 'Aceptar' }}</button>
-                <button class="btn small ghost" type="button" *ngIf="c.status === 'suggested'" (click)="setStatus(c, 'rejected')">Rechazar</button>
-                <button class="btn small ghost" type="button" *ngIf="c.status === 'accepted'" (click)="setStatus(c, 'paused')">Pausar</button>
-                <button class="btn small ghost" type="button" [attr.aria-expanded]="editId() === c.id" (click)="startEdit(c)">Editar</button>
+                <button class="btn small primary" type="button" *ngIf="canEdit() && (c.status === 'suggested' || c.status === 'paused' || c.status === 'rejected')" (click)="setStatus(c, 'accepted')">{{ c.status === 'paused' ? 'Reanudar' : 'Aceptar' }}</button>
+                <button class="btn small ghost" type="button" *ngIf="canEdit() && c.status === 'suggested'" (click)="setStatus(c, 'rejected')">Rechazar</button>
+                <button class="btn small ghost" type="button" *ngIf="canEdit() && c.status === 'accepted'" (click)="setStatus(c, 'paused')">Pausar</button>
+                <button class="btn small ghost" type="button" *ngIf="canEdit()" [attr.aria-expanded]="editId() === c.id" (click)="startEdit(c)">Editar</button>
               </div>
               <div class="profile-extra" *ngIf="detailId() === c.id">
-                <div class="cp-actions"><span class="badge" [class.ok]="c.verification === 'verified'">{{ c.verification === 'verified' ? 'Verificado' : 'Por verificar' }}</span><span class="badge">{{ c.opportunitiesCount }} oportunidades</span></div>
+                <div class="cp-actions"><span class="badge" [class.ok]="c.verification === 'verified'">{{ c.verification === 'verified' ? 'Verificado' : 'Por verificar' }}</span><span class="badge">{{ c.opportunitiesCount }} huecos de contenido</span></div>
                 <p>{{ originLabel(c.origin) }}<span *ngIf="c.overlapScore !== null"> · Coincidencia {{ c.overlapScore | percent }}</span></p>
                 <div class="cp-actions" *ngIf="c.overlapTopics?.length"><span class="badge" *ngFor="let topic of c.overlapTopics">{{ overlapLabel(topic) }}</span></div>
                 <ul class="cp-ev" *ngIf="c.evidence?.length"><li *ngFor="let e of c.evidence!.slice(0, 4)">{{ e.note }} <a *ngIf="e.url" [href]="e.url" target="_blank" rel="noopener noreferrer">Fuente</a></li></ul>
                 <p class="au-error" *ngIf="c.lastError">{{ c.lastError }}</p>
-                <button class="btn small ghost cp-danger" type="button" (click)="setStatus(c, 'removed')">Retirar</button>
+                <button class="btn small ghost cp-danger" type="button" *ngIf="canEdit()" (click)="setStatus(c, 'removed')">Retirar</button>
               </div>
               <form class="fields profile-extra cp-form" *ngIf="editId() === c.id" (ngSubmit)="saveEdit(c)">
                 <label class="profile-field"><span>Nombre</span><input class="input" name="name" [(ngModel)]="edit.name" /></label>
@@ -108,7 +114,7 @@ const KIND_LABEL: Record<string, string> = {
         <section class="card">
           <div class="card-header">
             <div><h2>Matriz de cobertura temática</h2><p>Agrupación por tópico para localizar vacíos y oportunidades</p></div>
-            <button class="btn small" type="button" [disabled]="busy()" (click)="run('coverage')"><app-icon name="refresh"></app-icon>Actualizar muestra</button>
+            <button class="btn small" type="button" *ngIf="canEdit()" [disabled]="busy()" (click)="run('coverage')"><app-icon name="refresh"></app-icon>Actualizar muestra</button>
           </div>
           <ng-container *ngIf="coverage() as matrix">
             <div class="table-wrap" tabindex="0" role="region" aria-label="Comparación de cobertura" *ngIf="matrix.topics.length && matrix.competitors.length">
@@ -126,7 +132,7 @@ const KIND_LABEL: Record<string, string> = {
                       <td [attr.colspan]="matrix.competitors.length + 3">
                         <p *ngIf="!row.siteSampleUrls.length">La muestra de este tema no incluye páginas propias.</p>
                         <ul class="cp-ev" *ngIf="row.siteSampleUrls.length"><li *ngFor="let url of row.siteSampleUrls"><a [href]="url" target="_blank" rel="noopener">{{ url }}</a></li></ul>
-                        <a class="btn small" routerLink="." [queryParams]="{ tab: 'opportunities', topic: row.topic }">Buscar oportunidades del tema</a>
+                        <a class="btn small" routerLink="." [queryParams]="{ tab: 'opportunities', topic: row.topic }">Ver huecos del tema</a>
                       </td>
                     </tr>
                   </ng-container>
@@ -140,29 +146,29 @@ const KIND_LABEL: Record<string, string> = {
           <div class="card-header"><div><h2>Diagnóstico accionable</h2><p>Dónde actuar sin duplicar Site Intelligence</p></div></div>
           <div class="grid2">
             <div class="callout"><h3>Tu inventario</h3><p>Las páginas propias provienen de <a routerLink="/studio/site-intelligence" [queryParams]="{ tab: 'crawl' }">Site Intelligence</a>.</p></div>
-            <div class="callout"><h3>Oportunidades externas</h3><p>Las ideas pasan al plan con la evidencia de origen.</p></div>
+            <div class="callout"><h3>Huecos de contenido</h3><p>Se valoran junto al resto del trabajo en <a routerLink="/studio/seo-opportunities">Oportunidades SEO</a>.</p></div>
           </div>
         </section>
       </div>
 
       <ng-container *ngIf="tab() === 'opportunities'">
-        <dl class="kpis" aria-label="Métricas de oportunidades" *ngIf="loaded()">
-          <div class="kpi"><dt class="top"><app-icon name="sparkles"></app-icon>Oportunidades abiertas</dt><dd class="number">{{ openOpportunities().length }}</dd><dd class="foot">Revisar evidencia</dd></div>
+        <dl class="kpis" aria-label="Métricas de huecos de contenido" *ngIf="loaded()">
+          <div class="kpi"><dt class="top"><app-icon name="sparkles"></app-icon>Huecos abiertos</dt><dd class="number">{{ openOpportunities().length }}</dd><dd class="foot">Revisar evidencia</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Mejoras de artículo</dt><dd class="number">{{ improvementCount() }}</dd><dd class="foot">Actualizar una página existente</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="circle-check"></app-icon>En seguimiento</dt><dd class="number">{{ monitoringCount() }}</dd><dd class="foot">Pendientes de decisión</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="plan"></app-icon>Propuestas en plan</dt><dd class="number">{{ plannedCount() }}</dd><dd class="foot">Vinculadas a una oportunidad</dd></div>
         </dl>
 
         <section class="card">
-          <div class="card-header"><div><h2>Oportunidades de crecimiento</h2><p>Convierte una idea en una propuesta con evidencia editorial</p></div></div>
+          <div class="card-header"><div><h2>Huecos de contenido</h2><p>Lo que cubren los competidores aceptados y tu sitio no, con la evidencia de cada uno</p></div><a class="btn small" routerLink="/studio/seo-opportunities">Todas las oportunidades SEO</a></div>
           <form class="filter-bar" (ngSubmit)="opportunitySearch.set(opportunitySearchText)">
-            <label class="search"><app-icon name="search"></app-icon><input class="input" type="search" name="query" aria-label="Buscar oportunidad" placeholder="Buscar oportunidad…" [(ngModel)]="opportunitySearchText" /></label>
-            <select class="input filter-select" name="status" aria-label="Estado de la oportunidad" [ngModel]="opportunityStatus()" (ngModelChange)="opportunityStatus.set($event)">
+            <label class="search"><app-icon name="search"></app-icon><input class="input" type="search" name="query" aria-label="Buscar hueco de contenido" placeholder="Buscar hueco…" [(ngModel)]="opportunitySearchText" /></label>
+            <select class="input filter-select" name="status" aria-label="Estado del hueco" [ngModel]="opportunityStatus()" (ngModelChange)="opportunityStatus.set($event)">
               <option value="">Todas</option><option value="open">Abiertas</option><option value="monitoring">En seguimiento</option><option value="dismissed">Descartadas</option><option value="planned">En el plan</option>
             </select>
             <button class="btn small" type="submit">Filtrar</button>
           </form>
-          <app-empty-state *ngIf="loaded() && !shownOpportunities().length" icon="sparkles" [title]="opportunities().length ? 'Ninguna oportunidad coincide' : 'Aún no hay oportunidades'" [text]="opportunities().length ? 'Cambia la búsqueda o el estado.' : 'Actualiza la muestra de cobertura para buscar temas que tu sitio aún no cubra.'"></app-empty-state>
+          <app-empty-state *ngIf="loaded() && !shownOpportunities().length" icon="sparkles" [title]="opportunities().length ? 'Ningún hueco coincide' : 'Aún no hay huecos de contenido'" [text]="opportunities().length ? 'Cambia la búsqueda o el estado.' : 'Actualiza la muestra de cobertura para buscar temas que tu sitio aún no cubra.'"></app-empty-state>
           <ul class="row-list">
             <li *ngFor="let o of shownOpportunities(); trackBy: trackId">
               <div class="row-main">
@@ -181,13 +187,13 @@ const KIND_LABEL: Record<string, string> = {
               <div class="row-action">
                 <ng-container *ngIf="o.planItemId; else opportunityActions"><span class="badge ok">Propuesta vinculada</span></ng-container>
                 <ng-template #opportunityActions>
-                  <ng-container *ngIf="o.status === 'open' || o.status === 'monitoring'">
+                  <ng-container *ngIf="canPlan() && (o.status === 'open' || o.status === 'monitoring')">
                     <button class="btn small primary" type="button" (click)="toPlan(o, 'new')">Añadir al plan</button>
                     <button class="btn small" type="button" *ngIf="o.targetUrl" (click)="toPlan(o, 'update')">Mejorar artículo</button>
                     <button class="btn small" type="button" *ngIf="o.status === 'open'" (click)="oppStatus(o, 'monitoring')">Vigilar</button>
                     <button class="btn small ghost" type="button" (click)="oppStatus(o, 'dismissed')">Descartar</button>
                   </ng-container>
-                  <button class="btn small" type="button" *ngIf="o.status === 'dismissed'" (click)="oppStatus(o, 'open')">Reabrir</button>
+                  <button class="btn small" type="button" *ngIf="canPlan() && o.status === 'dismissed'" (click)="oppStatus(o, 'open')">Reabrir</button>
                 </ng-template>
               </div>
             </li>
@@ -212,15 +218,31 @@ export class CompetitorsPageComponent implements OnDestroy {
   readonly opportunitySearch = signal('');
   readonly opportunityStatus = signal('');
   readonly loaded = signal(false);
+  readonly failed = signal('');
   readonly busy = signal<'discover' | 'coverage' | ''>('');
   readonly showAdd = signal(false);
   readonly editId = signal<string | null>(null);
   readonly detailId = signal<string | null>(null);
   readonly coverageTopic = signal<string | null>(null);
+  readonly canEdit = computed(() => this.app.can('integrations.manage'));
+  readonly canPlan = computed(() => this.app.can('projects.manage'));
   readonly competitorLabels = { suggested: 'Sugerido', accepted: 'Aceptado', rejected: 'Rechazado', paused: 'Pausado', removed: 'Retirado' };
   readonly opportunityLabels = { open: 'Abierta', planned: 'En el plan', dismissed: 'Descartada', monitoring: 'En seguimiento' };
   searchText = '';
   opportunitySearchText = '';
+
+  private lastResearch(c: Competitor): string | null {
+    return [c.lastCheckedAt, c.keywordsResearchedAt].filter((at): at is string => Boolean(at)).sort().at(-1) ?? null;
+  }
+  researched(c: Competitor): string {
+    const at = this.lastResearch(c);
+    return at ? `Investigado el ${new Date(at).toLocaleDateString('es-ES')}` : 'Sin investigar';
+  }
+  /** Rankings older than their freshness (60 days) are history, not the present. */
+  stale(c: Competitor): boolean {
+    const at = this.lastResearch(c);
+    return at !== null && Date.now() - Date.parse(at) > 60 * 86_400_000;
+  }
 
   overlapLabel(topic: string | { topic: string }): string {
     return typeof topic === 'string' ? topic : topic.topic;
@@ -275,8 +297,7 @@ export class CompetitorsPageComponent implements OnDestroy {
   kindLabel = (kind: string) => KIND_LABEL[kind] ?? kind;
 
   private message(error: unknown): string {
-    const e = error as { error?: { error?: string; message?: string }; message?: string };
-    return e?.error?.message ?? e?.error?.error ?? e?.message ?? 'Request failed';
+    return seoError(error, 'No se pudo completar la acción. Revisa los datos e inténtalo de nuevo.');
   }
 
   async reload(): Promise<void> {
@@ -287,8 +308,9 @@ export class CompetitorsPageComponent implements OnDestroy {
       this.coverage.set(coverage);
       this.opportunities.set(opportunities.items);
       this.loaded.set(true);
+      this.failed.set('');
     } catch (error) {
-      this.toast.error(this.message(error));
+      this.failed.set(this.message(error));
     }
   }
 
@@ -301,7 +323,7 @@ export class CompetitorsPageComponent implements OnDestroy {
         await new Promise((resolve) => setTimeout(resolve, 2000));
         const op = await firstValueFrom(this.api.operationStatus(operationId));
         if (['completed', 'succeeded', 'done', 'failed', 'cancelled'].includes(op.status)) {
-          if (op.status === 'failed') this.toast.error('The operation failed');
+          if (op.status === 'failed') this.toast.error('La operación ha fallado. El detalle está en Trabajos en segundo plano.');
           break;
         }
       }
@@ -355,7 +377,7 @@ export class CompetitorsPageComponent implements OnDestroy {
     if (!this.siteId) return;
     try {
       const result = await firstValueFrom(this.api.toPlan(this.siteId, o.id, { mode, targetUrl: mode === 'update' ? o.targetUrl ?? undefined : undefined }));
-      this.toast.success(result.created ? 'Proposal added to the plan' : 'Already in the plan');
+      this.toast.success(result.created ? 'Propuesta añadida al plan.' : 'Ya estaba en el plan.');
       await this.reload();
     } catch (error) {
       this.toast.error(this.message(error));

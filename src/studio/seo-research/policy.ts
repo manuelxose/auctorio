@@ -34,6 +34,31 @@ export const DEFAULT_RESEARCH_POLICY: ResearchPolicy = {
   maxSeedBatches: 2, maxCompetitorBatches: 2, maxSerpLookups: 3, maxMetricsBatches: 1, maxUsdPerRun: 0.25, cooldownDays: 14,
 };
 
+/** How much one run may ask for, as workspaces choose it. They never set amounts, and the subscription's allowance limits all of them. */
+export const RESEARCH_INTENSITIES = {
+  light: { maxSeedBatches: 1, maxCompetitorBatches: 1, maxSerpLookups: 1, maxMetricsBatches: 1, maxUsdPerRun: 0.1 },
+  balanced: { maxSeedBatches: 2, maxCompetitorBatches: 2, maxSerpLookups: 3, maxMetricsBatches: 1, maxUsdPerRun: 0.25 },
+  intensive: { maxSeedBatches: 4, maxCompetitorBatches: 4, maxSerpLookups: 6, maxMetricsBatches: 2, maxUsdPerRun: 0.5 },
+} as const satisfies Record<string, Partial<ResearchPolicy>>;
+export type ResearchIntensity = keyof typeof RESEARCH_INTENSITIES;
+
+/** null: limits set one by one. */
+export function intensityOf(policy: ResearchPolicy): ResearchIntensity | null {
+  const match = Object.entries(RESEARCH_INTENSITIES).find(([, limits]) => Object.entries(limits).every(([key, value]) => policy[key as NumericKey] === value));
+  return match ? (match[0] as ResearchIntensity) : null;
+}
+
+const WORKSPACE_KEYS: readonly string[] = ["mode", "targetDays", "replenishBelowDays", "minOpportunities", "minScore", "cooldownDays"];
+
+/** What a workspace may set: its goals and an intensity. Amounts and batch limits are the platform's. Throws `invalid_policy`. */
+export function workspaceResearchPolicy(input: unknown): Partial<ResearchPolicy> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("invalid_policy");
+  const { intensity, ...rest } = input as Record<string, unknown>;
+  if (Object.keys(rest).some((key) => !WORKSPACE_KEYS.includes(key))) throw new Error("invalid_policy");
+  if (intensity !== undefined && !(typeof intensity === "string" && Object.hasOwn(RESEARCH_INTENSITIES, intensity))) throw new Error("invalid_policy");
+  return { ...parseResearchPolicy(rest), ...(intensity === undefined ? {} : RESEARCH_INTENSITIES[intensity as ResearchIntensity]) };
+}
+
 type NumericKey = Exclude<keyof ResearchPolicy, "mode">;
 const RANGES: Record<NumericKey, [number, number]> = {
   targetDays: [14, 120], replenishBelowDays: [7, 90], minOpportunities: [3, 100], minScore: [20, 90], maxSeedBatches: [0, 5], maxCompetitorBatches: [0, 5], maxSerpLookups: [0, 10], maxMetricsBatches: [0, 2],
