@@ -3,7 +3,7 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { getNumberEnv } from "../shared/utils/env";
 import { structuredEvent } from "../shared/utils/logger";
 import { normalizeCanonicalUrl, deriveExternalId, upsertSourceItem } from "./sources";
-import { getWebIntelligenceProvider, hostnameOf, type WebIntelligenceProvider, type WebSearchResult } from "./web-intelligence";
+import { getWebIntelligenceProvider, hostnameOf, webIntelligenceAvailability, type WebIntelligenceProvider, type WebSearchResult } from "./web-intelligence";
 import { planDiscovery, type DiscoveryQueryPlan } from "./discovery-planner";
 import {
   evaluateDomainQuality,
@@ -234,7 +234,7 @@ export async function runWebDiscoveryForTenant(tenantId: string): Promise<Discov
     result.skipped = "already_running";
     return result;
   }
-  const provider = getWebIntelligenceProvider();
+  const provider = getWebIntelligenceProvider({ tenantId, siteId: null });
   if (!provider) {
     result.skipped = "web_intelligence_provider_not_configured";
     structuredEvent("web.discovery.failed", { tenantId, reason: result.skipped }, "warn");
@@ -560,8 +560,7 @@ async function scrapeSafely(provider: WebIntelligenceProvider, url: string, tena
 // ────────────────────────────────────────────────────────────── Worker tick
 
 export async function runWebDiscoveryTick(): Promise<{ tenants: number; runs: DiscoveryRunResult[] }> {
-  const provider = getWebIntelligenceProvider();
-  if (!provider) {
+  if (!webIntelligenceAvailability().configured) {
     structuredEvent("web.discovery.failed", { reason: "web_intelligence_provider_not_configured" }, "warn");
     return { tenants: 0, runs: [] };
   }

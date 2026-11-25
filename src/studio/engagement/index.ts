@@ -6,7 +6,7 @@ import { loadSiteTopicVocabulary, runAsOperation, tokenize } from "../source-reg
 import { isKeywordVariant } from "../keyword-candidates";
 import { structuredEvent } from "../../shared/utils/logger";
 import { estimateSearchCost, getOrCreateDiscoveryConfig, recordWebUsage } from "../web-discovery";
-import { getWebIntelligenceProvider, type WebSearchResult } from "../web-intelligence";
+import { getWebIntelligenceProvider, webIntelligenceAvailability, type WebSearchResult } from "../web-intelligence";
 import { searchReddit } from "./reddit";
 
 export type EngagementPlatform = "reddit" | "quora";
@@ -87,7 +87,7 @@ export async function readEngagement(scope: EngagementScope, status?: string) {
     }))),
     getSettings(scope),
   ]);
-  return { items: items.flat(), settings, searchConfigured: scope.platform === "reddit" || Boolean(getWebIntelligenceProvider()) };
+  return { items: items.flat(), settings, searchConfigured: scope.platform === "reddit" || webIntelligenceAvailability().configured };
 }
 
 export async function saveEngagementSettings(scope: EngagementScope, input: Record<string, unknown>) {
@@ -104,7 +104,7 @@ export async function saveEngagementSettings(scope: EngagementScope, input: Reco
 export async function discoverEngagement(scope: EngagementScope, site: EngagementSite) {
   const key = `${scope.siteId}:${scope.platform}`;
   if (running.has(key)) throw new Error("engagement_search_running");
-  const provider = getWebIntelligenceProvider();
+  const provider = getWebIntelligenceProvider({ tenantId: scope.tenantId, siteId: scope.siteId });
   if (!provider && scope.platform === "quora") throw new Error("web_intelligence_provider_not_configured");
   running.add(key);
   try {
@@ -224,7 +224,7 @@ export async function runEngagementTick() {
     select: { platform: true, site: { select: { id: true, tenantId: true, locale: true, brandVoice: true } } },
   });
   for (const { site, platform } of configured) {
-    if (platform === "quora" && !getWebIntelligenceProvider()) continue;
+    if (platform === "quora" && !webIntelligenceAvailability().configured) continue;
     const config = await getOrCreateDiscoveryConfig(site.tenantId);
     if (!config.enabled || config.mode === "manual") continue;
     const scope = { tenantId: site.tenantId, siteId: site.id, platform: platform as EngagementPlatform };

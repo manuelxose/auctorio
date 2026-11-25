@@ -234,7 +234,7 @@ async function collectExternalCandidates(
   }
 
   // 2. Web search for the site's main topics, only when a provider is configured.
-  const provider = getWebIntelligenceProvider();
+  const provider = getWebIntelligenceProvider({ tenantId, siteId: site.id });
   if (!provider) {
     result.skipped.push("web_search_provider_not_configured");
     return out;

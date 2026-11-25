@@ -2,12 +2,13 @@
 // To add a provider: implement SeoProvider and append it to SEO_PROVIDERS.
 
 import { anyApiProvider } from "./anyapi";
-import { SeoProviderError, type SeoCapability, type SeoErrorCode, type SeoMarket, type SeoProvider, type SeoQuote } from "./contract";
+import { SeoProviderError, isWebCapability, type SeoCapability, type SeoErrorCode, type SeoMarket, type SeoProvider, type SeoQuote } from "./contract";
 import { dataForSeoProvider } from "./dataforseo";
+import { firecrawlProvider, tavilyProvider, webProviderId } from "./web";
 import { DEFAULT_SEO_POLICY, type SeoPolicy } from "./policy";
 import type { SeoPriceOverrides } from "./pricing";
 
-export const SEO_PROVIDERS: readonly SeoProvider[] = [dataForSeoProvider, anyApiProvider];
+export const SEO_PROVIDERS: readonly SeoProvider[] = [dataForSeoProvider, anyApiProvider, tavilyProvider, firecrawlProvider];
 
 export const SEO_MODES = ["disabled", "dataforseo_only", "anyapi_only", "manual", "cost_optimized"] as const;
 export type SeoMode = (typeof SEO_MODES)[number];
@@ -34,7 +35,7 @@ export const DEFAULT_CONTROL: SeoControl = {
   emergencyStop: false,
   policy: DEFAULT_SEO_POLICY,
   pricing: {},
-  providers: { dataforseo: { enabled: true, priority: 10 }, anyapi: { enabled: false, priority: 20 } },
+  providers: { dataforseo: { enabled: true, priority: 10 }, anyapi: { enabled: false, priority: 20 }, tavily: { enabled: true, priority: 30 }, firecrawl: { enabled: true, priority: 40 } },
 };
 
 /**
@@ -73,6 +74,7 @@ export function seoBlockReason(
 
 /** The provider the mode names for a capability; null when it is chosen by price or not at all. */
 export function primarySeoProviderId(capability: SeoCapability, control: Pick<SeoControl, "mode" | "routing">): string | null {
+  if (isWebCapability(capability)) return (control.mode === "manual" ? control.routing[capability] : undefined) ?? webProviderId();
   return control.mode === "dataforseo_only" ? "dataforseo" : control.mode === "anyapi_only" ? "anyapi" : control.mode === "manual" ? control.routing[capability] ?? null : null;
 }
 
@@ -92,7 +94,7 @@ export function selectSeoProvider(
   const blocked = (provider: SeoProvider) => seoBlockReason(provider, capability, market, control, trigger, locks);
   const priority = (provider: SeoProvider) => control.providers[provider.id]?.priority ?? Number.MAX_SAFE_INTEGER;
 
-  if (control.mode === "cost_optimized") {
+  if (control.mode === "cost_optimized" && !isWebCapability(capability)) {
     if (locks.automaticRouting) throw new SeoProviderError("automatic_routing_locked", "automatic paid routing is locked until the production activation gates are met");
     const priced = providers.filter((provider) => !blocked(provider)).map((provider) => ({ provider, max: options.quote?.(provider).maxUsd ?? null }));
     const known = priced.filter((entry): entry is { provider: SeoProvider; max: number } => entry.max !== null);

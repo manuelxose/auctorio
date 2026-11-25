@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { SEO_CAPABILITIES, SeoProviderError, seoMarket, type SeoCapability, type SeoProvider, type SeoRequests } from "../src/infrastructure/seo/contract";
+import { SEO_CAPABILITIES, SeoProviderError, seoMarket, type DataCapability, type SeoCapability, type SeoProvider, type SeoRequests } from "../src/infrastructure/seo/contract";
 import { dataForSeoProvider } from "../src/infrastructure/seo/dataforseo";
 import { anyApiProvider } from "../src/infrastructure/seo/anyapi";
 import { DEFAULT_CONTROL, SEO_LOCKS, SEO_PROVIDERS, selectSeoProvider, type SeoControl } from "../src/infrastructure/seo/registry";
@@ -12,7 +12,7 @@ process.env.ANYAPI_API_KEY = "aa_test";
 const NO_LOCKS = { automaticRouting: false, paidFallback: false, paidAutomation: [] };
 
 const market = seoMarket("es-ES")!;
-const requests: { [C in SeoCapability]: SeoRequests[C] } = {
+const requests: { [C in DataCapability]: SeoRequests[C] } = {
   keyword_metrics: { market, keywords: ["guia tv", "sin datos"] },
   keyword_suggestions: { market, seed: "guia tv", limit: 100 },
   ranked_keywords: { market, domain: "example.com", limit: 2 },
@@ -23,7 +23,7 @@ const requests: { [C in SeoCapability]: SeoRequests[C] } = {
 
 const dfs = (result: unknown, cost: number | undefined = 0.0122) => ({ status_code: 20000, ...(cost === undefined ? {} : { cost }), tasks: [{ status_code: 20000, result }] });
 const dfsMetric = { keyword: "Guia TV", keyword_info: { search_volume: 1600, cpc: 0.2, competition: 0.1, competition_level: "LOW", last_updated_time: "2026-11-01 05:12:53 +00:00" }, keyword_properties: { keyword_difficulty: 21 }, search_intent_info: { main_intent: "informational" } };
-const dfsFixtures: Record<SeoCapability, unknown> = {
+const dfsFixtures: Record<DataCapability, unknown> = {
   keyword_metrics: dfs([{ items: [dfsMetric] }]),
   keyword_suggestions: dfs([{ items: [dfsMetric, { keyword: "tele hoy" }] }]),
   ranked_keywords: dfs([{ items: [{ keyword_data: dfsMetric, ranked_serp_element: { serp_item: { rank_absolute: 3, url: "https://example.com/tv", etv: 88.5 } } }] }]),
@@ -34,7 +34,7 @@ const dfsFixtures: Record<SeoCapability, unknown> = {
 
 const any = (data: unknown, extra: Record<string, unknown> = {}) => ({ output: { found: true, data }, provider: "AnyAPI", costUsd: 0.0147, items: 1, replayed: false, source: { id: "anonymous-owl", kind: "anonymous", name: "Owl" }, ...extra });
 const anyMetric = { keyword: "Guia TV", searchVolume: 1600, cpc: 0.2, competition: "LOW", keywordDifficulty: 21, searchIntent: "informational", updatedUtc: 1793509973 };
-const anyFixtures: Record<SeoCapability, unknown> = {
+const anyFixtures: Record<DataCapability, unknown> = {
   keyword_metrics: any({ keywords: [anyMetric] }),
   keyword_suggestions: any({ ideas: [anyMetric, { keyword: "tele hoy" }] }),
   ranked_keywords: any({ rankedKeywords: [{ ...anyMetric, rankAbsolute: 3, url: "https://example.com/tv", etv: 88.5 }, { keyword: "otra", rankAbsolute: 9 }] }),
@@ -50,7 +50,7 @@ function fakeFetch(body: unknown, status = 200, sent: Sent[] = []): typeof fetch
     return new Response(typeof body === "string" ? body : JSON.stringify(body), { status });
   }) as typeof fetch;
 }
-const run = <C extends SeoCapability>(provider: SeoProvider, capability: C, body: unknown, status = 200, sent: Sent[] = []) => provider.run(capability, requests[capability], fakeFetch(body, status, sent));
+const run = <C extends DataCapability>(provider: SeoProvider, capability: C, body: unknown, status = 200, sent: Sent[] = []) => provider.run(capability, requests[capability] as SeoRequests[C], fakeFetch(body, status, sent));
 const failure = async (provider: SeoProvider, body: unknown, status = 200) => {
   const error = await run(provider, "keyword_metrics", body, status).then(() => null, (e: unknown) => e);
   assert.ok(error instanceof SeoProviderError, `expected SeoProviderError, got ${String(error)}`);
@@ -197,7 +197,7 @@ test("registry: modes, disabled providers, capabilities and locks", () => {
 
 test("cost-optimized routing is locked; unlocked it takes the cheapest known price and never an unknown one", () => {
   const state = control({ mode: "cost_optimized", providers: bothOn });
-  const options = (capability: SeoCapability, locks = NO_LOCKS) => ({ locks, quote: (provider: SeoProvider) => provider.quote(capability, requests[capability]) });
+  const options = (capability: DataCapability, locks = NO_LOCKS) => ({ locks, quote: (provider: SeoProvider) => provider.quote(capability, requests[capability]) });
   assert.equal(code(() => selectSeoProvider("keyword_metrics", market, state, options("keyword_metrics", SEO_LOCKS as never))), "automatic_routing_locked");
   assert.equal(selectSeoProvider("keyword_metrics", market, state, options("keyword_metrics")).id, "dataforseo");
   assert.equal(selectSeoProvider("youtube_search", market, state, options("youtube_search")).id, "anyapi");
@@ -216,5 +216,5 @@ test("AnyAPI is selectable without DataForSEO credentials", () => {
   } finally {
     process.env.DATAFORSEO_LOGIN = "test";
   }
-  assert.deepEqual(SEO_PROVIDERS.map(({ id }) => id), ["dataforseo", "anyapi"]);
+  assert.deepEqual(SEO_PROVIDERS.map(({ id }) => id), ["dataforseo", "anyapi", "tavily", "firecrawl"]);
 });

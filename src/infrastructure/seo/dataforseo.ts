@@ -4,6 +4,7 @@
 import { secretOf } from "../ai/ai-settings";
 import {
   GOOGLE_LOCATION_CODES,
+  NO_WEB,
   SeoProviderError,
   assertNetworkAllowed,
   normalizeKeyword,
@@ -13,6 +14,7 @@ import {
   type KeywordMetrics,
   type KeywordVolume,
   type SeoAdapterResult,
+  type DataCapability,
   type SeoCapability,
   type SeoData,
   type SeoErrorCode,
@@ -221,7 +223,7 @@ const result = <C extends SeoCapability>(data: SeoData[C], billedUsd: number | n
   data, billedUsd, asOf, upstream: null, partial: false, nextCursor: null, notes: [],
 });
 
-type Handlers = { [C in SeoCapability]: (request: SeoRequests[C], location: DataForSeoLocation, fetchImpl: typeof fetch) => Promise<SeoAdapterResult<C>> };
+type Handlers = { [C in DataCapability]: (request: SeoRequests[C], location: DataForSeoLocation, fetchImpl: typeof fetch) => Promise<SeoAdapterResult<C>> };
 
 const handlers: Handlers = {
   keyword_metrics: async ({ keywords }, location, fetchImpl) => {
@@ -264,6 +266,7 @@ export const dataForSeoProvider: SeoProvider = {
     serp_organic: { supported: true, sourceTag: ID, dataKind: "historical", methodology: "Latest stored Google SERP snapshot (Labs historical_serps), not a live search", engine: "google", maxBatch: 1, maxResults: 100, ...NO_OPTIONS },
     search_volume: { supported: true, sourceTag: "dataforseo_google_ads", dataKind: "provider_reported", methodology: "Google Ads search volume in Google's buckets", engine: "google", maxBatch: MAX_ADS_KEYWORDS, maxResults: null, ...NO_OPTIONS },
     youtube_search: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "Live YouTube organic results", engine: "youtube", maxBatch: 1, maxResults: 20, ...NO_OPTIONS },
+    ...NO_WEB,
   },
   licensing: {
     termsUrl: "https://dataforseo.com/terms-of-service",
@@ -285,11 +288,13 @@ export const dataForSeoProvider: SeoProvider = {
     const { keywords, limit } = request as { keywords?: string[]; limit?: number };
     return priceQuote(ID, capability, keywords?.length ?? limit ?? 1);
   },
-  async run(capability, request, fetchImpl) {
+  async run<C extends SeoCapability>(capability: C, request: SeoRequests[C], fetchImpl: typeof fetch): Promise<SeoAdapterResult<C>> {
+    const handler = handlers[capability as DataCapability] as unknown as ((request: SeoRequests[C], location: DataForSeoLocation, fetchImpl: typeof fetch) => Promise<SeoAdapterResult<C>>) | undefined;
+    if (!handler) throw new SeoProviderError("unsupported_capability", `${ID}: ${capability} is not supported`, ID, 0);
     const location = locationOf(request.market);
     if (!location) throw new SeoProviderError("unsupported_market", `${ID}: market ${request.market.locale} is not supported`, ID);
     try {
-      return await handlers[capability](request, location, fetchImpl);
+      return await handler(request, location, fetchImpl);
     } catch (error) {
       throw toSeoError(error);
     }
