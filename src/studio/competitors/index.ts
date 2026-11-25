@@ -547,7 +547,7 @@ export async function computeOpportunities(tenantId: string, siteId: string): Pr
 export async function listOpportunities(tenantId: string, siteId: string, filters: { status?: string; kind?: string } = {}) {
   await requireSite(tenantId, siteId);
   return prisma.contentOpportunity.findMany({
-    where: { tenantId, siteId, ...(filters.status ? { status: filters.status } : {}), ...(filters.kind ? { kind: filters.kind } : {}) },
+    where: { tenantId, siteId, source: "competitor", ...(filters.status ? { status: filters.status } : {}), ...(filters.kind ? { kind: filters.kind } : {}) },
     include: { competitor: { select: { id: true, domain: true, name: true } } },
     orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
     take: 300,
@@ -595,6 +595,11 @@ export async function addOpportunityToPlan(tenantId: string, siteId: string, opp
     const existing = await prisma.editorialPlanItem.findFirst({ where: { id: opportunity.planItemId, tenantId } });
     if (existing) return { opportunity, planItem: existing, created: false };
   }
+  // Only new pages are written by the plan: an "update" proposal of these would publish a second article.
+  const firstParty = opportunity.source !== "competitor";
+  if (firstParty && !["create_content", "strengthen_cluster"].includes(opportunity.action ?? "")) throw new Error("opportunity_not_plannable");
+  if (firstParty && !["open", "approved"].includes(opportunity.status)) throw new Error("opportunity_not_open");
+  if (firstParty && input.mode === "update") throw new Error("opportunity_not_plannable");
   const mode = input.mode ?? (opportunity.kind === "improve_existing" ? "update" : "new");
   const relatedSiteUrls = Array.isArray(opportunity.relatedSiteUrls) ? (opportunity.relatedSiteUrls as string[]) : [];
   const targetUrl = mode === "update" ? (input.targetUrl ?? opportunity.targetUrl ?? relatedSiteUrls[0] ?? null) : null;
@@ -613,7 +618,7 @@ export async function addOpportunityToPlan(tenantId: string, siteId: string, opp
 
   return prisma.$transaction(async (tx) => {
     // Claim the opportunity first so concurrent clicks cannot create two items.
-    const claimed = await tx.contentOpportunity.updateMany({ where: { id: opportunity.id, planItemId: opportunity.planItemId }, data: { status: "planned" } });
+    const claimed = await tx.contentOpportunity.updateMany({ where: { id: opportunity.id, planItemId: opportunity.planItemId }, data: { status: "planned", decidedAt: new Date() } });
     if (claimed.count === 0) {
       const current = await tx.contentOpportunity.findUnique({ where: { id: opportunity.id } });
       const planItem = current?.planItemId ? await tx.editorialPlanItem.findUnique({ where: { id: current.planItemId } }) : null;
@@ -634,8 +639,9 @@ export async function addOpportunityToPlan(tenantId: string, siteId: string, opp
         tenantId,
         planId: plan.id,
         siteId,
-        title: proposalTitle(opportunity.kind, opportunity.topic, targetTitle).slice(0, 300),
+        title: (firstParty && opportunity.query ? opportunity.query.charAt(0).toUpperCase() + opportunity.query.slice(1) : proposalTitle(opportunity.kind, opportunity.topic, targetTitle)).slice(0, 300),
         topic: opportunity.topic,
+        ...(opportunity.query ? { primaryKeyword: opportunity.query, targetQuery: opportunity.query, opportunityScore: opportunity.score, confidence: opportunity.confidence } : {}),
         channel: "website",
         status: "proposed",
         contentType: mode === "update" ? "update" : null,
@@ -655,7 +661,7 @@ export async function addOpportunityToPlan(tenantId: string, siteId: string, opp
 export async function setOpportunityStatus(tenantId: string, siteId: string, opportunityId: string, status: "dismissed" | "monitoring" | "open", userId: string | null) {
   const opportunity = await prisma.contentOpportunity.findFirst({ where: { id: opportunityId, tenantId, siteId } });
   if (!opportunity) throw new Error("opportunity_not_found");
-  const updated = await prisma.contentOpportunity.update({ where: { id: opportunity.id }, data: { status } });
+  const updated = await prisma.contentOpportunity.update({ where: { id: opportunity.id }, data: { status, decidedAt: status === "open" ? null : new Date() } });
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: `opportunity.${status}`, entityType: "content_opportunity", entityId: opportunity.id });
   return updated;
 }

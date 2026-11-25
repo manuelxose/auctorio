@@ -358,7 +358,7 @@ export class MonthPlanComponent implements OnChanges, OnDestroy {
     return run.lastError?.includes('402') ? 'El proveedor rechazó las consultas por falta de saldo (402).' : `El proveedor falló en ${run.failedCalls} consultas.`;
   }
   providerName(id: string): string {
-    return ({ dataforseo: 'DataForSEO', anyapi: 'AnyAPI' } as Record<string, string>)[id] ?? id;
+    return ({ dataforseo: 'DataForSEO', anyapi: 'AnyAPI', search_console: 'Search Console' } as Record<string, string>)[id] ?? id;
   }
   measured(): number {
     return this.month?.items.filter((item) => item.searchVolume !== null).length ?? 0;

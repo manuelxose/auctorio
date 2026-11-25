@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseKeywordOverview, type KeywordMetrics } from "../src/infrastructure/seo/dataforseo";
-import { isKeywordVariant, keywordOpportunityScore, rankKeywordCandidates, type KeywordCandidate } from "../src/studio/keyword-candidates";
+import { isKeywordVariant, keywordOpportunityScore, keywordScoreParts, rankKeywordCandidates, type KeywordCandidate } from "../src/studio/keyword-candidates";
+import { resolveWeights } from "../src/studio/seo-intelligence/scoring";
 import { applyMeasuredKeywords, keywordAssignmentBlock } from "../src/studio/editorial-plan";
 import { screenKeywords } from "../src/studio/plan-keywords";
 
@@ -15,16 +16,39 @@ const context = {
   indexedUrlInventory: [] as string[],
 };
 
-test("opportunity score: demand × winnability × relevance × intent; no volume → 0", () => {
-  assert.equal(keywordOpportunityScore({ volume: null, difficulty: 10, relevance: 100, intent: "informational" }), 0);
+test("opportunity score: known factors only; no demand of any kind → 0", () => {
+  const base = { volume: 10_000, difficulty: 20, relevance: 80, intent: "informational" };
+  assert.equal(keywordOpportunityScore({ ...base, volume: null }), 0);
   assert.equal(keywordOpportunityScore({ volume: 99_999, difficulty: 10, relevance: 100, intent: "informational" }), 100);
-  const easy = keywordOpportunityScore({ volume: 10_000, difficulty: 20, relevance: 80, intent: "informational" });
-  const hard = keywordOpportunityScore({ volume: 10_000, difficulty: 60, relevance: 80, intent: "informational" });
-  const transactional = keywordOpportunityScore({ volume: 10_000, difficulty: 20, relevance: 80, intent: "transactional" });
+  const easy = keywordOpportunityScore(base);
+  const hard = keywordOpportunityScore({ ...base, difficulty: 60 });
   assert.ok(easy > hard && hard > 0, `${easy} > ${hard} > 0`);
-  assert.ok(easy > transactional);
-  // Winnability decreases past the reachable difficulty, never below the floor.
-  assert.equal(keywordOpportunityScore({ volume: 10_000, difficulty: 100, relevance: 100, intent: "informational" }), Math.round(100 * 0.8 * 0.05));
+  assert.ok(easy > keywordOpportunityScore({ ...base, intent: "transactional" }));
+  // Difficulty matters but no longer decides alone: the old product left this at 4.
+  assert.ok(keywordOpportunityScore({ volume: 10_000, difficulty: 100, relevance: 100, intent: "informational" }) > 30);
+  assert.equal(keywordOpportunityScore({ ...base, relevance: 0 }), 0);
+  // Unknown stays unknown: it is neither the best nor the worst value.
+  assert.deepEqual(keywordScoreParts({ ...base, difficulty: null, intent: null }), { demand: keywordScoreParts(base)!.demand, winnability: null, relevance: 0.8, intentFit: null });
+});
+
+test("the intent a business prefers depends on its profile", () => {
+  const score = (profile: "publisher" | "ecommerce", intent: string) => keywordOpportunityScore({ volume: 5_000, difficulty: 10, relevance: 90, intent }, 30, { profile, weights: resolveWeights(profile) });
+  assert.ok(score("publisher", "informational") > score("publisher", "transactional"));
+  assert.ok(score("ecommerce", "transactional") > score("ecommerce", "informational"));
+});
+
+test("Search Console evidence keeps a keyword nobody measured; a volume still wins over impressions", () => {
+  const firstParty = { impressions: 800, clicks: 3, position: 22 };
+  const ranked = rankKeywordCandidates(
+    [metric("programacion canal sur", null, null, null), { ...metric("programacion la 2", null, null, null), source: "search_console", firstParty }],
+    context,
+    10,
+  );
+  assert.deepEqual(ranked.map((candidate) => [candidate.keyword, candidate.volume, candidate.difficulty]), [["programacion la 2", null, null]]);
+  assert.deepEqual(ranked[0].firstParty, firstParty);
+  assert.equal(ranked[0].parts!.winnability! > 0, true);
+  const measured = keywordScoreParts({ volume: 1_000, difficulty: null, relevance: 80, intent: null, firstParty })!;
+  assert.equal(measured.demand, keywordScoreParts({ volume: 1_000, difficulty: null, relevance: 80, intent: null })!.demand);
 });
 
 test("variants differ by one modifier; different channels are different topics", () => {

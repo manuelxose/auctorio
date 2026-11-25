@@ -81,7 +81,7 @@ const SEO_LABELS: Record<string, { name: string; type: string; action: string }>
           <div class="kpi"><dt class="top"><app-icon name="warning"></app-icon>Señales abiertas</dt><dd class="number">{{ seoOpenCount }}</dd><dd class="foot">Agrupadas por causa</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Páginas inventariadas</dt><dd class="number">{{ (overview?.totalPages ?? 0) | number }}</dd><dd class="foot">Inventario del sitio</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="activity"></app-icon>Señales de alcance alto</dt><dd class="number">{{ seoHighCount }}</dd><dd class="foot">Al menos la mitad de la muestra</dd></div>
-          <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Search Console</dt><dd class="number">—</dd><dd class="foot">Datos fuera de este informe</dd></div>
+          <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Search Console</dt><dd class="number">—</dd><dd class="foot"><a routerLink="/studio/seo-opportunities">En Oportunidades SEO</a></dd></div>
         </dl>
         <div class="stack">
           <section class="card">

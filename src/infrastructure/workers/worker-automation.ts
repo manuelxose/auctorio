@@ -4,6 +4,8 @@ import { runAutomationWatchdogTick } from "../../studio/automation-watchdog";
 import { runSchedulerTick } from "./worker-scheduler";
 import { runIntervalWorker } from "./worker-runtime";
 import { structuredEvent } from "../../shared/utils/logger";
+import { runSearchConsoleTick } from "../../studio/search-console";
+import { analyzeSite } from "../../studio/seo-intelligence";
 import { assertRedisConfigured } from "../queue/redis";
 
 /** One control-plane process owns planning, scheduling and watchdog checks. */
@@ -40,6 +42,13 @@ export async function runControlWorker() {
         intervalMs: Math.max(60_000, getNumberEnv("WATCHDOG_INTERVAL_MS", 120_000)),
         tick: async () => {
           await runAutomationWatchdogTick();
+        },
+      },
+      {
+        name: "search-console",
+        intervalMs: Math.max(60_000, getNumberEnv("SEARCH_CONSOLE_INTERVAL_MS", 120_000)),
+        tick: async () => {
+          await runSearchConsoleTick(analyzeSite);
         },
       },
     ],

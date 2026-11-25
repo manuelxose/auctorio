@@ -34,7 +34,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       class="au-app au-shell"
       [class.au-shell--workspace]="workspaceArea()"
       [class.au-shell--profile-reference]="usesAdvancedReference()"
-      [class.shows-studio-toolbar]="profileToolbarOpen()"
       *ngIf="!loading; else bootState"
       [class.is-collapsed]="collapsed()"
       [class.has-copilot]="copilot.open()"
@@ -54,7 +53,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       </ng-template>
 
       <!-- Navigation A: global top bar -->
-      <header class="au-top" id="studio-global-toolbar">
+      <header class="au-top">
         <button
           #navToggle
           class="au-icon-button"
@@ -206,7 +205,7 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
       </header>
 
       <!-- Primary navigation: areas -->
-      <nav class="au-areas" id="studio-global-areas" aria-label="Areas">
+      <nav class="au-areas" aria-label="Areas">
         <ul class="au-areas__list">
           <li *ngFor="let area of areas" [class.au-areas__end]="area.end">
             <a
@@ -322,8 +321,6 @@ const COPILOT_KEY = 'auctorio.studio.copilot.open';
               {{ activeArea().label }} <span aria-hidden="true">{{ usesAdvancedReference() ? '›' : '/' }}</span>
               @if (usesAdvancedReference()) {
                 <strong>{{ workspaceToolTitle }}</strong>
-                <button type="button" class="profile-toolbar-toggle" [attr.aria-expanded]="profileToolbarOpen()"
-                  aria-controls="studio-global-toolbar studio-global-areas" (click)="profileToolbarOpen.set(!profileToolbarOpen())">Controles de Studio</button>
               } @else { {{ workspaceToolTitle }} }
             </div>
           }
@@ -409,7 +406,6 @@ export class AppShellComponent implements OnInit, OnDestroy {
 
   /** User preference wins; without one, the sidebar starts collapsed below 1200px. */
   readonly collapsed = signal(false);
-  readonly profileToolbarOpen = signal(false);
   readonly drawerOpen = signal(false);
   readonly isPhone = signal(false);
   readonly paletteOpen = signal(false);

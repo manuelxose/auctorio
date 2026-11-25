@@ -10,10 +10,17 @@
 - Retention follows the licence: nothing where storing is prohibited, 90 days where it is not established (both providers today), 730 where
   permitted. Expired cache and history (`seo_snapshots`) are deleted after a purchase, at most hourly. Metrics copied to plan items stay with the item.
 - A provider whose licence prohibits commercial use is never called.
+- Search Console data is private to the tenant: every table has tenant and site, every query filters by both, and it is never cached or shared between tenants.
+  A site may only read the property of its own domain. Choosing another property deletes the previous figures.
+- A revoked token is deleted at once. Disconnecting deletes the token and, if asked, every stored figure and what was derived from it. The grant is revoked
+  in Google only when no other site of the same person uses it.
+- Impressions are the site's own visibility, never market volume; average position is never shown as a live rank.
 - Credentials: encrypted at rest (AES-256-GCM), server-side only, never in responses, audits, logs or error messages.
 - Audited actions: `seo.control.updated`, `seo.provider.updated`, `seo.credential.set`, `seo.credential.cleared`, `seo.provider.live_test`,
   `seo.budget.updated`, `seo.budget.authorized`, `seo.budget.authorization_revoked`, `seo.reservation.resolved`, `seo.pricing.updated`, `seo.policy.updated`,
-  `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`.
+  `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`,
+  `search_console.connection_started`, `search_console.connected`, `search_console.property_selected`, `search_console.disconnected`,
+  `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_profile.updated`.
 
 ## Licensing (2026-11-24)
 

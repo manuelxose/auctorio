@@ -9,11 +9,12 @@ const ORIGIN: Record<KeywordOrigin['kind'], (value: string) => string> = {
   opportunity: (value) => `sale de "${value}", un tema que cubren tus competidores y tu sitio no`,
   site_topic: (value) => `sale de "${value}", un tema principal de tu sitio`,
   cluster: (value) => `sale de "${value}", un grupo de temas de tu sitio`,
+  search_console: () => 'Search Console ya muestra tu sitio para esa búsqueda y ninguna página la cubre',
 };
 
 const PARTS = [
-  { key: 'demand', label: 'Demanda', hint: 'búsquedas al mes' },
-  { key: 'winnability', label: 'Alcanzable', hint: 'dificultad frente a lo que tu sitio puede posicionar' },
+  { key: 'demand', label: 'Demanda', hint: 'búsquedas al mes o, sin ellas, impresiones propias' },
+  { key: 'winnability', label: 'Alcanzable', hint: 'posición media propia o dificultad frente a lo que tu sitio puede posicionar' },
   { key: 'relevance', label: 'Relevancia', hint: 'encaje con los temas de tu sitio' },
   { key: 'intentFit', label: 'Intención', hint: 'tipo de búsqueda' },
 ] as const;
@@ -58,12 +59,12 @@ const PARTS = [
           @for (part of partRows; track part.key) {
             <div class="kw-part">
               <span>{{ part.label }}</span>
-              <span class="kw-bar" aria-hidden="true"><i [style.width.%]="parts[part.key] * 100"></i></span>
-              <span>{{ parts[part.key] * 100 | number: '1.0-0' }}%</span>
+              <span class="kw-bar" aria-hidden="true"><i [style.width.%]="(parts[part.key] ?? 0) * 100"></i></span>
+              <span>{{ parts[part.key] === null ? 'Sin dato' : (parts[part.key]! * 100 | number: '1.0-0') + '%' }}</span>
               <small>{{ part.hint }}</small>
             </div>
           }
-          <p class="kw-muted">La puntuación es el producto de los cuatro factores.</p>
+          <p class="kw-muted">La puntuación combina los factores conocidos con los pesos de tu sitio; los que no se conocen no cuentan.</p>
         </section>
       }
       <section>
