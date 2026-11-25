@@ -330,7 +330,7 @@ type SettingsSection = 'sites' | 'team' | 'roles' | 'discovery';
             </div>
 
             <p class="au-muted" *ngIf="discovery">
-              Today: {{ discovery.usageToday.searches }} searches · {{ discovery.usageToday.scrapes }} pages · {{ discoveryCostLabel() }}
+              Today: {{ discovery.usageToday.searches }} searches · {{ discovery.usageToday.scrapes }} pages
             </p>
 
             <div class="au-form__actions">
@@ -676,11 +676,6 @@ export class SettingsPageComponent implements OnInit {
       },
       error: (err) => this.toast.error(err?.error?.message ? String(err.error.message) : 'The site could not be deleted.'),
     });
-  }
-
-  discoveryCostLabel(): string {
-    const cost = this.discovery?.usageToday?.estimatedCostUsd ?? 0;
-    return `$${Number(cost).toFixed(3)}`;
   }
 
   loadAccess(): void {

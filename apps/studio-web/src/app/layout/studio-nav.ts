@@ -89,26 +89,29 @@ export const STUDIO_NAV: StudioNavGroup[] = [
     end: true,
     items: [
       {
-        label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan', heading: 'Conocimiento del sitio',
+        label: 'Site Intelligence', path: '/studio/site-intelligence', icon: 'scan', heading: 'Inteligencia SEO', hint: 'Qué se sabe del sitio, cómo va en Google y qué hacer ahora.',
         sections: [
+          { id: 'overview', label: 'Resumen' },
+          { id: 'keywords', label: 'Palabras clave' },
+          { id: 'performance', label: 'Rendimiento' },
           { id: 'profile', label: 'Perfil y estrategia' },
           { id: 'pillars', label: 'Pilares y brechas' },
-          { id: 'seo', label: 'Señales SEO' },
+          { id: 'seo', label: 'Salud técnica' },
           { id: 'crawl', label: 'Páginas y rastreo' },
         ],
       },
-      { label: 'Oportunidades SEO', path: '/studio/seo-opportunities', icon: 'search', heading: 'Investigación', hint: 'Qué mejorar o crear, con los datos de Search Console y del sitio.' },
-      { label: 'Investigación SEO', path: '/studio/seo-research', icon: 'search' },
+      { label: 'Oportunidades SEO', path: '/studio/seo-opportunities', icon: 'competency', heading: 'Inteligencia SEO', hint: 'Qué mejorar o crear, con qué datos y con cuánta confianza.' },
       {
-        label: 'Competidores', path: '/studio/competitors', icon: 'globe',
+        label: 'Competidores', path: '/studio/competitors', icon: 'globe', heading: 'Inteligencia SEO', hint: 'Con quién compites y qué cubren que tú no.',
         sections: [
           { id: 'shortlist', label: 'Competidores' },
           { id: 'coverage', label: 'Cobertura temática' },
-          { id: 'opportunities', label: 'Oportunidades' },
+          { id: 'opportunities', label: 'Huecos de contenido' },
         ],
       },
+      { label: 'Investigación SEO', path: '/studio/seo-research', icon: 'search', heading: 'Inteligencia SEO', hint: 'Qué se investiga, por qué y cuánta asignación queda.' },
       {
-        label: 'Fuentes', path: '/studio/sources', icon: 'sources',
+        label: 'Fuentes', path: '/studio/sources', icon: 'sources', heading: 'Fuentes y noticias',
         sections: [
           { id: 'sources', label: 'Fuentes activas', aliases: ['active'] },
           { id: 'recommendations', label: 'Recomendadas', aliases: ['recommended'] },
@@ -118,7 +121,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
         ],
       },
       {
-        label: 'Inbox', path: '/studio/inbox', icon: 'inbox',
+        label: 'Inbox', path: '/studio/inbox', icon: 'inbox', heading: 'Fuentes y noticias',
         sections: [{ id: 'inbox', label: 'Historias', aliases: ['stories'] }, { id: 'clusters', label: 'Clústeres' }],
       },
       {
@@ -168,6 +171,10 @@ export const STUDIO_NAV: StudioNavGroup[] = [
         ],
       },
       {
+        label: 'SEO del sitio', path: '/studio/settings/seo', icon: 'search', hint: 'Objetivos, mercados, temas, investigación y Search Console.',
+        sections: [{ id: 'business', label: 'Negocio y temas' }, { id: 'research', label: 'Investigación' }, { id: 'data', label: 'Search Console' }, { id: 'optimization', label: 'Prioridades de mejora' }],
+      },
+      {
         label: 'Modo y ritmo', path: '/studio/automation', icon: 'automation', heading: 'Automatización e integraciones',
         sections: [{ id: 'mode', label: 'Modos de trabajo' }, { id: 'plan', label: 'Plan del mes' }, { id: 'schedule', label: 'Calendario y volumen' }, { id: 'safety', label: 'Seguridad y recuperación' }],
       },
@@ -204,7 +211,7 @@ export const STUDIO_NAV: StudioNavGroup[] = [
         sections: [
           { id: 'tenants', label: 'Workspaces', path: '/studio/admin/workspaces' },
           { id: 'providers', label: 'Proveedores IA', path: '/studio/admin/ai' },
-          { id: 'seo', label: 'Proveedores SEO', path: '/studio/admin/seo' },
+          { id: 'seo', label: 'Operaciones SEO', path: '/studio/admin/seo' },
           { id: 'usage', label: 'Uso global', path: '/studio/admin/overview' },
         ],
       },

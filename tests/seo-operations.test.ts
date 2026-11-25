@@ -166,7 +166,7 @@ function leaks(value: unknown, path = "$"): string[] {
   if (typeof value === "string") return /dataforseo|anyapi/i.test(value) ? [`${path} = ${JSON.stringify(value.slice(0, 120))}`] : [];
   if (Array.isArray(value)) return value.flatMap((entry, index) => leaks(entry, `${path}[${index}]`));
   if (!value || typeof value !== "object") return [];
-  return Object.entries(value).flatMap(([key, entry]) => [...(/usd$|cost|price|billed/i.test(key) || key === "providerId" ? [`${path}.${key}`] : []), ...leaks(entry, `${path}.${key}`)]);
+  return Object.entries(value).flatMap(([key, entry]) => [...(/usd|cost|price|billed/i.test(key) || key === "providerId" ? [`${path}.${key}`] : []), ...leaks(entry, `${path}.${key}`)]);
 }
 
 const approx = (actual: unknown, expected: number | null, message?: string) => {
@@ -1197,3 +1197,50 @@ test("assistant tools read what a workspace may see, ask for research only after
   assert.doesNotMatch(explained, /\]\(|<script|`rm|\n#/);
   assert.deepEqual(calls, [], "nothing here reached a provider");
 }));
+
+// ---- Final checks ----
+
+test("a customer sees a platform failure only by name, no key says usd, and pages are absolute", () => using(async (a) => {
+  const admin = await asAdmin(a);
+  const raw = "connect ECONNREFUSED 10.0.0.1:5432 prisma.seoResearchRun failed";
+  const run = await prisma.seoResearchRun.create({ data: { tenantId: a.tenantId, siteId: a.siteId, trigger: "manual", reason: {}, policy: {}, maxUsd: 0.25, status: "queued", activeKey: a.siteId, error: raw } });
+  await prisma.seoResearchTask.createMany({ data: [
+    { tenantId: a.tenantId, siteId: a.siteId, runId: run.id, position: 1, kind: "inspect_site", status: "failed", reason: raw },
+    { tenantId: a.tenantId, siteId: a.siteId, runId: run.id, position: 2, kind: "profile", status: "skipped", reason: "budget_exhausted" },
+  ] });
+  const url = `/v2/sites/${a.siteId}/seo-research`;
+  const named = (view: any) => [view.error, view.tasks.map((task: { reason: string }) => task.reason)];
+  const expected = ["unexpected_failure", ["unexpected_failure", "budget_exhausted"]];
+  assert.deepEqual(named((await call(a.who, "GET", `${url}/runs/${run.id}`, READER)).body), expected);
+  const overview = (await call(a.who, "GET", url, READER)).body;
+  assert.equal(overview.runs.find((entry: { id: string }) => entry.id === run.id).error, "unexpected_failure");
+  assert.equal(overview.active.error, "unexpected_failure");
+  assert.equal((await call(a.who, "GET", url, READER)).text.includes("ECONNREFUSED"), false);
+  const paused = await call(a.who, "POST", `${url}/runs/${run.id}/pause`, EDITOR);
+  assert.deepEqual([paused.status, ...named(paused.body)], [200, ...expected]);
+  assert.ok(!paused.text.includes("ECONNREFUSED"));
+  // The platform keeps the text.
+  const detail = await admin.op("GET", `research/${run.id}`);
+  assert.equal(detail.body.run.error, raw);
+  assert.ok(detail.body.run.tasks.some((task: { reason: string }) => task.reason === raw));
+
+  // No key containing "usd" at any depth, profile.policy included.
+  const keys = (value: unknown, path = "$"): string[] => (Array.isArray(value) ? value.flatMap((entry, index) => keys(entry, `${path}[${index}]`)) : value && typeof value === "object" ? Object.entries(value).flatMap(([key, entry]) => [...(/usd/i.test(key) ? [`${path}.${key}`] : []), ...keys(entry, `${path}.${key}`)]) : []);
+  assert.ok(overview.profile.policy, "policy is present");
+  assert.deepEqual(keys(overview), []);
+
+  // Pages of the performance view are absolute https addresses.
+  const through = new Date(`${dayText(-1)}T00:00:00Z`);
+  await prisma.searchConsoleConnection.create({ data: { tenantId: a.tenantId, siteId: a.siteId, status: "active", property: "sc-domain:example.test", syncedThrough: through, syncedFrom: new Date(through.getTime() - 60 * DAY) } });
+  await prisma.searchPerformance.createMany({ data: [
+    ...Array.from({ length: 56 }, (_, back) => ({ tenantId: a.tenantId, siteId: a.siteId, dataset: "site", date: new Date(through.getTime() - back * DAY), clicks: 2, impressions: 100, positionSum: 500 })),
+    ...["https://www.example.test/guia/", "https://example.test/series"].map((page) => ({ tenantId: a.tenantId, siteId: a.siteId, dataset: "page", date: through, page, clicks: 3, impressions: 90, positionSum: 400 })),
+  ] });
+  const performance = (await call(a.who, "GET", `/v2/sites/${a.siteId}/seo-performance`, READER)).body;
+  assert.ok(performance.pages.length >= 2);
+  for (const entry of performance.pages) assert.match(entry.page, /^https:\/\/[^/\s]+/, entry.page);
+}));
+
+test("optimize my articles is a content-to-improve question", () => {
+  assert.equal(routeIntent("How can I optimize my articles?")?.tool, "seo_content_to_improve");
+});

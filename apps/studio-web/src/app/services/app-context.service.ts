@@ -33,6 +33,11 @@ export class AppContextService {
   readonly role = computed(() => this.sessionState()?.role ?? 'viewer');
   readonly permissions = computed(() => this.sessionState()?.permissions ?? []);
 
+  /** Whether to offer an action; the server decides again. */
+  can(permission: string): boolean {
+    return this.permissions().includes(permission);
+  }
+
   constructor() {
     // The HTTP interceptor reads the active site from this small store.
     const store = inject(ActiveSiteStore);

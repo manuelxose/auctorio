@@ -30,7 +30,7 @@ async function requireSite(tenantId: string, siteId: string) {
 
 // ---- No amounts ----
 
-const MONEY_KEY = /usd$|cost|price|billed/i;
+const MONEY_KEY = /usd|cost|price|billed/i;
 /** As the governor and the spending limits write amounts; a keyword that names a price stays as it is. */
 const MONEY_TEXT = /\d+\.\d{4} USD|(?<=can cost )\d+\.\d+|(?<=\b(?:spent|hard|limit)=)\d+\.\d+/g;
 
@@ -296,7 +296,7 @@ export async function workspacePerformance(tenantId: string, siteId: string, day
       GROUP BY query ORDER BY SUM(clicks) DESC, SUM(impressions) DESC LIMIT 50`,
     organic(tenantId, siteId, through, days),
   ]);
-  const pages = [...current].sort((a, b) => b[1].clicks - a[1].clicks || b[1].impressions - a[1].impressions).slice(0, 50).map(([page, totals]) => ({ page, ...figures(totals), previousClicks: summary.previous ? previous.get(page)?.clicks ?? 0 : null }));
+  const pages = [...current].sort((a, b) => b[1].clicks - a[1].clicks || b[1].impressions - a[1].impressions).slice(0, 50).map(([page, totals]) => ({ page: URL.canParse(page) ? page : `https://${page}`, ...figures(totals), previousClicks: summary.previous ? previous.get(page)?.clicks ?? 0 : null }));
   const newContent = await Promise.all(publications.map(async (row) => {
     const since = addDays(row.publishedAt!, 1);
     // Published after the newest stored day: nothing is known yet.

@@ -7,6 +7,9 @@ import { AppContextService } from '../services/app-context.service';
 import { ToastService } from '../services/toast.service';
 import { AppIconComponent } from '../components/ui/app-icon.component';
 import { AppEmptyStateComponent } from '../components/ui/app-empty-state.component';
+import { SeoKeywordsComponent } from '../components/seo/seo-keywords.component';
+import { SeoOverviewComponent } from '../components/seo/seo-overview.component';
+import { SeoPerformanceComponent } from '../components/seo/seo-performance.component';
 import { OnboardingTimelineComponent } from '../components/intelligence/onboarding-timeline.component';
 import { IntelligenceApiService } from '../services/intelligence-api.service';
 import { EditorialContextService } from '../services/editorial-context.service';
@@ -47,41 +50,46 @@ const SEO_LABELS: Record<string, { name: string; type: string; action: string }>
 @Component({
   selector: 'app-site-intelligence-page',
   standalone: true,
-  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, OnboardingTimelineComponent],
+  imports: [CommonModule, FormsModule, RouterLink, AppIconComponent, AppEmptyStateComponent, OnboardingTimelineComponent, SeoOverviewComponent, SeoKeywordsComponent, SeoPerformanceComponent],
   styleUrls: ['./site-intelligence-profile.css', './site-intelligence-sections.css'],
   template: `
     <section class="au-page">
       <header class="profile-reference">
         <div class="page-head">
           <div>
-            <p class="overline">Auctorio / Herramientas avanzadas</p>
-            <h1>Conocimiento del sitio</h1>
+            <p class="overline">Auctorio / Inteligencia SEO</p>
+            <h1>Site Intelligence</h1>
             <p>Qué sabe Auctorio del sitio, con qué evidencia y cómo influye en sus contenidos.</p>
           </div>
-          <div class="head-actions">
+          <div class="head-actions" *ngIf="!seoTab">
             <button class="btn small" type="button" [disabled]="loading" (click)="load()"><app-icon name="refresh"></app-icon> Actualizar datos</button>
-            <button class="btn small primary" type="button" [disabled]="busy" (click)="indexSite()"><app-icon name="scan"></app-icon> {{ busy ? 'Leyendo el sitio…' : 'Leer el sitio' }}</button>
+            <button class="btn small primary" type="button" *ngIf="canIndex" [disabled]="busy" (click)="indexSite()"><app-icon name="scan"></app-icon> {{ busy ? 'Leyendo el sitio…' : 'Leer el sitio' }}</button>
           </div>
         </div>
       </header>
-      <div class="au-banner au-banner--error" *ngIf="loadError" role="alert">
+      <div class="au-banner au-banner--error" *ngIf="loadError && !seoTab" role="alert">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ loadError }}</span>
-        <button class="au-banner__action" type="button" (click)="load()">Retry</button>
+        <button class="au-banner__action" type="button" (click)="load()">Reintentar</button>
       </div>
 
-      <div class="au-banner au-banner--warning au-mb-3" *ngIf="overview?.profile?.warnings?.length">
+      <div class="au-banner au-banner--warning au-mb-3" *ngIf="!seoTab && overview?.profile?.warnings?.length">
         <app-icon name="warning"></app-icon>
         <span class="au-banner__text">{{ overview?.profile?.warnings?.join(' · ') }}</span>
       </div>
 
+      <div class="advanced-page" *ngIf="seoTab">
+        <app-seo-overview *ngIf="tab === 'overview'" />
+        <app-seo-keywords *ngIf="tab === 'keywords'" />
+        <app-seo-performance *ngIf="tab === 'performance'" />
+      </div>
+
       <div class="profile-reference" *ngIf="tab === 'seo'">
-        <div class="section-note"><app-icon name="info"></app-icon><span><strong>Señales del inventario propio.</strong> Las cifras corresponden a páginas analizadas por Auctorio. La indexación y las posiciones se consultan en Search Console.</span></div>
+        <div class="section-note"><app-icon name="info"></app-icon><span><strong>Señales del inventario propio.</strong> Las cifras corresponden a páginas analizadas por Auctorio. Los resultados en Google están en Rendimiento.</span></div>
         <dl class="kpis" aria-label="Métricas SEO">
           <div class="kpi"><dt class="top"><app-icon name="warning"></app-icon>Señales abiertas</dt><dd class="number">{{ seoOpenCount }}</dd><dd class="foot">Agrupadas por causa</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="content"></app-icon>Páginas inventariadas</dt><dd class="number">{{ (overview?.totalPages ?? 0) | number }}</dd><dd class="foot">Inventario del sitio</dd></div>
           <div class="kpi"><dt class="top"><app-icon name="activity"></app-icon>Señales de alcance alto</dt><dd class="number">{{ seoHighCount }}</dd><dd class="foot">Al menos la mitad de la muestra</dd></div>
-          <div class="kpi"><dt class="top"><app-icon name="globe"></app-icon>Search Console</dt><dd class="number">—</dd><dd class="foot"><a routerLink="/studio/seo-opportunities">En Oportunidades SEO</a></dd></div>
         </dl>
         <div class="stack">
           <section class="card">
@@ -168,12 +176,12 @@ const SEO_LABELS: Record<string, { name: string; type: string; action: string }>
                 <div class="fields">
                   <label class="profile-field" *ngFor="let field of profileFields">
                     <span>{{ field.label }}</span>
-                    <input class="input" type="text" [name]="field.key" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)" />
+                    <input class="input" type="text" [name]="field.key" [attr.aria-label]="field.label" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)" />
                   </label>
                 </div>
                 <label class="profile-field">
                   <span>Restricciones editoriales</span>
-                  <textarea class="textarea" rows="2" name="editorialRestrictions" [ngModel]="csv(draft.editorialRestrictions)" (ngModelChange)="setList('editorialRestrictions', $event)"></textarea>
+                  <textarea class="textarea" rows="2" name="editorialRestrictions" aria-label="Restricciones" [ngModel]="csv(draft.editorialRestrictions)" (ngModelChange)="setList('editorialRestrictions', $event)"></textarea>
                 </label>
                 <div class="form-footer">
                   <span class="badge" [class.ok]="layers?.approved" [class.warning]="!layers?.approved">{{ layers?.approved ? 'Versión ' + layers?.approved?.version : 'Pendiente de aprobación' }}</span>
@@ -185,7 +193,7 @@ const SEO_LABELS: Record<string, { name: string; type: string; action: string }>
                   <div class="fields">
                     <label class="profile-field" *ngFor="let field of additionalFields">
                       <span>{{ field.label }} <small>{{ sourceLabel(field.key) }}</small></span>
-                      <textarea class="textarea" [name]="field.key" rows="2" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)"></textarea>
+                      <textarea class="textarea" [name]="field.key" [attr.aria-label]="field.label" rows="2" [ngModel]="field.kind === 'list' ? csv(draft[field.key]) : draft[field.key] ?? ''" (ngModelChange)="field.kind === 'list' ? setList(field.key, $event) : setText(field.key, $event)"></textarea>
                     </label>
                     <label class="profile-field"><span>Nota de versión</span><input class="input" type="text" name="note" [(ngModel)]="note" /></label>
                   </div>
@@ -420,10 +428,10 @@ const SEO_LABELS: Record<string, { name: string; type: string; action: string }>
       </div>
 
       <app-empty-state
-        *ngIf="!loading && !overview && !loadError"
+        *ngIf="!seoTab && !loading && !overview && !loadError"
         icon="scan"
-        title="No site intelligence yet"
-        text="Leer el sitio completo to crawl its sitemaps, understand its content and build the site profile."
+        title="Aún no se conoce este sitio"
+        text="Lee el sitio para recorrer sus sitemaps, entender su contenido y crear su perfil."
       ></app-empty-state>
     </section>
   `,
@@ -437,7 +445,14 @@ export class SiteIntelligencePageComponent implements OnInit {
   readonly profileFields = PROFILE_FIELDS.map((key) => FIELDS.find((field) => field.key === key)!);
   readonly additionalFields = FIELDS.filter((field) => !PROFILE_FIELDS.includes(field.key) && field.key !== 'editorialRestrictions');
   // ?tab= picks the section (sidebar sub-items); old tab ids still deep-link to the section that absorbed them.
-  tab = 'profile';
+  tab = 'overview';
+  /** Sections that load their own data. */
+  get seoTab(): boolean {
+    return ['overview', 'keywords', 'performance'].includes(this.tab);
+  }
+  get canIndex(): boolean {
+    return this.appContext.can('integrations.manage') || this.appContext.can('projects.manage');
+  }
   private readonly router = inject(Router);
   private readonly tabSub = inject(ActivatedRoute, { optional: true })?.queryParamMap.subscribe((query) => {
     const legacy: Record<string, string> = { onboarding: 'crawl', health: 'crawl', inventory: 'crawl', coverage: 'crawl', opportunities: 'pillars' };
@@ -539,7 +554,7 @@ export class SiteIntelligencePageComponent implements OnInit {
         this.loadVersions();
         this.applyLayers(res.layers);
         if (this.tab === 'pillars') this.loadOverview();
-        this.toast.success('Strategy saved as version ' + res.version + '.');
+        this.toast.success('Estrategia guardada como versión ' + res.version + '.');
       },
       error: (err) => {
         this.saving = false;

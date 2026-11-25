@@ -20,6 +20,9 @@ export type Competitor = {
   lastError: string | null;
   snapshotsCount: number;
   opportunitiesCount: number;
+  /** Keywords of the site it was also seen for; null = never researched. */
+  keywordOverlap: number | null;
+  keywordsResearchedAt: string | null;
 };
 
 export type CoverageComparison = {

@@ -17,7 +17,7 @@ describe('studio nav (M5)', () => {
   it('keeps the specialist tools under Advanced', () => {
     const advanced = STUDIO_NAV.find((group) => group.id === 'advanced')!;
     expect(advanced.items.map((item) => item.label)).toEqual([
-      'Site Intelligence', 'Oportunidades SEO', 'Investigación SEO', 'Competidores', 'Fuentes', 'Inbox', 'Plan editorial', 'Cola de revisión', 'Biblioteca multimedia', 'Trabajos en segundo plano',
+      'Site Intelligence', 'Oportunidades SEO', 'Competidores', 'Investigación SEO', 'Fuentes', 'Inbox', 'Plan editorial', 'Cola de revisión', 'Biblioteca multimedia', 'Trabajos en segundo plano',
     ]);
   });
 
@@ -42,16 +42,16 @@ describe('studio nav (M5)', () => {
     const settings = STUDIO_NAV.find((group) => group.id === 'settings')!;
     const visible = (permissions: string[], platform = false) => settings.items
       .filter((item) => item.sidebar !== false && canSeeNavItem(item, permissions, platform)).map((item) => item.label);
-    const base = ['Sitios', 'Escritura', 'Modo y ritmo', 'Conexiones', 'Descubrimiento web', 'Herramientas del asistente'];
+    const base = ['Sitios', 'Escritura', 'SEO del sitio', 'Modo y ritmo', 'Conexiones', 'Descubrimiento web', 'Herramientas del asistente'];
     expect(visible([])).toEqual(base);
     expect(visible(['users.manage'])).toEqual([...base, 'Personas', 'Roles y permisos']);
     expect(visible(['roles.manage'])).toEqual([...base, 'Roles y permisos']);
     expect(visible(['workspace.manage'])).toEqual([...base, 'Salud del sistema']);
     expect(visible([], true)).toEqual([...base, 'Administración global']);
-    expect(settings.items.filter((item) => !item.platformAdminOnly && item.sidebar !== false).flatMap((item) => item.sections ?? []).length).toBe(26);
-    expect(STUDIO_NAV.find((group) => group.id === 'advanced')!.items.flatMap((item) => item.sections ?? []).length).toBe(24);
+    expect(settings.items.filter((item) => !item.platformAdminOnly && item.sidebar !== false).flatMap((item) => item.sections ?? []).length).toBe(30);
+    expect(STUDIO_NAV.find((group) => group.id === 'advanced')!.items.flatMap((item) => item.sections ?? []).length).toBe(27);
     expect(activeNavItem('/studio/admin/ai')?.item.platformAdminOnly).toBeTrue();
-    expect(activeNavItem('/studio/admin/seo')?.item.sections?.map(({ label }) => label)).toContain('Proveedores SEO');
+    expect(activeNavItem('/studio/admin/seo')?.item.sections?.map(({ label }) => label)).toContain('Operaciones SEO');
     expect(activeNavItem('/studio/settings/social')?.item.sidebar).toBeFalse();
     expect(sectionFor('/studio/operations', 'workers')).toBe('queues');
     expect(sectionFor('/studio/operations', 'cost')).toBe('costs');

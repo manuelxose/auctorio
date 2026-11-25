@@ -1,8 +1,8 @@
-.cp-page .muted-sm { color:#8d869b; font-size:11px; }
+.cp-page .muted-sm { color: #5c5a78; font-size:11px; }
 .cp-page .row-action { display:flex; flex-wrap:wrap; align-items:center; gap:7px; justify-content:flex-end; }
 .cp-page .mini-card { border:1px solid #ebe5f0; background:#fff; border-radius:12px; padding:14px; min-width:0; }
 .cp-page .mini-card h3 { font-size:12px; margin:0 0 5px; }
-.cp-page .mini-card p { font-size:11px; color:#7c758e; margin:0 0 11px; }
+.cp-page .mini-card p { font-size:11px; color: #5c5a78; margin:0 0 11px; }
 .cp-page .mini-card, .cp-page .row-list { overflow-wrap: anywhere; }
 .cp-page .cp-card-title { align-items: center; }
 .cp-page .cp-summary { margin-block: 13px 11px; }
@@ -14,6 +14,6 @@
 .cp-page .cp-danger { color: #b95552; }
 .cp-page .cp-note { margin-bottom: 2px; }
 .cp-page .row-title { margin: 0; }
-.cp-page .table caption { padding: 8px 11px; text-align: left; color: #817b93; }
+.cp-page .table caption { padding: 8px 11px; text-align: left; color: #5c5a78; }
 .cp-page .row-action { flex: 0 0 auto; }
 @media (max-width: 760px) { .cp-page .row-action { justify-content: flex-start; } }

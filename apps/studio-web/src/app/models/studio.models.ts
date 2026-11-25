@@ -1155,7 +1155,7 @@ export type DiscoverySettings = {
 export type DiscoverySettingsResponse = {
   config: DiscoverySettings & { id: string; siteId: string | null };
   provider: { provider: string; configured: boolean; message: string };
-  usageToday: { searches: number; scrapes: number; estimatedCostUsd: number };
+  usageToday: { searches: number; scrapes: number };
 };
 
 export type SourceRecommendation = {
