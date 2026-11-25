@@ -263,6 +263,32 @@ export async function decideSeoOpportunity(tenantId: string, siteId: string, id:
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: `seo_opportunity.${decision}`, entityType: "content_opportunity", entityId: id, metadata: { seoAction: row.action, targetUrl: row.targetUrl } });
 }
 
+/** Improvements Auctorio can write: a new version of the page's own article, left for review. The rest are tasks for a person. */
+export const REVISABLE: readonly string[] = ["update_existing", "expand_existing", "improve_metadata"];
+
+const REVISION_TASK: Record<string, string> = {
+  update_existing: "Update this published article so it answers the search better. Keep what is correct and still useful.",
+  expand_existing: "Expand this published article to cover what is missing. Keep the existing sections.",
+  improve_metadata: "Improve the title, the meta description and the introduction of this published article so more people choose it. Keep the body as it is except for small corrections.",
+};
+
+/** Writes a new version of the page an approved improvement is about. Nothing is bought and nothing is published: a person approves it. */
+export async function startOpportunityRevision(tenantId: string, siteId: string, id: string, userId: string | null) {
+  const row = await prisma.contentOpportunity.findFirst({ where: { id, tenantId, siteId } });
+  if (!row) throw new Error("opportunity_not_found");
+  if (!REVISABLE.includes(row.action ?? "")) throw new Error("opportunity_not_revisable");
+  if (row.status !== "approved") throw new Error("opportunity_not_approved");
+  const { projectOfPage, startProductionForProject } = await import("../production/pipeline");
+  const projectId = await projectOfPage(tenantId, siteId, row.targetUrl);
+  if (!projectId) throw new Error("optimization_page_not_managed");
+  const { isProjectGenerationInFlight } = await import("../orchestration");
+  if (await isProjectGenerationInFlight(tenantId, projectId)) throw new Error("generation_in_flight");
+  const feedback = [REVISION_TASK[row.action!], row.query ? `Search: ${row.query}.` : null].filter(Boolean).join(" ");
+  const job = await startProductionForProject(tenantId, projectId, { feedback, userId, requireReview: true });
+  await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "seo_opportunity.revision_started", entityType: "content_opportunity", entityId: id, metadata: { projectId, productionJobId: job.id, seoAction: row.action } });
+  return { projectId, jobId: job.id, status: job.status };
+}
+
 /** A person says when the change went live: measuring starts there. */
 export async function completeSeoOpportunity(tenantId: string, siteId: string, id: string, input: { actedAt: Date; url: string | null }, userId: string | null) {
   const row = await prisma.contentOpportunity.findFirst({ where: { id, tenantId, siteId }, include: { site: { select: { baseUrl: true } } } });

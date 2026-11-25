@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import sharp from "sharp";
 import { stripImageMetadata } from "../src/infrastructure/storage/image-processing";
 import { parseYoutubeOrganic } from "../src/infrastructure/seo/dataforseo";
-import { infographicPrompt, infographicSection, insertYoutube, imageStylePrompt, pickYoutubeVideo, readVisualSettings } from "../src/studio/editorial-engine/visuals";
+import { infographicPrompt, infographicSection, insertYoutube, imageStylePrompt, readVisualSettings, youtubeCandidates } from "../src/studio/editorial-engine/visuals";
 import { resolveArticleTargets, resolveVisualSettings } from "../src/studio/editorial-engine/structure";
 import { inlineAlt } from "../src/studio/inline-images";
 import { comparesOptions } from "../src/studio/editorial-engine/quality-checklist";
@@ -34,7 +34,8 @@ test("M6 visuals settings: validated, stored next to the targets, ignored by tar
   assert.equal(visuals.coverStyle, "realistic");
   assert.equal(visuals.bodyStyle, "media_library");
   assert.equal(visuals.imageInstructions, "sin personas");
-  assert.deepEqual(visuals.youtube, { enabled: true, channelOnly: true, channelUrl: "https://www.youtube.com/@guiatv" });
+  assert.deepEqual(visuals.youtube, { enabled: true, channelOnly: true, channelUrl: "https://www.youtube.com/@guiatv", approved: [] });
+  assert.deepEqual(readVisualSettings({ youtube: { approved: [{ id: "abcdefghijk", title: " Mi  vídeo " }, { id: "bad", title: "x" }, { id: "ABCDEFGHIJK" }, "x"] } }).youtube.approved, [{ id: "abcdefghijk", title: "Mi vídeo" }]);
   assert.equal(readVisualSettings({ youtube: { enabled: true, channelOnly: true, channelUrl: "https://evil.com/@x" } }).youtube.channelOnly, false);
   assert.equal(resolveVisualSettings({ visuals: { infographic: true } }).infographic, true);
   assert.equal(resolveVisualSettings(null).infographic, false);
@@ -64,9 +65,10 @@ test("M6 YouTube: parsed from the SERP, channel filter, one no-JS figure before 
   const { videos, costUsd } = parseYoutubeOrganic(body);
   assert.equal(costUsd, 0.002);
   assert.deepEqual(videos.map((video) => video.id), ["abcdefghijk", "ABCDEFGHIJK"]);
-  assert.equal(pickYoutubeVideo(videos, { enabled: true, channelOnly: false, channelUrl: "" })?.id, "abcdefghijk");
-  assert.equal(pickYoutubeVideo(videos, { enabled: true, channelOnly: true, channelUrl: "https://www.youtube.com/@guiatv" })?.id, "ABCDEFGHIJK");
-  assert.equal(pickYoutubeVideo(videos, { enabled: true, channelOnly: true, channelUrl: "https://www.youtube.com/@other" }), null);
+  const ids = (channelOnly: boolean, channelUrl: string) => youtubeCandidates(videos, { channelOnly, channelUrl }).map(({ id }) => id);
+  assert.deepEqual(ids(false, ""), ["abcdefghijk", "ABCDEFGHIJK"]);
+  assert.deepEqual(ids(true, "https://www.youtube.com/@guiatv"), ["ABCDEFGHIJK"]);
+  assert.deepEqual(ids(true, "https://www.youtube.com/@other"), []);
 
   const html = insertYoutube("<p>i</p><h2>Uno</h2><p>a</p><h2>Dos</h2><p>b</p>", videos[0]);
   assert.ok(html.indexOf('data-block="youtube"') > html.indexOf("Uno") && html.indexOf('data-block="youtube"') < html.indexOf("Dos"));

@@ -22,6 +22,8 @@ export const HIGH_SENSITIVITY_FACT_KEYS = new Set([
 /** Fact keys whose different statements mean a real conflict. */
 export const CONFLICT_SENSITIVE_KEYS = new Set(["published_at", "release_year", "release_date", "title_identity"]);
 
+/** The page was found, not read: it supports no claim. */
+const DISCOVERY_HINT = "Found in a search, not read. You may link it as further reading; do NOT state any figure, date or claim as coming from it.";
 const USAGE_HINTS: Record<FactUsage, string> = {
   state_confidently: "State this fact confidently without hedging.",
   state: "State this fact; no attribution needed.",
@@ -130,7 +132,7 @@ export function licenseFact(
     usage,
     sensitivity,
     reasons,
-    phrasingHint: USAGE_HINTS[usage],
+    phrasingHint: fact.evidenceKind === "search_result" ? DISCOVERY_HINT : USAGE_HINTS[usage],
     sources: [
       {
         publisher: fact.publisher,

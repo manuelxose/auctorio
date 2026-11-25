@@ -13,7 +13,7 @@ import { getPrismaClient } from "../infrastructure/db/prisma";
 import { structuredEvent } from "../shared/utils/logger";
 import { getOrCreatePolicy } from "./automation";
 import { normalizeAutomationMode } from "./automation-mode";
-import { ensureAutoPublications, evaluateAutopilotGateForVersion } from "./planner";
+import { approvalRequired, ensureAutoPublications, evaluateAutopilotGateForVersion } from "./planner";
 import { runQualityRepairCycle } from "./quality-repair";
 import { approveVersion } from "./repository";
 import { retryPublication } from "./publication";
@@ -126,6 +126,11 @@ export async function recoverStuckAutoProjects(input: RecoveryInput): Promise<Re
     const latestVersion = project.versions[0] ?? null;
     if (!latestVersion) {
       pushItem(report, project.id, "skip", "no_version");
+      continue;
+    }
+
+    if (latestVersion.status !== "approved" && approvalRequired(project.metadata)) {
+      pushItem(report, project.id, "skip", "approval_required");
       continue;
     }
 

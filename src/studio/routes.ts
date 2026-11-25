@@ -1241,7 +1241,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
     }
 
-    const body = parseBody<{ feedback?: string; promptPresetVersionId?: string }>(request);
+    const body = parseBody<{ feedback?: string; promptPresetVersionId?: string; refreshResearch?: boolean }>(request);
     const presetVersionId = body.promptPresetVersionId?.trim() || null;
     // An unknown or foreign preset would otherwise start a real (paid) run that silently ignores it.
     if (presetVersionId) {
@@ -1252,7 +1252,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
         return notFound(reply, "prompt preset version not found");
       }
     }
-    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback ?? null, presetVersionId, userId: context.userId });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback ?? null, presetVersionId, userId: context.userId, refreshResearch: body.refreshResearch === true });
     return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 
@@ -1267,7 +1267,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return badRequest(reply, "invalid project id");
     }
 
-    const body = parseBody<{ feedback?: string }>(request);
+    const body = parseBody<{ feedback?: string; refreshResearch?: boolean }>(request);
     if (!body.feedback?.trim()) {
       return badRequest(reply, "feedback is required");
     }
@@ -1280,7 +1280,7 @@ export function registerStudioRoutes(fastify: FastifyInstance) {
       return reply.code(409).send({ error: "generation_in_flight", message: "This project is already being written. Wait for the current draft to finish." });
     }
 
-    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback.trim(), userId: context.userId });
+    const job = await startProductionForProject(context.tenantId, project.id, { feedback: body.feedback.trim(), userId: context.userId, refreshResearch: body.refreshResearch === true });
     return reply.code(202).send({ project_id: project.id, production_job_id: job.id, status: job.status });
   });
 

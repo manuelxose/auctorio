@@ -7,7 +7,9 @@ import { Prisma, type EditorialPlanItem } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { createProject } from "../repository";
 import { suggestInternalLinks, suggestOwnPosts } from "../internal-linking";
-import { serpSourceFacts } from "../serp-sources";
+import { normalizeKeyword } from "../../infrastructure/seo/contract";
+import type { OpportunityEvidence } from "../seo-research/reservoir";
+import { prioritizeSources, serpNeed, serpSourceFacts } from "../serp-sources";
 import { buildStoryBrief } from "../editorial-engine/brief-builder";
 import { LENGTH_BY_TYPE } from "../editorial-engine/classifier";
 import { formatInternalUrl, LENGTH_MODES, readArticleTargetsOverride, renderWritingGuidance, resolveArticleTargets, resolveBrandSettings, resolveVisualSettings, resolveWritingSettings, wordTargetRange } from "../editorial-engine/structure";
@@ -16,7 +18,8 @@ import { hasContactCard, hasMapCard, readBrandSettings, renderBrandGuidance, res
 import { crawlBrand, withCrawledBrand } from "../brand-colors";
 import type { FactSafetyReport } from "../editorial-engine/fact-safety";
 import { isArticleType, type ArticleType, type EngineEntity, type EngineInternalLink, type LedgerFact, type SearchIntent } from "../editorial-engine/types";
-import type { BriefArtifact, PreparedInput, ProductionRequestOptions } from "./types";
+import { videoNeeded, type VisualSettings } from "../editorial-engine/visuals";
+import type { BriefArtifact, PreparedInput, PreparedResearch, ProductionRequestOptions } from "./types";
 
 const prisma = getPrismaClient();
 
@@ -160,6 +163,7 @@ export function planEvidenceToLedger(sourceEvidence: unknown): { facts: LedgerFa
       verificationStatus: "unverified",
       conflictingStatements: [],
       supportingGroups: 1,
+      evidenceKind: "plan",
       ...(typeof entry.sourceId === "string" && typeof entry.itemId === "string" ? { origin: { sourceId: entry.sourceId, itemId: entry.itemId } } : {}),
     });
   }
@@ -252,10 +256,51 @@ export function siteGuidance(site: { name: string; baseUrl: string | null }, bra
   return renderBrandGuidance(brand, sections);
 }
 
+/** Same as the retention of provider data whose licence says nothing. */
+const RESEARCH_MAX_DAYS = 90;
+const RESEARCH_MAX_DAYS_TIME_SENSITIVE = 3;
+/** States worth trying again on another run. */
+const RETRY_SERP: readonly string[] = ["unavailable", "too_old"];
+const RETRY_VIDEO: readonly string[] = ["unavailable", "disabled"];
+
+const FORMAT_GUIDANCE: Record<string, string> = { how_to: "step-by-step guides", list: "lists", comparison: "comparisons", news: "news and current information", video: "videos" };
+
+type ResearchInput = {
+  tenantId: string;
+  site: { id: string; locale: string; type: string };
+  keyword: string;
+  timeSensitive: boolean;
+  need: ReturnType<typeof serpNeed>;
+  exclude: { domains: string[]; urls: string[] };
+  max: number;
+  youtube: VisualSettings["youtube"] | null;
+  videoNeeded: boolean;
+  reuseOnly: boolean;
+};
+
+/** Search results and video for one article: what an earlier run of it found, then stored data, then (a first run only) a purchase. */
+async function researchFor(input: ResearchInput, previous: PreparedResearch | null): Promise<PreparedResearch> {
+  const { tenantId, site, keyword, timeSensitive, reuseOnly } = input;
+  const maxAge = (timeSensitive ? RESEARCH_MAX_DAYS_TIME_SENSITIVE : RESEARCH_MAX_DAYS) * 86_400_000;
+  const known = previous && previous.keyword === normalizeKeyword(keyword) && previous.timeSensitive === timeSensitive && Date.now() - Date.parse(previous.at) <= maxAge ? previous : null;
+  const blocked = (url: string | null) => input.exclude.domains.some((domain) => hostOf(url) === domain || hostOf(url)?.endsWith(`.${domain}`));
+  const sources = known && !RETRY_SERP.includes(known.serp.state)
+    ? { facts: known.facts.filter((fact) => !blocked(fact.sourceUrl)), serp: { ...known.serp, state: known.serp.state === "acquired" ? ("reused" as const) : known.serp.state } }
+    : await serpSourceFacts({ tenantId, siteId: site.id, locale: site.locale, siteType: site.type, timeSensitive, keyword, exclude: input.exclude, max: input.max, need: input.need, reuseOnly });
+  const video = !input.youtube?.enabled
+    ? { video: null, state: "disabled" as const, code: null }
+    : known && !RETRY_VIDEO.includes(known.video.state)
+      ? { ...known.video, state: known.video.state === "acquired" ? ("reused" as const) : known.video.state }
+      : await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword, youtube: input.youtube, needed: input.videoNeeded, reuseOnly });
+  return { keyword: normalizeKeyword(keyword), at: known?.at ?? new Date().toISOString(), timeSensitive, ...sources, video };
+}
+
 export async function preparePlanItemInput(
   tenantId: string,
   planItemId: string,
   options: ProductionRequestOptions,
+  /** What an earlier run of the same article found. */
+  previous: PreparedResearch | null = null,
 ): Promise<PreparedInput> {
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId } });
   if (!item) throw new Error("editorial_plan_item_not_found");
@@ -275,26 +320,44 @@ export async function preparePlanItemInput(
   // for the keyword as citable external sources (own site and accepted competitors excluded).
   const targets = resolveArticleTargets(planningSettings?.articleTargets, generation.articleTargets);
   const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId: site.id, status: "accepted" }, select: { domain: true } });
-  const serpFacts = item.primaryKeyword && isGuide
-    ? await serpSourceFacts({
+  const ownHost = hostOf(site.baseUrl);
+  const timeSensitive = item.newsOrEvergreen === "news";
+  const opportunity = await prisma.contentOpportunity.findFirst({ where: { tenantId, siteId: site.id, planItemId: item.id }, select: { evidence: true } });
+  const known = (opportunity?.evidence ?? {}) as OpportunityEvidence;
+  const selection = asRecord(asRecord(item.metadata).selection);
+  const research = item.primaryKeyword && (isGuide || timeSensitive)
+    ? await researchFor({
         tenantId,
-        siteId: site.id,
-        locale: site.locale,
-        siteType: site.type,
-        timeSensitive: item.newsOrEvergreen === "news",
+        site,
         keyword: item.primaryKeyword,
+        timeSensitive,
+        need: serpNeed({
+          timeSensitive,
+          intent: selection.source !== "model" && typeof selection.intent === "string" ? selection.intent : known.provider?.intent ?? null,
+          serpKnown: Boolean(known.serp),
+          sources: new Set(planEvidence.facts.filter((fact) => fact.sourceUrl && hostOf(fact.sourceUrl) !== ownHost).map((fact) => fact.publisherGroup)).size,
+          wantedSources: targets.externalLinks,
+        }),
         exclude: {
-          domains: [hostOf(site.baseUrl), ...competitors.map(({ domain }) => hostOf(`https://${domain.replace(/^https?:\/\//, "")}`))].filter((domain): domain is string => Boolean(domain)),
+          domains: [ownHost, ...competitors.map(({ domain }) => hostOf(`https://${domain.replace(/^https?:\/\//, "")}`))].filter((domain): domain is string => Boolean(domain)),
           urls: planEvidence.facts.map((fact) => fact.sourceUrl).filter((url): url is string => Boolean(url)),
         },
         max: targets.externalLinks + 5, // a few spare so the writer picks the relevant ones
-      })
-    : [];
-  const youtube = isGuide && item.primaryKeyword
-    ? await youtubeVideoFor({ tenantId, siteId: site.id, locale: site.locale, keyword: item.primaryKeyword, youtube: resolveVisualSettings(planningSettings?.articleTargets).youtube })
+        youtube: isGuide ? resolveVisualSettings(planningSettings?.articleTargets).youtube : null,
+        videoNeeded: videoNeeded({ contentType: item.contentType, primaryKeyword: item.primaryKeyword, title: headline }, generation.video),
+        reuseOnly: options.reuseResearch === true,
+      }, previous)
     : null;
-  const facts = [...planEvidence.facts, ...serpFacts];
-  const evidence = { facts, groups: new Set(facts.map((fact) => fact.publisherGroup)).size };
+  const facts = prioritizeSources([...planEvidence.facts, ...(research?.facts ?? [])]);
+  // A page nobody read supports nothing: it does not count as a source.
+  const citable = facts.filter((fact) => fact.evidenceKind !== "search_result");
+  const evidence = { facts, groups: new Set(citable.map((fact) => fact.publisherGroup)).size };
+  const degraded = [
+    ...(research && RETRY_SERP.includes(research.serp.state) ? [`sources_${research.serp.state}:${research.serp.code ?? "no_fresh_results"}`] : []),
+    ...(research?.video.state === "unavailable" ? [`video_unavailable:${research.video.code ?? "error"}`] : []),
+    ...(timeSensitive && !citable.some((fact) => fact.sourceUrl && hostOf(fact.sourceUrl) !== ownHost) ? ["no_fresh_evidence"] : []),
+  ];
+  const format = research?.serp.insight?.format;
   const entities: EngineEntity[] = stringList(item.relatedEntities).map((name, index) => ({
     id: `plan-entity-${index}`,
     domain: "editorial_plan",
@@ -332,12 +395,14 @@ export async function preparePlanItemInput(
       planId: item.planId,
       record: item as unknown as Record<string, unknown>,
       generation,
-      guidance: [...planGuidance(item), ...siteGuidance(site, brand, isGuide ? targets.sections : null), ...renderWritingGuidance(writing, language, { summary: isGuide && targets.sections.summary })],
+      guidance: [...planGuidance(item), ...(format ? [`Search results for this keyword are mostly ${FORMAT_GUIDANCE[format]}: answer that expectation.`] : []), ...siteGuidance(site, brand, isGuide ? targets.sections : null), ...renderWritingGuidance(writing, language, { summary: isGuide && targets.sections.summary })],
       brand,
       disclaimer: writing.disclaimer,
-      youtube,
+      youtube: research?.video.video ?? null,
     },
     options,
+    research,
+    degraded,
   };
 }
 

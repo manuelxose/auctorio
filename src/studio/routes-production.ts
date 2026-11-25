@@ -2,7 +2,8 @@
 
 import type { FastifyInstance, FastifyReply } from "fastify";
 import type { ProductionJobStatus } from "@prisma/client";
-import { badRequest, isUuid, parseBody, requireStudioContext, requireStudioPermission } from "./http-utils";
+import { hasStudioPermission } from "./security";
+import { badRequest, errorBody, isUuid, parseBody, requireStudioContext, requireStudioPermission } from "./http-utils";
 import {
   ProductionError,
   cancelProductionJob,
@@ -88,6 +89,11 @@ export function registerProductionRoutes(fastify: FastifyInstance) {
         if (action === "cancel") return reply.send({ job: await cancelProductionJob(context.tenantId, id, context.userId) });
         const body = parseBody<{ decision?: string; notes?: string }>(request);
         if (body.decision !== "approve" && body.decision !== "reject") return badRequest(reply, "decision must be approve or reject");
+        // Approving it changes a page that is already public.
+        const held = body.decision === "approve" ? (await getProductionJob(context.tenantId, id))?.summary.held : null;
+        if (held === "modifies_published_page" && !(["review.approve", "publishing.manage"] as const).every((permission) => hasStudioPermission(context.permissions, permission))) {
+          return reply.code(403).send(errorBody(reply, "forbidden", "Missing permission: review.approve, publishing.manage"));
+        }
         return reply.send({ job: await reviewProductionJob(context.tenantId, id, { decision: body.decision, notes: body.notes }, context.userId) });
       } catch (error) {
         return fail(reply, error);

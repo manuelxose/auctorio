@@ -35,6 +35,7 @@ import {
   type GatesArtifact,
   type MaterializeArtifact,
   type PreparedInput,
+  type PreparedResearch,
   type ProductionRequest,
   type ProductionRequestOptions,
   type QaArtifact,
@@ -61,10 +62,10 @@ async function updateGeneration(ctx: StageContext, data: Prisma.ArticleGeneratio
 
 // ────────────────────────────────────────────────────────────── Shared stages
 
-async function prepare(job: { tenantId: string; siteId: string; request: ProductionRequest }, now: Date): Promise<PreparedInput> {
+async function prepare(job: { tenantId: string; siteId: string; request: ProductionRequest; research?: PreparedResearch | null }, now: Date): Promise<PreparedInput> {
   const { request } = job;
   if (request.kind === "cluster") return prepareClusterInput(job.tenantId, request.clusterId, job.siteId, request, now);
-  if (request.kind === "plan_item") return preparePlanItemInput(job.tenantId, request.planItemId, request);
+  if (request.kind === "plan_item") return preparePlanItemInput(job.tenantId, request.planItemId, request, job.research ?? null);
   return prepareManualInput(job.tenantId, request, request);
 }
 
@@ -301,6 +302,15 @@ async function gates(ctx: StageContext): Promise<GatesArtifact> {
   return { decision, copyrightWarning, provenance };
 }
 
+/** Why a draft must not publish itself; null when it may. Clusters keep their own update policy. */
+async function holdReason(ctx: StageContext, projectId: string): Promise<string | null> {
+  if (ctx.input.degraded?.includes("no_fresh_evidence")) return "no_fresh_evidence";
+  if (ctx.kind === "cluster") return null;
+  if (ctx.request.requireReview) return "modifies_published_page";
+  const live = await prisma.publication.findFirst({ where: { tenantId: ctx.tenantId, projectId, channel: "website", status: "published", NOT: { externalId: { startsWith: "dryrun-" } } }, select: { id: true } });
+  return live ? "modifies_published_page" : null;
+}
+
 async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   const { input } = ctx;
   const parsed = need(ctx.artifacts.write, "write").parsed;
@@ -392,6 +402,10 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
     });
   }
 
+  const held = await holdReason(ctx, projectId!);
+  await prisma.$executeRaw`UPDATE content_projects SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), '{approvalRequired}', ${JSON.stringify(held)}::jsonb) WHERE id = ${projectId}::uuid AND tenant_id = ${ctx.tenantId}::uuid`;
+  result.held = held;
+
   const latest = await prisma.contentVersion.findFirst({ where: { tenantId: ctx.tenantId, projectId: projectId! }, orderBy: { versionNumber: "desc" }, select: { versionNumber: true } });
   const version = await prisma.contentVersion.create({
     data: {
@@ -427,7 +441,7 @@ async function materialize(ctx: StageContext): Promise<MaterializeArtifact> {
   if (ctx.request.kind === "plan_item") {
     // Plan items publish in their calendar slot, never earlier: assisted waits for approval, autopilot schedules itself.
     const policy = await getOrCreatePolicy(ctx.tenantId, ctx.siteId);
-    const autopilot = policy.mode === "autopilot" && gate.decision.decision === "auto_publish";
+    const autopilot = policy.mode === "autopilot" && gate.decision.decision === "auto_publish" && !held;
     if (autopilot || policy.mode === "assisted") {
       const item = await prisma.editorialPlanItem.findFirst({ where: { id: ctx.request.planItemId, tenantId: ctx.tenantId }, select: { scheduledFor: true } });
       const scheduledFor = slotOrNow(item?.scheduledFor ?? null, ctx.now);
