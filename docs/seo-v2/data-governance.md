@@ -15,11 +15,18 @@
 - A revoked token is deleted at once. Disconnecting deletes the token and, if asked, every stored figure and what was derived from it. The grant is revoked
   in Google only when no other site of the same person uses it.
 - Impressions are the site's own visibility, never market volume; average position is never shown as a live rank.
+- Two classes of data. (A) Market intelligence: what providers say of a keyword in a market (`seo_keyword_metrics`), with no site in it. (B) Private: Search Console, opportunities,
+  site keywords, discoveries, profiles, plans, runs. Every (B) query filters by tenant and site.
+- Sharing (A) between workspaces is off. It needs the platform policy `shareMarketData` **and** a provider whose licence permits storing and sharing (`sharableProviders`), checked when
+  the row was collected and again when it is read. No provider qualifies today. Even then only exact keywords are answered: nobody can list another's keywords or learn who collected them.
+- Retention of knowledge follows the licence (`retain_until`) and is purged with the cache; a site keyword without any discovery left and no opportunity goes too.
+- Disconnecting Search Console with deletion also clears the derived research profile and the reason of runs that quoted its figures.
 - Credentials: encrypted at rest (AES-256-GCM), server-side only, never in responses, audits, logs or error messages.
 - Audited actions: `seo.control.updated`, `seo.provider.updated`, `seo.credential.set`, `seo.credential.cleared`, `seo.provider.live_test`,
   `seo.budget.updated`, `seo.budget.authorized`, `seo.budget.authorization_revoked`, `seo.reservation.resolved`, `seo.pricing.updated`, `seo.policy.updated`,
   `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`,
   `search_console.connection_started`, `search_console.connected`, `search_console.property_selected`, `search_console.disconnected`,
+  `seo_research.requested`, `seo_research.pause`, `seo_research.resume`, `seo_research.cancel`, `seo_research.retry`, `seo_research.profile_updated`,
   `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_profile.updated`.
 
 ## Licensing (2026-11-24)

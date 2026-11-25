@@ -8,6 +8,8 @@ import { buildEditorialPlanningContext } from "../editorial-plan-context";
 import { REACHABLE_DIFFICULTY, keywordScoringFor } from "../keyword-candidates";
 import { DAY_MS, addDays, day } from "../search-console";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "../site-relevance";
+import { readResearchPolicy } from "../seo-research/policy";
+import { levelOf, stageOf, type OpportunityEvidence } from "../seo-research/reservoir";
 import { evaluateActions, linkPublishedActions, recordSeoAction } from "./attribution";
 import { base, detectOpportunities, pageKey, queryKey, type Draft, type QueryRow, type SearchData } from "./detect";
 import { pageTotals, siteTotals } from "./performance";
@@ -66,6 +68,22 @@ const COMPETITOR_ACTIONS: Record<string, SeoAction> = {
 function storedDrafts(rows: Array<{ source: string; kind: string; topic: string; query: string | null; targetUrl: string | null; relatedSiteUrls: unknown; rationale: string; evidence: unknown; dedupeKey: string }>): Draft[] {
   return rows.flatMap<Draft>((row) => {
     const relatedUrls = Array.isArray(row.relatedSiteUrls) ? (row.relatedSiteUrls as string[]) : [];
+    if (row.source === "research") {
+      const { provider, serp } = (row.evidence ?? {}) as OpportunityEvidence;
+      if (!provider || !row.query) return [];
+      const ranks = Boolean(serp?.ownUrl);
+      return [base({
+        source: "research", kind: row.kind, topic: row.topic, query: row.query, targetUrl: serp?.ownUrl ?? null, relatedUrls, action: ranks ? "update_existing" : "create_content", intent: provider.intent, why: row.rationale,
+        actionReason: ranks ? "Los resultados guardados muestran una página tuya: mejorarla antes que crear otra." : "Hay demanda medida y ninguna página del sitio la cubre.",
+        volume: provider.volume, difficulty: provider.difficulty, position: serp?.ownPosition ?? null,
+        evidence: [
+          { metric: "Volumen mensual", value: provider.volume, kind: provider.volume === null ? "unknown" : "provider_reported", source: "provider", period: provider.asOf ?? provider.at?.slice(0, 10) ?? undefined },
+          { metric: "Dificultad", value: provider.difficulty, kind: provider.difficulty === null ? "unknown" : "provider_reported", source: "provider" },
+          ...(serp ? [{ metric: "Dominios en los resultados guardados", value: serp.domains.length, kind: "observed" as const, source: "provider" as const, period: serp.at.slice(0, 10) }] : []),
+        ],
+        risks: ["El volumen es una estimación de un proveedor."], caveats: ["Sin datos propios de búsqueda para esta consulta."], dedupeKey: row.dedupeKey,
+      })];
+    }
     if (row.source === "provider") {
       const provider = (row.evidence as { provider?: { source: string; volume: number | null; difficulty: number | null; intent: string | null; position: number | null; asOf: string | null } } | null)?.provider;
       if (!provider) return [];
@@ -106,7 +124,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
     prisma.siteInternalLink.groupBy({ by: ["targetUrl"], where: { tenantId, siteId }, _count: { _all: true } }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId }, select: { name: true, slug: true, pagesCount: true } }),
     prisma.searchIndexStatus.findMany({ where: { tenantId, siteId } }),
-    prisma.contentOpportunity.findMany({ where: { tenantId, siteId, source: { in: ["competitor", "provider"] }, decidedAt: null } }),
+    prisma.contentOpportunity.findMany({ where: { tenantId, siteId, source: { in: ["competitor", "provider", "research"] }, decidedAt: null } }),
     prisma.siteSeoProfile.findFirst({ where: { tenantId, siteId } }),
     prisma.seoAction.findMany({ where: { tenantId, siteId }, select: { url: true, actedAt: true } }),
     prisma.editorialPlanItem.findMany({ where: { tenantId, siteId, status: { notIn: ["rejected", "canceled"] } }, select: { primaryKeyword: true, targetQuery: true }, take: 5_000 }),
@@ -164,7 +182,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
   const summary: AnalysisSummary = { analyzed: decisions.length, open: 0, monitoring: 0, deferred: 0, rejected: 0, expired: 0, firstPartyData: data !== null };
   await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ANALYSIS_LOCK}::int, hashtext(${siteId}))`;
-    const existing = new Map((await tx.contentOpportunity.findMany({ where: { tenantId, siteId }, select: { id: true, dedupeKey: true, decidedAt: true } })).map((row) => [row.dedupeKey, row]));
+    const existing = new Map((await tx.contentOpportunity.findMany({ where: { tenantId, siteId }, select: { id: true, dedupeKey: true, decidedAt: true, reservedUntil: true } })).map((row) => [row.dedupeKey, row]));
     for (const decision of decisions) {
       const { draft } = decision;
       const dedupeKey = draft.dedupeKey.slice(0, 500);
@@ -174,9 +192,10 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
         action: decision.action, score: decision.score, confidence: decision.confidence, priority: decision.priority, analyzedAt: now,
         explanation: decision.explanation as unknown as Prisma.InputJsonValue,
         // Competitor opportunities keep the status people work with; the engine only weighs them.
-        ...(row?.decidedAt || draft.source === "competitor" ? {} : { status: decision.status }),
+        // One a plan is writing right now keeps its status until it is done.
+        ...(row?.decidedAt || draft.source === "competitor" || (row?.reservedUntil && row.reservedUntil > now) ? {} : { status: decision.status }),
       };
-      if (draft.source === "competitor" || draft.source === "provider") {
+      if (draft.source === "competitor" || draft.source === "provider" || draft.source === "research") {
         if (row) await tx.contentOpportunity.update({ where: { id: row.id }, data: scored });
         continue;
       }
@@ -194,6 +213,7 @@ export async function analyzeSite(tenantId: string, siteId: string, now = new Da
       where: {
         tenantId, siteId, decidedAt: null, status: { not: "expired" }, source: { in: data ? ["search_console", "crawl"] : ["crawl"] },
         OR: [{ analyzedAt: null }, { analyzedAt: { lt: now } }],
+        AND: [{ OR: [{ reservedUntil: null }, { reservedUntil: { lte: now } }] }],
       },
       data: { status: "expired" },
     });
@@ -212,16 +232,18 @@ async function requireSite(tenantId: string, siteId: string) {
 
 export async function listSeoOpportunities(tenantId: string, siteId: string, filters: { status?: string; action?: string; take?: number } = {}) {
   await requireSite(tenantId, siteId);
-  return prisma.contentOpportunity.findMany({
+  const policy = readResearchPolicy((await prisma.siteResearchProfile.findFirst({ where: { tenantId, siteId }, select: { policy: true } }))?.policy);
+  const rows = await prisma.contentOpportunity.findMany({
     where: { tenantId, siteId, action: filters.action ?? { not: null }, ...(filters.status ? { status: filters.status } : {}) },
     orderBy: [{ priority: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }],
     take: filters.take ?? 200,
     select: {
       id: true, source: true, kind: true, topic: true, query: true, targetUrl: true, relatedSiteUrls: true, rationale: true, action: true, status: true, score: true, confidence: true, priority: true,
-      explanation: true, planItemId: true, decidedAt: true, analyzedAt: true,
+      explanation: true, planItemId: true, decidedAt: true, analyzedAt: true, evidence: true, market: true, reservedUntil: true,
       actions: { select: { id: true, actedAt: true, url: true, evaluations: true, baseline: true, seoCostUsd: true, contentCostUsd: true } },
     },
   });
+  return rows.map(({ evidence, reservedUntil, ...row }) => ({ ...row, stage: stageOf({ ...row, evidence, reservedUntil }, policy), level: levelOf({ ...row, evidence, reservedUntil }) }));
 }
 
 /** Statuses a person may set; planning and completing have their own operations. */
@@ -250,7 +272,7 @@ export async function completeSeoOpportunity(tenantId: string, siteId: string, i
   const host = (value: string) => new URL(value).hostname.replace(/^www\./, "");
   if (!url) throw new Error("url_required");
   if (!row.site.baseUrl || !URL.canParse(url) || host(url) !== host(row.site.baseUrl)) throw new Error("url_not_of_this_site");
-  const action = await recordSeoAction({ tenantId, siteId, opportunityId: id, action: row.action ?? "update_existing", url, query: row.query, actedAt: input.actedAt, planItemId: row.planItemId, publicationId: null, seoCostUsd: row.source === "provider" ? null : 0, contentCostUsd: null });
+  const action = await recordSeoAction({ tenantId, siteId, opportunityId: id, action: row.action ?? "update_existing", url, query: row.query, actedAt: input.actedAt, planItemId: row.planItemId, publicationId: null, seoCostUsd: row.source === "provider" || row.source === "research" ? null : 0, contentCostUsd: null });
   await prisma.contentOpportunity.update({ where: { id }, data: { status: "completed", decidedAt: new Date() } });
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "seo_opportunity.completed", entityType: "content_opportunity", entityId: id, metadata: { url, actedAt: input.actedAt.toISOString() } });
   return action;

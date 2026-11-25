@@ -12,6 +12,7 @@ import { getSitePlanningSettings } from "./planning-settings";
 import { computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { isKeywordVariant } from "./keyword-candidates";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
+import { claimKeywords } from "./seo-research/reservoir";
 
 const prisma = getPrismaClient();
 
@@ -128,6 +129,7 @@ export async function addPlanKeywords(tenantId: string, siteId: string, keywords
       }),
     ),
   );
+  await claimKeywords(tenantId, siteId, created.map((item) => ({ keyword: item.primaryKeyword ?? "", planItemId: item.id })));
   // Measured volume + difficulty for the new items (no-op without an SEO provider; never blocks).
   await enrichPlanItemsWithKeywordMetrics(tenantId, plan.id);
   await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "editorial_plan_items.keywords_added", entityType: "site", entityId: siteId, metadata: { planId: plan.id, created: created.length, dropped: screen.dropped.length, unscheduled: unscheduled.length } });

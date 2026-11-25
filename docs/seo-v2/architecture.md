@@ -1,6 +1,6 @@
 # SEO V2 architecture
 
-State after SEO-V2-04 (SEO-V2-03 has not been built). Sections marked *(later)* are not built.
+State after SEO-V2-03, which was built after SEO-V2-04.
 
 ## Layers
 
@@ -18,8 +18,9 @@ State after SEO-V2-04 (SEO-V2-03 has not been built). Sections marked *(later)* 
 
 | First-party data | `src/infrastructure/google/search-console.ts`, `src/studio/search-console.ts` | Authorized Search Console access, incremental synchronization |
 | Intelligence engine | `src/studio/seo-intelligence/` | Detection, scoring, action selection, explanation, attribution |
+| Research engine | `src/studio/seo-research/` | Keyword knowledge, research profile, opportunity reservoir, triggers, durable runs |
 
-The opportunity repository of the owner's diagram is `content_opportunities`. A shared keyword knowledge repository is *(later)*.
+The opportunity repository of the owner's diagram is `content_opportunities`; the keyword knowledge is `seo_keyword_metrics` and `site_keywords`.
 
 ## A call, step by step
 
@@ -118,3 +119,46 @@ Decisions:
 - **Competitor opportunities keep their status**; the engine adds action, score, confidence and explanation.
 - **Weights never change on their own.**
 - **Google Ads API is not implemented** (optional; no approved credentials). Conversions are reported as unavailable: there is no authorized source.
+
+## Persistent knowledge and research
+
+Conceptual entity -> where it lives:
+
+| Entity | Implementation |
+|---|---|
+| SEOKeyword, SEOKeywordMetricSnapshot | `seo_keyword_metrics` (tenant, provider, source, country, language, keyword): one row per change, confirmed when it comes back equal |
+| SiteKeywordRelationship, SEOKeywordDiscovery, SEOCompetitorKeyword | `site_keywords` and `site_keyword_discoveries` (the discovery of kind `competitor` carries competitor, position and page) |
+| SEOKeywordCluster | `site_topic_clusters` (existing); `site_keywords.cluster` |
+| SEODomain, SEOCompetitor | `competitors` (existing) and the site's own domain |
+| SEOSerpSnapshot, SEOSourceEvidence | `seo_snapshots` and `provider_cache_entries` (existing); `content_opportunities.evidence` |
+| SEOMarket | `SeoMarket` in code; locale or country and language in each row |
+| SiteOpportunity | `content_opportunities` (existing) plus market, run and reservation |
+| SEOResearchRun, SEOResearchTask | `seo_research_runs`, `seo_research_tasks` |
+| SEOResearchPolicy, research profile | `site_research_profiles` (`policy`, `derived`, `corrections`) |
+
+1. **Knowledge** (`knowledge.ts`). The manager records every metric it buys, whoever asked: values, provenance per field, completeness, licence at the
+   time and retention. Figures of different sources are never merged; a keyword its provider cannot measure may use another source's figures as that source's.
+2. **Profile** (`profile.ts`). Derived from stored data, without models or providers, at most once a day. Each field says who says it: corrected,
+   configured, approved, observed, detected or unknown. Rebuilding never touches corrections, and corrected topics, exclusions and audience also reach the
+   planner and the analysis (`applyCorrections`).
+3. **Reservoir** (`reservoir.ts`). The eleven stages and the enrichment level (0-5) are derived from the stored statuses (`stageOf`, `levelOf`), so they cannot
+   drift from them. A plan generation reserves its keywords under a lock of the site, variants included, for an hour; the article claims its
+   opportunity in the transaction that creates it. Deleted and canceled articles give theirs back; a rejected one drops it.
+4. **Triggers** (`triggers.ts`). New market, topic or verified competitor, season, change of own traffic, old evidence, lack of opportunities, pending plan, or a
+   person. Each has a key that is never researched twice for the site; lack of opportunities has a cooldown. No trigger looks at the calendar month.
+5. **Runs** (`runs.ts`). Tasks are checkpoints: site, first-party data, profile, gaps, purchases, screening, metrics, SERP, inventory. One open run per site (unique
+   key), one worker per run (lease). Each purchase stops if there are already enough good opportunities, if the run's limit would be passed, or if the governor
+   refuses. Reservations carry the run, and the dispatch statement itself requires it to be running: a pause or a cancellation cannot be raced.
+6. **Planning never buys.** It reads the reservoir and stored answers. If they cannot feed the plan and nothing was researched during the cooldown, it asks for a run, waits
+   up to 90 s and goes on with what there is; the worker finishes the rest.
+
+Worker: interval `seo-research` of the control worker (`SEO_RESEARCH_INTERVAL_MS`, 60 s). It continues open runs and, where the
+platform allows automatic research (off by default), checks each site with recent editorial activity every six hours. Onboarding has a `research` step. Studio: `/studio/seo-research`.
+
+Decisions:
+
+- **No lifecycle column**: eleven stages next to the nine statuses people and the engine already use would be two truths.
+- **Search Console queries never enter** `site_keywords`: they stay in their tables and opportunities, and go when the owner deletes them.
+- **The own-domain ranking is bought only without Search Console**, and counts within the competitor batches.
+- **SERP lookups need a known price**; today DataForSEO's is unknown and AnyAPI is locked, so none is made.
+- **The crawl is reused, not started**: indexing is the site index's job.

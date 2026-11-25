@@ -114,7 +114,8 @@ const STATES: Record<string, string> = { reserved: 'reservada', dispatched: 'en 
           <span class="au-row__title">{{ capabilities[c] }}</span>
           <input class="au-input num" type="number" min="1" [(ngModel)]="freshness[c]" [name]="'f-' + c" [attr.aria-label]="'Días de frescura: ' + capabilities[c]" /><span class="au-row__meta">días</span>
         </div>
-        <button class="au-btn au-mt-2" type="button" (click)="saveFreshness()">Guardar frescura</button>
+        <label class="au-row"><input type="checkbox" name="automatic-research" [(ngModel)]="automaticResearch" /><span>Dejar que la investigación SEO empiece sola cuando haya un motivo, dentro de los límites</span></label>
+        <button class="au-btn au-mt-2" type="button" (click)="saveFreshness()">Guardar frescura e investigación</button>
       </section>
 
       <section class="au-panel au-panel--padded au-mt-4">
@@ -156,6 +157,7 @@ export class SeoGovernorSettingsComponent implements OnInit {
   notes: Record<string, string> = {};
   ceilings: Record<string, number | null> = {};
   freshness: Record<string, number> = {};
+  automaticResearch = false;
 
   ngOnInit(): void {
     this.load();
@@ -182,6 +184,7 @@ export class SeoGovernorSettingsComponent implements OnInit {
       next: (data) => {
         this.data = data;
         for (const id of Object.keys(SEO_CAPABILITY_LABELS)) this.freshness[id] = data.policy.freshness[id].days;
+        this.automaticResearch = data.policy['automaticResearch'] === true;
       },
       error: (e: { status?: number }) => { if (e.status !== 403) this.toast.error('No se han podido cargar los presupuestos SEO.'); },
     });
@@ -244,6 +247,6 @@ export class SeoGovernorSettingsComponent implements OnInit {
 
   saveFreshness(): void {
     const { freshness: _current, ...policy } = this.data!.policy;
-    this.api.setSeoPolicy({ ...policy, freshnessDays: this.freshness }).subscribe(this.after('Frescura guardada.'));
+    this.api.setSeoPolicy({ ...policy, automaticResearch: this.automaticResearch, freshnessDays: this.freshness }).subscribe(this.after('Guardado.'));
   }
 }

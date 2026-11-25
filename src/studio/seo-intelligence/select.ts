@@ -132,7 +132,9 @@ export function decideOpportunities(drafts: Draft[], ctx: DecisionContext): Deci
       effort: EFFORT[draft.action].label,
       externalData: draft.source === "provider"
         ? { required: true, used: ["Proveedor SEO"], detail: "Usa datos de un proveedor externo ya guardados; no se ha comprado nada para esta decisión." }
-        : { required: false, used: [], detail: firstParty ? "No ha hecho falta ningún dato externo de pago." : "Usa páginas públicas de competidores ya leídas; sin coste de proveedor." },
+        : draft.source === "research"
+          ? { required: true, used: ["Proveedor SEO"], detail: "Se apoya en datos que compró la investigación del sitio; no se ha comprado nada para esta decisión." }
+          : { required: false, used: [], detail: firstParty ? "No ha hecho falta ningún dato externo de pago." : "Usa páginas públicas de competidores ya leídas; sin coste de proveedor." },
       risks: draft.risks,
       safeguards: [],
       profile: ctx.profile,

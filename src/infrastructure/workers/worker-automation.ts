@@ -6,6 +6,7 @@ import { runIntervalWorker } from "./worker-runtime";
 import { structuredEvent } from "../../shared/utils/logger";
 import { runSearchConsoleTick } from "../../studio/search-console";
 import { analyzeSite } from "../../studio/seo-intelligence";
+import { runResearchTick } from "../../studio/seo-research/runs";
 import { assertRedisConfigured } from "../queue/redis";
 
 /** One control-plane process owns planning, scheduling and watchdog checks. */
@@ -49,6 +50,13 @@ export async function runControlWorker() {
         intervalMs: Math.max(60_000, getNumberEnv("SEARCH_CONSOLE_INTERVAL_MS", 120_000)),
         tick: async () => {
           await runSearchConsoleTick(analyzeSite);
+        },
+      },
+      {
+        name: "seo-research",
+        intervalMs: Math.max(30_000, getNumberEnv("SEO_RESEARCH_INTERVAL_MS", 60_000)),
+        tick: async () => {
+          await runResearchTick();
         },
       },
     ],

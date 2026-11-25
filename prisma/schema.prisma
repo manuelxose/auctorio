@@ -412,6 +412,10 @@ model Tenant {
   // assistant (agent E)
   copilotActions                 CopilotAction[]
 
+  seoKeywordMetrics    SeoKeywordMetric[]
+  siteKeywords         SiteKeyword[]
+  siteResearchProfiles SiteResearchProfile[]
+  seoResearchRuns      SeoResearchRun[]
   @@map("tenants")
 }
 
@@ -629,6 +633,9 @@ model Site {
   // production (agent D)
   productionJobs         ProductionJob[]
 
+  siteKeywords         SiteKeyword[]
+  siteResearchProfile  SiteResearchProfile?
+  seoResearchRuns      SeoResearchRun[]
   @@unique([tenantId, key])
   @@index([tenantId, type])
   @@map("sites")
@@ -2673,7 +2680,7 @@ model ContentOpportunity {
   targetUrl       String?   @map("target_url")
   status          String    @default("open")
   planItemId      String?   @map("plan_item_id") @db.Uuid
-  /// competitor | search_console | crawl | provider
+  /// competitor | search_console | crawl | provider | research
   source          String    @default("competitor")
   query           String?
   /// One of SEO_ACTIONS (src/studio/seo-intelligence/scoring.ts); null = not scored yet.
@@ -2687,6 +2694,12 @@ model ContentOpportunity {
   /// Set when a person decided: the engine stops changing the status.
   decidedAt       DateTime? @map("decided_at")
   analyzedAt      DateTime? @map("analyzed_at")
+  /// Locale it was researched for; null = the site's own.
+  market          String?
+  researchRunId   String?   @map("research_run_id") @db.Uuid
+  /// Plan generation holding it; free again after reservedUntil.
+  reservedBy      String?   @map("reserved_by") @db.Uuid
+  reservedUntil   DateTime? @map("reserved_until")
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
@@ -3232,6 +3245,8 @@ model SeoSpendReservation {
   id               String    @id @default(uuid()) @db.Uuid
   idempotencyKey   String    @unique @map("idempotency_key")
   tenantId         String    @map("tenant_id") @db.Uuid
+  /// Research run that asked for it: its request leaves only while the run is running.
+  runId            String?   @map("run_id") @db.Uuid
   /// Not named siteId: a platform ledger must not be filtered by the request's active site.
   targetSiteId     String?   @map("target_site_id") @db.Uuid
   providerId       String    @map("provider_id")
@@ -3258,6 +3273,7 @@ model SeoSpendReservation {
   @@index([tenantId, createdAt])
   @@index([state, leaseUntil])
   @@index([providerId, dispatchedAt])
+  @@index([runId])
   @@map("seo_spend_reservations")
 }
 
@@ -3423,4 +3439,189 @@ model SeoAction {
 
   @@index([tenantId, siteId, actedAt])
   @@map("seo_actions")
+}
+
+/// Market intelligence: what a provider said of a keyword in a market, one row per change. Holds no site data.
+model SeoKeywordMetric {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  providerId    String   @map("provider_id")
+  /// Method within the provider (its sourceTag); values of different sources are never merged.
+  source        String
+  country       String
+  language      String
+  keyword       String
+  volume        Int?
+  difficulty    Float?
+  cpc           Float?
+  intent        String?
+  /// Per-field provenance (FieldProvenance): a field absent was never asked, one listed with a null value is unavailable.
+  fields        Json
+  /// Share of the metric fields that are known, 0-100.
+  quality       Int
+  /// Rights when it was collected: permitted | prohibited | unverified.
+  storage       String
+  sharing       String
+  reservationId String?  @map("reservation_id") @db.Uuid
+  collectedAt   DateTime @map("collected_at")
+  /// Last time the same values came back.
+  confirmedAt   DateTime @map("confirmed_at")
+  retainUntil   DateTime @map("retain_until")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, country, language, keyword])
+  @@index([country, language, keyword])
+  @@index([retainUntil])
+  @@map("seo_keyword_metrics")
+}
+
+/// Private to the site: what a keyword is to it. Search Console queries never enter (they stay in their own tables).
+model SiteKeyword {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  siteId        String   @map("site_id") @db.Uuid
+  /// Locale.
+  market        String
+  keyword       String
+  /// Accent- and stopword-insensitive identity.
+  keywordKey    String   @map("keyword_key")
+  /// candidate | opportunity | rejected
+  status        String   @default("candidate")
+  /// Why it was rejected.
+  reason        String?
+  /// Progressive enrichment: 0 candidate, 1 metrics, 2 site relevance.
+  level         Int      @default(0)
+  score         Int?
+  cluster       String?
+  opportunityId String?  @map("opportunity_id") @db.Uuid
+  firstSeenAt   DateTime @default(now()) @map("first_seen_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site        Site                   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  discoveries SiteKeywordDiscovery[]
+
+  @@unique([siteId, market, keywordKey])
+  @@index([tenantId, siteId, status])
+  @@map("site_keywords")
+}
+
+/// Where a site's keyword came from; with kind "competitor" it is also what that competitor ranks for.
+model SiteKeywordDiscovery {
+  id            String   @id @default(uuid()) @db.Uuid
+  tenantId      String   @map("tenant_id") @db.Uuid
+  siteKeywordId String   @map("site_keyword_id") @db.Uuid
+  /// opportunity | site_topic | cluster | competitor | own_ranking
+  kind          String
+  /// Seed or domain.
+  value         String
+  competitorId  String?  @map("competitor_id") @db.Uuid
+  position      Int?
+  url           String?
+  providerId    String   @map("provider_id")
+  runId         String?  @map("run_id") @db.Uuid
+  discoveredAt  DateTime @map("discovered_at")
+  retainUntil   DateTime @map("retain_until")
+
+  keyword SiteKeyword @relation(fields: [siteKeywordId], references: [id], onDelete: Cascade)
+
+  @@unique([siteKeywordId, kind, value])
+  @@index([tenantId, competitorId])
+  @@index([retainUntil])
+  @@map("site_keyword_discoveries")
+}
+
+/// What research knows of a website, what people corrected, and its research policy.
+model SiteResearchProfile {
+  id               String    @id @default(uuid()) @db.Uuid
+  tenantId         String    @map("tenant_id") @db.Uuid
+  siteId           String    @unique @map("site_id") @db.Uuid
+  /// Rebuilt from stored data at will.
+  derived          Json?
+  derivedAt        DateTime? @map("derived_at")
+  /// Only people change it, and it always wins.
+  corrections      Json?
+  reviewedAt       DateTime? @map("reviewed_at")
+  reviewedByUserId String?   @map("reviewed_by_user_id") @db.Uuid
+  /// Overrides of the research policy.
+  policy           Json?
+  nextCheckAt      DateTime? @map("next_check_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@index([nextCheckAt])
+  @@map("site_research_profiles")
+}
+
+model SeoResearchRun {
+  id                String    @id @default(uuid()) @db.Uuid
+  tenantId          String    @map("tenant_id") @db.Uuid
+  siteId            String    @map("site_id") @db.Uuid
+  /// RESEARCH_TRIGGERS (src/studio/seo-research/policy.ts)
+  trigger           String
+  /// Same key = same research: never repeated for the site.
+  triggerKey        String?   @map("trigger_key")
+  /// Why it is justified, and what it must look at.
+  reason            Json
+  /// The site id while it is not finished: one open run per site.
+  activeKey         String?   @unique @map("active_key") @db.Uuid
+  /// queued | running | paused | succeeded | partial | failed | cancelled
+  status            String    @default("queued")
+  policy            Json
+  maxUsd            Float     @map("max_usd")
+  /// Maximum price of the purchases it planned; null = not planned yet.
+  estimatedUsd      Float?    @map("estimated_usd")
+  summary           Json?
+  error             String?
+  leaseId           String?   @map("lease_id") @db.Uuid
+  leaseUntil        DateTime? @map("lease_until")
+  nextAt            DateTime? @map("next_at")
+  requestedByUserId String?   @map("requested_by_user_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at")
+  startedAt         DateTime? @map("started_at")
+  finishedAt        DateTime? @map("finished_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site              @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  tasks  SeoResearchTask[]
+
+  @@unique([siteId, triggerKey])
+  @@index([tenantId, siteId, createdAt])
+  @@index([status, nextAt])
+  @@map("seo_research_runs")
+}
+
+/// A step of a run and its checkpoint: a finished one is never done again.
+model SeoResearchTask {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @map("tenant_id") @db.Uuid
+  siteId     String    @map("site_id") @db.Uuid
+  runId      String    @map("run_id") @db.Uuid
+  position   Int
+  kind       String
+  subject    String    @default("")
+  market     String    @default("")
+  /// pending | running | succeeded | skipped | failed | cancelled
+  status     String    @default("pending")
+  /// Why it may buy, or why it did not.
+  reason     String?
+  /// Asked for by the trigger: not cut short when there are enough opportunities.
+  focus      Boolean   @default(false)
+  attempts   Int       @default(0)
+  maxUsd     Float?    @map("max_usd")
+  billedUsd  Float?    @map("billed_usd")
+  result     Json?
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  run SeoResearchRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, kind, subject, market])
+  @@index([tenantId, siteId, kind, status])
+  @@map("seo_research_tasks")
 }

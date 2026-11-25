@@ -56,7 +56,9 @@ has no reservations. Months and days are UTC. Background work may use 80 % of a 
 
 ## Where the saving comes from
 
-- A full, uncached plan costs at most 9 × 0.024 = 0.216 USD. Calls stop once there are as many candidates as the plan can use.
+- A plan buys nothing (SEO-V2-03). A research run costs at most 0.25 USD by default (`maxUsdPerRun`, up to 2): two seed batches and two domain batches (0.096 USD at list
+  price), one metrics batch and three SERP lookups, only if useful. It stops once the good opportunities reach the target.
+- A subject answered in the last 60 days is not asked again, whatever the run.
 - Volume, CPC, difficulty and intent that came with discovery are not bought again; a missing difficulty does not trigger an overview.
 - `search_volume` costs 0.09 USD flat: it waits until at least 10 keywords need it.
 - Freshness: keyword data 75 days (60–90), rankings 60 (30–90), SERP and YouTube 21 (14–30), time-sensitive SERP 3. Nothing is refreshed on a schedule.

@@ -1,6 +1,6 @@
 // Mirrors src/studio/onboarding/orchestrator.ts and src/studio/site-intelligence/strategy.ts.
 
-export type OnboardingStepId = 'index' | 'profile' | 'sources' | 'competitors' | 'strategy' | 'first_plan_offer';
+export type OnboardingStepId = 'index' | 'profile' | 'sources' | 'competitors' | 'strategy' | 'research' | 'first_plan_offer';
 export type OnboardingStepStatus = 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped';
 
 export type OnboardingStepState = {

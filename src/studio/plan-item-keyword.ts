@@ -9,6 +9,7 @@ import { resolveArticleTargets } from "./editorial-engine/structure";
 import { readPlanItemSelection, type PlanItemSelection, type PlanResearch } from "./editorial-plan";
 import { buildEditorialPlanningContext, type EditorialPlanningContext } from "./editorial-plan-context";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
+import { claimKeywords, dropClaim } from "./seo-research/reservoir";
 import { keywordContentType, screenKeywords } from "./plan-keywords";
 import { getSitePlanningSettings } from "./planning-settings";
 import { registerSearchTargets } from "./site-intelligence";
@@ -138,6 +139,9 @@ export async function changePlanItemKeyword(tenantId: string, itemId: string, ra
   });
   if (changed.count !== 1) throw new Error("editorial_plan_item_keyword_locked");
 
+  // The inventory follows the person's choice: the old opportunity is discarded, the new one is this article's.
+  await dropClaim(tenantId, item.siteId, item.id);
+  await claimKeywords(tenantId, item.siteId, [{ keyword, planItemId: item.id }]);
   // Ordinary editing never buys data: only what is already stored.
   await enrichPlanItemsWithKeywordMetrics(tenantId, item.planId, undefined, { reuseOnly: true });
   // The old keyword stays registered on purpose: it was discarded by a person, so the plan does not propose it again.

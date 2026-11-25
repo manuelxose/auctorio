@@ -4,7 +4,7 @@
  * handler so parallel modules (sources, competitors, ...) stay decoupled.
  * A step without a registered handler is recorded as "skipped", never as done.
  */
-export const ONBOARDING_STEPS = ["index", "profile", "sources", "competitors", "strategy", "first_plan_offer"] as const;
+export const ONBOARDING_STEPS = ["index", "profile", "sources", "competitors", "strategy", "research", "first_plan_offer"] as const;
 export type OnboardingStepId = (typeof ONBOARDING_STEPS)[number];
 
 export type OnboardingStepContext = {

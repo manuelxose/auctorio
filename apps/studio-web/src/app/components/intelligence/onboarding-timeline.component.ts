@@ -12,6 +12,7 @@ const STEP_LABELS: Record<OnboardingStepId, { title: string; text: string }> = {
   sources: { title: 'Find sources', text: 'Feeds and references that fit the site.' },
   competitors: { title: 'Map competitors', text: 'Sites covering the same topics.' },
   strategy: { title: 'Suggest an editorial strategy', text: 'Pillars, audience and formats for you to review. Nothing is approved for you.' },
+  research: { title: 'Keyword research', text: 'Finds search opportunities within the spending limits; what is already known is not bought again.' },
   first_plan_offer: { title: 'Ready for the first plan', text: 'Nothing is generated or published until you ask.' },
 };
 

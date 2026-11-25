@@ -84,6 +84,7 @@ export const routes: Routes = [
         data: { studioMeta: { section: 'Sources', title: 'Sources' } },
       },
       { path: 'seo-opportunities', loadComponent: () => import('./pages/seo-opportunities-page.component').then((m) => m.SeoOpportunitiesPageComponent), data: { studioMeta: { section: 'Advanced', title: 'Oportunidades SEO' } } },
+      { path: 'seo-research', loadComponent: () => import('./pages/seo-research-page.component').then((m) => m.SeoResearchPageComponent), data: { studioMeta: { section: 'Advanced', title: 'Investigación SEO' } } },
       { path: 'competitors', loadComponent: () => import('./pages/competitors-page.component').then((m) => m.CompetitorsPageComponent), data: { studioMeta: { section: 'Competitors', title: 'Competitors' } } },
       {
         path: 'automation',

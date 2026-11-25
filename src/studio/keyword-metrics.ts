@@ -8,7 +8,7 @@ import { structuredEvent } from "../shared/utils/logger";
 
 const prisma = getPrismaClient();
 
-type AcquireOptions = Pick<SeoScope, "fetchImpl" | "reuseOnly" | "decision" | "priority">;
+type AcquireOptions = Pick<SeoScope, "fetchImpl" | "reuseOnly" | "decision" | "priority" | "runId">;
 
 /** Metrics per normalized keyword; a keyword the provider has no data for maps to null, one nobody could answer now is absent. */
 export async function getKeywordMetrics(tenantId: string, siteId: string | null, keywords: string[], route: SeoRoute, options: AcquireOptions = {}): Promise<Map<string, KeywordMetrics | null>> {

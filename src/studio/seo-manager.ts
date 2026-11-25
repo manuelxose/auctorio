@@ -31,6 +31,7 @@ import { sha256 } from "../shared/utils/hash";
 import { structuredEvent } from "../shared/utils/logger";
 import { mergeKeywordMetrics, readSeoCache, writeSeoCache, writeSeoSnapshot, type FieldProvenance, type SeoCacheEntry, type SeoCacheRow } from "./seo-cache";
 import { loadSeoControl, readSeoControl } from "./seo-control";
+import { recordKeywordMetrics, type MetricRow } from "./seo-research/knowledge";
 import { dispatchSeoReservation, markSeoReservationUncertain, releaseSeoReservation, reserveSeoSpend, settleSeoReservation, waitForSeoLeases, type SeoPriority, type SeoReservation } from "./seo-governor";
 
 export { loadSeoControl } from "./seo-control";
@@ -84,6 +85,8 @@ export type SeoScope = {
   decision?: SeoDecision;
   /** Stored data only: nothing is bought. */
   reuseOnly?: boolean;
+  /** Research run the purchase belongs to. */
+  runId?: string;
 };
 
 /** Request options the provider does not declare are refused before anything is sent. */
@@ -191,7 +194,7 @@ async function sendReserved<C extends SeoCapability>(
   };
   if (!(await dispatchSeoReservation(reservation.id, provider.id))) {
     await account(() => releaseSeoReservation(reservation.id, "stopped_before_dispatch"));
-    const reason = seoBlockReason(provider, capability, null, await readSeoControl(), "authorized_test") ?? "provider_disabled";
+    const reason = seoBlockReason(provider, capability, null, await readSeoControl(), "authorized_test") ?? (scope.runId ? "run_stopped" : "provider_disabled");
     throw new SeoProviderError(reason, `${provider.id}: stopped before sending (${reason})`, provider.id, 0);
   }
   let result: SeoAdapterResult<C>;
@@ -259,11 +262,14 @@ async function keepAnswer<C extends SeoCapability>(route: SeoRoute, capability: 
   const declaration = provider.capabilities[capability];
   const base = { asOf: result.asOf, upstream: result.upstream, methodology: declaration.supported ? declaration.methodology : "" };
   const store = (cap: SeoCapability, rows: SeoCacheRow[]) => writeSeoCache(tenantId, provider.id, cap, rows, fetchedAt, days);
+  const learn = (rows: MetricRow[]) => recordKeywordMetrics({ tenantId, provider, source: declaration.supported ? declaration.sourceTag : provider.id, market, rows, reservationId, fetchedAt, retentionDays: days });
 
   if (capability === "search_volume") {
     const volumes = new Map((result.data as KeywordVolume[]).map((row) => [row.keyword, row.volume]));
     const rows = bought.filter(({ subject }) => volumes.has(subject) || !result.partial);
     await store(capability, rows.map(({ subject, key }) => ({ key, payload: volumes.get(subject) ?? null, negative: !volumes.has(subject), meta: base })));
+    const provenance: FieldProvenance = { at: fetchedAt.toISOString(), via: capability, kind: declaration.supported ? declaration.dataKind : "unknown", asOf: result.asOf, upstream: result.upstream };
+    await learn(rows.map(({ subject }) => ({ keyword: subject, values: { volume: volumes.get(subject) ?? null, difficulty: null, cpc: null, intent: null }, fields: { volume: provenance } })));
   } else if (capability !== "keyword_metrics") {
     const data = result.data as unknown[];
     // Nothing left of a partial answer is not "no data": it is asked again next time.
@@ -279,15 +285,21 @@ async function keepAnswer<C extends SeoCapability>(route: SeoRoute, capability: 
     const existing = await readSeoCache(tenantId, provider.id, "keyword_metrics", keywords.map((keyword) => ({ key: keyOf(keyword), legacyKey: null })), days, fetchedAt);
     const provenance: FieldProvenance = { at: fetchedAt.toISOString(), via: capability, kind: declaration.supported ? declaration.fieldKinds?.volume ?? declaration.dataKind : "unknown", asOf: result.asOf, upstream: result.upstream };
     const rows: SeoCacheRow[] = [];
+    const learned: MetricRow[] = [];
     for (const keyword of keywords) {
       const known = existing.get(keyOf(keyword));
       const row = metrics.get(keyword);
       if (row) {
         const merged = mergeKeywordMetrics(known && !known.negative ? { payload: known.payload as KeywordMetrics, meta: known.meta } : null, { ...row, keyword }, provenance);
         rows.push({ key: keyOf(keyword), payload: merged.payload, negative: false, meta: { ...base, ...merged.meta }, fetchedAt: new Date(merged.meta.fields!.volume!.at) });
-      } else if (!result.partial && (!known || known.negative)) rows.push({ key: keyOf(keyword), payload: null, negative: true, meta: base });
+        learned.push({ keyword, values: merged.payload, fields: merged.meta.fields! });
+      } else if (!result.partial && (!known || known.negative)) {
+        rows.push({ key: keyOf(keyword), payload: null, negative: true, meta: base });
+        learned.push({ keyword, values: { volume: null, difficulty: null, cpc: null, intent: null }, fields: { volume: provenance } });
+      }
     }
     await store("keyword_metrics", rows);
+    await learn(learned);
   }
   await writeSeoSnapshot({
     tenantId, providerId: provider.id, capability, cacheKey: bought.length === 1 ? bought[0].key : `batch:${bought.length}:${sha256(bought.map(({ key }) => key).join("\n")).slice(0, 16)}`,
@@ -351,7 +363,7 @@ async function acquireNow<C extends SeoCapability>(route: SeoRoute, capability: 
         if (selected.id !== provider.id) throw new SeoProviderError("provider_disabled", `${capability}: ${provider.id} is no longer the selected provider`, provider.id, 0);
         const reserved = await reserveSeoSpend({
           tenantId: scope.tenantId, siteId: scope.siteId, provider, capability, kind: scope.kind, resource: SEO_RESOURCES[capability], keys: chunk.map(({ leaseKey }) => leaseKey),
-          quote: (keys) => quoteOf(pick(keys)), priority: scope.priority, locks: scope.locks,
+          quote: (keys) => quoteOf(pick(keys)), priority: scope.priority, locks: scope.locks, runId: scope.runId,
         });
         busy.push(...pick(reserved.busy));
         for (const { key, code } of reserved.blocked) refuse([byLease.get(key)!], code);
@@ -459,7 +471,7 @@ type Batch = { keywords: Set<string>; result: Promise<unknown> };
 const batches = new Map<string, Batch>();
 
 function coalesced<C extends SeoCapability>(route: SeoRoute, capability: C, request: SeoRequests[C], scope: SeoScope, keywords: string[]): Promise<SeoResult<C>> {
-  const group = [scope.tenantId, scope.siteId, scope.kind, route.provider.id, capability, route.marketKey, route.market.country, route.market.language, scope.reuseOnly ? "reuse" : "buy", scope.locks ? "locks" : "", scope.priority ?? "", JSON.stringify(scope.decision ?? null)].join("|");
+  const group = [scope.tenantId, scope.siteId, scope.kind, route.provider.id, capability, route.marketKey, route.market.country, route.market.language, scope.reuseOnly ? "reuse" : "buy", scope.locks ? "locks" : "", scope.priority ?? "", scope.runId ?? "", JSON.stringify(scope.decision ?? null)].join("|");
   let batch = batches.get(group);
   if (!batch) {
     const set = new Set<string>();

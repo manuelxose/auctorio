@@ -34,7 +34,7 @@ export type SearchData = {
 
 export type Evidence = { metric: string; value: number | string | null; kind: DataKind; source: "search_console" | "crawl" | "url_inspection" | "competitors" | "provider"; period?: string; note?: string };
 export type Draft = {
-  source: "search_console" | "crawl" | "competitor" | "provider";
+  source: "search_console" | "crawl" | "competitor" | "provider" | "research";
   kind: string;
   topic: string;
   query: string | null;

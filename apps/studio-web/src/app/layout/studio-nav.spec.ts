@@ -17,7 +17,7 @@ describe('studio nav (M5)', () => {
   it('keeps the specialist tools under Advanced', () => {
     const advanced = STUDIO_NAV.find((group) => group.id === 'advanced')!;
     expect(advanced.items.map((item) => item.label)).toEqual([
-      'Site Intelligence', 'Oportunidades SEO', 'Competidores', 'Fuentes', 'Inbox', 'Plan editorial', 'Cola de revisión', 'Biblioteca multimedia', 'Trabajos en segundo plano',
+      'Site Intelligence', 'Oportunidades SEO', 'Investigación SEO', 'Competidores', 'Fuentes', 'Inbox', 'Plan editorial', 'Cola de revisión', 'Biblioteca multimedia', 'Trabajos en segundo plano',
     ]);
   });
 

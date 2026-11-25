@@ -81,5 +81,5 @@ test("there is one way to a provider and one way to spend: the manager and the g
   assert.deepEqual(using(/api\.dataforseo\.com|api\.getanyapi\.com\/v1/), ["src/infrastructure/seo/anyapi.ts", "src/infrastructure/seo/dataforseo.ts"]);
   assert.deepEqual(using(/seoSpendReservation\.(create|update|delete|upsert)|(UPDATE|INSERT INTO|DELETE FROM) seo_spend_reservations/), ["src/studio/seo-governor.ts"]);
   // No GET route buys: routes never call the manager to acquire.
-  assert.deepEqual(using(/\bacquireSeo\(/), ["src/studio/keyword-candidates.ts", "src/studio/keyword-metrics.ts", "src/studio/serp-sources.ts", "src/studio/youtube-videos.ts"]);
+  assert.deepEqual(using(/\bacquireSeo\(/), ["src/studio/keyword-candidates.ts", "src/studio/keyword-metrics.ts", "src/studio/seo-research/runs.ts", "src/studio/serp-sources.ts", "src/studio/youtube-videos.ts"]);
 });

@@ -46,6 +46,21 @@ export function applyApprovedStrategy(profile: SiteIntelligenceProfileSummary, c
   };
 }
 
+/** What a person corrected in the research profile beats what was detected. Pure. */
+export function applyCorrections(profile: PlanningProfile | null, corrections: { topics?: string[]; excludedTopics?: string[]; audience?: string }): PlanningProfile | null {
+  if (!profile) return profile;
+  const { topics = [], excludedTopics = [], audience } = corrections;
+  if (!topics.length && !excludedTopics.length && !audience) return profile;
+  const banned = new Set(excludedTopics.map((topic) => topic.toLowerCase()));
+  return {
+    ...profile,
+    mainTopics: [...new Set([...topics, ...(profile.mainTopics ?? [])])].filter((topic) => !banned.has(topic.toLowerCase())),
+    excludedTopics: [...new Set([...(profile.excludedTopics ?? []), ...excludedTopics])],
+    strategyExclusions: [...new Set([...(profile.strategyExclusions ?? []), ...excludedTopics])],
+    detectedAudience: audience ?? profile.detectedAudience,
+  };
+}
+
 export type PlanningEvidence = {
   sourceType: "source" | "source_item" | "indexed-page" | "profile";
   url?: string;
@@ -148,8 +163,9 @@ export async function buildEditorialPlanningContext(tenantId: string, siteId: st
     }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId }, orderBy: { pagesCount: "desc" }, take: 25 }),
   ]);
-  const profile: PlanningProfile | null = detectedProfile && approved ? applyApprovedStrategy(detectedProfile, approved.config) : detectedProfile;
-  const exclusions = approved ? strategyExclusions(approved.config) : [];
+  const corrections = ((await prisma.siteResearchProfile.findFirst({ where: { tenantId, siteId }, select: { corrections: true } }))?.corrections ?? {}) as { topics?: string[]; excludedTopics?: string[]; audience?: string };
+  const profile = applyCorrections(detectedProfile && approved ? applyApprovedStrategy(detectedProfile, approved.config) : detectedProfile, corrections);
+  const exclusions = [...new Set([...(approved ? strategyExclusions(approved.config) : []), ...(corrections.excludedTopics ?? [])])];
   const excludedSlugs = new Set(approved?.config.pillars.filter((pillar) => !pillar.included).map((pillar) => pillar.clusterSlug ?? pillar.name.toLowerCase()) ?? []);
   const clusters = allClusters.filter((cluster) => !excludedSlugs.has(cluster.slug) && !excludedSlugs.has(cluster.name.toLowerCase()));
 

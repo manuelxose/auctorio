@@ -192,7 +192,7 @@ export type SeoErrorCode =
   | "external_disabled" | "provider_disabled" | "not_selected" | "not_configured" | "unsupported_capability" | "unsupported_market"
   | "paid_automation_locked" | "automatic_routing_locked" | "unknown_price" | "spend_limit" | "network_blocked" | "bad_request"
   | "emergency_stop" | "license_prohibited" | "budget_exhausted" | "circuit_open" | "quota_wait" | "acquisition_in_progress"
-  | "billing_uncertain" | "retry_cooldown" | "duplicate_request" | "reuse_only" | "not_worth_cost"
+  | "billing_uncertain" | "retry_cooldown" | "duplicate_request" | "reuse_only" | "not_worth_cost" | "run_stopped"
   | "invalid_credentials" | "insufficient_balance" | "rate_limited" | "timeout" | "malformed_response" | "upstream_error";
 
 const RETRYABLE: ReadonlySet<SeoErrorCode> = new Set(["rate_limited", "timeout", "upstream_error"]);
