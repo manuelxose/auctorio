@@ -16,6 +16,10 @@ import {
 import { readSeoControl } from "./seo-control";
 import { OPPORTUNITY_DECISIONS, analyzeSite, completeSeoOpportunity, decideSeoOpportunity, getSeoProfile, listSeoOpportunities, saveSeoProfile } from "./seo-intelligence";
 import { outcomeSummary } from "./seo-intelligence/attribution";
+import { listSiteKeywords } from "./seo-research/knowledge";
+import { saveResearchProfile } from "./seo-research/profile";
+import { RUN_CONTROLS, controlResearchRun, estimateResearch, getResearchOverview, getResearchRun, requestResearch } from "./seo-research/runs";
+import type { ResearchFocus } from "./seo-research/triggers";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 
 const prisma = getPrismaClient();
@@ -23,6 +27,7 @@ const prisma = getPrismaClient();
 const STATUS: Record<string, number> = {
   site_not_found: 404, opportunity_not_found: 404, search_console_not_connected: 409, search_console_not_configured: 503, opportunity_already_acted: 409, opportunity_conflicts_with_approved: 409, opportunity_changed: 409,
   search_console_syncing: 409, external_seo_stopped: 409, site_base_url_required: 400, search_console_unknown_state: 400, search_console_state_expired: 400, search_console_property_not_allowed: 400, invalid_profile: 400, invalid_weights: 400,
+  research_run_not_found: 404, research_run_not_controllable: 409, research_already_running: 409, research_disabled: 409, research_manual_only: 409, invalid_corrections: 400, invalid_policy: 400,
   invalid_priority_topics: 400, invalid_holdout_percent: 400, url_required: 400, url_not_of_this_site: 400,
 };
 
@@ -37,6 +42,16 @@ function fail(reply: FastifyReply, error: unknown) {
 }
 
 type Params = { siteId: string; id?: string };
+
+/** Subjects a person asks to research. */
+function parseFocus(value: unknown): ResearchFocus | null {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const { topics = [], market, ...rest } = value as { topics?: unknown; market?: unknown };
+  if (Object.keys(rest).length || !Array.isArray(topics) || topics.length > 5 || topics.some((topic) => typeof topic !== "string" || !topic.trim() || topic.length > 80)) return null;
+  if (market !== undefined && (typeof market !== "string" || !/^[a-z]{2}-[A-Z]{2}$/.test(market))) return null;
+  return { ...(topics.length ? { topics: topics as string[] } : {}), ...(market ? { market } : {}) };
+}
 
 export function registerSeoIntelligenceRoutes(fastify: FastifyInstance) {
   const route = (method: "GET" | "POST" | "PUT" | "DELETE", path: string, permission: StudioPermission, run: (context: StudioRequestContext, params: Params, request: FastifyRequest, reply: FastifyReply) => Promise<unknown>) =>
@@ -125,6 +140,32 @@ export function registerSeoIntelligenceRoutes(fastify: FastifyInstance) {
     if (!Number.isFinite(actedAt.getTime()) || actedAt.getTime() > Date.now() + 60_000 || actedAt.getFullYear() < 2015) return badRequest(reply, "actedAt must be a past date");
     return completeSeoOpportunity(context.tenantId, siteId, id!, { actedAt, url: parseOptionalString(body.url) ?? null }, context.userId);
   });
+
+  // Research. Reading never buys; a run buys only through the manager and the governor.
+  route("GET", "seo-research", "analytics.read", (context, { siteId }) => getResearchOverview(context.tenantId, siteId));
+  route("GET", "seo-research/keywords", "analytics.read", async (context, { siteId }, request) => {
+    const status = parseOptionalString((request.query as { status?: string }).status) ?? undefined;
+    return { items: await listSiteKeywords(context.tenantId, siteId, { status }) };
+  });
+  route("PUT", "seo-research/profile", "projects.manage", (context, { siteId }, request) => {
+    const body = parseBody<{ corrections?: unknown; reviewed?: boolean }>(request);
+    return saveResearchProfile(context.tenantId, siteId, { corrections: body.corrections, reviewed: body.reviewed === true }, context.userId);
+  });
+  route("PUT", "seo-research/policy", "workspace.manage", (context, { siteId }, request) => saveResearchProfile(context.tenantId, siteId, { policy: parseBody<{ policy?: unknown }>(request).policy ?? null }, context.userId));
+  route("POST", "seo-research/estimate", "projects.manage", async (context, { siteId }, request, reply) => {
+    const focus = parseFocus(parseBody<{ focus?: unknown }>(request).focus);
+    return focus ? estimateResearch(context.tenantId, siteId, focus) : badRequest(reply, "invalid focus");
+  });
+  route("POST", "seo-research/runs", "projects.manage", async (context, { siteId }, request, reply) => {
+    const body = parseBody<{ focus?: unknown; maxUsd?: unknown }>(request);
+    const focus = parseFocus(body.focus);
+    if (!focus) return badRequest(reply, "invalid focus");
+    if (body.maxUsd !== undefined && (typeof body.maxUsd !== "number" || !Number.isFinite(body.maxUsd) || body.maxUsd < 0)) return badRequest(reply, "invalid maxUsd");
+    const { runId, created } = await requestResearch({ tenantId: context.tenantId, siteId, userId: context.userId, trigger: "manual", triggerKey: null, detail: "Pedida por una persona.", focus, maxUsd: body.maxUsd as number | undefined });
+    return { created, run: await getResearchRun(context.tenantId, siteId, runId) };
+  });
+  route("GET", "seo-research/runs/:id", "analytics.read", (context, { siteId, id }) => getResearchRun(context.tenantId, siteId, id!));
+  for (const control of RUN_CONTROLS) route("POST", `seo-research/runs/:id/${control}`, "projects.manage", (context, { siteId, id }) => controlResearchRun(context.tenantId, siteId, id!, control, context.userId));
 
   route("GET", "seo-profile", "analytics.read", (context, { siteId }) => getSeoProfile(context.tenantId, siteId));
   route("PUT", "seo-profile", "workspace.manage", (context, { siteId }, request) => saveSeoProfile(context.tenantId, siteId, parseBody(request), context.userId));

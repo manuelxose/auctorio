@@ -115,7 +115,7 @@ test("ONB-01: activating a website creates one onboarding run whose steps run in
   const siteId = body.initialization.siteId;
 
   const run = await waitForRun(tenant.id, siteId);
-  assert.deepEqual(run.steps.map((step) => step.id), ["index", "profile", "sources", "competitors", "strategy", "first_plan_offer"]);
+  assert.deepEqual(run.steps.map((step) => step.id), ["index", "profile", "sources", "competitors", "strategy", "research", "first_plan_offer"]);
   assert.deepEqual(run.steps.map((step) => step.status), ["succeeded", "succeeded", "succeeded", "succeeded", "succeeded", "succeeded"]);
   assert.equal(run.status, "succeeded");
   assert.ok(run.steps.every((step) => step.status === "skipped" || (step.startedAt && step.finishedAt)));

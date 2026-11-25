@@ -1,22 +1,22 @@
-// Data first, AI second: the plan's keywords come from the SEO provider (ideas around the site's own
-// topics + keywords accepted competitors rank for), filtered and scored by the app. The model only
-// writes the brief for a keyword it is handed.
+// Data first, AI second: the plan's keywords come from the site's opportunity inventory and from what providers already
+// answered, filtered and scored by the app. The model only writes the brief for a keyword it is handed.
+// Planning never buys: acquiring more is the research engine's decision (seo-research/).
 
 import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
-import { SeoProviderError, normalizeKeyword, type KeywordMetrics } from "../infrastructure/seo/contract";
-import { acquireSeo, seoRoute, type SeoRoute } from "./seo-manager";
+import { SeoProviderError, normalizeDomain, normalizeKeyword, seoMarket, type KeywordMetrics } from "../infrastructure/seo/contract";
+import { acquireSeo, seoRoute, type SeoRoute, type SeoScope } from "./seo-manager";
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import type { EditorialPlanningContext } from "./editorial-plan-context";
 import { structuredEvent } from "../shared/utils/logger";
 import { combineFactors, demandFromImpressions, demandFromVolume, defaultSeoProfile, factor, feasibilityFromPosition, intentValue, isSeoProfile, resolveWeights, type SeoProfile, type Weights } from "./seo-intelligence/scoring";
+import { PLANNABLE, reconcileReservoir, reserveForPlanning, type OpportunityEvidence } from "./seo-research/reservoir";
 
 const prisma = getPrismaClient();
-// Cost caps per plan: ≤5 seeds + ≤3 competitors → ≤9 calls of ≤100 rows (docs/seo-v2/cost-model.md), reused while fresh.
 const MAX_SEEDS = 5;
 const MAX_COMPETITORS = 3;
-const ROWS_PER_CALL = 100;
+export const ROWS_PER_CALL = 100;
 /** Below it a keyword is not proposed as new content. */
 export const MIN_RELEVANCE = 30;
 /** Kept on the plan so an editor can swap a keyword for another measured one. */
@@ -35,12 +35,12 @@ export function reachableDifficultyFor(ownKeywords: KeywordMetrics[]): number {
 }
 
 /** Where a candidate came from: a seed of the site's own (keyword ideas) or a competitor that ranks for it. */
-export type KeywordOrigin = { kind: "opportunity" | "site_topic" | "cluster" | "competitor" | "search_console"; value: string };
+export type KeywordOrigin = { kind: "opportunity" | "site_topic" | "cluster" | "competitor" | "search_console" | "own_ranking"; value: string };
 /** The four factors of the score, each 0–1, as they were when the keyword was chosen; null = unknown, left out of the score. */
 export type KeywordScoreParts = { demand: number | null; winnability: number | null; relevance: number | null; intentFit: number | null };
 /** What Search Console observed for the query on the site itself in the last 28 days. */
 export type FirstPartyEvidence = { impressions: number; clicks: number; position: number | null };
-export type KeywordCandidate = KeywordMetrics & { score: number; variants: string[]; origin?: KeywordOrigin | null; parts?: KeywordScoreParts; firstParty?: FirstPartyEvidence };
+export type KeywordCandidate = KeywordMetrics & { score: number; variants: string[]; origin?: KeywordOrigin | null; parts?: KeywordScoreParts; firstParty?: FirstPartyEvidence; collectedAt?: string; opportunityId?: string };
 /** How the site values a keyword. */
 export type KeywordScoring = { profile: SeoProfile; weights: Weights };
 const PUBLISHER: KeywordScoring = { profile: "publisher", weights: resolveWeights("publisher") };
@@ -203,19 +203,20 @@ export function rankKeywordCandidates(
   return out.slice(0, limit);
 }
 
-async function keywordRows(
+/** One discovery answer of a provider. With reuseOnly it costs nothing and throws `reuse_only` when nothing is stored. */
+export async function keywordRows(
   tenantId: string,
   site: { id: string; type: string },
   route: SeoRoute,
   capability: "keyword_suggestions" | "ranked_keywords",
   subject: string,
-  options: { fetchImpl: typeof fetch; reuseOnly: boolean },
-): Promise<{ rows: KeywordMetrics[]; stale: boolean }> {
-  const scope = { tenantId, siteId: site.id, kind: "keyword_metrics", priority: "planning" as const, decision: { importance: "normal" as const, siteType: site.type }, ...options };
+  options: Pick<SeoScope, "fetchImpl" | "reuseOnly" | "runId" | "priority">,
+) {
+  const scope: SeoScope = { tenantId, siteId: site.id, kind: "keyword_metrics", priority: "planning", decision: { importance: "normal", siteType: site.type }, ...options };
   const { data, meta } = capability === "keyword_suggestions"
     ? await acquireSeo(route, capability, { seed: subject, limit: ROWS_PER_CALL }, scope)
     : await acquireSeo(route, capability, { domain: subject, limit: ROWS_PER_CALL }, scope);
-  return { rows: data, stale: meta.freshness === "stale" };
+  return { rows: data.map((row) => ({ ...row, collectedAt: meta.fetchedAt })), meta };
 }
 
 function seedOrigin(seed: string, context: Pick<EditorialPlanningContext, "profile">, opportunityTopics: string[]): "opportunity" | "site_topic" | "cluster" {
@@ -231,27 +232,41 @@ export function keywordSeeds(context: Pick<EditorialPlanningContext, "profile" |
   return out.slice(0, MAX_SEEDS);
 }
 
-/** Queries Search Console showed for the site that no page of it covers (found by the SEO intelligence engine). */
-async function firstPartyCandidates(tenantId: string, siteId: string) {
+/** Opportunities of the inventory a plan may write: the site's own queries and what research found, in the plan's language. */
+async function inventoryRows(tenantId: string, siteId: string, locale: string) {
+  const now = new Date();
+  const language = seoMarket(locale)?.language;
   const rows = await prisma.contentOpportunity.findMany({
-    where: { tenantId, siteId, source: "search_console", action: "create_content", status: "open", query: { not: null } },
-    orderBy: { priority: { sort: "desc", nulls: "last" } },
-    take: MAX_STORED_CANDIDATES,
-    select: { query: true, evidence: true },
+    where: {
+      tenantId, siteId, source: { in: ["search_console", "research"] }, action: { in: [...PLANNABLE] }, status: { in: ["open", "approved"] }, planItemId: null, query: { not: null },
+      OR: [{ reservedUntil: null }, { reservedUntil: { lte: now } }],
+    },
+    // What a person approved goes first.
+    orderBy: [{ status: "asc" }, { priority: { sort: "desc", nulls: "last" } }],
+    take: MAX_STORED_CANDIDATES * 3,
+    select: { id: true, query: true, source: true, evidence: true, market: true },
   });
-  return rows.flatMap((row) => {
-    const firstParty = (row.evidence as { firstParty?: FirstPartyEvidence & { intent?: string | null } } | null)?.firstParty;
-    if (!row.query || !firstParty) return [];
+  return rows.flatMap<KeywordMetrics & { opportunityId: string; origin: KeywordOrigin | null; firstParty?: FirstPartyEvidence; collectedAt?: string }>((row) => {
+    const evidence = (row.evidence ?? {}) as OpportunityEvidence;
+    const keyword = normalizeKeyword(row.query!);
+    if (row.market && language && seoMarket(row.market)?.language !== language) return [];
+    if (row.source === "search_console") {
+      if (!evidence.firstParty) return [];
+      const { impressions, clicks, position, intent } = evidence.firstParty;
+      return [{ opportunityId: row.id, keyword, volume: null, difficulty: null, cpc: null, intent: intent ?? null, source: "search_console", origin: { kind: "search_console" as const, value: keyword }, firstParty: { impressions, clicks, position } }];
+    }
+    const provider = evidence.provider;
+    // The search results showed a page of the site: improving it is another task.
+    if (!provider || evidence.serp?.ownUrl) return [];
     return [{
-      keyword: normalizeKeyword(row.query), volume: null, difficulty: null, cpc: null, intent: firstParty.intent ?? null, source: "search_console",
-      origin: { kind: "search_console" as const, value: normalizeKeyword(row.query) },
-      firstParty: { impressions: firstParty.impressions, clicks: firstParty.clicks, position: firstParty.position },
+      opportunityId: row.id, keyword, volume: provider.volume, difficulty: provider.difficulty, cpc: provider.cpc ?? null, intent: provider.intent, source: provider.source, asOf: provider.asOf,
+      origin: (evidence.origin ?? null) as KeywordOrigin | null, collectedAt: provider.at ?? undefined,
     }];
   });
 }
 
 /** Keywords a provider says the site ranks for, within reach: work on the page that ranks. Scored by the next analysis. */
-async function recordRankedOpportunities(tenantId: string, siteId: string, rows: KeywordMetrics[]) {
+export async function recordRankedOpportunities(tenantId: string, siteId: string, rows: Array<KeywordMetrics & { collectedAt?: string }>) {
   const reachable = rows
     .filter((row) => row.rank?.url && row.rank.position && row.rank.position >= 4 && row.rank.position <= RANKING_LIMIT && row.volume)
     .sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0))
@@ -262,7 +277,7 @@ async function recordRankedOpportunities(tenantId: string, siteId: string, rows:
     const data = {
       rationale: `El proveedor sitúa una página tuya en la posición ${row.rank!.position} para «${keyword}».`,
       targetUrl: row.rank!.url,
-      evidence: { provider: { source: row.source, volume: row.volume, difficulty: row.difficulty, intent: row.intent, position: row.rank!.position, asOf: row.asOf ?? null } } as Prisma.InputJsonObject,
+      evidence: { provider: { source: row.source, volume: row.volume, difficulty: row.difficulty, intent: row.intent, position: row.rank!.position, asOf: row.asOf ?? null, at: row.collectedAt ?? null } } as Prisma.InputJsonObject,
     };
     await prisma.contentOpportunity.upsert({
       where: { siteId_dedupeKey: { siteId, dedupeKey } },
@@ -272,107 +287,115 @@ async function recordRankedOpportunities(tenantId: string, siteId: string, rows:
   }
 }
 
+export const ownDomainOf = (baseUrl: string | null): string | null => (baseUrl && URL.canParse(baseUrl) ? new URL(baseUrl).hostname.replace(/^www\./, "") : null);
+
+export type KeywordSubjects = { seeds: Array<{ keyword: string; origin: KeywordOrigin["kind"] }>; competitors: Array<{ id: string; domain: string }>; ownDomain: string | null };
+export type StoredKeyword = KeywordMetrics & { origin: KeywordOrigin; collectedAt: string; providerId: string; competitorId: string | null };
+
+/** What a plan looks at by default. */
+export async function keywordSubjects(tenantId: string, siteId: string, context: Pick<EditorialPlanningContext, "profile" | "clusters" | "site">): Promise<KeywordSubjects> {
+  const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId, status: "accepted" }, select: { id: true, domain: true }, orderBy: { overlapScore: "desc" }, take: MAX_COMPETITORS });
+  const opportunities = await prisma.contentOpportunity.findMany({ where: { tenantId, siteId, status: "open", kind: { in: ["missing_topic", "underdeveloped_cluster", "differentiated_angle"] } }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 5 });
+  const topics = opportunities.map((entry) => entry.topic);
+  return { seeds: keywordSeeds(context, topics).map((keyword) => ({ keyword, origin: seedOrigin(keyword, context, topics) })), competitors, ownDomain: ownDomainOf(context.site.baseUrl) };
+}
+
+/** Everything providers already answered about these subjects in a market. Buys nothing. */
+export async function storedKeywords(
+  tenantId: string,
+  site: { id: string; type: string },
+  locale: string,
+  subjects: KeywordSubjects,
+): Promise<{ rows: StoredKeyword[]; own: StoredKeyword[]; market: string | null; reason: string | null; answered: Set<string> }> {
+  const [ideas, rankings] = await Promise.all([seoRoute("keyword_suggestions", locale), seoRoute("ranked_keywords", locale)]);
+  // A capability without a provider is skipped: the other one still yields candidates.
+  const calls = [
+    ...(ideas.provider ? subjects.seeds.map(({ keyword, origin }) => ({ route: ideas, capability: "keyword_suggestions" as const, origin: { kind: origin, value: keyword } as KeywordOrigin, competitorId: null as string | null })) : []),
+    ...(rankings.provider ? subjects.competitors.map(({ id, domain }) => ({ route: rankings, capability: "ranked_keywords" as const, origin: { kind: "competitor", value: normalizeDomain(domain) } as KeywordOrigin, competitorId: id as string | null })) : []),
+    ...(rankings.provider && subjects.ownDomain ? [{ route: rankings, capability: "ranked_keywords" as const, origin: { kind: "own_ranking", value: normalizeDomain(subjects.ownDomain) } as KeywordOrigin, competitorId: null as string | null }] : []),
+  ];
+  const rows: StoredKeyword[] = [];
+  const own: StoredKeyword[] = [];
+  const answered = new Set<string>();
+  for (const call of calls) {
+    const stored = await keywordRows(tenantId, site, call.route, call.capability, call.origin.value, { reuseOnly: true }).catch((error: unknown) => {
+      if (error instanceof SeoProviderError) return null;
+      throw error;
+    });
+    if (!stored) continue;
+    if (stored.meta.freshness !== "stale") answered.add(`${call.capability}|${call.origin.value}`);
+    (call.origin.kind === "own_ranking" ? own : rows).push(...stored.rows.map((row) => ({ ...row, origin: call.origin, providerId: call.route.provider.id, competitorId: call.competitorId })));
+  }
+  return { rows, own, market: ideas.provider ? ideas.marketKey : rankings.provider ? rankings.marketKey : null, reason: ideas.provider || rankings.provider ? null : (ideas as { reason: string }).reason, answered };
+}
+
+/** What the site's own rankings say: what is reachable, and what it already ranks for. */
+export function ownRankings(own: KeywordMetrics[]): { keywords: string[]; reachableDifficulty: number } {
+  // Position unknown counts as ranking: creating a second page would be the costlier mistake.
+  return { keywords: own.filter((item) => (item.rank?.position ?? 0) <= RANKING_LIMIT).map((item) => item.keyword), reachableDifficulty: reachableDifficultyFor(own) };
+}
+
+/** Never the site's own figures: those belong to the Search Console opportunities, which are deleted with them. */
+export const evidenceOfCandidate = (candidate: KeywordCandidate): OpportunityEvidence => ({
+  firstParty: null,
+  provider: candidate.source === "search_console" ? null : { source: candidate.source, volume: candidate.volume, difficulty: candidate.difficulty, cpc: candidate.cpc, intent: candidate.intent, position: null, asOf: candidate.asOf ?? null, at: candidate.collectedAt ?? null },
+  origin: candidate.origin ?? null,
+  variants: candidate.variants.slice(0, 20),
+});
+
 /**
- * Measured keyword candidates for a plan, best first. Empty when no SEO provider may be used,
- * the market is unsupported or every call fails: the caller then keeps the model-picked flow.
+ * Keyword candidates for a plan, best first, from the inventory and from stored provider data; nothing is bought.
+ * With `reserveFor` they are reserved for that generation, and only those it got are returned. Empty when there is
+ * nothing to choose from: the caller then keeps the model-picked flow.
  */
 export async function collectKeywordCandidates(
   tenantId: string,
   siteId: string,
   context: EditorialPlanningContext,
   limit: number,
-  fetchImpl: typeof fetch = fetch,
+  options: { reserveFor?: string; reserve?: number } = {},
   /** Filled in place with the trace of the run. */
   research: KeywordResearch = emptyKeywordResearch(),
 ): Promise<KeywordCandidate[]> {
-  // A capability without a provider is skipped: the other one still yields candidates.
+  if (options.reserveFor) await reconcileReservoir(tenantId, siteId);
   const scoring = await keywordScoringFor(tenantId, { id: siteId, type: context.site.type }, context.profile?.detectedSiteType ?? null);
-  const firstPartyRows = await firstPartyCandidates(tenantId, siteId);
-  const [ideas, rankings] = await Promise.all([seoRoute("keyword_suggestions", context.site.locale), seoRoute("ranked_keywords", context.site.locale)]);
-  if (!ideas.provider && !rankings.provider && !firstPartyRows.length) {
-    research.skipped = ideas.reason === "not_configured" || ideas.reason === "unsupported_market" ? ideas.reason : "disabled";
+  const inventory = await inventoryRows(tenantId, siteId, context.site.locale);
+  const routes = await Promise.all([seoRoute("keyword_suggestions", context.site.locale), seoRoute("ranked_keywords", context.site.locale)]);
+  const reason = routes.some((route) => route.provider) ? null : (routes[0] as { reason: string }).reason;
+  if (reason && !inventory.length) {
+    research.skipped = reason === "not_configured" || reason === "unsupported_market" ? reason : "disabled";
     return [];
   }
-  const competitors = await prisma.competitor.findMany({ where: { tenantId, siteId, status: "accepted" }, select: { domain: true }, orderBy: { overlapScore: "desc" }, take: MAX_COMPETITORS });
-  const opportunities = await prisma.contentOpportunity.findMany({ where: { tenantId, siteId, status: "open", kind: { in: ["missing_topic", "underdeveloped_cluster", "differentiated_angle"] } }, select: { topic: true }, orderBy: { createdAt: "desc" }, take: 5 });
-  // The site's own ranking keywords (1 cached call): skip what it already ranks for and set its reachable difficulty.
-  const ownDomain = (() => {
-    try {
-      return context.site.baseUrl ? new URL(context.site.baseUrl).hostname.replace(/^www\./, "") : null;
-    } catch {
-      return null;
-    }
-  })();
-  let ownKeywords: KeywordMetrics[] = [];
-  if (ownDomain && rankings.provider) {
-    try {
-      ownKeywords = (await keywordRows(tenantId, context.site, rankings, "ranked_keywords", ownDomain, { fetchImpl, reuseOnly: false })).rows;
-    } catch (error) {
-      research.failedCalls += 1;
-      research.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 200);
-      structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: research.lastError }, "warn");
-    }
-  }
-  const opportunityTopics = opportunities.map((entry) => entry.topic);
-  research.seeds = ideas.provider ? keywordSeeds(context, opportunityTopics).map((keyword) => ({ keyword, origin: seedOrigin(keyword, context, opportunityTopics) })) : [];
-  const rankedCompetitors = rankings.provider ? competitors : [];
-  const calls: Array<{ origin: KeywordOrigin; run: (reuseOnly: boolean) => ReturnType<typeof keywordRows> }> = [
-    ...research.seeds.map(({ keyword, origin }) => ({
-      origin: { kind: origin, value: keyword },
-      run: (reuseOnly: boolean) => keywordRows(tenantId, context.site, ideas as SeoRoute, "keyword_suggestions", keyword, { fetchImpl, reuseOnly }),
-    })),
-    ...rankedCompetitors.map(({ domain }) => ({
-      origin: { kind: "competitor" as const, value: domain },
-      run: (reuseOnly: boolean) => keywordRows(tenantId, context.site, rankings as SeoRoute, "ranked_keywords", domain, { fetchImpl, reuseOnly }),
-    })),
-  ];
-  const reachableDifficulty = reachableDifficultyFor(ownKeywords);
-  // Position unknown counts as ranking: creating a second page would be the costlier mistake.
-  const own = { keywords: ownKeywords.filter((item) => (item.rank?.position ?? 0) <= RANKING_LIMIT).map((item) => item.keyword), reachableDifficulty };
-  // What is stored costs nothing and is always used; the rest is bought in order only while candidates are still short.
-  const answers = new Map<number, { rows: KeywordMetrics[]; stale: boolean }>();
-  for (const [index, call] of calls.entries()) {
-    const stored = await call.run(true).catch((error: unknown) => {
-      if (error instanceof SeoProviderError) return null;
-      throw error;
-    });
-    if (stored) answers.set(index, stored);
-  }
-  // First-party queries go last in the list so a provider's row of the same keyword keeps its volume, and cost nothing.
-  const collected = () => [...calls.flatMap((call, index) => (answers.get(index)?.rows ?? []).map((item) => ({ ...item, origin: call.origin }))), ...firstPartyRows];
-  let bought = 0;
-  for (const [index, call] of calls.entries()) {
-    if (answers.get(index)?.stale === false) continue;
-    if (rankKeywordCandidates(collected(), context, limit, own, [], scoring).length >= limit) break;
-    try {
-      answers.set(index, await call.run(false));
-      bought += 1;
-    } catch (error) {
-      research.failedCalls += 1;
-      research.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 200);
-      structuredEvent("keyword_candidates.call_failed", { tenantId, siteId, error: research.lastError }, "warn");
-    }
-  }
-  const metrics = collected();
+  const subjects = await keywordSubjects(tenantId, siteId, context);
+  const stored = await storedKeywords(tenantId, context.site, context.site.locale, subjects);
+  const own = ownRankings(stored.own);
+  // The inventory goes last so a provider's row of the same keyword keeps its newer values.
+  const metrics = [...stored.rows, ...inventory];
   const rejects: KeywordReject[] = [];
   const ranked = rankKeywordCandidates(metrics, context, limit, own, rejects, scoring);
-  await recordRankedOpportunities(tenantId, siteId, ownKeywords);
+  const known = new Map([...inventory].reverse().map((row) => [keywordTokens(row.keyword).join(" "), row.opportunityId]));
+  const candidates = ranked.map((candidate) => ({ ...candidate, opportunityId: known.get(keywordTokens(candidate.keyword).join(" ")) }));
   Object.assign(research, {
     provider: ranked.find((candidate) => candidate.source !== "search_console")?.source ?? ranked[0]?.source ?? null,
-    skipped: ranked.length ? null : research.failedCalls && !metrics.length ? "provider_error" : "no_data",
-    market: ideas.provider ? ideas.marketKey : rankings.provider ? rankings.marketKey : null,
-    competitors: rankedCompetitors.map(({ domain }) => domain),
-    ownDomain,
-    ownRankingKeywords: ownKeywords.length,
-    reachableDifficulty,
+    skipped: ranked.length ? null : "no_data",
+    market: stored.market,
+    seeds: stored.reason ? [] : (subjects.seeds as KeywordResearch["seeds"]),
+    competitors: stored.reason ? [] : subjects.competitors.map(({ domain }) => domain),
+    ownDomain: subjects.ownDomain,
+    ownRankingKeywords: stored.own.length,
+    reachableDifficulty: own.reachableDifficulty,
     rows: metrics.length,
     candidates: ranked.slice(0, MAX_STORED_CANDIDATES).map((candidate, index) => ({
       keyword: candidate.keyword, volume: candidate.volume, difficulty: candidate.difficulty, intent: candidate.intent, score: candidate.score,
       variants: candidate.variants, origin: candidate.origin ?? null, parts: candidate.parts ?? null, firstParty: candidate.firstParty ?? null, rank: index + 1,
     })),
-    rejected: rejects.reduce<KeywordResearch["rejected"]>((counts, { reason }) => ({ ...counts, [reason]: (counts[reason] ?? 0) + 1 }), {}),
+    rejected: rejects.reduce<KeywordResearch["rejected"]>((counts, { reason: code }) => ({ ...counts, [code]: (counts[code] ?? 0) + 1 }), {}),
     rejectedSample: [...rejects].sort((a, b) => (b.volume ?? 0) - (a.volume ?? 0)).slice(0, 25),
   } satisfies Partial<KeywordResearch>);
-  structuredEvent("keyword_candidates.collected", { tenantId, siteId, calls: calls.length + (ownDomain && rankings.provider ? 1 : 0), bought, rows: metrics.length, candidates: ranked.length, reachableDifficulty });
-  return ranked;
+  structuredEvent("keyword_candidates.collected", { tenantId, siteId, rows: metrics.length, candidates: ranked.length, reachableDifficulty: own.reachableDifficulty });
+  if (!options.reserveFor) return candidates;
+  return reserveForPlanning({
+    tenantId, siteId, market: context.site.locale, holder: options.reserveFor, limit: options.reserve ?? limit,
+    candidates: candidates.map((candidate) => ({ ...candidate, evidence: evidenceOfCandidate(candidate) })),
+  });
 }

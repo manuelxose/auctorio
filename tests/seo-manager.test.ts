@@ -15,7 +15,10 @@ import { registerStudioRoutes } from "../src/studio/routes";
 import { buildStudioProxySignature } from "../src/studio/security";
 import { STUDIO_PERMISSIONS_HEADER, STUDIO_SESSION_HEADER, STUDIO_SIGNATURE_HEADER, STUDIO_TENANT_HEADER, STUDIO_TIMESTAMP_HEADER, STUDIO_USER_HEADER } from "../src/studio/http-utils";
 import { storeProviderCache } from "../src/studio/enrichment/provider-cache";
+import { buildEditorialPlanningContext } from "../src/studio/editorial-plan-context";
 import { collectKeywordCandidates, emptyKeywordResearch } from "../src/studio/keyword-candidates";
+import { knownKeywordMetrics, listSiteKeywords } from "../src/studio/seo-research/knowledge";
+import { advanceResearchRun, checkSiteResearch, controlResearchRun, estimateResearch, getResearchRun, requestPlanningResearch, requestResearch, runCost, runResearchTick, startOnboardingResearch } from "../src/studio/seo-research/runs";
 import { enrichPlanItemsWithKeywordMetrics } from "../src/studio/keyword-metrics";
 import {
   dispatchSeoReservation, recoverSeoReservations, releaseSeoReservation, reserveSeoSpend, resolveUncertainReservation, settleSeoReservation, type ReserveInput,
@@ -188,7 +191,7 @@ test("keyword research records its provider, or why there was none", async () =>
   const context = (locale: string) => ({ profile: null, clusters: [{ name: "guia tv" }], site: { id: ws.siteId, name: "Guía TV", type: "guiatv", baseUrl: null, locale }, searchTargets: [], existingPlanQueries: [], existingPlanTitles: [], indexedUrlInventory: [] }) as never;
   const skipped = async (locale: string) => {
     const research = emptyKeywordResearch();
-    assert.deepEqual(await collectKeywordCandidates(ws.tenantId, ws.siteId, context(locale), 5, answering(calls, () => ({})), research), []);
+    assert.deepEqual(await collectKeywordCandidates(ws.tenantId, ws.siteId, context(locale), 5, {}, research), []);
     return research.skipped;
   };
   try {
@@ -203,7 +206,9 @@ test("keyword research records its provider, or why there was none", async () =>
 
     const research = emptyKeywordResearch();
     const row = { keyword: "guia tv hoy", keyword_info: { search_volume: 9000 }, keyword_properties: { keyword_difficulty: 10 }, search_intent_info: { main_intent: "informational" } };
-    const ranked = await collectKeywordCandidates(ws.tenantId, ws.siteId, context("es-ES"), 5, answering(calls, () => ({ status_code: 20000, cost: 0.024, tasks: [{ status_code: 20000, result: [{ items: [row] }] }] })), research);
+    const ideas = (await seoRoute("keyword_suggestions", "es-ES")) as SeoRoute;
+    await acquireSeo(ideas, "keyword_suggestions", { seed: "guia tv", limit: 100 }, { tenantId: ws.tenantId, siteId: ws.siteId, kind: "keyword_metrics", fetchImpl: answering(calls, () => ({ status_code: 20000, cost: 0.024, tasks: [{ status_code: 20000, result: [{ items: [row] }] }] })) });
+    const ranked = await collectKeywordCandidates(ws.tenantId, ws.siteId, context("es-ES"), 5, {}, research);
     assert.deepEqual([calls.length, research.market, research.seeds, research.failedCalls, research.rows], [1, "2724|es", [{ keyword: "guia tv", origin: "cluster" }], 0, 1]);
     assert.deepEqual([research.provider, research.skipped], ranked.length ? ["dataforseo", null] : [null, "no_data"]);
   } finally {
@@ -762,25 +767,197 @@ test("stale data is refreshed only for a decision worth its price, and served wh
   assert.equal(await codeOf(ask({ reuseOnly: true })), "reuse_only", "past retention it is not served");
 }));
 
-test("regenerated plans, edits and repeated interactions buy nothing new", () => governed(async (ws) => {
+// ---- Research (SEO-V2-03) ----
+
+const WORDS = ["cine", "estrenos", "infantiles", "coreanas", "policiacas", "historicas", "turcas", "romanticas", "cortas", "britanicas"];
+/** DataForSEO answering `rows` relevant keywords per seed or domain; `before` runs while the request is in flight. */
+const researchFetch = (calls: string[], options: { rows?: number; cost?: number; before?: (subject: string) => Promise<void> | void; volume?: number } = {}) =>
+  (async (url: string, init: RequestInit) => {
+    const [task] = JSON.parse(String(init.body));
+    const subject: string = task.target ?? task.keywords?.[0] ?? task.keyword;
+    calls.push(`${url.includes("ranked_keywords") ? "domain" : url.includes("keyword_overview") ? "metrics" : "seed"}:${subject}`);
+    await options.before?.(subject);
+    const base = url.includes("ranked_keywords") ? `peliculas ${subject.split(".")[0]}` : subject;
+    const keywords: string[] = url.includes("keyword_overview") ? task.keywords : WORDS.slice(0, options.rows ?? 10).map((word) => `${base} ${word}`);
+    const items = keywords.map((keyword) => ({ ...labsRow(keyword, options.volume ?? 9000, 10), search_intent_info: { main_intent: "informational" } }));
+    return new Response(JSON.stringify(labs(url.includes("ranked_keywords") ? items.map((item) => ({ keyword_data: item, ranked_serp_element: { serp_item: { rank_group: 3, url: `https://${subject}/x` } } })) : items, options.cost ?? 0.024)));
+  }) as typeof fetch;
+async function researchSite(ws: Workspace, policy: object = {}) {
+  for (const name of ["series", "television", "futbol"]) await prisma.siteTopicCluster.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, name, slug: name, pagesCount: 3 } });
+  await prisma.competitor.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, domain: "rival.test", origin: "manual", name: "Rival", status: "accepted", verification: "verified" } });
+  await prisma.siteResearchProfile.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, policy } });
+}
+const kinds = (run: Awaited<ReturnType<typeof getResearchRun>>, status: string) => run.tasks.filter((task) => task.status === status && task.external).map((task) => task.kind);
+
+test("onboarding research is bounded, persistent and not repeated; planning reads what it found and buys nothing", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 100 });
   const calls: string[] = [];
-  const row = (keyword: string) => ({ ...labsRow(keyword, 9000, 10), search_intent_info: { main_intent: "informational" } });
-  const fetchImpl = answering(calls, (url) => labs(url.includes("ranked_keywords") ? [] : [row("guia tv hoy"), row("programacion tv"), row("tdt canales")], 0.024));
-  const context = (limitTopics: string[]) => ({ profile: null, clusters: limitTopics.map((name) => ({ name })), site: { id: ws.siteId, name: "Guía TV", type: "guiatv", baseUrl: "https://example.test", locale: "es-ES" }, searchTargets: [], existingPlanQueries: [], existingPlanTitles: [], indexedUrlInventory: [] }) as never;
-  const plan = (limit: number) => collectKeywordCandidates(ws.tenantId, ws.siteId, context(["guia tv", "television"]), limit, fetchImpl);
-  const first = await plan(60);
+  const fetchImpl = researchFetch(calls);
+  const estimate = await estimateResearch(ws.tenantId, ws.siteId);
+  assert.deepEqual([estimate.acquisitions.map((entry) => entry.kind), Math.round(estimate.maxUsd * 1000)], [["discover_seed", "discover_seed", "own_keywords", "competitor_keywords"], 96]);
+  assert.equal(calls.length, 0, "an estimate buys nothing");
+
+  const run = await startOnboardingResearch(ws.tenantId, ws.siteId, null, { fetchImpl });
+  assert.equal(run.status, "succeeded", JSON.stringify(run.tasks.filter((task) => task.status !== "succeeded")));
+  assert.equal(calls.length, 4, "two seeds, the own domain and one competitor at most");
+  assert.deepEqual([run.progress, run.cost.requests, Math.round(run.cost.actualUsd * 1000), run.cost.heldUsd], [100, 4, 96, 0]);
+  assert.ok(run.cost.actualUsd <= run.maxUsd && run.cost.actualUsd <= run.estimatedUsd! + 1e-9);
+  assert.ok((await ws.reservations()).every((row) => row.runId === run.id), "every purchase belongs to its run");
+  assert.ok(run.tasks.filter((task) => task.external).every((task) => task.reason && task.billedUsd! > 0));
+
+  // Everything that came back is kept: metrics with provenance, keywords with their sources, opportunities with evidence.
+  const metrics = await knownKeywordMetrics(ws.tenantId, { country: "ES", language: "es" }, ["series cine", "series turcas"], { maxAgeDays: 1 });
+  assert.deepEqual([metrics.size, metrics.get("series cine")!.volume, metrics.get("series cine")!.providerId], [2, 9000, "dataforseo"]);
+  const keywords = await listSiteKeywords(ws.tenantId, ws.siteId, {});
+  assert.ok(keywords.length >= 20 && keywords.every((row) => row.discoveries.length > 0));
+  assert.ok(keywords.some((row) => row.discoveries.some((entry) => entry.kind === "competitor" && entry.value === "rival.test" && entry.position === 3)));
+  const opportunities = await prisma.contentOpportunity.findMany({ where: { tenantId: ws.tenantId, source: "research" } });
+  assert.ok(opportunities.length > 5 && opportunities.every((row) => row.researchRunId === run.id && row.analyzedAt), `${opportunities.length}`);
+  assert.ok(opportunities.some((row) => row.status === "open" && row.action === "create_content" && row.score! >= 40), JSON.stringify(opportunities[0]));
+
+  // Again, and concurrently: the same run, no request.
+  for (const again of await Promise.all([startOnboardingResearch(ws.tenantId, ws.siteId, null, { fetchImpl }), startOnboardingResearch(ws.tenantId, ws.siteId, null, { fetchImpl })])) assert.equal(again.id, run.id);
+  assert.equal(calls.length, 4);
+  // Another run only buys what nobody answered: the third topic is left; what is known is not asked again.
+  const manual = await requestResearch({ tenantId: ws.tenantId, siteId: ws.siteId, trigger: "manual", triggerKey: null, detail: "x", focus: {} });
+  await advanceResearchRun(manual.runId, { fetchImpl });
+  assert.equal(calls.length, 5);
+  assert.equal(new Set(calls).size, 5);
+
+  // Planning: candidates from the inventory, reserved, and not one request, however often.
+  const context = await buildEditorialPlanningContext(ws.tenantId, ws.siteId);
+  const holder = randomUUID();
+  const mine = await collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60, { reserveFor: holder, reserve: 3 });
+  assert.ok(mine.length === 3 && mine.every((candidate) => candidate.opportunityId));
+  const others = await collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60, { reserveFor: randomUUID(), reserve: 3 });
+  assert.equal(others.filter((candidate) => mine.some((held) => held.keyword === candidate.keyword)).length, 0);
+  for (let i = 0; i < 5; i += 1) await collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60);
+  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 100, null, { fetchImpl }), null, "researched lately: nothing more is bought for a plan");
+  assert.equal(calls.length, 5);
+}));
+
+test("a plan without enough knowledge asks for research once; with enough it asks for none", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 5 });
+  const calls: string[] = [];
+  const fetchImpl = researchFetch(calls);
+  const runId = await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl });
+  const run = await getResearchRun(ws.tenantId, ws.siteId, runId!);
+  assert.deepEqual([run.trigger, run.status, calls.length], ["pending_decision", "succeeded", 1]);
+  assert.deepEqual([...new Set(run.tasks.filter((task) => task.status === "skipped").map((task) => task.reason))], ["enough_opportunities"], "early stopping");
+  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 4, null, { fetchImpl }), null);
+  assert.equal(calls.length, 1);
+  await prisma.siteResearchProfile.update({ where: { siteId: ws.siteId }, data: { policy: { mode: "manual", minOpportunities: 100 } } });
+  assert.equal(await requestPlanningResearch(ws.tenantId, ws.siteId, 50, null, { fetchImpl }), null, "only people start it");
+}));
+
+test("a run stays within its own limit and the governor's; what was refused can be retried", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 100 });
+  const calls: string[] = [];
+  const fetchImpl = researchFetch(calls);
+  const request = async (maxUsd?: number) => (await requestResearch({ tenantId: ws.tenantId, siteId: ws.siteId, trigger: "manual", triggerKey: null, detail: "x", focus: {}, maxUsd })).runId;
+  const small = await request(0.03);
+  await advanceResearchRun(small, { fetchImpl });
+  let run = await getResearchRun(ws.tenantId, ws.siteId, small);
+  assert.deepEqual([run.status, calls.length, run.tasks.filter((task) => task.reason === "run_limit").length], ["partial", 1, 3]);
+  await limitTo("tenant", ws.tenantId, "daily", 0.03);
+  const second = await request();
+  await advanceResearchRun(second, { fetchImpl });
+  run = await getResearchRun(ws.tenantId, ws.siteId, second);
+  assert.deepEqual([run.status, calls.length], ["partial", 1]);
+  assert.ok(run.tasks.filter((task) => task.status === "skipped").every((task) => task.reason === "budget_exhausted"));
+  // The budget is raised and a person retries: only what was not bought is bought.
+  await prisma.seoBudget.deleteMany({ where: { scopeId: ws.tenantId } });
+  await controlResearchRun(ws.tenantId, ws.siteId, second, "retry", null);
+  await advanceResearchRun(second, { fetchImpl });
+  run = await getResearchRun(ws.tenantId, ws.siteId, second);
+  assert.deepEqual([run.status, kinds(run, "succeeded").length, new Set(calls).size === calls.length], ["succeeded", 4, true]);
+}));
+
+test("cancelling or pausing stops the next request; the one in flight is accounted for", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 100 });
+  const request = async () => (await requestResearch({ tenantId: ws.tenantId, siteId: ws.siteId, trigger: "manual", triggerKey: null, detail: "x", focus: {} })).runId;
+  const calls: string[] = [];
+  const cancelled = await request();
+  await advanceResearchRun(cancelled, { fetchImpl: researchFetch(calls, { before: async () => void (await controlResearchRun(ws.tenantId, ws.siteId, cancelled, "cancel", null)), rows: 2 }) });
+  let run = await getResearchRun(ws.tenantId, ws.siteId, cancelled);
+  assert.deepEqual([run.status, calls.length], ["cancelled", 1]);
+  assert.equal(Math.round(run.cost.actualUsd * 1000), 24, "what had left is paid for");
+  assert.equal(run.cost.heldUsd, 0);
+  assert.ok(run.tasks.some((task) => task.status === "cancelled"));
+  const sent = calls.length;
+  assert.equal(await advanceResearchRun(cancelled, { fetchImpl: researchFetch(calls) }), null);
+  assert.equal(calls.length, sent);
+
+  // The last check before sending looks at the run itself, so a stopped one cannot be raced.
+  const paused = await request();
+  await prisma.seoResearchRun.update({ where: { id: paused }, data: { status: "running" } });
+  const one = (await reserveSeoSpend(reserveInput(ws, ["run-a"], { runId: paused }))).reservation!.id;
+  const two = (await reserveSeoSpend(reserveInput(ws, ["run-b"], { runId: paused }))).reservation!.id;
+  assert.equal(await dispatchSeoReservation(one, "dataforseo"), true);
+  await controlResearchRun(ws.tenantId, ws.siteId, paused, "pause", null);
+  assert.equal(await dispatchSeoReservation(two, "dataforseo"), false);
+  await releaseSeoReservation(two, "test");
+  await settleSeoReservation(one, { actualUsd: 0.007 });
+  assert.deepEqual([Math.round((await runCost(paused)).actualUsd * 1000), (await runCost(paused)).heldUsd], [7, 0]);
+  assert.equal(await advanceResearchRun(paused, { fetchImpl: researchFetch(calls) }), null, "paused");
+  await controlResearchRun(ws.tenantId, ws.siteId, paused, "resume", null);
+  await advanceResearchRun(paused, { fetchImpl: researchFetch(calls) });
+  run = await getResearchRun(ws.tenantId, ws.siteId, paused);
+  assert.equal(run.status, "succeeded", JSON.stringify(run.tasks));
+}));
+
+test("a lost worker, concurrent workers and the emergency stop repeat and lose nothing", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 100 });
+  const calls: string[] = [];
+  const runId = (await requestResearch({ tenantId: ws.tenantId, siteId: ws.siteId, trigger: "manual", triggerKey: null, detail: "x", focus: {} })).runId;
+  const set = (active: boolean) => prisma.seoControlSetting.upsert({ where: { id: "global" }, create: { id: "global", mode: "dataforseo_only", emergencyStop: active }, update: { emergencyStop: active } });
+  await set(true);
+  assert.equal(await advanceResearchRun(runId, { fetchImpl: researchFetch(calls) }), null);
+  assert.deepEqual(await runResearchTick({ fetchImpl: researchFetch(calls) }), { advanced: 0, checked: 0 });
+  await set(false);
+  // The stop arrives while a request is being answered: the next one waits.
+  await advanceResearchRun(runId, { fetchImpl: researchFetch(calls, { before: async () => void (await set(true)) }) });
+  let run = await getResearchRun(ws.tenantId, ws.siteId, runId);
+  assert.deepEqual([run.status, calls.length], ["queued", 1]);
+  await set(false);
+  // The worker died in the middle of a step that had already bought its data.
+  await prisma.seoResearchTask.updateMany({ where: { runId, kind: "discover_seed", status: "succeeded" }, data: { status: "running", result: {} } });
+  await prisma.seoResearchRun.update({ where: { id: runId }, data: { status: "running", leaseId: randomUUID(), leaseUntil: new Date(Date.now() - 1), nextAt: null } });
+  const states = await Promise.all(Array.from({ length: 4 }, () => advanceResearchRun(runId, { fetchImpl: researchFetch(calls) })));
+  assert.equal(states.filter((state) => state !== null).length, 1, "one worker holds it");
+  run = await getResearchRun(ws.tenantId, ws.siteId, runId);
+  assert.equal(run.status, "succeeded", JSON.stringify(run.tasks));
+  assert.deepEqual([calls.length, new Set(calls).size], [4, 4], "the step that was done was read back, not bought again");
+}));
+
+test("a worker starts research by itself only when the platform allows it", () => governed(async (ws) => {
+  await researchSite(ws);
+  assert.equal(await checkSiteResearch(ws.tenantId, ws.siteId), null, "off by default");
+  await setPolicy({ automaticResearch: true });
+  await prisma.siteResearchProfile.update({ where: { siteId: ws.siteId }, data: { policy: { mode: "manual" } } });
+  assert.equal(await checkSiteResearch(ws.tenantId, ws.siteId), null, "the site opted out");
+  await prisma.siteResearchProfile.update({ where: { siteId: ws.siteId }, data: { policy: {} } });
+  const started = (await checkSiteResearch(ws.tenantId, ws.siteId))!;
+  assert.deepEqual([started.created, (await getResearchRun(ws.tenantId, ws.siteId, started.runId)).trigger], [true, "insufficient_opportunities"]);
+}));
+
+test("regenerated plans, edits and repeated interactions buy nothing new", () => governed(async (ws) => {
+  await researchSite(ws, { minOpportunities: 100 });
+  const calls: string[] = [];
+  const fetchImpl = researchFetch(calls);
+  await startOnboardingResearch(ws.tenantId, ws.siteId, null, { fetchImpl });
   const spent = calls.length;
-  assert.ok(first.length > 0 && spent === 3, `own domain and two seeds: ${spent}`);
-  for (let i = 0; i < 5; i += 1) assert.deepEqual((await plan(60)).map((candidate) => candidate.keyword), first.map((candidate) => candidate.keyword));
-  await Promise.all(Array.from({ length: 10 }, () => plan(60)));
-  assert.equal(calls.length, spent);
-  // Enough candidates already stored: a new seed is not bought.
-  await collectKeywordCandidates(ws.tenantId, ws.siteId, context(["guia tv", "television", "series"]), 1, fetchImpl);
+  const context = await buildEditorialPlanningContext(ws.tenantId, ws.siteId);
+  const plan = () => collectKeywordCandidates(ws.tenantId, ws.siteId, context, 60);
+  const first = (await plan()).map((candidate) => candidate.keyword);
+  assert.ok(first.length > 0);
+  for (let i = 0; i < 5; i += 1) assert.deepEqual((await plan()).map((candidate) => candidate.keyword), first);
+  await Promise.all(Array.from({ length: 10 }, () => plan()));
   assert.equal(calls.length, spent);
 
   const planRow = await prisma.editorialPlan.create({ data: { tenantId: ws.tenantId, siteId: ws.siteId, name: "p", dateFrom: new Date(), dateTo: new Date() } });
   const item = (primaryKeyword: string) => prisma.editorialPlanItem.create({ data: { tenantId: ws.tenantId, planId: planRow.id, siteId: ws.siteId, title: primaryKeyword, channel: "website", primaryKeyword } });
-  const [known, unknown] = [await item("guia tv hoy"), await item("palabra escrita a mano")];
+  const [known, unknown] = [await item("series cine"), await item("palabra escrita a mano")];
   assert.equal(await enrichPlanItemsWithKeywordMetrics(ws.tenantId, planRow.id, fetchImpl, { reuseOnly: true }), 1, "editing uses what discovery brought");
   assert.equal((await prisma.editorialPlanItem.findUniqueOrThrow({ where: { id: known.id } })).searchVolume, 9000);
   assert.equal((await prisma.editorialPlanItem.findUniqueOrThrow({ where: { id: unknown.id } })).keywordMetricsSource, null);

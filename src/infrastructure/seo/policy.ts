@@ -26,6 +26,10 @@ export type SeoPolicy = {
   onboardingDays: number;
   /** Own ceiling of requests per minute to each provider, below its documented limit. */
   maxRequestsPerMinute: number;
+  /** Market data may be read by other workspaces. Off unless the platform says so, and only for providers whose licence permits it. */
+  shareMarketData: boolean;
+  /** Workers may start research, and so buy, without anyone asking. Off until the platform says so. */
+  automaticResearch: boolean;
 };
 
 export const DEFAULT_SEO_POLICY: SeoPolicy = {
@@ -43,6 +47,8 @@ export const DEFAULT_SEO_POLICY: SeoPolicy = {
   minVolumeBatch: 10,
   onboardingDays: 14,
   maxRequestsPerMinute: 60,
+  shareMarketData: false,
+  automaticResearch: false,
 };
 
 const positive = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value > 0;
@@ -61,6 +67,8 @@ export function readSeoPolicy(stored: unknown): SeoPolicy {
   if (Array.isArray(value.overrides)) policy.overrides = value.overrides.filter((entry: any) => isCapability(entry?.capability) && positive(entry.days));
   for (const key of ["low", "normal", "high"] as const) if (typeof value.decisionValueUsd?.[key] === "number" && value.decisionValueUsd[key] >= 0) policy.decisionValueUsd[key] = value.decisionValueUsd[key];
   for (const key of ["minVolumeBatch", "onboardingDays", "maxRequestsPerMinute"] as const) if (positive(value[key])) policy[key] = value[key];
+  policy.shareMarketData = value.shareMarketData === true;
+  policy.automaticResearch = value.automaticResearch === true;
   return policy;
 }
 

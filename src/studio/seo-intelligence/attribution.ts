@@ -113,7 +113,7 @@ export async function linkPublishedActions(tenantId: string, siteId: string): Pr
     await recordSeoAction({
       tenantId, siteId, opportunityId: row.id, action: row.action ?? "create_content", url: publication.externalUrl, query: row.query, actedAt: publication.publishedAt, planItemId: row.planItemId, publicationId: publication.id,
       // The ledger does not split a planning purchase between articles: unknown, unless only first-party data was used.
-      seoCostUsd: row.source === "provider" ? null : 0,
+      seoCostUsd: row.source === "provider" || row.source === "research" ? null : 0,
       contentCostUsd: generations.length ? generations.reduce((sum, entry) => sum + (entry.costUsd ?? 0), 0) : null,
     });
     await prisma.contentOpportunity.update({ where: { id: row.id }, data: { status: "completed", decidedAt: new Date() } });

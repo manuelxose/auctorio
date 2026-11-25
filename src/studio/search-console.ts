@@ -220,6 +220,9 @@ export async function disconnectSearchConsole(tenantId: string, siteId: string, 
       await tx.contentOpportunity.deleteMany({ where: { tenantId, siteId, source: "search_console", planItemId: null } });
       await tx.seoAction.updateMany({ where: { tenantId, siteId }, data: { baseline: Prisma.DbNull, evaluations: Prisma.DbNull } });
       await tx.contentOpportunity.updateMany({ where: { tenantId, siteId }, data: { explanation: Prisma.DbNull, score: null, confidence: null, priority: null } });
+      // The research profile is derived again without them; the reason of a run may quote how they changed.
+      await tx.siteResearchProfile.updateMany({ where: { tenantId, siteId }, data: { derived: Prisma.DbNull, derivedAt: null } });
+      await tx.seoResearchRun.updateMany({ where: { tenantId, siteId, trigger: "performance_change" }, data: { reason: {} } });
     }
     await writeAudit({ tenantId, actorType: userId ? "user" : "system", actorUserId: userId, action: "search_console.disconnected", entityType: "site", entityId: siteId, metadata: { deleteData: options.deleteData } }, tx);
   });

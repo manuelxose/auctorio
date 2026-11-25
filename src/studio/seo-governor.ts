@@ -134,6 +134,8 @@ export type ReserveInput = {
   priority?: SeoPriority;
   trigger?: SeoTrigger;
   locks?: SeoLocks;
+  /** Research run that asks: its request leaves only while the run is running. */
+  runId?: string;
 };
 
 export type SeoReservation = { id: string; maxUsd: number; quote: SeoQuote };
@@ -235,7 +237,7 @@ async function reserveNow(input: ReserveInput): Promise<ReserveResult> {
 
       await tx.seoSpendReservation.create({
         data: {
-          id, idempotencyKey: input.idempotencyKey ?? id, tenantId, targetSiteId: siteId, providerId: provider.id, operation: capability, allowance,
+          id, idempotencyKey: input.idempotencyKey ?? id, runId: input.runId ?? null, tenantId, targetSiteId: siteId, providerId: provider.id, operation: capability, allowance,
           kind: input.kind, resource: input.resource, units: ordered.length, state: "reserved", estimatedUsd: quote.estimatedUsd === null ? null : roundUp(quote.estimatedUsd), maxUsd,
           pricingVersion: SEO_PRICING_VERSION, leaseUntil, createdAt: now,
         },
@@ -259,8 +261,8 @@ async function reportExhausted(budget: SeoBudgetLimit, input: ReserveInput): Pro
 }
 
 /**
- * Last check before the request leaves. false: the reservation was lost, or an emergency stop, the kill switch or the
- * provider switch came in between; the request must not be sent.
+ * Last check before the request leaves. false: the reservation was lost, or an emergency stop, the kill switch, the
+ * provider switch or the pause or cancellation of its research run came in between; the request must not be sent.
  */
 export async function dispatchSeoReservation(id: string, providerId: string): Promise<boolean> {
   const now = new Date();
@@ -268,6 +270,7 @@ export async function dispatchSeoReservation(id: string, providerId: string): Pr
     UPDATE seo_spend_reservations SET state = 'dispatched', dispatched_at = ${sqlTime(now)}, lease_until = ${sqlTime(new Date(now.getTime() + SEO_LEASE_MS))}
     WHERE id = ${id}::uuid AND state = 'reserved' AND lease_until > ${sqlTime(now)}
       AND NOT EXISTS (SELECT 1 FROM seo_control_settings WHERE id = 'global' AND (emergency_stop OR mode = 'disabled'))
+      AND (run_id IS NULL OR EXISTS (SELECT 1 FROM seo_research_runs r WHERE r.id = run_id AND r.status = 'running'))
       AND NOT EXISTS (SELECT 1 FROM seo_provider_states WHERE provider_id = ${providerId} AND NOT enabled)`) === 1;
 }
 

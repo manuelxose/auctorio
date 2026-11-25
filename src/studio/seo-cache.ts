@@ -105,6 +105,10 @@ export async function purgeExpiredSeoData(now = new Date(), force = false): Prom
   try {
     await prisma.seoSnapshot.deleteMany({ where: { retainUntil: { lt: now } } });
     await prisma.providerCacheEntry.deleteMany({ where: { providerKey: { in: SEO_PROVIDERS.map((provider) => provider.id) }, expiresAt: { lt: now } } });
+    await prisma.seoKeywordMetric.deleteMany({ where: { retainUntil: { lt: now } } });
+    // What the licence no longer lets be kept, and the site keywords nothing explains any more.
+    await prisma.siteKeywordDiscovery.deleteMany({ where: { retainUntil: { lt: now } } });
+    await prisma.siteKeyword.deleteMany({ where: { opportunityId: null, discoveries: { none: {} }, updatedAt: { lt: new Date(now.getTime() - 86_400_000) } } });
     await prisma.seoAcquisitionLease.deleteMany({ where: { until: { lt: new Date(now.getTime() - 2 * 86_400_000) } } });
   } catch (error) {
     structuredEvent("seo.purge_failed", { error: error instanceof Error ? error.message : String(error) }, "warn");

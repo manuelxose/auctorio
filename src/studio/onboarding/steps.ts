@@ -1,4 +1,4 @@
-// Built-in onboarding step handlers (index, profile, strategy, first_plan_offer).
+// Built-in onboarding step handlers (index, profile, strategy, research, first_plan_offer).
 // "sources" and "competitors" are registered by their own modules.
 
 import { getPrismaClient } from "../../infrastructure/db/prisma";
@@ -7,6 +7,7 @@ import { notify } from "../notifications";
 import { refreshSiteIntelligence } from "../site-intelligence";
 import { rebuildSiteProfile } from "../site-intelligence/profile";
 import { getApprovedStrategy, regenerateStrategySuggestion } from "../site-intelligence/strategy";
+import { startOnboardingResearch } from "../seo-research/runs";
 import { getOnboardingStep, registerOnboardingStep, type OnboardingStepHandler, type OnboardingStepId } from "./contracts";
 
 const prisma = getPrismaClient();
@@ -59,6 +60,18 @@ const strategyStep: OnboardingStepHandler = async ({ tenantId, siteId }) => {
   };
 };
 
+const researchStep: OnboardingStepHandler = async ({ tenantId, siteId, userId }) => {
+  // Bounded by the site's research policy and the SEO cost governor; a research already done is not repeated.
+  const run = await startOnboardingResearch(tenantId, siteId, userId);
+  const coverage = (run.summary ?? {}) as { available?: number; keywords?: number };
+  return {
+    summary: run.finishedAt
+      ? `Keyword research ${run.status}: ${coverage.available ?? 0} usable opportunities, ${coverage.keywords ?? 0} keyword(s) known, ${run.cost.actualUsd.toFixed(3)} USD.`
+      : "Keyword research continues in the background.",
+    counts: { opportunities: coverage.available ?? 0, keywords: coverage.keywords ?? 0 },
+  };
+};
+
 const firstPlanOfferStep: OnboardingStepHandler = async ({ tenantId, siteId, userId }) => {
   const site = await prisma.site.findFirst({ where: { id: siteId, tenantId }, select: { name: true } });
   if (!site) throw new Error("site_not_found");
@@ -84,6 +97,7 @@ const BUILT_IN: Array<[OnboardingStepId, OnboardingStepHandler]> = [
   ["index", indexStep],
   ["profile", profileStep],
   ["strategy", strategyStep],
+  ["research", researchStep],
   ["first_plan_offer", firstPlanOfferStep],
 ];
 

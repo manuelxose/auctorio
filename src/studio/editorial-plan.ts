@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import type { EditorialPlanItemStatus, PublicationChannel } from "@prisma/client";
 import { getTextProvider } from "../infrastructure/ai/text";
@@ -21,6 +22,8 @@ import { buildEditorialPlanningContext, renderPlanningContext, type EditorialPla
 import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileForSiteType } from "./site-relevance";
 import { registerSearchTargets } from "./site-intelligence";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
+import { claimReserved, releaseReservations } from "./seo-research/reservoir";
+import { requestPlanningResearch } from "./seo-research/runs";
 import { MAX_STORED_CANDIDATES, collectKeywordCandidates, emptyKeywordResearch, type KeywordCandidate, type KeywordResearch } from "./keyword-candidates";
 import { normalizeKeyword } from "../infrastructure/seo/contract";
 import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
@@ -542,6 +545,8 @@ async function executeEditorialPlanGeneration(
 
   // prepareEditorialPlan guarantees a site; re-assert for narrowing.
   const siteId = input.siteId!;
+  // Each generation holds its own keywords, so two of them never write the same article.
+  const holder = randomUUID();
 
   try {
     const contextStarted = Date.now();
@@ -571,9 +576,14 @@ ${SOURCE_DATA_RULES}`;
     let lastProvider = "unknown";
     let lastModel = "unknown";
 
-    // Measured keywords (SEO provider) are handed out to calls in score order; none → the model picks (previous flow).
+    // Planning uses what is known; when that is too little it asks the research engine, which decides whether to buy.
+    await requestPlanningResearch(input.tenantId, siteId, input.publicationCount, input.userId ?? null);
+    // Measured keywords are handed out to calls in score order; none → the model picks (previous flow).
     const research = emptyKeywordResearch();
-    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, Math.max(input.publicationCount * 2, MAX_STORED_CANDIDATES), undefined, research).catch(() => [] as KeywordCandidate[]);
+    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, Math.max(input.publicationCount * 2, MAX_STORED_CANDIDATES), { reserveFor: holder, reserve: input.publicationCount * 2 + 8 }, research).catch((error: unknown) => {
+      structuredEvent("keyword_candidates.failed", { tenantId: input.tenantId, siteId, planId: plan.id, error: error instanceof Error ? error.message : String(error) }, "warn");
+      return [] as KeywordCandidate[];
+    });
     const planResearch: PlanResearch = {
       ...research,
       strategy: {
@@ -803,6 +813,7 @@ ${SOURCE_DATA_RULES}`;
     let filledTotal = items.length;
     let finalStatus: "ready" | "partial" = "ready";
     let replacedTitles: string[] = [];
+    const takenItems = new Set<EditorialPlanBriefV2>();
     await prisma.$transaction(async (tx) => {
       if (append?.replaceItemId) {
         const replaced = await tx.editorialPlanItem.findFirst({ where: { id: append.replaceItemId, tenantId: input.tenantId }, select: { title: true, workingTitle: true } });
@@ -824,8 +835,16 @@ ${SOURCE_DATA_RULES}`;
           parts: metrics?.parts ?? null,
           origin: metrics?.origin ?? null,
         };
+        const itemId = randomUUID();
+        if (metrics?.opportunityId && !(await claimReserved(tx, { tenantId: input.tenantId, siteId, holder, opportunityId: metrics.opportunityId, planItemId: itemId }))) {
+          // Someone took the opportunity meanwhile: a second article about it must not exist.
+          validated.dropped.push({ title: item.workingTitle, reason: "opportunity already taken" });
+          takenItems.add(item);
+          continue;
+        }
         await tx.editorialPlanItem.create({
           data: {
+            id: itemId,
             tenantId: input.tenantId,
             planId: plan.id,
             siteId: input.siteId,
@@ -889,6 +908,7 @@ ${SOURCE_DATA_RULES}`;
           },
         });
       }
+      filledTotal -= takenItems.size;
       if (append) filledTotal = await tx.editorialPlanItem.count({ where: { planId: plan.id } });
       // A plan with empty required slots is never "ready": it is reported as partial with the exact gaps.
       finalStatus = unfilledSlots.length > 0 || filledTotal < requestedTotal ? "partial" : "ready";
@@ -901,7 +921,7 @@ ${SOURCE_DATA_RULES}`;
           siteIntelligenceVersion: context.profile?.version ?? null,
           generatedOutput: {
             // The replaced proposal's stored brief goes too, so the output never lists a proposal that no longer exists.
-            items: [...withoutReplacedBriefs(append?.previous.items ?? [], replacedTitles), ...items],
+            items: [...withoutReplacedBriefs(append?.previous.items ?? [], replacedTitles), ...items.filter((item) => !takenItems.has(item))],
             dropped: [...(append?.previous.dropped ?? []), ...validated.dropped],
             warnings: [...(append?.previous.warnings ?? []), ...validated.warnings],
             requestedCount: requestedTotal,
@@ -921,8 +941,8 @@ ${SOURCE_DATA_RULES}`;
       });
     });
 
-    // Measured demand (volume + difficulty) when a keyword provider is configured; never blocks the plan.
-    await enrichPlanItemsWithKeywordMetrics(input.tenantId, plan.id);
+    // What is already known of the keywords the model picked; the rest waits for a research batch. Nothing is bought.
+    await enrichPlanItemsWithKeywordMetrics(input.tenantId, plan.id, undefined, { reuseOnly: true });
 
     // Register target queries so future plans avoid cannibalization.
     const targetItems = items.filter((item) => item.targetQuery);
@@ -977,6 +997,8 @@ ${SOURCE_DATA_RULES}`;
       normalizedError: message,
     }, "error");
     throw error;
+  } finally {
+    await releaseReservations(input.tenantId, siteId, holder).catch(() => undefined); // they expire by themselves
   }
 }
 
