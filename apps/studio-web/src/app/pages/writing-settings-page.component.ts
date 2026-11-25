@@ -42,7 +42,7 @@ const DEFAULT_VISUALS: VisualSettings = {
   coverStyle: 'realistic',
   bodyStyle: 'realistic',
   infographic: false,
-  youtube: { enabled: false, channelOnly: false, channelUrl: '' },
+  youtube: { enabled: false, channelOnly: false, channelUrl: '', approved: [] },
 };
 
 type WritingDraft = {
@@ -211,7 +211,10 @@ type Toggle = { label: string; hint: string; get: () => boolean; set: (on: boole
               </li>
             }
           </ul>
-          @if (visuals.youtube.channelOnly) {
+          @if (visuals.youtube.enabled) {
+            <label class="au-field ws-promo"><span>Vídeos aprobados (uno por línea: dirección | título)</span><textarea class="au-textarea" name="v-approved" rows="3" [ngModel]="approvedText" (ngModelChange)="setApproved($event)" placeholder="https://www.youtube.com/watch?v=… | Cómo sintonizar la TDT"></textarea><small class="au-muted">Se prueban antes de buscar en YouTube. La búsqueda solo se hace si el artículo pide un vídeo.</small></label>
+          }
+          @if (visuals.youtube.enabled) {
             <label class="au-field ws-promo"><span>URL de tu canal de YouTube</span><input class="au-input" name="v-channel" type="url" maxlength="200" [(ngModel)]="visuals.youtube.channelUrl" (ngModelChange)="dirty = true" placeholder="https://www.youtube.com/@tucanal" /></label>
           }
         </section>
@@ -554,6 +557,17 @@ export class WritingSettingsPageComponent implements DoCheck, OnDestroy {
   writing: WritingSettings | null = null;
   brand: BrandSettings = structuredClone(DEFAULT_BRAND);
   visuals: VisualSettings = structuredClone(DEFAULT_VISUALS);
+  approvedText = '';
+
+  /** Lines without a YouTube address and a title are not stored. */
+  setApproved(text: string): void {
+    this.approvedText = text;
+    this.visuals.youtube.approved = text.split('\n').flatMap((line) => {
+      const match = /(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{11})\S*\s*\|\s*(.+)$/.exec(line.trim());
+      return match ? [{ id: match[1], title: match[2].trim() }] : [];
+    });
+    this.dirty = true;
+  }
   readonly imageStyles: Array<{ key: ImageStyle; label: string }> = [
     { key: 'realistic', label: 'Foto realista' },
     { key: 'illustration', label: 'Ilustración' },
@@ -635,6 +649,7 @@ export class WritingSettingsPageComponent implements DoCheck, OnDestroy {
         this.audienceText = this.brand.audience.join('\n');
         const v = this.targets.visuals;
         this.visuals = { ...structuredClone(DEFAULT_VISUALS), ...v, youtube: { ...DEFAULT_VISUALS.youtube, ...v?.youtube } };
+        this.approvedText = this.visuals.youtube.approved.map((video) => `https://www.youtube.com/watch?v=${video.id} | ${video.title}`).join('\n');
         this.citiesText = this.brand.location.cities.join(', ');
         this.dirty = false;
         this.detectedInfo = null;

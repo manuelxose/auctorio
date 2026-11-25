@@ -3,7 +3,7 @@
 
 import type { SeoCapability, SeoQuote } from "./contract";
 
-export const SEO_PRICING_VERSION = "2026-11-24.1";
+export const SEO_PRICING_VERSION = "2026-11-25.1";
 /** Older verifications are flagged for review; they do not stop spending (a bill above the quote does). */
 export const PRICE_REVIEW_DAYS = 90;
 
@@ -28,6 +28,9 @@ export type SeoPrice = {
 const DFS_LABS = "https://dataforseo.com/pricing/dataforseo-labs/dataforseo-google-api";
 const ANYAPI = "https://api.getanyapi.com/catalog";
 const VERIFIED = "2026-11-24";
+const TAVILY = "https://docs.tavily.com/documentation/api-credits";
+const FIRECRAWL = "https://www.firecrawl.dev/pricing";
+const WEB_VERIFIED = "2026-11-25";
 const price = (providerId: string, capability: SeoCapability, source: string, patch: Pick<SeoPrice, "billingUnit" | "perRequestUsd"> & Partial<SeoPrice>): SeoPrice => ({
   providerId, capability, currency: "USD", perItemUsd: 0, minRequestUsd: 0, maxRequestUsd: null, batchItems: null, verifiedAt: VERIFIED, source, uncertainty: "list_price", ...patch,
 });
@@ -47,6 +50,11 @@ export const SEO_PRICES: readonly SeoPrice[] = [
   price("anyapi", "serp_organic", ANYAPI, { billingUnit: "request", perRequestUsd: 0.0005, maxRequestUsd: 0.002, uncertainty: "failover_range" }),
   price("anyapi", "search_volume", ANYAPI, { billingUnit: "request", perRequestUsd: 0.108, batchItems: 1000, uncertainty: "none" }),
   price("anyapi", "youtube_search", ANYAPI, { billingUnit: "request", perRequestUsd: 0.00034, maxRequestUsd: 0.0012, uncertainty: "failover_range" }),
+  // The dearest published price of a credit: pay as you go (Tavily), monthly Hobby (Firecrawl).
+  price("tavily", "web_search", TAVILY, { billingUnit: "1 credit", perRequestUsd: 0.008, verifiedAt: WEB_VERIFIED }),
+  price("tavily", "web_extract", TAVILY, { billingUnit: "1 credit per 5 pages", perRequestUsd: 0.008, verifiedAt: WEB_VERIFIED }),
+  price("firecrawl", "web_search", FIRECRAWL, { billingUnit: "2 credits per 10 results", perRequestUsd: 0.0076, maxRequestUsd: 0.0152, verifiedAt: WEB_VERIFIED }),
+  price("firecrawl", "web_extract", FIRECRAWL, { billingUnit: "1 credit + 4 for extraction", perRequestUsd: 0.019, verifiedAt: WEB_VERIFIED }),
 ];
 
 export function seoPrice(providerId: string, capability: SeoCapability): SeoPrice | null {

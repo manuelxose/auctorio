@@ -28,7 +28,8 @@ const ERRORS: Record<string, string> = {
   opportunity_conflicts_with_approved: 'Esa página ya tiene otra acción aprobada. Complétala antes.', opportunity_not_open: 'Esta oportunidad ya no está abierta.', search_console_not_configured: 'Falta configurar Google en el servidor.',
   search_console_syncing: 'Ya se está sincronizando.', external_seo_stopped: 'Un administrador ha parado el SEO externo.', search_console_property_not_allowed: 'Esa propiedad no es de este dominio.', site_base_url_required: 'El sitio no tiene dirección web.',
   search_console_state_expired: 'La autorización caducó. Vuelve a conectar.', search_console_unknown_state: 'Esa autorización no es de esta sesión.', search_console_forbidden: 'Google no concedió el permiso de lectura.', search_console_quota: 'Google ha limitado las consultas. Se reintentará más tarde.',
-  forbidden: 'No tienes permiso para esta acción.',
+  forbidden: 'No tienes permiso para esta acción.', optimization_page_not_managed: 'Esa página no se publicó con Auctorio: haz el cambio en tu web y márcala como hecha.', generation_in_flight: 'Esa página ya se está redactando.',
+  opportunity_not_approved: 'Aprueba antes la mejora.',
 };
 
 @Component({
@@ -138,7 +139,10 @@ const ERRORS: Record<string, string> = {
                         <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, creates(item) ? 'plan' : 'approved')">{{ creates(item) ? 'Al plan' : 'Aprobar' }}</button>
                         <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'dismissed')">Descartar</button>
                       }
-                      @if (item.status === 'approved') { <button class="au-btn au-btn--secondary au-btn--sm" type="button" (click)="show(item.id)">Completar</button> }
+                      @if (item.status === 'approved') {
+                        @if (revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
+                        <button class="au-btn au-btn--ghost au-btn--sm" type="button" (click)="show(item.id)">Completar</button>
+                      }
                       @if (item.status === 'dismissed') { <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button> }
                     </td>
                   </tr>
@@ -250,6 +254,7 @@ const ERRORS: Record<string, string> = {
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'dismissed')">Descartar</button>
             }
             @if (item.status === 'approved') {
+              @if (revisable(item)) { <button class="au-btn au-btn--secondary au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'revise')">Preparar revisión</button> }
               <label class="au-field"><span class="au-field__label">Fecha del cambio</span><input class="au-input" type="date" [max]="today" [(ngModel)]="doneOn" /></label>
               <button class="au-btn au-btn--primary au-btn--sm" type="button" [disabled]="!!busy() || !doneOn" (click)="act(item, 'done')">Marcar como hecha</button>
               <button class="au-btn au-btn--ghost au-btn--sm" type="button" [disabled]="!!busy()" (click)="act(item, 'open')">Reabrir</button>
@@ -333,6 +338,9 @@ export class SeoOpportunitiesPageComponent {
   }
   creates(item: SeoOpportunity): boolean {
     return item.action === 'create_content' || item.action === 'strengthen_cluster';
+  }
+  revisable(item: SeoOpportunity): boolean {
+    return !!item.targetUrl && ['update_existing', 'expand_existing', 'improve_metadata'].includes(item.action);
   }
   badge(item: SeoOpportunity): string {
     const action = this.proposed(item);
@@ -445,8 +453,14 @@ export class SeoOpportunitiesPageComponent {
       this.toast.success(`${result.open} oportunidad(es) abiertas${result.firstPartyData ? '' : '. Aún no hay datos suficientes de Search Console'}.`);
     });
   }
-  act(item: SeoOpportunity, action: 'plan' | 'approved' | 'dismissed' | 'open' | 'done'): Promise<void> {
+  act(item: SeoOpportunity, action: 'plan' | 'approved' | 'dismissed' | 'open' | 'done' | 'revise'): Promise<void> {
     return this.work('act', async (siteId) => {
+      if (action === 'revise') {
+        const { projectId } = await firstValueFrom(this.api.revise(siteId, item.id));
+        this.toast.success('Redactando una versión nueva de la página. No se publica hasta que la apruebes.');
+        await this.router.navigate(['/studio/content', projectId]);
+        return;
+      }
       if (action === 'plan') await firstValueFrom(this.api.plan(siteId, item.id));
       else if (action === 'done') await firstValueFrom(this.api.markDone(siteId, item.id, this.doneOn));
       else await firstValueFrom(this.api.decide(siteId, item.id, action));

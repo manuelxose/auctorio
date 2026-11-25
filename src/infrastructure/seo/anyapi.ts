@@ -4,11 +4,13 @@
 import { secretOf } from "../ai/ai-settings";
 import {
   GOOGLE_LOCATION_CODES,
+  NO_WEB,
   SeoProviderError,
   assertNetworkAllowed,
   normalizeKeyword,
   num,
   text,
+  type DataCapability,
   type KeywordMetrics,
   type SeoAdapterResult,
   type SeoCapability,
@@ -72,7 +74,7 @@ function metricRows(rows: Row[]): { data: KeywordMetrics[]; dropped: number } {
 const sendable = (keywords: string[]) => keywords.filter((keyword) => keyword.length <= MAX_KEYWORD_CHARS);
 const skipped = (keywords: string[]) => keywords.length - sendable(keywords).length;
 
-const operations: { [C in SeoCapability]: Operation<C> } = {
+const operations: { [C in DataCapability]: Operation<C> } = {
   keyword_metrics: {
     sku: "seo.keyword_overview",
     list: "keywords",
@@ -158,7 +160,8 @@ function statusCode(status: number): SeoErrorCode {
 }
 
 async function call<C extends SeoCapability>(capability: C, request: SeoRequests[C], fetchImpl: typeof fetch): Promise<SeoAdapterResult<C>> {
-  const operation = operations[capability] as unknown as Operation<C>;
+  const operation = operations[capability as DataCapability] as unknown as Operation<C> | undefined;
+  if (!operation) throw new SeoProviderError("unsupported_capability", `${ID}: ${capability} is not supported`, ID, 0);
   const body = operation.body(request);
   if (Array.isArray(body.keywords) && body.keywords.length === 0) throw new SeoProviderError("bad_request", `${ID}: no keyword can be sent (over ${MAX_KEYWORD_CHARS} characters)`, ID, 0);
   const { maxUsd } = anyApiProvider.quote(capability, request);
@@ -223,6 +226,7 @@ export const anyApiProvider: SeoProvider = {
     serp_organic: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "AnyAPI google.search: live Google results at request time", engine: "google", devices: [], maxBatch: 1, maxResults: 10, pagination: true, degraded: "About 10 results per request; those Google hides behind redirect links are dropped (6 of 10 in the live test)" },
     search_volume: { supported: true, sourceTag: "anyapi_search_volume", dataKind: "provider_reported", methodology: "AnyAPI seo.search_volume; upstream undisclosed", engine: "google", devices: [], maxBatch: 1000, maxResults: null, pagination: false, degraded: "Flat 0.108 USD per request, whatever the number of keywords" },
     youtube_search: { supported: true, sourceTag: ID, dataKind: "observed", methodology: "AnyAPI youtube.search: live YouTube results", engine: "youtube", devices: [], maxBatch: 1, maxResults: null, pagination: true, degraded: "No country or language targeting" },
+    ...NO_WEB,
   },
   licensing: {
     termsUrl: "https://getanyapi.com/terms",

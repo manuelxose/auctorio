@@ -8,6 +8,7 @@ import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../infrastructure/db/prisma";
 import {
   SeoProviderError,
+  isWebCapability,
   normalizeDomain,
   normalizeKeyword,
   seoMarket,
@@ -26,7 +27,7 @@ import {
 } from "../infrastructure/seo/contract";
 import { SEO_RESOURCES, freshnessDays, retentionDays, seoCacheKey, type SeoDecision } from "../infrastructure/seo/policy";
 import { effectiveQuote, seoPrice, type SeoPriceOverrides } from "../infrastructure/seo/pricing";
-import { DEFAULT_CONTROL, findSeoProvider, primarySeoProviderId, seoBlockReason, selectSeoProvider, type SeoControl, type SeoLocks } from "../infrastructure/seo/registry";
+import { DEFAULT_CONTROL, SEO_PROVIDERS, findSeoProvider, primarySeoProviderId, seoBlockReason, selectSeoProvider, type SeoControl, type SeoLocks } from "../infrastructure/seo/registry";
 import { sha256 } from "../shared/utils/hash";
 import { structuredEvent } from "../shared/utils/logger";
 import { mergeKeywordMetrics, readSeoCache, writeSeoCache, writeSeoSnapshot, type FieldProvenance, type SeoCacheEntry, type SeoCacheRow } from "./seo-cache";
@@ -238,9 +239,10 @@ type Subject = { subject: string; key: string; legacyKey: string | null; leaseKe
 const keywordsOf = (request: unknown) => (request as { keywords?: string[] }).keywords;
 
 function subjectsOf<C extends SeoCapability>(route: SeoRoute, capability: C, request: SeoRequests[C], tenantId: string): Subject[] {
-  const single = request as { seed?: string; domain?: string; keyword?: string; limit?: number; cursor?: string; device?: string; engine?: string };
-  const normalize = capability === "ranked_keywords" ? normalizeDomain : normalizeKeyword;
-  const subjects = [...new Set((keywordsOf(request) ?? [single.seed ?? single.domain ?? single.keyword ?? ""]).map(normalize).filter(Boolean))];
+  const single = request as { seed?: string; domain?: string; keyword?: string; url?: string; limit?: number; cursor?: string; device?: string; engine?: string; freshnessHours?: number };
+  // A web query keeps its case (operators) and a URL is a URL.
+  const normalize = isWebCapability(capability) ? (value: string) => value.trim() : capability === "ranked_keywords" ? normalizeDomain : normalizeKeyword;
+  const subjects = [...new Set((keywordsOf(request) ?? [single.seed ?? single.domain ?? single.url ?? single.keyword ?? ""]).map(normalize).filter(Boolean))];
   return subjects.map((subject) => {
     const key = seoCacheKey(route.provider, capability, route.market, subject, single);
     const legacy = single.cursor || single.device ? null : `${route.marketKey}|${subject}`;
@@ -251,7 +253,7 @@ function subjectsOf<C extends SeoCapability>(route: SeoRoute, capability: C, req
 /** The request the provider gets for these subjects. */
 function requestFor<C extends SeoCapability>(capability: C, request: SeoRequests[C], subjects: string[]): SeoRequests[C] {
   if (keywordsOf(request)) return { ...request, keywords: subjects };
-  const field = capability === "ranked_keywords" ? "domain" : capability === "keyword_suggestions" ? "seed" : "keyword";
+  const field = capability === "ranked_keywords" ? "domain" : capability === "keyword_suggestions" ? "seed" : capability === "web_extract" ? "url" : "keyword";
   return { ...request, [field]: subjects[0] };
 }
 
@@ -301,6 +303,7 @@ async function keepAnswer<C extends SeoCapability>(route: SeoRoute, capability: 
     await store("keyword_metrics", rows);
     await learn(learned);
   }
+  if (capability === "web_extract") return; // a third party's page: no history of it is kept
   await writeSeoSnapshot({
     tenantId, providerId: provider.id, capability, cacheKey: bought.length === 1 ? bought[0].key : `batch:${bought.length}:${sha256(bought.map(({ key }) => key).join("\n")).slice(0, 16)}`,
     data: result.data, meta: { ...base, partial: result.partial, market, subjects: bought.length, limit: (request as { limit?: number }).limit ?? null }, reservationId, fetchedAt, retentionDays: days,
@@ -508,6 +511,26 @@ export async function acquireSeo<C extends SeoCapability>(route: SeoRoute, capab
   return { data: (data as Array<{ keyword: string }>).filter((row) => own.has(row.keyword)) as SeoData[C], meta: { ...meta, unresolved } };
 }
 
+/**
+ * What is already stored of an answer, when nobody may be asked now (stopped, disabled, no credentials): the knowledge an
+ * installation has keeps serving it. Sends nothing. null = nothing stored by any provider.
+ */
+export async function readStoredSeo<C extends SeoCapability>(capability: C, locale: string | null | undefined, request: Omit<SeoRequests[C], "market">, scope: Omit<SeoScope, "reuseOnly">): Promise<SeoResult<C> | null> {
+  const market = seoMarket(locale);
+  if (!market) return null;
+  for (const provider of SEO_PROVIDERS) {
+    const declaration = provider.capabilities[capability];
+    const marketKey = declaration.supported ? provider.marketKey(capability, market) : null;
+    if (!declaration.supported || marketKey === null) continue;
+    try {
+      return await acquireNow({ provider, market, marketKey, sourceTag: declaration.sourceTag }, capability, { ...request, market } as SeoRequests[C], { ...scope, reuseOnly: true });
+    } catch (error) {
+      if (!(error instanceof SeoProviderError)) throw error;
+    }
+  }
+  return null;
+}
+
 // ---- Authorized live test ----
 
 /** Most an administrator can authorize for one live test. */
@@ -520,6 +543,8 @@ const testRequest = (market: SeoMarket): { [C in SeoCapability]: SeoRequests[C] 
   serp_organic: { market, keyword: "weather" },
   search_volume: { market, keywords: ["weather"] },
   youtube_search: { market, keyword: "weather" },
+  web_search: { market, keyword: "weather", limit: 1 },
+  web_extract: { market, url: "https://example.com" },
 });
 
 /** Price of the same small request on every provider: what cost-optimized routing compares. */

@@ -23,6 +23,13 @@ deduplication, or from using each provider where it is cheaper.
 | Free trial | 1 USD for new accounts | About 100 requests at sign-up |
 | Refunds | Not established | Unused purchased funds, 14 days |
 
+| Web capability | Tavily | Firecrawl |
+|---|---|---|
+| `web_search` | 0.008 (1 credit) | 0.0076 per 10 results, at most 0.0152 |
+| `web_extract` | 0.008 (1 credit per 5 pages) | 0.019 (1 credit + 4 for extraction) |
+
+Read on 2026-11-25; the dearest published credit (pay as you go; monthly Hobby). Neither reports what it charged, so the maximum is recorded: a free plan is billed less than shown.
+
 Sources: dataforseo.com/pricing (`dataforseo-labs/dataforseo-google-api`, `keywords-data/google-ads`, `serp/youtube-serp-api`);
 api.getanyapi.com/catalog; getanyapi.com/terms.
 
@@ -39,6 +46,7 @@ list price: another lane served it, within the quoted maximum.
 | Each plan, per workspace | 5 a month |
 | Each workspace | 5 a month, 2 a day |
 | Each site | 3 a month (recurring), 2 in all while onboarding (14 days), 1 a day, 0.5 a month for `search_volume` |
+| Each workspace, web | 2 a month for `web_search`, 1 for `web_extract`, within its 5 |
 
 They are initial assumptions, editable in the panel. All apply at once. Budgets start counting when SEO-V2-02 is deployed: earlier spending
 has no reservations. Months and days are UTC. Background work may use 80 % of a recurring limit.
@@ -61,4 +69,7 @@ has no reservations. Months and days are UTC. Background work may use 80 % of a 
 - A subject answered in the last 60 days is not asked again, whatever the run.
 - Volume, CPC, difficulty and intent that came with discovery are not bought again; a missing difficulty does not trigger an overview.
 - `search_volume` costs 0.09 USD flat: it waits until at least 10 keywords need it.
+- An article asks for its search results once. Retries, rewrites and revisions use what it found, even when the cache has expired (90 days; 3 for news).
+- A plan with enough plan sources and a measured intent buys no search results; a template with room for a video buys none.
+- Web search answers last 7 days (6 hours for news): competitor, source and news discovery stop paying twice for the same question.
 - Freshness: keyword data 75 days (60–90), rankings 60 (30–90), SERP and YouTube 21 (14–30), time-sensitive SERP 3. Nothing is refreshed on a schedule.

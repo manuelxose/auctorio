@@ -2,8 +2,12 @@
 // a provider's endpoints, codes and response shapes stay inside its adapter.
 // Nothing here estimates a metric: a value the provider did not return is null.
 
-export const SEO_CAPABILITIES = ["keyword_metrics", "keyword_suggestions", "ranked_keywords", "serp_organic", "search_volume", "youtube_search"] as const;
+export const SEO_CAPABILITIES = ["keyword_metrics", "keyword_suggestions", "ranked_keywords", "serp_organic", "search_volume", "youtube_search", "web_search", "web_extract"] as const;
 export type SeoCapability = (typeof SEO_CAPABILITIES)[number];
+/** Open-web search and page reading: their own providers, whatever the mode of the SEO data providers (infrastructure/seo/web.ts). */
+export type WebCapability = "web_search" | "web_extract";
+export type DataCapability = Exclude<SeoCapability, WebCapability>;
+export const isWebCapability = (capability: SeoCapability): boolean => capability === "web_search" || capability === "web_extract";
 
 /** Where a value comes from. `unknown` = never asked; `unavailable` = asked, the provider has no value (both are stored as null). */
 export type SeoDataKind = "observed" | "provider_reported" | "estimated" | "historical" | "unavailable" | "unknown";
@@ -74,6 +78,22 @@ export type KeywordMetrics = {
 };
 export type KeywordVolume = { keyword: string; volume: number };
 export type SerpResult = { url: string; title: string; domain: string; description: string };
+export type WebSearchResult = { url: string; title: string; description: string | null; publishedAt: string | null; domain: string; score: number | null };
+export type WebClaim = { claim: string; confidence: number };
+export type WebExtraction = {
+  url: string;
+  title: string | null;
+  publisher: string | null;
+  author: string | null;
+  publishedAt: string | null;
+  description: string | null;
+  articleText: string | null;
+  images: string[];
+  language: string | null;
+  entities: string[];
+  claims: WebClaim[];
+  structuredData: Record<string, unknown> | null;
+};
 export type YoutubeResult = { id: string; title: string; channel: string; channelUrl: string };
 
 type Paged = { market: SeoMarket; cursor?: string };
@@ -84,6 +104,8 @@ export type SeoRequests = {
   serp_organic: Paged & { keyword: string; engine?: "google"; device?: "desktop" | "mobile" };
   search_volume: { market: SeoMarket; keywords: string[] };
   youtube_search: Paged & { keyword: string };
+  web_search: { market: SeoMarket; keyword: string; limit?: number; freshnessHours?: number };
+  web_extract: { market: SeoMarket; url: string };
 };
 export type SeoData = {
   keyword_metrics: KeywordMetrics[];
@@ -92,6 +114,8 @@ export type SeoData = {
   serp_organic: SerpResult[];
   search_volume: KeywordVolume[];
   youtube_search: YoutubeResult[];
+  web_search: WebSearchResult[];
+  web_extract: WebExtraction[];
 };
 
 export type SeoQuote = {
@@ -149,7 +173,7 @@ export type CapabilityDeclaration =
       /** Kind per field where it differs from the response's own kind. */
       fieldKinds?: Partial<Record<string, SeoDataKind>>;
       methodology: string;
-      engine: "google" | "youtube";
+      engine: "google" | "youtube" | "web";
       /** Devices a caller may choose; empty = the provider decides. */
       devices: ReadonlyArray<"desktop" | "mobile">;
       maxBatch: number | null;
@@ -159,6 +183,12 @@ export type CapabilityDeclaration =
       degraded: string | null;
     }
   | { supported: false; reason: string; alternatives: string[] };
+
+/** For adapters that serve SEO data only. */
+export const NO_WEB: Record<WebCapability, CapabilityDeclaration> = {
+  web_search: { supported: false, reason: "not a web search provider", alternatives: ["tavily", "firecrawl"] },
+  web_extract: { supported: false, reason: "does not read pages", alternatives: ["tavily", "firecrawl"] },
+};
 
 export type SeoLicensing = {
   termsUrl: string;
@@ -212,9 +242,10 @@ export class SeoProviderError extends Error {
   }
 }
 
-/** Tests never reach a provider: inside the test runner only an injected fetch may be used. */
+/** Tests never reach a provider: inside the test runner only an injected or replaced fetch may be used. */
+const REAL_FETCH = globalThis.fetch;
 export function assertNetworkAllowed(fetchImpl: typeof fetch, providerId: string): void {
-  if (fetchImpl === globalThis.fetch && (process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === "test")) {
+  if (fetchImpl === REAL_FETCH && (process.env.NODE_TEST_CONTEXT || process.env.NODE_ENV === "test")) {
     throw new SeoProviderError("network_blocked", `${providerId}: external SEO calls are blocked in tests`, providerId, 0);
   }
 }

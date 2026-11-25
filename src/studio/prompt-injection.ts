@@ -29,7 +29,9 @@ export const SOURCE_DATA_RULES = [
  * provenance (e.g. "fact-ledger", "previous-article", "candidate-headlines").
  */
 export function wrapUntrustedContent(label: string, content: string): string {
-  return `${UNTRUSTED_BLOCK_OPEN} ${label} BEGIN>>>\n${content}\n<<<${UNTRUSTED_BLOCK_CLOSE} ${label}`;
+  // The content cannot close its own block.
+  const inert = content.replace(/<{3,}/g, "‹‹‹").replace(/>{3,}/g, "›››");
+  return `${UNTRUSTED_BLOCK_OPEN} ${label} BEGIN>>>\n${inert}\n<<<${UNTRUSTED_BLOCK_CLOSE} ${label}`;
 }
 
 /** Bound untrusted content before embedding (length + NUL stripping). */
@@ -47,6 +49,11 @@ export function neutralizeInlineControlCharacters(content: string): string {
   return content
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
     .replace(/[\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069]/g, "");
+}
+
+/** Sentences that address a model instead of a reader: never quoted as evidence. */
+export function looksLikeInstruction(sentence: string): boolean {
+  return /\b(ignore|disregard|forget|ignora|olvida|omite)\b.{0,40}\b(previous|prior|above|all|anterior(es)?|instruc\w*|prompt)\b|\b(system prompt|you are now|act as an?|as an ai|eres un(a)? (ia|asistente)|act[uú]a como)\b|<\/?(system|assistant|instructions?)>/i.test(sentence);
 }
 
 export { neutralizeInlineControlCharacters as sanitizeUntrustedText };

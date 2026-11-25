@@ -1,6 +1,6 @@
 # SEO V2 production readiness
 
-| Gate | State after SEO-V2-03 |
+| Gate | State after SEO-V2-05 |
 |---|---|
 | Provider contract, registry and adapters | Done |
 | Kill switch and per-provider switch, effective on the next call in every process | Done |
@@ -13,10 +13,15 @@
 | Search Console live authorization | Synchronization checked live on 2026-11-24. Authorization, refresh and revocation pending: `GOOGLE_CLIENT_SECRET`, the API and the consent screen of the Google project |
 | Google verification of the OAuth app | Pending: `webmasters.readonly` is a sensitive scope; until verified, only test users can connect |
 | Research engine with a paid provider | Pending: never run against a real provider (no budget authorized) |
+| Every external SEO call governed, web search included | Done (SEO-V2-05); never run against a real provider in this milestone |
+| Editorial workflows reuse stored intelligence | Done (SEO-V2-05), with simulated providers |
 | Lifting `SEO_LOCKS` | Pending: licensing, DataForSEO live verification and owner approval |
 
 ## Deploying
 
+- SEO-V2-05 has no migration. Deploy API and workers together. What changes on deployment: web discovery (news, sources, competitors, engagement) spends within the governor (2 USD a month per
+  workspace for searches, 1 for pages, inside its 5) and stops with the kill switch and the emergency stop; search results of an article are bought only if needed and once; automation never
+  publishes a change to a page that is already public, nor a news item without a current source. Review the web budgets first if a workspace searches a lot.
 - SEO-V2-03 (`20261125120000_seo_persistent_knowledge`) is additive: six tables and new nullable columns. Deploy API and workers together: an older API would still buy while
   planning. Workers start research by themselves only once an administrator allows it (Proveedores SEO → **Dejar que la investigación SEO empiece sola**, policy
   `automaticResearch`, off by default); then, at most 0.25 USD per run within the governor's budgets. Onboarding, a plan with too little knowledge and manual runs do not need it.

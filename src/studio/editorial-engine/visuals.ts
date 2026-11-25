@@ -13,15 +13,16 @@ export type VisualSettings = {
   bodyStyle: ImageStyle | "media_library";
   /** One body image becomes an infographic of the section with steps, figures or a comparison. */
   infographic: boolean;
-  youtube: { enabled: boolean; channelOnly: boolean; channelUrl: string };
+  youtube: { enabled: boolean; channelOnly: boolean; channelUrl: string; /** The site's approved videos, offered before any search. */ approved: ApprovedVideo[] };
 };
+export type ApprovedVideo = { id: string; title: string };
 
 export const DEFAULT_VISUALS: VisualSettings = {
   imageInstructions: "",
   coverStyle: "realistic",
   bodyStyle: "realistic",
   infographic: false,
-  youtube: { enabled: false, channelOnly: false, channelUrl: "" },
+  youtube: { enabled: false, channelOnly: false, channelUrl: "", approved: [] },
 };
 
 const rec = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
@@ -40,6 +41,7 @@ export function readVisualSettings(value: unknown): VisualSettings {
       enabled: youtube.enabled === true,
       channelOnly: youtube.channelOnly === true && /^https:\/\/(www\.)?youtube\.com\/(@[\w.-]+|channel\/[\w-]+|c\/[\w.-]+)\/?$/.test(channelUrl),
       channelUrl: /^https:\/\/(www\.)?youtube\.com\//.test(channelUrl) ? channelUrl : "",
+      approved: (Array.isArray(youtube.approved) ? youtube.approved : []).map(rec).flatMap(({ id, title }) => (typeof id === "string" && /^[\w-]{11}$/.test(id) && typeof title === "string" && title.trim() ? [{ id, title: title.replace(/\s+/g, " ").trim().slice(0, 150) }] : [])).slice(0, 100),
     },
   };
 }
@@ -105,8 +107,16 @@ export function insertYoutube(html: string, video: YoutubeVideo): string {
   return index === undefined ? `${html}${figure}` : `${html.slice(0, index)}${figure}${html.slice(index)}`;
 }
 
-/** The first video, optionally only from the site's own channel (matched on its URL). */
-export function pickYoutubeVideo(videos: YoutubeVideo[], youtube: VisualSettings["youtube"]): YoutubeVideo | null {
+/** Candidates in order, optionally only from the site's own channel (matched on its URL). */
+export function youtubeCandidates(videos: YoutubeVideo[], youtube: Pick<VisualSettings["youtube"], "channelOnly" | "channelUrl">): YoutubeVideo[] {
   const channel = youtube.channelUrl.replace(/^https:\/\/(www\.)?youtube\.com\//, "").replace(/\/$/, "").toLowerCase();
-  return videos.find((video) => !youtube.channelOnly || (channel && video.channelUrl.toLowerCase().includes(channel))) ?? null;
+  return videos.filter((video) => !youtube.channelOnly || (channel && video.channelUrl.toLowerCase().includes(channel)));
+}
+
+const NEEDS_VIDEO = /\b(c[oó]mo|paso a paso|tutorial|how to|step by step|v[ií]deos?|tr[aá]ilers?|trailers?|reviews?|an[aá]lisis|unboxing|recetas?|recipes?|ejercicios?|workout|instalar|install|configurar|setup|montar|reparar|repair)\b/i;
+
+/** Whether the article itself calls for a video; a template with room for one does not. An explicit choice on the item wins. */
+export function videoNeeded(item: { contentType?: string | null; primaryKeyword?: string | null; title?: string | null }, choice: unknown): boolean {
+  if (typeof choice === "boolean") return choice;
+  return item.contentType === "tutorial" || item.contentType === "review" || NEEDS_VIDEO.test(`${item.primaryKeyword ?? ""} ${item.title ?? ""}`);
 }

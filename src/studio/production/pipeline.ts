@@ -27,6 +27,7 @@ import { generateSocialForPlanItem } from "../editorial-plan";
 import { resolveClusterSite } from "../editorial-engine/cluster-production";
 import { ensurePlanItemProject, slotOrNow } from "./plan-item";
 import { getOrCreatePolicy } from "../automation";
+import { pageKey } from "../seo-intelligence/detect";
 import { createPublication } from "../publication";
 import { productionStages } from "./stages";
 import {
@@ -124,6 +125,12 @@ export function toProductionJobView(job: ProductionJob): ProductionJobView {
   const summary: Record<string, unknown> = {};
   if (artifacts.duplicates) summary.duplicates = { decision: artifacts.duplicates.decision, reason: artifacts.duplicates.reason, similarity: artifacts.duplicates.similarity };
   if (artifacts.evidence) summary.evidence = { licenses: artifacts.evidence.licenses.length, forbidden: artifacts.evidence.forbidden.length, requireAttribution: artifacts.evidence.requireAttribution.length };
+  if (artifacts.research) {
+    const { serp, video, facts, at } = artifacts.research;
+    summary.research = { at, serp, video: { state: video.state, code: video.code, id: video.video?.id ?? null }, pagesRead: facts.filter((fact) => fact.evidenceKind === "page").length, leads: facts.filter((fact) => fact.evidenceKind === "search_result").length };
+  }
+  if (artifacts.degraded?.length) summary.degraded = artifacts.degraded;
+  if (artifacts.materialize?.held) summary.held = artifacts.materialize.held;
   if (artifacts.brief) summary.brief = { articleType: artifacts.brief.brief.articleType, searchIntent: artifacts.brief.brief.searchIntent, primaryKeyword: artifacts.brief.brief.primaryKeyword };
   if (artifacts.write) summary.writer = { provider: artifacts.write.provider, model: artifacts.write.model, title: artifacts.write.parsed.title };
   if (artifacts.qa) {
@@ -189,7 +196,7 @@ async function syncPlanItem(job: ProductionJob, outcome: "generating" | "needs_r
 // ────────────────────────────────────────────────────────────── Start
 
 /** rerun: an editor asked to rewrite a finished plan item (Regenerate), so its finished job does not answer for it. */
-type StartOptions = { userId?: string | null; wait?: boolean; now?: Date; rerun?: boolean };
+type StartOptions = { userId?: string | null; wait?: boolean; now?: Date; rerun?: boolean; /** A person wants fresh search results and sources, within the budget. */ refreshResearch?: boolean };
 
 function manualKey(request: { siteId: string; title: string; brief: string }): string {
   return crypto.createHash("sha256").update(`${request.siteId}\u0000${request.title.trim()}\u0000${request.brief.trim()}`).digest("hex").slice(0, 40);
@@ -249,6 +256,19 @@ export async function startProduction(
   if (target.item && target.item.status !== "approved" && !target.item.projectId) {
     throw new ProductionError("editorial_plan_item_must_be_approved");
   }
+  if (target.item?.contentType === "update") {
+    // Improving a page is a new version of its own project; a second article would compete with it.
+    const projectId = target.item.projectId ?? (await projectOfPage(tenantId, target.siteId, planItemTargetUrl(target.item)));
+    if (!projectId) throw new ProductionError("optimization_page_not_managed", "this page was not published with Auctorio: improve it on the website and mark the opportunity as done", 409);
+    target.item = await prisma.editorialPlanItem.update({ where: { id: target.item.id }, data: { projectId } });
+    request = { ...request, requireReview: true, reuseResearch: true };
+  }
+  // Rewriting an article it already has does not buy its data again, unless a person asks for that.
+  const before = request.kind === "plan_item" && options.rerun
+    ? await prisma.productionJob.findFirst({ where: { tenantId, planItemId: request.planItemId, artifacts: { path: ["research", "keyword"], not: Prisma.AnyNull } }, orderBy: { createdAt: "desc" }, select: { artifacts: true } })
+    : null;
+  const research = before && !options.refreshResearch ? artifactsOf(before as Pick<ProductionJob, "artifacts">).research : undefined;
+  if (options.rerun && !options.refreshResearch) request = { ...request, reuseResearch: true };
 
   let job: ProductionJob;
   try {
@@ -263,7 +283,7 @@ export async function startProduction(
         stage: "prepare",
         idempotencyKey: target.key,
         request: request as unknown as Prisma.InputJsonObject,
-        artifacts: { completed: [] } as Prisma.InputJsonObject,
+        artifacts: { completed: [], ...(research ? { research } : {}) } as unknown as Prisma.InputJsonObject,
         initiatorUserId: options.userId ?? null,
       },
     });
@@ -355,7 +375,9 @@ async function executeProductionJob(jobId: string, options: { now?: Date } = {})
 
   try {
     job = await saveArtifacts(job.id, { stage: "prepare" }, artifacts);
-    const input = await productionStages.prepare({ tenantId: job.tenantId, siteId: job.siteId, request }, now);
+    const input = await productionStages.prepare({ tenantId: job.tenantId, siteId: job.siteId, request, research: artifacts.research ?? null }, now);
+    if (input.research) artifacts.research = input.research;
+    artifacts.degraded = input.degraded ?? [];
     if (!artifacts.completed.includes("prepare")) artifacts.completed.push("prepare");
     const ctx: StageContext = { jobId: job.id, tenantId: job.tenantId, siteId: job.siteId, kind: request.kind, request, generationId: job.generationId, input, artifacts, now };
 
@@ -549,13 +571,32 @@ export async function listProductionJobs(
   return { items: rows.map(toProductionJobView), page, pageSize, total, counts: statusCounts };
 }
 
+// ────────────────────────────────────────────────────────────── Pages already public
+
+export const planItemTargetUrl = (item: { metadata: unknown }): string | null => {
+  const url = (item.metadata as { targetUrl?: unknown } | null)?.targetUrl;
+  return typeof url === "string" ? url : null;
+};
+
+/** The project a public page was published from: publishing a new version of it updates that same page. */
+export async function projectOfPage(tenantId: string, siteId: string, url: string | null): Promise<string | null> {
+  if (!url) return null;
+  const path = pageKey(url);
+  const rows = await prisma.publication.findMany({
+    where: { tenantId, siteId, channel: "website", status: "published", externalId: { not: null }, externalUrl: { not: null }, project: { deletedAt: null }, NOT: { externalId: { startsWith: "dryrun-" } } },
+    select: { projectId: true, externalUrl: true },
+    orderBy: { publishedAt: "desc" },
+  });
+  return rows.find((row) => pageKey(row.externalUrl!) === path)?.projectId ?? null;
+}
+
 // ────────────────────────────────────────────────────────────── Existing project entry
 
 /** (Re)write an existing project through the pipeline; a run already in flight is returned, not forked. */
 export async function startProductionForProject(
   tenantId: string,
   projectId: string,
-  options: { feedback?: string | null; presetVersionId?: string | null; brief?: string | null; userId?: string | null } = {},
+  options: { feedback?: string | null; presetVersionId?: string | null; brief?: string | null; userId?: string | null; refreshResearch?: boolean; requireReview?: boolean } = {},
 ): Promise<ProductionJobView> {
   const project = await prisma.contentProject.findFirst({ where: { id: projectId, tenantId } });
   if (!project) throw new ProductionError("project_not_found", undefined, 404);
@@ -565,8 +606,8 @@ export async function startProductionForProject(
   if (typeof planItemId === "string" && !options.brief?.trim()) {
     const item = await prisma.editorialPlanItem.findFirst({ where: { id: planItemId, tenantId, channel: "website" }, select: { id: true } });
     if (item) {
-      const request = { kind: "plan_item" as const, planItemId: item.id, language, feedback: options.feedback ?? null, presetVersionId: options.presetVersionId ?? null };
-      return (await startProduction(tenantId, request, { userId: options.userId ?? null, rerun: true })).job;
+      const request = { kind: "plan_item" as const, planItemId: item.id, language, feedback: options.feedback ?? null, presetVersionId: options.presetVersionId ?? null, ...(options.requireReview ? { requireReview: true } : {}) };
+      return (await startProduction(tenantId, request, { userId: options.userId ?? null, rerun: true, refreshResearch: options.refreshResearch })).job;
     }
   }
   const { job } = await startProduction(
@@ -580,6 +621,7 @@ export async function startProductionForProject(
       language,
       feedback: options.feedback ?? null,
       presetVersionId: options.presetVersionId ?? null,
+      ...(options.requireReview ? { requireReview: true } : {}),
     },
     { userId: options.userId ?? null },
   );

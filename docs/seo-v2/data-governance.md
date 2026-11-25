@@ -10,6 +10,9 @@
 - Retention follows the licence: nothing where storing is prohibited, 90 days where it is not established (both providers today), 730 where
   permitted. Expired cache and history (`seo_snapshots`) are deleted after a purchase, at most hourly. Metrics copied to plan items stay with the item.
 - A provider whose licence prohibits commercial use is never called.
+- Web search and extraction (Tavily, Firecrawl) are cached per tenant like the rest. Their terms on storing results were not established: 90 days at most, and pages read by them keep no history.
+- A source keeps its address, publisher and when it was read. A search result nobody read is never evidence of a claim.
+- The research of an article (`production_jobs.artifacts.research`) holds at most two sentences per page, with its address; it is reused for 90 days.
 - Search Console data is private to the tenant: every table has tenant and site, every query filters by both, and it is never cached or shared between tenants.
   A site may only read the property of its own domain. Choosing another property deletes the previous figures.
 - A revoked token is deleted at once. Disconnecting deletes the token and, if asked, every stored figure and what was derived from it. The grant is revoked
@@ -27,7 +30,7 @@
   `seo.emergency_stop.activated`, `seo.emergency_stop.lifted`,
   `search_console.connection_started`, `search_console.connected`, `search_console.property_selected`, `search_console.disconnected`,
   `seo_research.requested`, `seo_research.pause`, `seo_research.resume`, `seo_research.cancel`, `seo_research.retry`, `seo_research.profile_updated`,
-  `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_profile.updated`.
+  `seo_opportunity.approved`, `seo_opportunity.dismissed`, `seo_opportunity.open`, `seo_opportunity.completed`, `seo_opportunity.revision_started`, `seo_profile.updated`.
 
 ## Licensing (2026-11-24)
 

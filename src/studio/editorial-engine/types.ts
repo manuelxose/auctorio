@@ -53,6 +53,10 @@ export type LedgerFact = {
   /** Number of independent publisher groups supporting this exact statement. */
   supportingGroups: number;
   /** Source-registry origin of plan evidence (server-stamped), kept for provenance. */
+  /** plan: the plan's validated evidence; page: what the page itself says, read by our crawler; search_result: only found in a search, never evidence of a claim. */
+  evidenceKind?: "plan" | "page" | "search_result";
+  /** When the page was read (ISO). */
+  retrievedAt?: string | null;
   origin?: { sourceId: string; itemId: string };
 };
 

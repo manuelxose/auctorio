@@ -1,7 +1,7 @@
 // Freshness, retention and acquisition policy (SEO-V2-02). Pure. Freshness is when data may be refreshed, not a refresh schedule:
 // stale data is bought again only for a pending decision worth more than the request.
 
-import { SEO_CAPABILITIES, normalizeDomain, normalizeKeyword, type SeoCapability, type SeoFreshness, type SeoLicensing, type SeoMarket, type SeoProvider } from "./contract";
+import { SEO_CAPABILITIES, isWebCapability, normalizeDomain, normalizeKeyword, type SeoCapability, type SeoFreshness, type SeoLicensing, type SeoMarket, type SeoProvider } from "./contract";
 import { sha256 } from "../../shared/utils/hash";
 
 /** Bump when the shape of cached SEO payloads changes: older entries stop matching. */
@@ -17,6 +17,7 @@ export type SeoPolicy = {
   /** Days data stays fresh, and the range within which importance can move it. */
   freshness: Record<SeoCapability, FreshnessRange>;
   timeSensitiveSerpDays: number;
+  timeSensitiveWebDays: number;
   /** First match wins; every field given must match. */
   overrides: Array<{ capability: SeoCapability; siteType?: string; country?: string; urgency?: SeoUrgency; days: number }>;
   /** USD a decision that depends on fresh data is worth. */
@@ -40,8 +41,11 @@ export const DEFAULT_SEO_POLICY: SeoPolicy = {
     ranked_keywords: { min: 30, days: 60, max: 90 },
     serp_organic: { min: 14, days: 21, max: 30 },
     youtube_search: { min: 14, days: 21, max: 30 },
+    web_search: { min: 3, days: 7, max: 14 },
+    web_extract: { min: 1, days: 7, max: 14 },
   },
   timeSensitiveSerpDays: 3,
+  timeSensitiveWebDays: 0.25,
   overrides: [],
   decisionValueUsd: { low: 0.005, normal: 0.05, high: 0.5 },
   minVolumeBatch: 10,
@@ -81,6 +85,7 @@ export function freshnessDays(capability: SeoCapability, market: SeoMarket, deci
   const importance = decision.importance ?? "normal";
   const days = override?.days
     ?? (capability === "serp_organic" && urgency === "time_sensitive" ? policy.timeSensitiveSerpDays
+      : capability === "web_search" && urgency === "time_sensitive" ? policy.timeSensitiveWebDays
       : importance === "high" ? range.min : importance === "low" ? range.max : range.days);
   return Math.min(days, retentionDays(licensing));
 }
@@ -104,6 +109,8 @@ export const SEO_RESOURCES: Record<SeoCapability, string> = {
   serp_organic: "serp_organic",
   search_volume: "google_ads_volume",
   youtube_search: "youtube_organic",
+  web_search: "web_search",
+  web_extract: "web_extract",
 };
 
 /**
@@ -115,7 +122,7 @@ export function seoCacheKey(
   capability: SeoCapability,
   market: SeoMarket,
   subject: string,
-  options: { device?: string; engine?: string; limit?: number; cursor?: string } = {},
+  options: { device?: string; engine?: string; limit?: number; cursor?: string; freshnessHours?: number } = {},
 ): string {
   const declaration = provider.capabilities[capability];
   const marketKey = provider.marketKey(capability, market) ?? "-";
@@ -131,6 +138,7 @@ export function seoCacheKey(
     options.limit ?? "-",
     options.cursor ?? "-",
     sha256(declaration.supported ? declaration.methodology : "").slice(0, 8), // names the endpoint or SKU: the upstream source
-    capability === "ranked_keywords" ? normalizeDomain(subject) : normalizeKeyword(subject),
+    ...(options.freshnessHours ? [`${options.freshnessHours}h`] : []),
+    isWebCapability(capability) ? subject.trim() : capability === "ranked_keywords" ? normalizeDomain(subject) : normalizeKeyword(subject),
   ].map((part) => String(part).replace(/\|/g, "%7C")).join("|");
 }

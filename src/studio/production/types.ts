@@ -16,6 +16,8 @@ import type {
   SiteValueBlock,
 } from "../editorial-engine/types";
 import type { QaReportV2 } from "../qa";
+import type { SerpOutcome } from "../serp-sources";
+import type { VideoOutcome } from "../youtube-videos";
 
 export type ProductionRequestOptions = {
   language?: "es" | "en";
@@ -27,6 +29,20 @@ export type ProductionRequestOptions = {
   feedback?: string | null;
   /** Approved Studio prompt preset version whose instructions the writer follows. */
   presetVersionId?: string | null;
+  /** A rewrite: search results, sources and video come from what is stored; nothing is bought. */
+  reuseResearch?: boolean;
+  /** A revision of a page that is already public: it waits for a person, whatever the automation mode. */
+  requireReview?: boolean;
+};
+
+/** What was looked up outside for an article. Kept on the job, so a retry or a rewrite does not look it up again. */
+export type PreparedResearch = {
+  keyword: string;
+  at: string;
+  timeSensitive: boolean;
+  facts: LedgerFact[];
+  serp: SerpOutcome;
+  video: VideoOutcome;
 };
 
 export type ProductionRequest =
@@ -101,6 +117,9 @@ export type PreparedInput = {
     disclaimer?: string;
   } | null;
   options: ProductionRequestOptions;
+  research?: PreparedResearch | null;
+  /** What was missing while preparing; `no_fresh_evidence` keeps the draft from publishing itself. */
+  degraded?: string[];
 };
 
 export type BriefArtifact = {
@@ -132,10 +151,14 @@ export type MaterializeArtifact = {
   publicationId: string | null;
   /** Hero image enqueue failure (job finishes as partial; the draft is kept). */
   imageRequestError: string | null;
+  /** Why the draft waits for a person instead of publishing itself. */
+  held?: string | null;
 };
 
 export type ProductionArtifacts = {
   completed?: ProductionStage[];
+  research?: PreparedResearch;
+  degraded?: string[];
   duplicates?: DuplicateCheckResult;
   evidence?: FactSafetyReport;
   brief?: BriefArtifact;

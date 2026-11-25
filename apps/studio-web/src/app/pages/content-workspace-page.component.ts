@@ -206,6 +206,7 @@ function hostOf(url: string): string {
                   <details #revisionPanel class="art-ai art-section-card" [open]="revisionOpen" (toggle)="revisionOpen = revisionPanel.open">
                     <summary>Mejorar con IA</summary>
                     <textarea class="au-textarea" rows="2" placeholder="Por ejemplo, añade una sección sobre precios" [(ngModel)]="feedback" aria-label="Qué quieres mejorar"></textarea>
+                    <label class="au-check"><input type="checkbox" [(ngModel)]="refreshResearch" /> <span>Buscar fuentes nuevas (puede gastar presupuesto SEO)</span></label>
                     <button class="au-btn au-btn--secondary art-ai-action" type="button" [disabled]="revising" (click)="revise()"><app-icon name="sparkles"></app-icon>{{ revising ? 'Revisando…' : 'Solicitar revisión' }}</button>
                   </details>
                 </section>
@@ -549,6 +550,7 @@ export class ContentWorkspacePageComponent implements OnInit, OnDestroy {
   saving = false;
   revising = false;
   feedback = '';
+  refreshResearch = false;
   selectedVersionId: string | null = null;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -1087,9 +1089,10 @@ ${htmlToMarkdown(this.draftBody)}`], { type: 'text/markdown' }));
       return;
     }
     this.revising = true;
-    this.api.reviseProject(this.projectId, this.feedback.trim()).subscribe({
+    this.api.reviseProject(this.projectId, this.feedback.trim(), this.refreshResearch).subscribe({
       next: () => {
         this.revising = false;
+        this.refreshResearch = false;
         this.feedback = '';
         this.notice = 'AI revision queued.';
         this.load();

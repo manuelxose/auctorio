@@ -13,6 +13,13 @@ Checked on 2026-11-24 against official sources. "Not established" means it was l
 | `search_volume` | `keyword-metrics.ts` | Google Ads `search_volume/live`, 1000 keywords | `seo.search_volume`, 1000 keywords |
 | `youtube_search` | `youtube-videos.ts` | `serp/youtube/organic/live/advanced` | `youtube.search`, no market parameter |
 
+| Capability | Consumer | Tavily | Firecrawl |
+|---|---|---|---|
+| `web_search` | `web-intelligence.ts` | `/search`, no market, `days` filter | `/v1/search`, language and country, `qdr` filter |
+| `web_extract` | `web-intelligence.ts` | `/extract`, basic | `/v1/scrape`, markdown and extraction |
+
+Neither Tavily nor Firecrawl is a Google SERP: they discover pages. Both were in use before SEO V2 outside the manager; since SEO-V2-05 they go through it.
+
 The two `serp_organic` sources are not equivalent: one is a stored snapshot (its date is returned in `asOf`), the other a live search.
 Difficulty scales belong to each provider and are not comparable.
 

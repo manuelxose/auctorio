@@ -14,7 +14,7 @@ import {
   syncSearchConsole,
 } from "./search-console";
 import { readSeoControl } from "./seo-control";
-import { OPPORTUNITY_DECISIONS, analyzeSite, completeSeoOpportunity, decideSeoOpportunity, getSeoProfile, listSeoOpportunities, saveSeoProfile } from "./seo-intelligence";
+import { OPPORTUNITY_DECISIONS, analyzeSite, completeSeoOpportunity, decideSeoOpportunity, getSeoProfile, listSeoOpportunities, saveSeoProfile, startOpportunityRevision } from "./seo-intelligence";
 import { outcomeSummary } from "./seo-intelligence/attribution";
 import { listSiteKeywords } from "./seo-research/knowledge";
 import { saveResearchProfile } from "./seo-research/profile";
@@ -26,6 +26,7 @@ const prisma = getPrismaClient();
 
 const STATUS: Record<string, number> = {
   site_not_found: 404, opportunity_not_found: 404, search_console_not_connected: 409, search_console_not_configured: 503, opportunity_already_acted: 409, opportunity_conflicts_with_approved: 409, opportunity_changed: 409,
+  opportunity_not_revisable: 409, opportunity_not_approved: 409, optimization_page_not_managed: 409, generation_in_flight: 409,
   search_console_syncing: 409, external_seo_stopped: 409, site_base_url_required: 400, search_console_unknown_state: 400, search_console_state_expired: 400, search_console_property_not_allowed: 400, invalid_profile: 400, invalid_weights: 400,
   research_run_not_found: 404, research_run_not_controllable: 409, research_already_running: 409, research_disabled: 409, research_manual_only: 409, invalid_corrections: 400, invalid_policy: 400,
   invalid_priority_topics: 400, invalid_holdout_percent: 400, url_required: 400, url_not_of_this_site: 400,
@@ -140,6 +141,8 @@ export function registerSeoIntelligenceRoutes(fastify: FastifyInstance) {
     if (!Number.isFinite(actedAt.getTime()) || actedAt.getTime() > Date.now() + 60_000 || actedAt.getFullYear() < 2015) return badRequest(reply, "actedAt must be a past date");
     return completeSeoOpportunity(context.tenantId, siteId, id!, { actedAt, url: parseOptionalString(body.url) ?? null }, context.userId);
   });
+
+  route("POST", "seo-opportunities/:id/revision", "projects.manage", (context, { siteId, id }) => startOpportunityRevision(context.tenantId, siteId, id!, context.userId));
 
   // Research. Reading never buys; a run buys only through the manager and the governor.
   route("GET", "seo-research", "analytics.read", (context, { siteId }) => getResearchOverview(context.tenantId, siteId));

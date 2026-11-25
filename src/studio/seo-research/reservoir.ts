@@ -10,6 +10,7 @@ import { MIN_CONFIDENCE } from "../seo-intelligence/scoring";
 import { editorialCapacity } from "./profile";
 import type { ResearchPolicy } from "./policy";
 import { isKeywordVariant, keywordTokens } from "../keyword-candidates";
+import { NEW_CONTENT } from "../plan-slots";
 
 const prisma = getPrismaClient();
 const DAY_MS = 86_400_000;
@@ -36,7 +37,7 @@ export type OpportunityEvidence = {
   provider?: { source: string; volume: number | null; difficulty: number | null; cpc?: number | null; intent: string | null; position?: number | null; asOf: string | null; at?: string | null } | null;
   origin?: { kind: string; value: string } | null;
   variants?: string[];
-  serp?: { providerId: string; at: string; domains: string[]; ownUrl: string | null; ownPosition: number | null } | null;
+  serp?: { providerId: string; /** observed = live; historical = stored by the provider. */ dataKind?: string; asOf?: string | null; format?: string | null; at: string; domains: string[]; ownUrl: string | null; ownPosition: number | null } | null;
 };
 
 export type StageRow = {
@@ -250,7 +251,7 @@ export async function reservoirCoverage(tenantId: string, siteId: string, policy
     }),
     prisma.siteTopicCluster.findMany({ where: { tenantId, siteId }, select: { name: true, pagesCount: true } }),
     editorialCapacity(tenantId, siteId, now),
-    prisma.editorialPlanItem.count({ where: { tenantId, siteId, channel: "website", scheduledFor: { gt: now }, status: { notIn: ["rejected", "canceled", "published"] } } }),
+    prisma.editorialPlanItem.count({ where: { tenantId, siteId, channel: "website", scheduledFor: { gt: now }, status: { notIn: ["rejected", "canceled", "published"] }, ...NEW_CONTENT } }),
   ]);
   const stages = Object.fromEntries(STAGES.map((stage) => [stage, 0])) as Record<Stage, number>;
   const language = seoMarket(site.locale)?.language ?? site.locale;

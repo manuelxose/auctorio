@@ -9,9 +9,9 @@ import { structuredEvent } from "../shared/utils/logger";
 import { getOrCreatePolicy, isDayActive, readPublishingWindows } from "./automation";
 import { PLAN_LEAD_TIME_MINUTES } from "./automation-mode";
 import { evaluateAiSpend } from "./cost-budgets";
-import { enqueuePlanSlots, readPlanItemSelection, type PlanResearch } from "./editorial-plan";
+import { enqueuePlanSlots, readPlanItemSelection, type PlanResearch, type PlanShortage } from "./editorial-plan";
 import { failOperation } from "./operations";
-import { computePlanSlotsDetailed, localDateInZone, nextLocalDate, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
+import { NEW_CONTENT, computePlanSlotsDetailed, localDateInZone, nextLocalDate, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 import { getSitePlanningSettings } from "./planning-settings";
 
 const prisma = getPrismaClient();
@@ -84,7 +84,7 @@ async function loadMonth(policy: AutomationPolicy & { siteId: string }, now: Dat
   const settings = await getSitePlanningSettings(policy.tenantId, policy.siteId);
   const dayStart = new Date(now.getTime() - 24 * 3_600_000);
   const items = await prisma.editorialPlanItem.findMany({
-    where: { tenantId: policy.tenantId, siteId: policy.siteId, channel: "website", status: OPEN_ITEM, scheduledFor: { gte: dayStart } },
+    where: { tenantId: policy.tenantId, siteId: policy.siteId, channel: "website", status: OPEN_ITEM, scheduledFor: { gte: dayStart }, ...NEW_CONTENT },
     select: { scheduledFor: true },
   });
   return { settings, ...monthSlots(policy, settings, items.map((item) => item.scheduledFor!), now) };
@@ -212,8 +212,9 @@ export async function getMonthPlan(tenantId: string, siteId: string, now = new D
     lastRun: lastRun ? { status: lastRun.status, at: lastRun.createdAt.toISOString(), error: lastRun.errorSummary } : null,
     items: items.map(({ metadata, plan, ...item }) => ({ ...item, planName: plan.name, source: readPlanItemSelection(metadata)?.source ?? null })),
     plans: plans.map((plan) => {
-      const research = ((plan.generatedOutput ?? {}) as { keywordResearch?: PlanResearch[] }).keywordResearch ?? [];
-      return { id: plan.id, name: plan.name, status: plan.status, research: research[research.length - 1] ?? null };
+      const output = (plan.generatedOutput ?? {}) as { keywordResearch?: PlanResearch[]; shortage?: PlanShortage | null };
+      const research = output.keywordResearch ?? [];
+      return { id: plan.id, name: plan.name, status: plan.status, research: research[research.length - 1] ?? null, shortage: output.shortage ?? null };
     }),
   };
 }

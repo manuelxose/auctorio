@@ -80,6 +80,9 @@ test("there is one way to a provider and one way to spend: the manager and the g
   assert.deepEqual(using(/\bprovider\.run\(/), ["src/studio/seo-manager.ts"]);
   assert.deepEqual(using(/api\.dataforseo\.com|api\.getanyapi\.com\/v1/), ["src/infrastructure/seo/anyapi.ts", "src/infrastructure/seo/dataforseo.ts"]);
   assert.deepEqual(using(/seoSpendReservation\.(create|update|delete|upsert)|(UPDATE|INSERT INTO|DELETE FROM) seo_spend_reservations/), ["src/studio/seo-governor.ts"]);
+  // Web search and page reading too: only the adapter knows the hosts, only the registry and the facade know the adapter.
+  assert.deepEqual(using(/api\.tavily\.com|api\.firecrawl\.dev/), ["src/infrastructure/seo/web.ts"]);
+  assert.deepEqual(using(/from "[^"]*\/seo\/web"|from "\.\/web"/), ["src/infrastructure/seo/registry.ts", "src/studio/web-intelligence.ts"]);
   // No GET route buys: routes never call the manager to acquire.
-  assert.deepEqual(using(/\bacquireSeo\(/), ["src/studio/keyword-candidates.ts", "src/studio/keyword-metrics.ts", "src/studio/seo-research/runs.ts", "src/studio/serp-sources.ts", "src/studio/youtube-videos.ts"]);
+  assert.deepEqual(using(/\bacquireSeo\(/), ["src/studio/keyword-candidates.ts", "src/studio/keyword-metrics.ts", "src/studio/seo-research/runs.ts", "src/studio/serp-sources.ts", "src/studio/web-intelligence.ts", "src/studio/youtube-videos.ts"]);
 });

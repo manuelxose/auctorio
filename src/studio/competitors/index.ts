@@ -245,7 +245,7 @@ export async function discoverCompetitors(tenantId: string, siteId: string, opti
     note(registrableHost(recommendation.domain), { kind: "source_overlap", url: recommendation.url, note: `${recommendation.status} source covering ${topics.slice(0, 4).join(", ")}`, observedAt });
   }
   // 4. Web search results for the main topics, only when a provider is configured.
-  const provider = getWebIntelligenceProvider();
+  const provider = getWebIntelligenceProvider({ tenantId, siteId });
   if (!provider) {
     result.skipped.push("web_search_provider_not_configured");
   } else {

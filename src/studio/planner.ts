@@ -18,6 +18,7 @@ import { runQualityRepairCycle } from "./quality-repair";
 import { evaluateAutonomousGate, readGateConfig } from "./quality-gate";
 import type { QaReportV2 } from "./qa";
 import { PLAN_LEAD_TIME_MINUTES, type AutomationMode } from "./automation-mode";
+import { NEW_CONTENT } from "./plan-slots";
 import { ensureMonthlyPlan } from "./autopilot-plan";
 import { bulkApproveEditorialPlanItems } from "./editorial-plan";
 import { startProductionForPlanItem, startProductionForProject } from "./production/pipeline";
@@ -400,6 +401,8 @@ async function progressAutoProjects(policy: AutomationPolicy, tenantId: string):
     try {
       const latestVersion = project.versions[0] ?? null;
       const mode = policy.mode as AutomationMode;
+      // A change to a page that is already public waits for a person, whatever the mode.
+      if (latestVersion && latestVersion.status !== "approved" && approvalRequired(project.metadata)) continue;
 
       // ── AUTOPILOT: strict gate, self-healing repair, automatic approval. ──
       if (mode === "autopilot") {
@@ -707,6 +710,9 @@ async function nextFreeSlot(
   return null;
 }
 
+/** Set when the draft was written (production/stages.ts). */
+export const approvalRequired = (metadata: unknown): boolean => typeof (metadata as { approvalRequired?: unknown } | null)?.approvalRequired === "string";
+
 const PLAN_ITEMS_PER_TICK = 3;
 
 /**
@@ -722,7 +728,8 @@ export async function progressDuePlanItems(
   const now = options.now ?? new Date();
   const start = options.start ?? startProductionForPlanItem;
   const { tenantId, siteId } = policy;
-  const window = { tenantId, siteId, channel: "website" as const, scheduledFor: { lte: new Date(now.getTime() + PLAN_LEAD_TIME_MINUTES * 60_000) } };
+  // Improving a page that is already public is started by a person.
+  const window = { tenantId, siteId, channel: "website" as const, ...NEW_CONTENT, scheduledFor: { lte: new Date(now.getTime() + PLAN_LEAD_TIME_MINUTES * 60_000) } };
   if (policy.mode === "autopilot") {
     const proposed = await prisma.editorialPlanItem.findMany({ where: { ...window, status: "proposed" }, select: { id: true } });
     if (proposed.length) await bulkApproveEditorialPlanItems(tenantId, proposed.map((item) => item.id), null);

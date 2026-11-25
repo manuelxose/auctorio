@@ -40,12 +40,12 @@ export type KeywordOrigin = { kind: "opportunity" | "site_topic" | "cluster" | "
 export type KeywordScoreParts = { demand: number | null; winnability: number | null; relevance: number | null; intentFit: number | null };
 /** What Search Console observed for the query on the site itself in the last 28 days. */
 export type FirstPartyEvidence = { impressions: number; clicks: number; position: number | null };
-export type KeywordCandidate = KeywordMetrics & { score: number; variants: string[]; origin?: KeywordOrigin | null; parts?: KeywordScoreParts; firstParty?: FirstPartyEvidence; collectedAt?: string; opportunityId?: string };
+export type KeywordCandidate = KeywordMetrics & { score: number; variants: string[]; origin?: KeywordOrigin | null; parts?: KeywordScoreParts; firstParty?: FirstPartyEvidence; collectedAt?: string; opportunityId?: string; /** A person approved it. */ approved?: boolean; researchRunId?: string | null };
 /** How the site values a keyword. */
 export type KeywordScoring = { profile: SeoProfile; weights: Weights };
 const PUBLISHER: KeywordScoring = { profile: "publisher", weights: resolveWeights("publisher") };
 
-export type KeywordRejectReason = "no_volume" | "already_ranking" | "off_topic" | "low_relevance" | "cannibalization" | "no_score";
+export type KeywordRejectReason = "no_volume" | "already_ranking" | "off_topic" | "low_relevance" | "cannibalization" | "no_score" | "excluded_topic";
 export type KeywordReject = { keyword: string; reason: KeywordRejectReason; volume: number | null };
 
 /** What one plan run measured and why it kept or dropped keywords; stored on the plan so the choice can be reviewed. */
@@ -203,6 +203,38 @@ export function rankKeywordCandidates(
   return out.slice(0, limit);
 }
 
+/** Every word of the topic is in the keyword. */
+export const isAboutTopic = (keyword: string, topic: string): boolean => {
+  const words = keywordTokens(topic);
+  const tokens = new Set(keywordTokens(keyword));
+  return words.length > 0 && words.every((word) => tokens.has(word));
+};
+const PRIORITY_BONUS = 10;
+const REPEAT_PENALTY = 8;
+
+/**
+ * The order a plan takes them in: what a person approved first; then by score, with a bonus for the priority topics and
+ * a growing penalty for a topic already taken, so that one cluster does not fill the plan. Never drops anything. Pure.
+ */
+export function balanceCandidates<T extends { keyword: string; score: number; approved?: boolean }>(candidates: T[], topics: string[], priorityTopics: string[] = []): T[] {
+  const rest = candidates.filter((candidate) => !candidate.approved).map((candidate) => ({ candidate, topic: topics.find((topic) => isAboutTopic(candidate.keyword, topic)) ?? null, bonus: priorityTopics.some((topic) => isAboutTopic(candidate.keyword, topic)) ? PRIORITY_BONUS : 0 }));
+  const out = candidates.filter((candidate) => candidate.approved);
+  const used = new Map<string, number>();
+  for (const candidate of out) {
+    const topic = topics.find((entry) => isAboutTopic(candidate.keyword, entry));
+    if (topic) used.set(topic, (used.get(topic) ?? 0) + 1);
+  }
+  while (rest.length) {
+    const value = (entry: (typeof rest)[number]) => entry.candidate.score + entry.bonus - (entry.topic ? (used.get(entry.topic) ?? 0) * REPEAT_PENALTY : 0);
+    let best = 0;
+    for (let index = 1; index < rest.length; index += 1) if (value(rest[index]) > value(rest[best])) best = index;
+    const [taken] = rest.splice(best, 1);
+    if (taken.topic) used.set(taken.topic, (used.get(taken.topic) ?? 0) + 1);
+    out.push(taken.candidate);
+  }
+  return out;
+}
+
 /** One discovery answer of a provider. With reuseOnly it costs nothing and throws `reuse_only` when nothing is stored. */
 export async function keywordRows(
   tenantId: string,
@@ -244,22 +276,22 @@ async function inventoryRows(tenantId: string, siteId: string, locale: string) {
     // What a person approved goes first.
     orderBy: [{ status: "asc" }, { priority: { sort: "desc", nulls: "last" } }],
     take: MAX_STORED_CANDIDATES * 3,
-    select: { id: true, query: true, source: true, evidence: true, market: true },
+    select: { id: true, query: true, source: true, evidence: true, market: true, status: true, researchRunId: true },
   });
-  return rows.flatMap<KeywordMetrics & { opportunityId: string; origin: KeywordOrigin | null; firstParty?: FirstPartyEvidence; collectedAt?: string }>((row) => {
+  return rows.flatMap<KeywordMetrics & { opportunityId: string; approved: boolean; researchRunId: string | null; origin: KeywordOrigin | null; firstParty?: FirstPartyEvidence; collectedAt?: string }>((row) => {
     const evidence = (row.evidence ?? {}) as OpportunityEvidence;
     const keyword = normalizeKeyword(row.query!);
     if (row.market && language && seoMarket(row.market)?.language !== language) return [];
     if (row.source === "search_console") {
       if (!evidence.firstParty) return [];
       const { impressions, clicks, position, intent } = evidence.firstParty;
-      return [{ opportunityId: row.id, keyword, volume: null, difficulty: null, cpc: null, intent: intent ?? null, source: "search_console", origin: { kind: "search_console" as const, value: keyword }, firstParty: { impressions, clicks, position } }];
+      return [{ opportunityId: row.id, approved: row.status === "approved", researchRunId: row.researchRunId, keyword, volume: null, difficulty: null, cpc: null, intent: intent ?? null, source: "search_console", origin: { kind: "search_console" as const, value: keyword }, firstParty: { impressions, clicks, position } }];
     }
     const provider = evidence.provider;
     // The search results showed a page of the site: improving it is another task.
     if (!provider || evidence.serp?.ownUrl) return [];
     return [{
-      opportunityId: row.id, keyword, volume: provider.volume, difficulty: provider.difficulty, cpc: provider.cpc ?? null, intent: provider.intent, source: provider.source, asOf: provider.asOf,
+      opportunityId: row.id, approved: row.status === "approved", researchRunId: row.researchRunId, keyword, volume: provider.volume, difficulty: provider.difficulty, cpc: provider.cpc ?? null, intent: provider.intent, source: provider.source, asOf: provider.asOf,
       origin: (evidence.origin ?? null) as KeywordOrigin | null, collectedAt: provider.at ?? undefined,
     }];
   });
@@ -353,7 +385,7 @@ export async function collectKeywordCandidates(
   siteId: string,
   context: EditorialPlanningContext,
   limit: number,
-  options: { reserveFor?: string; reserve?: number } = {},
+  options: { reserveFor?: string; reserve?: number; priorityTopics?: string[]; excludedTopics?: string[] } = {},
   /** Filled in place with the trace of the run. */
   research: KeywordResearch = emptyKeywordResearch(),
 ): Promise<KeywordCandidate[]> {
@@ -372,9 +404,20 @@ export async function collectKeywordCandidates(
   // The inventory goes last so a provider's row of the same keyword keeps its newer values.
   const metrics = [...stored.rows, ...inventory];
   const rejects: KeywordReject[] = [];
-  const ranked = rankKeywordCandidates(metrics, context, limit, own, rejects, scoring);
-  const known = new Map([...inventory].reverse().map((row) => [keywordTokens(row.keyword).join(" "), row.opportunityId]));
-  const candidates = ranked.map((candidate) => ({ ...candidate, opportunityId: known.get(keywordTokens(candidate.keyword).join(" ")) }));
+  const excluded = options.excludedTopics ?? [];
+  const known = new Map([...inventory].reverse().map((row) => [keywordTokens(row.keyword).join(" "), row]));
+  const found = rankKeywordCandidates(metrics, context, limit, own, rejects, scoring).flatMap<KeywordCandidate>((candidate) => {
+    if (excluded.some((topic) => isAboutTopic(candidate.keyword, topic))) {
+      rejects.push({ keyword: candidate.keyword, reason: "excluded_topic", volume: candidate.volume });
+      return [];
+    }
+    const row = known.get(keywordTokens(candidate.keyword).join(" "));
+    return [{ ...candidate, opportunityId: row?.opportunityId, approved: row?.approved ?? false, researchRunId: row?.researchRunId ?? null }];
+  });
+  const business = await prisma.siteSeoProfile.findFirst({ where: { tenantId, siteId }, select: { priorityTopics: true } });
+  const priorityTopics = [...(options.priorityTopics ?? []), ...(Array.isArray(business?.priorityTopics) ? business.priorityTopics.map(String) : [])];
+  const ranked = balanceCandidates(found, [...new Set([...context.clusters.map((cluster) => cluster.name), ...(context.profile?.mainTopics ?? [])])], priorityTopics);
+  const candidates = ranked;
   Object.assign(research, {
     provider: ranked.find((candidate) => candidate.source !== "search_console")?.source ?? ranked[0]?.source ?? null,
     skipped: ranked.length ? null : "no_data",

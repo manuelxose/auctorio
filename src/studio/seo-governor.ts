@@ -53,6 +53,9 @@ export const DEFAULT_SEO_BUDGETS: ReadonlyArray<SeoBudgetKey & { limitUsd: numbe
   limit("site", "*", "total", 2, { allowance: "onboarding" }),
   limit("site", "*", "daily", 1), // burst protection
   limit("site", "*", "monthly", 0.5, { operation: "search_volume" }),
+  // News and discovery run all day: they must not use up what keyword research needs.
+  limit("tenant", "*", "monthly", 2, { operation: "web_search" }),
+  limit("tenant", "*", "monthly", 1, { operation: "web_extract" }),
 ];
 
 export const budgetKeyOf = (key: SeoBudgetKey) => [key.scope, key.scopeId, key.operation, key.allowance, key.period].join("|");

@@ -8,7 +8,7 @@ import { Agent } from "undici";
 import { getEnv, getNumberEnv } from "../../shared/utils/env";
 import { retryWithBackoff } from "../resilience/retry";
 import { DomainThrottle } from "../resilience/limiter";
-import { validateScrapeUrl } from "../../infrastructure/scraping";
+import { fetchUrl, guardedLookup, readCapped, validateScrapeUrl } from "../../infrastructure/scraping";
 
 export class SourceHttpError extends Error {
   constructor(
@@ -87,7 +87,7 @@ export function getDomainThrottle(): DomainThrottle {
 /** Build an undici Agent with separate connect/headers/body timeouts. */
 function buildAgent(connectTimeoutMs: number, headersTimeoutMs: number, bodyTimeoutMs: number): Agent {
   return new Agent({
-    connect: { timeout: connectTimeoutMs },
+    connect: { timeout: connectTimeoutMs, lookup: guardedLookup as never },
     headersTimeout: headersTimeoutMs,
     bodyTimeout: bodyTimeoutMs,
   });
@@ -205,11 +205,10 @@ async function rawHop(
 }
 
 async function readBody(response: Response, maxBytes: number): Promise<string> {
-  const text = await response.text();
-  if (text.length > maxBytes) {
-    throw new SourceHttpError(`fetch_body_too_large bytes=${text.length}`, response.status, false);
-  }
-  return text;
+  return readCapped(response, maxBytes).catch((error: unknown) => {
+    if (error instanceof Error && error.message.startsWith("fetch_body_too_large")) throw new SourceHttpError(error.message, response.status, false);
+    throw error;
+  });
 }
 
 function rawFetch(url: URL, options: SourceHttpOptions, signal: AbortSignal): Promise<SourceHttpResponse> {
@@ -325,16 +324,8 @@ export async function fetchRobotsRules(hostname: string): Promise<RobotsRules> {
     const robotsUrl = new URL(`https://${hostname}/robots.txt`);
     // Same SSRF guard as content fetches — never bypass for robots.txt.
     await validateScrapeUrl(robotsUrl);
-    const response = await fetch(robotsUrl.toString(), {
-      headers: { "user-agent": getEnv("SCRAPE_USER_AGENT", "auctorio-bot") },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!response.ok) {
-      // 404/403 robots.txt means "no restrictions" per convention.
-      robotsCache.set(hostname, { fetchedAt: Date.now(), rules });
-      return rules;
-    }
-    const body = await response.text();
+    // 404/403 robots.txt means "no restrictions" per convention: fetchUrl throws and the rules stay empty.
+    const { body } = await fetchUrl(robotsUrl, { accept: "text/plain", maxBytes: 512 * 1024 });
     const parsed = parseRobotsTxt(body);
     robotsCache.set(hostname, { fetchedAt: Date.now(), rules: parsed });
     return parsed;

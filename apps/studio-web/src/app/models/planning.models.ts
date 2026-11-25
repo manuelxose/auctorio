@@ -93,7 +93,7 @@ export type VisualSettings = {
   coverStyle: ImageStyle;
   bodyStyle: ImageStyle | 'media_library';
   infographic: boolean;
-  youtube: { enabled: boolean; channelOnly: boolean; channelUrl: string };
+  youtube: { enabled: boolean; channelOnly: boolean; channelUrl: string; approved: Array<{ id: string; title: string }> };
 };
 
 /** Mirrors brand.ts BrandSettings (CTAs, business details, branding). */
@@ -138,7 +138,7 @@ export type PlanningInventory = {
 
 export type KeywordOrigin = { kind: 'opportunity' | 'site_topic' | 'cluster' | 'competitor' | 'search_console'; value: string };
 export type KeywordScoreParts = { demand: number | null; winnability: number | null; relevance: number | null; intentFit: number | null };
-export type KeywordRejectReason = 'no_volume' | 'already_ranking' | 'off_topic' | 'low_relevance' | 'cannibalization' | 'no_score';
+export type KeywordRejectReason = 'no_volume' | 'already_ranking' | 'off_topic' | 'low_relevance' | 'cannibalization' | 'no_score' | 'excluded_topic';
 export type KeywordCandidate = { keyword: string; volume: number | null; difficulty: number | null; intent: string | null; score: number; variants: string[]; origin: KeywordOrigin | null; parts: KeywordScoreParts | null; rank: number };
 export type PlanResearch = {
   id: string;
@@ -158,6 +158,8 @@ export type PlanResearch = {
   rejectedSample: Array<{ keyword: string; reason: KeywordRejectReason; volume: number | null }>;
   strategy: { mode: string; priorityTopics: string[]; excludedTopics: string[]; approvedVersion: number | null; pillars: string[]; siteIntelligenceVersion: number | null };
 };
+/** Mirrors editorial-plan.ts PlanShortage. */
+export type PlanShortage = { at: string; requested: number; fromOpportunities: number; fromModel: number; unfilled: number; research: { state: string; runId: string | null; available: number | null }; noData: string | null };
 export type PlanItemSelection = { source: string; researchId: string | null; score: number | null; rank: number | null; intent: string | null; parts: KeywordScoreParts | null; origin: KeywordOrigin | null };
 
 export type MonthPlanItem = {
@@ -172,6 +174,7 @@ export type MonthPlanItem = {
   status: string;
   scheduledFor: string | null;
   projectId: string | null;
+  contentType?: string | null;
   source: PlanItemSelection['source'] | null;
 };
 export type MonthPlan = {
@@ -192,7 +195,7 @@ export type MonthPlan = {
   generating: { planId: string; planName: string; completed: number; total: number } | null;
   lastRun: { status: string; at: string; error: string | null } | null;
   items: MonthPlanItem[];
-  plans: Array<{ id: string; name: string; status: string; research: PlanResearch | null }>;
+  plans: Array<{ id: string; name: string; status: string; research: PlanResearch | null; shortage?: PlanShortage | null }>;
 };
 export type MonthPlanStart = { started: boolean; reason: string; planId?: string; operationId?: string; slots?: number };
 export type PlanItemSelectionView = {
