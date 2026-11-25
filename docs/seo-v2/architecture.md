@@ -1,19 +1,19 @@
 # SEO V2 architecture
 
-State after SEO-V2-03, which was built after SEO-V2-04.
+State after SEO-V2-05.
 
 ## Layers
 
 | Layer | File | Responsibility |
 |---|---|---|
-| Consumers | `src/studio/keyword-metrics.ts`, `keyword-candidates.ts`, `serp-sources.ts`, `youtube-videos.ts` | Ask for a capability and say what decision needs it; degrade without blocking |
+| Consumers | `src/studio/keyword-metrics.ts`, `keyword-candidates.ts`, `serp-sources.ts`, `youtube-videos.ts`, `web-intelligence.ts` | Ask for a capability and say what decision needs it; degrade without blocking |
 | Manager | `src/studio/seo-manager.ts` | The only way to a provider: reuse stored data, buy what is missing, coalesce, queue by priority, record health and circuit |
 | Cost Governor | `src/studio/seo-governor.ts` | Budgets, atomic reservations, leases (single flight), settlement, recovery |
 | Cache | `src/studio/seo-cache.ts` | Canonical keys in `provider_cache_entries`, field provenance, history, retention |
 | Prices, policy | `src/infrastructure/seo/pricing.ts`, `policy.ts` | Versioned price registry; freshness, retention and acquisition policy. Pure |
 | Registry | `src/infrastructure/seo/registry.ts` | Providers, modes, selection rules, locks. Pure |
 | Contract | `src/infrastructure/seo/contract.ts` | Capabilities, requests, results, quotes, errors, licensing |
-| Adapters | `src/infrastructure/seo/dataforseo.ts`, `anyapi.ts` | Everything provider-specific |
+| Adapters | `src/infrastructure/seo/dataforseo.ts`, `anyapi.ts`, `web.ts` (Tavily, Firecrawl) | Everything provider-specific |
 | Control plane | `src/studio/routes-admin-seo.ts`, Studio → Ajustes → Administración global → Proveedores SEO (`/studio/admin/seo`) | Platform administrators only |
 
 | First-party data | `src/infrastructure/google/search-console.ts`, `src/studio/search-console.ts` | Authorized Search Console access, incremental synchronization |
@@ -49,6 +49,9 @@ mode counts as `disabled`.
 
 `SEO_LOCKS` (code, not a setting) keeps closed until the production activation gates are met: automatic routing, paid fallback and
 AnyAPI automation. While closed, AnyAPI can only be reached by an administrator's authorized live test.
+
+The web capabilities (`web_search`, `web_extract`) have their own providers: `WEB_INTELLIGENCE_PROVIDER` chooses, whatever the mode of the SEO data providers;
+*manual* may route them elsewhere. `disabled` and the emergency stop stop them too.
 
 ## Control state
 
@@ -162,3 +165,43 @@ Decisions:
 - **The own-domain ranking is bought only without Search Console**, and counts within the competitor batches.
 - **SERP lookups need a known price**; today DataForSEO's is unknown and AnyAPI is locked, so none is made.
 - **The crawl is reused, not started**: indexing is the site index's job.
+
+## Editorial integration
+
+| Consumer | What it uses |
+|---|---|
+| Editorial plan, Autopilot month, extension, filling slots | Stored opportunities, reserved and claimed; research only when they cannot feed the plan. Never buys by itself |
+| Rewriting one proposal, changing a keyword, calendar, plan editing | Stored data only |
+| Adding keywords by hand | Measures the new ones (a person asked); without data they stay unmeasured |
+| Article, first run | Search results and video: stored, else bought if needed |
+| Article, retry, rewrite, revision, *Fix with AI* | What the article already found (`artifacts.research`), else stored data. Fresh data only with `refreshResearch` |
+| SEO package, internal links, briefs, images, social, publication, CMS | Nothing external |
+| Competitor and source discovery, news discovery, engagement | `web_search`, `web_extract` through the manager |
+| Competitor coverage, site index, source pages | Own crawler: free, guarded |
+| Assistant, opportunities, competitors, any GET | Stored data |
+| Workers | `seo-research` tick (off unless the platform allows it), Search Console sync, article production |
+
+1. **Choosing** (`keyword-candidates.ts`). Approved by a person first; then score, plus 10 for priority topics (plan, site profile), minus 8 for each article already taken of
+   the same topic. Excluded topics are dropped. The article keeps `metadata.selection`: `opportunityId`, `researchRunId`, `metrics` (`measured`, `own_data`, `unmeasured`) and `metricsAt`.
+2. **Shortage** (`generatedOutput.shortage`): how many came from opportunities, from the model and stayed empty, and what happened with research. A model's keyword is marked as
+   unmeasured, carries no figures, and is dropped when the site already covers it.
+3. **Asking for research**: a person's plan may; Autopilot's only if the platform allows `automaticResearch`. Priority topics without opportunities are its focus.
+4. **SERP** (`serpNeed`): bought for an approved article that is being written, when its topic moves, its plan sources are fewer than the site's target, or no one measured its
+   intent. For a moving topic, stored (historical) results are not bought and nothing older than 3 days is used.
+5. **Evidence**. A result becomes a source when our crawler has read it (`evidenceKind: page`, `retrievedAt`); unread, it is a lead: title only, and the writer may not state anything
+   from it. Order: official, primary documentation, read or validated, leads. The dominant format of the titles reaches the writer as a fixed phrase.
+6. **Video**: the site's approved videos, its channel's public feed, stored search results, and a search only if the article calls for a video. Relevance by title; YouTube's oEmbed
+   says whether it can be embedded.
+7. **Improvements** (`contentType: "update"`, or an approved opportunity) are a new version of the project that published the page, found by its public URL. Automation does not
+   start them, they always wait for a person with `review.approve` and `publishing.manage`, and they never count as planned articles (`NEW_CONTENT`). A page not published with
+   Auctorio stays a manual task.
+8. **Held drafts** (`summary.held`): changes to a public page, and news without a current source. No automation mode publishes them.
+9. **Degraded drafts** (`summary.degraded`): `sources_*`, `video_*`, `no_fresh_evidence`, with the reason. Shown in the production panel.
+10. **Fetching** (`infrastructure/scraping`): each redirect is checked again, the address is checked when connecting (DNS rebinding), bodies are cut at a limit, and source text cannot
+    close its data block in a prompt.
+
+Decisions:
+
+- **Official YouTube Data API is not implemented**: there is no authorized key. oEmbed and the channel feed need none.
+- **Time-sensitive web answers last six hours**; older ones are refused, not served as stale.
+- **Pages read by third parties (`web_extract`) keep no history.**
