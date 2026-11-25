@@ -19,6 +19,7 @@ import { enrichPlanItemsWithKeywordMetrics, getKeywordMetrics } from "../keyword
 import { analyzeSite } from "../seo-intelligence";
 import { readSeoControl } from "../seo-control";
 import { acquireSeo, seoRoute, type SeoRoute } from "../seo-manager";
+import { serpInsight } from "../serp-sources";
 import { knownKeywordMetrics, sharableProviders, storeSiteKeywords, type SiteKeywordInput } from "./knowledge";
 import { SEO_RESEARCH_DONE, readResearchPolicy, type ResearchPolicy } from "./policy";
 import { getResearchProfile, researchTopics, type ResearchProfile } from "./profile";
@@ -88,25 +89,41 @@ export async function requestResearch(input: { tenantId: string; siteId: string;
 
 const providerAvailable = async (locale: string) => (await Promise.all([seoRoute("keyword_suggestions", locale), seoRoute("ranked_keywords", locale)])).some((route) => route.provider);
 
+/** Why a plan did, or did not, ask for research; kept on the plan when it is short of opportunities. */
+export type PlanningResearch = {
+  state: "not_requested" | "sufficient" | "turned_off" | "no_provider" | "not_authorized" | "researched_recently" | "finished" | "in_progress" | "failed";
+  runId: string | null;
+  /** Qualified opportunities before asking. */
+  available: number | null;
+};
+
 /**
- * A plan is about to be written. Only when the inventory cannot feed it, and nothing was researched lately, is research
- * asked for; the plan waits briefly and goes on with whatever there is. Never fails the plan.
+ * A plan is about to be written. Only when the inventory cannot feed it, nothing was researched lately and it may be
+ * asked for (a person asked for the plan, or the platform lets research start by itself) is research requested, about the
+ * priority topics without opportunities when there are any. The plan waits briefly and goes on with whatever there is.
  */
-export async function requestPlanningResearch(tenantId: string, siteId: string, articles: number, userId: string | null, options: { fetchImpl?: typeof fetch } = {}): Promise<string | null> {
+export async function requestPlanningResearch(tenantId: string, siteId: string, articles: number, userId: string | null, options: { fetchImpl?: typeof fetch; /** Nobody is waiting: automation asks. */ unattended?: boolean; priorityTopics?: string[] } = {}): Promise<PlanningResearch> {
+  let available: number | null = null;
+  const outcome = (state: PlanningResearch["state"], runId: string | null = null): PlanningResearch => ({ state, runId, available });
   try {
     const profile = await getResearchProfile(tenantId, siteId);
-    if (profile.policy.mode !== "automatic" || !(await providerAvailable(profile.markets.value?.[0] ?? ""))) return null;
     await reconcileReservoir(tenantId, siteId);
-    const coverage = await reservoirCoverage(tenantId, siteId, profile.policy, [], new Date());
-    if (coverage.available >= articles) return null;
+    const coverage = await reservoirCoverage(tenantId, siteId, profile.policy, options.priorityTopics ?? [], new Date());
+    available = coverage.available;
+    if (coverage.available >= articles) return outcome("sufficient");
+    if (profile.policy.mode !== "automatic") return outcome("turned_off");
+    if (!(await providerAvailable(profile.markets.value?.[0] ?? ""))) return outcome("no_provider");
+    if (options.unattended && !(await readSeoControl()).policy.automaticResearch) return outcome("not_authorized");
     const recent = await prisma.seoResearchRun.findFirst({ where: { tenantId, siteId, status: { in: [...SEO_RESEARCH_DONE] }, finishedAt: { gte: new Date(Date.now() - profile.policy.cooldownDays * DAY_MS) } }, select: { id: true } });
-    if (recent) return null;
-    const { runId } = await requestResearch({ tenantId, siteId, userId, trigger: "pending_decision", triggerKey: null, detail: `Un plan necesita ${articles} artículos y hay ${coverage.available} oportunidades de calidad.`, focus: {} });
+    if (recent) return outcome("researched_recently", recent.id);
+    const focus = coverage.gaps.length ? { topics: coverage.gaps.slice(0, 3) } : {};
+    const { runId } = await requestResearch({ tenantId, siteId, userId, trigger: "pending_decision", triggerKey: null, detail: `Un plan necesita ${articles} artículos y hay ${coverage.available} oportunidades de calidad.`, focus });
     await advanceResearchRun(runId, { deadlineMs: 90_000, fetchImpl: options.fetchImpl });
-    return runId;
+    const run = await prisma.seoResearchRun.findUnique({ where: { id: runId }, select: { status: true } });
+    return outcome((SEO_RESEARCH_DONE as readonly string[]).includes(run?.status ?? "") ? "finished" : run?.status === "failed" || run?.status === "canceled" ? "failed" : "in_progress", runId);
   } catch (error) {
     structuredEvent("seo_research.planning_request_failed", { tenantId, siteId, error: error instanceof Error ? error.message : String(error) }, "warn");
-    return null;
+    return outcome("failed");
   }
 }
 
@@ -351,7 +368,7 @@ async function execute(work: Workspace, run: SeoResearchRun, task: SeoResearchTa
       const { data, meta } = await buy(work, run, task, "serp_organic", (route) => acquireSeo(route, "serp_organic", { keyword: task.subject }, { tenantId, siteId, kind: "keyword_metrics", ...scope, decision: { importance: "normal", siteType: work.context.site.type } }));
       const own = normalizeDomain(work.context.site.baseUrl ?? "");
       const at = data.findIndex((row) => own && normalizeDomain(row.domain) === own);
-      const serp = { providerId: meta.providerId, at: meta.fetchedAt, domains: [...new Set(data.map((row) => row.domain))].slice(0, 10), ownUrl: at >= 0 ? data[at].url : null, ownPosition: at >= 0 ? at + 1 : null };
+      const serp = { providerId: meta.providerId, dataKind: meta.dataKind, asOf: meta.asOf, format: serpInsight(data).format, at: meta.fetchedAt, domains: [...new Set(data.map((row) => row.domain))].slice(0, 10), ownUrl: at >= 0 ? data[at].url : null, ownPosition: at >= 0 ? at + 1 : null };
       const rows = await prisma.contentOpportunity.findMany({ where: { tenantId, siteId, source: "research", query: task.subject, decidedAt: null }, select: { id: true, evidence: true } });
       for (const row of rows) await prisma.contentOpportunity.updateMany({ where: { id: row.id, decidedAt: null }, data: { evidence: { ...((row.evidence ?? {}) as Prisma.JsonObject), serp } as Prisma.InputJsonObject } });
       return { result: { results: data.length, ownPosition: serp.ownPosition } };

@@ -7,6 +7,9 @@
  * so DST transitions and month boundaries need no special casing.
  */
 
+/** Articles, not improvements of pages that already exist: those never use up the planned or contracted articles. A NULL type is an article. */
+export const NEW_CONTENT = { OR: [{ contentType: null }, { contentType: { not: "update" } }] };
+
 export const MAX_PLAN_SLOTS = 200;
 export const MAX_PLAN_DAYS = 366;
 /** A slot must start at least this far in the future to be planned. */

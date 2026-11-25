@@ -23,11 +23,11 @@ import { classifyCannibalization, computeSiteRelevanceScore, syntheticProfileFor
 import { registerSearchTargets } from "./site-intelligence";
 import { enrichPlanItemsWithKeywordMetrics } from "./keyword-metrics";
 import { claimReserved, releaseReservations } from "./seo-research/reservoir";
-import { requestPlanningResearch } from "./seo-research/runs";
+import { requestPlanningResearch, type PlanningResearch } from "./seo-research/runs";
 import { MAX_STORED_CANDIDATES, collectKeywordCandidates, emptyKeywordResearch, type KeywordCandidate, type KeywordResearch } from "./keyword-candidates";
 import { normalizeKeyword } from "../infrastructure/seo/contract";
 import { GUIDE_TARGETS, resolveArticleTargets } from "./editorial-engine/structure";
-import { MAX_PLAN_SLOTS, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
+import { MAX_PLAN_SLOTS, NEW_CONTENT, computePlanSlotsDetailed, localDateInZone, nextLocalDate, planRangeBounds, type PlanSlot, type PlanSlotRequest } from "./plan-slots";
 
 const prisma = getPrismaClient();
 const CHANNELS = ["website", "x", "instagram", "facebook"] as const;
@@ -73,6 +73,21 @@ type StoredPlanOutput = {
   unfilledSlots?: UnfilledSlot[];
   /** One entry per run, newest last: what was measured and why keywords were kept or dropped. */
   keywordResearch?: PlanResearch[];
+  shortage?: PlanShortage | null;
+};
+
+/** The last run had fewer qualified opportunities than articles to plan: what was done about it. */
+export type PlanShortage = {
+  at: string;
+  requested: number;
+  /** Articles that came from a stored opportunity. */
+  fromOpportunities: number;
+  /** Articles whose keyword the model proposed: nobody measured it. */
+  fromModel: number;
+  unfilled: number;
+  research: PlanningResearch;
+  /** Why there was no data to choose from, when that was the case. */
+  noData: KeywordResearch["skipped"];
 };
 
 /** Keyword trace plus the strategy it ran under. */
@@ -91,6 +106,13 @@ export type PlanItemSelection = {
   intent: string | null;
   parts: KeywordCandidate["parts"] | null;
   origin: KeywordCandidate["origin"];
+  // Absent in plans made before SEO-V2-05.
+  opportunityId?: string | null;
+  researchRunId?: string | null;
+  /** measured: a provider reported it. own_data: only the site's own search data. unmeasured: nobody measured it. */
+  metrics?: "measured" | "own_data" | "unmeasured";
+  /** When the figures were collected. */
+  metricsAt?: string | null;
 };
 
 export function readPlanItemSelection(metadata: unknown): PlanItemSelection | null {
@@ -388,7 +410,7 @@ export function keywordAssignmentBlock(keywords: KeywordCandidate[], count: numb
     "",
     `KEYWORDS ARE FIXED (measured search demand). Write exactly one item per keyword below, in this order. Use the keyword verbatim as primaryKeyword and targetQuery and put its variants in secondaryKeywords. Do not choose other keywords: you only write the brief (title, angle, outline, FAQ, contentType).`,
     ...lines,
-    rest > 0 ? `Then write ${rest} more item(s) with keywords of your choice.` : "",
+    rest > 0 ? `Then write ${rest} more item(s) with keywords of your choice. Only subjects that clearly belong to this destination and that it does not cover yet: return fewer items rather than filler.` : "",
   ].join("\n");
 }
 
@@ -577,10 +599,14 @@ ${SOURCE_DATA_RULES}`;
     let lastModel = "unknown";
 
     // Planning uses what is known; when that is too little it asks the research engine, which decides whether to buy.
-    await requestPlanningResearch(input.tenantId, siteId, input.publicationCount, input.userId ?? null);
+    // Rewriting one proposal is editing: it uses what there is.
+    const planningResearch: PlanningResearch = input.append?.replaceItemId
+      ? { state: "not_requested", runId: null, available: null }
+      : await requestPlanningResearch(input.tenantId, siteId, input.publicationCount, input.userId ?? null, { unattended: input.trigger === "autopilot", priorityTopics: strategy.priorityTopics ?? [] });
     // Measured keywords are handed out to calls in score order; none → the model picks (previous flow).
     const research = emptyKeywordResearch();
-    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, Math.max(input.publicationCount * 2, MAX_STORED_CANDIDATES), { reserveFor: holder, reserve: input.publicationCount * 2 + 8 }, research).catch((error: unknown) => {
+    const keywordPool = await collectKeywordCandidates(input.tenantId, siteId, context, Math.max(input.publicationCount * 2, MAX_STORED_CANDIDATES), // A few spare for briefs that do not survive validation; the rest stay free for another plan.
+      { reserveFor: holder, reserve: input.publicationCount + Math.max(2, Math.ceil(input.publicationCount / 2)), priorityTopics: strategy.priorityTopics ?? [], excludedTopics: [...(strategy.excludedTopics ?? []), ...(context.approvedStrategy?.exclusions ?? [])] }, research).catch((error: unknown) => {
       structuredEvent("keyword_candidates.failed", { tenantId: input.tenantId, siteId, planId: plan.id, error: error instanceof Error ? error.message : String(error) }, "warn");
       return [] as KeywordCandidate[];
     });
@@ -629,6 +655,12 @@ ${SOURCE_DATA_RULES}`;
       const pinned = applyMeasuredKeywords(raw, keywords, count);
       const validatedBatch = postValidatePlanItems(pinned.items, { ...input, guideWords, publicationCount: count }, context);
       const batch = { ...validatedBatch, dropped: [...pinned.dropped, ...validatedBatch.dropped] };
+      // Measured keywords were checked before they were handed out; the model's own choices are checked here.
+      batch.kept = batch.kept.filter((item) => {
+        const competes = !measured.has(normalizeKeyword(item.primaryKeyword ?? "")) && (item.cannibalizationRisk === "high" || item.cannibalizationRisk === "update-existing");
+        if (competes) batch.dropped.push({ title: item.workingTitle, reason: `cannibalization: the site already covers ${item.primaryKeyword}` });
+        return !competes;
+      });
       if (avoidTitles.length === 0) return batch;
       const avoidKeys = new Set(avoidTitles.map(normalizeSlug));
       const kept: EditorialPlanBriefV2[] = [];
@@ -800,6 +832,8 @@ ${SOURCE_DATA_RULES}`;
         normalizedError: "EDITORIAL_PLAN_NO_RELEVANT_ITEMS",
         dropped: validated?.dropped.slice(0, 20) ?? [],
       }, "error");
+      const shortage: PlanShortage = { at: new Date().toISOString(), requested: input.publicationCount, fromOpportunities: 0, fromModel: 0, unfilled: input.publicationCount, research: planningResearch, noData: research.skipped };
+      await prisma.editorialPlan.update({ where: { id: plan.id }, data: { generatedOutput: { ...(input.append?.previous ?? { dropped: validated?.dropped ?? [], requestedCount: input.publicationCount, filledCount: 0, keywordResearch: [planResearch] }), shortage } as unknown as Prisma.InputJsonObject } });
       throw new Error("EDITORIAL_PLAN_NO_RELEVANT_ITEMS");
     }
 
@@ -834,6 +868,10 @@ ${SOURCE_DATA_RULES}`;
           intent: metrics?.intent ?? null,
           parts: metrics?.parts ?? null,
           origin: metrics?.origin ?? null,
+          opportunityId: metrics?.opportunityId ?? null,
+          researchRunId: metrics?.researchRunId ?? null,
+          metrics: !metrics ? "unmeasured" : metrics.volume !== null || metrics.difficulty !== null ? "measured" : "own_data",
+          metricsAt: metrics?.collectedAt ?? null,
         };
         const itemId = randomUUID();
         if (metrics?.opportunityId && !(await claimReserved(tx, { tenantId: input.tenantId, siteId, holder, opportunityId: metrics.opportunityId, planItemId: itemId }))) {
@@ -888,7 +926,7 @@ ${SOURCE_DATA_RULES}`;
             recommendedWordCountMax: item.recommendedWordCountMax,
             difficultyEstimate: item.difficultyEstimate,
             // Candidate metrics are already measured: no second provider call for these items.
-            ...(metrics ? { searchVolume: metrics.volume, keywordDifficulty: metrics.difficulty, keywordMetricsSource: metrics.source, keywordMetricsAt: new Date() } : {}),
+            ...(metrics ? { searchVolume: metrics.volume, keywordDifficulty: metrics.difficulty, keywordMetricsSource: metrics.source, keywordMetricsAt: metrics.collectedAt ? new Date(metrics.collectedAt) : new Date() } : {}),
             opportunityScore: item.opportunityScore,
             relevanceScore: item.relevanceScore,
             cannibalizationRisk: item.cannibalizationRisk,
@@ -909,7 +947,13 @@ ${SOURCE_DATA_RULES}`;
         });
       }
       filledTotal -= takenItems.size;
-      if (append) filledTotal = await tx.editorialPlanItem.count({ where: { planId: plan.id } });
+      if (append) filledTotal = await tx.editorialPlanItem.count({ where: { planId: plan.id, ...NEW_CONTENT } });
+      const created = items.filter((item) => !takenItems.has(item));
+      const fromOpportunities = created.filter((item) => measured.has(normalizeKeyword(item.primaryKeyword ?? ""))).length;
+      const unfilled = Math.max(0, input.publicationCount - created.length);
+      const shortage: PlanShortage | null = fromOpportunities < input.publicationCount
+        ? { at: new Date().toISOString(), requested: input.publicationCount, fromOpportunities, fromModel: created.length - fromOpportunities, unfilled, research: planningResearch, noData: research.skipped }
+        : null;
       // A plan with empty required slots is never "ready": it is reported as partial with the exact gaps.
       finalStatus = unfilledSlots.length > 0 || filledTotal < requestedTotal ? "partial" : "ready";
       await tx.editorialPlan.update({
@@ -929,6 +973,7 @@ ${SOURCE_DATA_RULES}`;
             keywordSource: keywordPool[0]?.source ?? "model",
             keywordResearch: [...(append?.previous.keywordResearch ?? []), planResearch].slice(-MAX_STORED_RESEARCH),
             unfilledSlots,
+            shortage,
           } as unknown as Prisma.InputJsonObject,
           error: finalStatus === "partial" ? `${Math.max(unfilledSlots.length, requestedTotal - filledTotal)} of ${requestedTotal} slots could not be filled` : null,
           ...(append?.extendTo
@@ -1066,7 +1111,7 @@ async function runPlanGenerationInBackground(
 
 /** Rebuilds a generation input from a persisted plan so extensions use the same strategy and cadence. */
 async function loadPlanForExtension(tenantId: string, planId: string, userId?: string | null) {
-  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId }, include: { items: { select: { id: true, title: true } } } });
+  const plan = await prisma.editorialPlan.findFirst({ where: { id: planId, tenantId }, include: { items: { select: { id: true, title: true, contentType: true } } } });
   if (!plan) throw new Error("editorial_plan_not_found");
   if (plan.status !== "ready" && plan.status !== "partial") throw new Error("editorial_plan_not_extendable");
   const config = (plan.configuration ?? {}) as Record<string, unknown>;
@@ -1106,7 +1151,7 @@ async function loadPlanForExtension(tenantId: string, planId: string, userId?: s
     strategy,
     allowWithoutIntelligence: plan.siteIntelligenceVersion === null,
   };
-  return { plan, base, strategy, accounts, previous: (plan.generatedOutput ?? {}) as StoredPlanOutput };
+  return { plan, base, strategy, accounts, previous: (plan.generatedOutput ?? {}) as StoredPlanOutput, articles: plan.items.filter((item) => item.contentType !== "update").length };
 }
 
 /** Atomically claims the plan (ready|partial -> generating) so two extensions never run at once. */
@@ -1117,7 +1162,7 @@ async function claimPlan(planId: string, from: "ready" | "partial"): Promise<voi
 
 /** Missing-slot recovery: generates proposals only for the plan's unfilled slots; existing items are untouched. */
 export async function enqueueFillMissingSlots(tenantId: string, planId: string, userId?: string | null) {
-  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, planId, userId);
+  const { plan, base, strategy, accounts, previous, articles } = await loadPlanForExtension(tenantId, planId, userId);
   const unfilled = previous.unfilledSlots ?? [];
   if (plan.status !== "partial" || unfilled.length === 0) throw new Error("editorial_plan_has_no_unfilled_slots");
   const slots: PlanSlot[] = unfilled.map((slot, index) => ({ index, localDate: slot.localDate, localTime: slot.localTime, scheduledFor: new Date(slot.scheduledFor) }));
@@ -1131,7 +1176,7 @@ export async function enqueueFillMissingSlots(tenantId: string, planId: string, 
       append: {
         previousStatus: "partial",
         previous,
-        totalRequested: previous.requestedCount ?? plan.items.length + slots.length,
+        totalRequested: previous.requestedCount ?? articles + slots.length,
         avoidTitles: plan.items.map((item) => item.title),
         keepUnfilled: [],
       },
@@ -1152,7 +1197,7 @@ export async function enqueueRegeneratePlanItem(tenantId: string, itemId: string
   const item = await prisma.editorialPlanItem.findFirst({ where: { id: itemId, tenantId } });
   if (!item) throw new Error("editorial_plan_item_not_found");
   if (item.projectId || !["proposed", "rejected"].includes(item.status)) throw new Error("editorial_plan_item_not_replaceable");
-  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, item.planId, userId);
+  const { plan, base, strategy, accounts, previous, articles } = await loadPlanForExtension(tenantId, item.planId, userId);
   const scheduledFor = item.scheduledFor ?? plan.dateFrom;
   const local = new Intl.DateTimeFormat("en-CA", {
     timeZone: plan.timezone,
@@ -1177,7 +1222,7 @@ export async function enqueueRegeneratePlanItem(tenantId: string, itemId: string
       append: {
         previousStatus,
         previous,
-        totalRequested: previous.requestedCount ?? plan.items.length,
+        totalRequested: previous.requestedCount ?? articles,
         avoidTitles: plan.items.map((entry) => entry.title),
         keepUnfilled: previous.unfilledSlots ?? [],
         replaceItemId: item.id,
@@ -1219,7 +1264,7 @@ export function buildExtensionSlotRequest(
 
 /** Extends a plan to a later end date: only the NEW slots are generated; existing items are untouched. */
 export async function enqueueExtendPlan(tenantId: string, planId: string, input: { dateTo: string; articlesPerDay?: number }, userId?: string | null) {
-  const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, planId, userId);
+  const { plan, base, strategy, accounts, previous, articles } = await loadPlanForExtension(tenantId, planId, userId);
   const request = buildExtensionSlotRequest(plan, input);
   const { slots, skippedPast } = computePlanSlotsDetailed(request);
   if (slots.length === 0) throw new Error("editorial_plan_extend_no_slots");
@@ -1239,7 +1284,7 @@ export async function enqueueExtendPlan(tenantId: string, planId: string, input:
       append: {
         previousStatus,
         previous,
-        totalRequested: (previous.requestedCount ?? plan.items.length) + slots.length,
+        totalRequested: (previous.requestedCount ?? articles) + slots.length,
         avoidTitles: plan.items.map((item) => item.title),
         keepUnfilled: previous.unfilledSlots ?? [],
         // The stored cadence keeps describing the whole plan, so its start stays the original one.
@@ -1307,7 +1352,7 @@ export async function enqueuePlanSlots(input: {
     return runPlanGenerationInBackground(existing, generation, generation.strategy!, [], "editorial_plan_generation");
   }
   if (existing && existing.status !== "failed" && existing._count.items + slots.length <= MAX_PLAN_SLOTS) {
-    const { plan, base, strategy, accounts, previous } = await loadPlanForExtension(tenantId, existing.id, input.userId);
+    const { plan, base, strategy, accounts, previous, articles } = await loadPlanForExtension(tenantId, existing.id, input.userId);
     const previousStatus = plan.status as "ready" | "partial";
     const times = new Set(slots.map((slot) => slot.scheduledFor.toISOString()));
     // Slots already behind us can no longer be filled.
@@ -1324,7 +1369,7 @@ export async function enqueuePlanSlots(input: {
         append: {
           previousStatus,
           previous,
-          totalRequested: plan.items.length + keepUnfilled.length + slots.length,
+          totalRequested: articles + keepUnfilled.length + slots.length,
           avoidTitles: [...new Set([...plan.items, ...future].map((item) => item.title))],
           keepUnfilled,
         },

@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 import { getPrismaClient } from "../../infrastructure/db/prisma";
 import { normalizeKeyword, seoMarket } from "../../infrastructure/seo/contract";
 import { writeAudit } from "../audit";
+import { NEW_CONTENT } from "../plan-slots";
 import { getSitePlanningSettings } from "../planning-settings";
 import { addDays } from "../search-console";
 import { siteTotals } from "../seo-intelligence/performance";
@@ -86,7 +87,7 @@ export async function editorialCapacity(tenantId: string, siteId: string, now = 
   const settings = await getSitePlanningSettings(tenantId, siteId);
   if (settings.persisted) return { articlesPerWeek: settings.articlesPerDay * settings.weekdays.length, basis: "settings" };
   const scheduled = await prisma.editorialPlanItem.count({
-    where: { tenantId, siteId, channel: "website", status: { notIn: ["rejected", "canceled"] }, scheduledFor: { gte: addDays(now, -30), lt: addDays(now, 30) } },
+    where: { tenantId, siteId, channel: "website", status: { notIn: ["rejected", "canceled"] }, scheduledFor: { gte: addDays(now, -30), lt: addDays(now, 30) }, ...NEW_CONTENT },
   });
   return scheduled >= 4 ? { articlesPerWeek: Math.round((scheduled / 60) * 70) / 10, basis: "observed" } : { articlesPerWeek: null, basis: "unknown" };
 }
