@@ -14,7 +14,7 @@ import { PlanGeneratorComponent } from '../components/planning/plan-generator.co
 import { BacklogAction, PlanBacklogViewComponent } from '../components/planning/plan-backlog-view.component';
 import { PlanPipelineViewComponent } from '../components/planning/plan-pipeline-view.component';
 import { PlanItemDrawerComponent } from '../components/planning/plan-item-drawer.component';
-import { addDays, localDate } from '../components/planning/planning-utils';
+import { addDays, localDate, shortageText } from '../components/planning/planning-utils';
 import { sectionFor } from '../layout/studio-nav';
 import type { OperationItem, StudioSite } from '../models/studio.models';
 import type { PlanDetail, PlanGenerationAccepted, PlanItem } from '../models/planning.models';
@@ -146,6 +146,7 @@ type View = 'backlog' | 'pipeline';
             </button>
           </div>
         </header>
+        <p class="au-banner au-banner--warning" role="status" *ngIf="shortage(plan.generatedOutput?.shortage) as text">{{ text }} <a routerLink="/studio/seo-research">Ver investigación</a></p>
 
         <form class="pw-extend" *ngIf="extending" (ngSubmit)="extend()">
           <label class="au-field">
@@ -252,6 +253,7 @@ export class EditorialPlanPageComponent implements OnInit, OnDestroy {
   count(status: string): number {
     return this.items().filter((item) => item.status === status).length;
   }
+  readonly shortage = shortageText;
   unfilledCount(): number {
     return this.plan?.generatedOutput?.unfilledSlots?.length ?? 0;
   }

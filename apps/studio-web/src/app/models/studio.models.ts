@@ -1260,6 +1260,7 @@ export type EditorialPlan = {
     requestedCount?: number;
     filledCount?: number;
     unfilledSlots?: Array<{ localDate: string; localTime: string; scheduledFor: string; reason: string }>;
+    shortage?: import('./planning.models').PlanShortage | null;
   } | null;
   _count?: { items: number };
 };

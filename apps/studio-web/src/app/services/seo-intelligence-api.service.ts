@@ -112,6 +112,10 @@ export class SeoIntelligenceApiService {
   markDone(siteId: string, id: string, actedAt: string): Observable<unknown> {
     return this.http.post(`${this.site(siteId)}/seo-opportunities/${id}/complete`, { actedAt });
   }
+  /** A new version of the page, left for review. */
+  revise(siteId: string, id: string): Observable<{ projectId: string; jobId: string; status: string }> {
+    return this.http.post<{ projectId: string; jobId: string; status: string }>(`${this.site(siteId)}/seo-opportunities/${id}/revision`, {});
+  }
   plan(siteId: string, id: string): Observable<unknown> {
     return this.http.post(`${this.site(siteId)}/opportunities/${id}/plan`, {});
   }

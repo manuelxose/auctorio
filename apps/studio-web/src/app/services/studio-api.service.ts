@@ -240,9 +240,11 @@ export class StudioApiService {
     });
   }
 
-  reviseProject(projectId: string, feedback: string): Observable<unknown> {
+  /** `refreshResearch` asks for new search results and sources; without it the revision uses what the article already has. */
+  reviseProject(projectId: string, feedback: string, refreshResearch = false): Observable<unknown> {
     return this.http.post(`${this.apiBase}/backend/v2/projects/${projectId}/revise`, {
       feedback,
+      ...(refreshResearch ? { refreshResearch } : {}),
     });
   }
 

@@ -9,7 +9,7 @@ import { ToastService } from '../../services/toast.service';
 import type { KeywordRejectReason, MonthPlan, MonthPlanItem, PlanItemSelectionView, PlanResearch } from '../../models/planning.models';
 import { AppIconComponent } from '../ui/app-icon.component';
 import { KeywordWhyComponent } from './keyword-why.component';
-import { statusTone } from './planning-utils';
+import { shortageText, statusTone } from './planning-utils';
 
 const STATUS: Record<string, string> = {
   proposed: 'Propuesto', approved: 'Aprobado', content_pending: 'En cola', generating: 'Redactando', content_ready: 'Borrador listo',
@@ -17,7 +17,7 @@ const STATUS: Record<string, string> = {
 };
 const REJECTED: Record<KeywordRejectReason, string> = {
   no_volume: 'sin búsquedas medidas', already_ranking: 'tu sitio ya posiciona', off_topic: 'fuera de tema', low_relevance: 'poco relevantes',
-  cannibalization: 'compiten con otro contenido tuyo', no_score: 'sin puntuación suficiente',
+  cannibalization: 'compiten con otro contenido tuyo', no_score: 'sin puntuación suficiente', excluded_topic: 'son de temas excluidos',
 };
 const SEED: Record<string, string> = { opportunity: 'hueco frente a competidores', site_topic: 'tema principal', cluster: 'grupo de temas' };
 const NOT_STARTED: Record<string, string> = {
@@ -124,6 +124,7 @@ export function keywordError(err: unknown): string {
         @if (m.budgetBlocked) { <div class="au-banner au-banner--warning mp-banner"><span class="au-banner__text">El presupuesto de IA está agotado; el plan no se amplía hasta que haya saldo.</span></div> }
         @if (m.outsideWindows) { <div class="au-banner au-banner--warning mp-banner"><span class="au-banner__text">{{ m.outsideWindows }} huecos quedan fuera de las ventanas de publicación y no se planifican. <a routerLink="/studio/automation" [queryParams]="{ tab: 'schedule' }">Revisar Calendario y volumen</a></span></div> }
         @if (providerDown(); as run) { <div class="au-banner au-banner--warning mp-banner" role="alert"><span class="au-banner__text"><strong>Las palabras de este plan no están medidas.</strong> {{ providerError(run) }} La IA propuso las palabras a partir de los temas del sitio. Puedes cambiarlas una a una.</span></div> }
+        @for (plan of m.plans; track plan.id) { @if (shortage(plan.shortage); as text) { <div class="au-banner au-banner--warning mp-banner" role="status"><span class="au-banner__text"><strong>{{ plan.name }}: faltan oportunidades.</strong> {{ text }} <a routerLink="/studio/seo-research">Ver investigación</a></span></div> } }
         @if (!m.metricsProvider) { <div class="au-banner au-banner--warning mp-banner"><span class="au-banner__text">El proveedor de palabras clave no está configurado o está desactivado: las palabras las propone la IA, sin volumen medido.</span></div> }
       }
     </section>
@@ -173,7 +174,7 @@ export function keywordError(err: unknown): string {
                 @for (item of m.items; track item.id) {
                   <tr>
                     <td data-label="Fecha" class="mp-nowrap">{{ when(item, m.timezone) }}</td>
-                    <td data-label="Artículo"><span class="mp-title"><span>{{ item.title }}</span><small class="mp-muted">{{ item.planName }}</small></span></td>
+                    <td data-label="Artículo"><span class="mp-title"><span>{{ item.title }}</span><small class="mp-muted">{{ item.planName }}@if (item.contentType === 'update') { · Mejora de una página, no cuenta como artículo }</small></span></td>
                     <td data-label="Palabra clave">{{ item.primaryKeyword ?? '—' }}</td>
                     <td data-label="Búsq./mes" class="mp-num">{{ item.searchVolume !== null ? (item.searchVolume | number) : '—' }}</td>
                     <td data-label="KD" class="mp-num">{{ item.keywordDifficulty ?? '—' }}</td>
@@ -349,6 +350,8 @@ export class MonthPlanComponent implements OnChanges, OnDestroy {
   }
 
   /** The newest research, when the provider is configured but none of its answers could be used. */
+  readonly shortage = shortageText;
+
   providerDown(): PlanResearch | null {
     const runs = (this.month?.plans ?? []).map((plan) => plan.research).filter((run): run is PlanResearch => Boolean(run));
     const last = runs.sort((a, b) => b.at.localeCompare(a.at))[0];

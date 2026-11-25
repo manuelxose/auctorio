@@ -15,6 +15,18 @@ const BADGE: Record<string, string> = {
   cancelled: 'au-badge--neutral',
 };
 
+const REASONS: Record<string, string> = {
+  budget_exhausted: 'the SEO budget is used up', external_disabled: 'external SEO data is turned off', emergency_stop: 'external SEO data is stopped', provider_disabled: 'the provider is turned off', not_configured: 'no provider is configured', not_selected: 'no provider is selected',
+  unsupported_market: 'this market is not supported', paid_automation_locked: 'this provider is not activated for automation', unknown_price: 'its price is not known', circuit_open: 'the provider is failing', upstream_error: 'the provider failed', timeout: 'the provider did not answer',
+  rate_limited: 'the provider is busy', insufficient_balance: 'the provider account has no balance', invalid_credentials: 'the provider rejected the credentials', historical_only: 'only older stored results are available', reuse_only: 'nothing stored answers it',
+};
+const DEGRADED: Record<string, (reason: string) => string> = {
+  sources_unavailable: (reason) => `Written without search sources: ${REASONS[reason] ?? reason}.`,
+  sources_too_old: () => 'Written without search sources: the stored results are too old for a current topic.',
+  video_unavailable: (reason) => `Written without a video: ${REASONS[reason] ?? reason}.`,
+  no_fresh_evidence: () => 'No current source supports this news item: it will not publish by itself.',
+};
+
 /** Live stage progress of a production job, with retry / cancel / review / open-in-editor. Give it jobId, planItemId or clusterId. */
 const TERMINAL: string[] = ['ready', 'failed', 'cancelled'];
 
@@ -37,6 +49,13 @@ const TERMINAL: string[] = ['ready', 'failed', 'cancelled'];
             <li [class.au-muted]="s.status === 'pending'">{{ s.stage }}: {{ s.status }}</li>
           }
         </ul>
+        @if (notes(j); as list) {
+          @if (list.length) {
+            <ul class="au-banner au-banner--warning" role="status" style="display: grid; gap: 0.25rem; list-style: none">
+              @for (note of list; track note) { <li>{{ note }}</li> }
+            </ul>
+          }
+        }
         @if (j.error) {
           <p class="au-banner au-banner--error" role="alert">{{ j.errorCode }}: {{ j.error }}</p>
         }
@@ -80,6 +99,13 @@ export class ProductionStatusComponent implements OnChanges, OnDestroy {
 
   badge(status: string): string {
     return BADGE[status] ?? 'au-badge--neutral';
+  }
+
+  /** What the draft lacked and why it waits: never hidden behind a finished status. */
+  notes(job: ProductionJob): string[] {
+    const codes = (job.summary['degraded'] ?? []) as unknown as string[];
+    const held = job.summary['held'] as unknown as string | undefined;
+    return [...codes.map((code) => DEGRADED[code.split(':')[0]]?.(code.split(':')[1] ?? '') ?? code), ...(held === 'modifies_published_page' ? ['This draft changes a page that is already public: publishing it needs your approval.'] : [])];
   }
 
   private refresh(): void {

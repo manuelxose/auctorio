@@ -1,4 +1,4 @@
-import type { PlanEvidenceEntry, PlanItem, PlanOutlineEntry } from '../../models/planning.models';
+import type { PlanEvidenceEntry, PlanItem, PlanOutlineEntry, PlanShortage } from '../../models/planning.models';
 
 export const WEEKDAYS = [
   { value: 1, short: 'Lun', long: 'Lunes' },
@@ -68,6 +68,27 @@ export function outlineOf(value: unknown): PlanOutlineEntry[] {
   return value
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === 'object')
     .map((entry) => ({ heading: String(entry['heading'] ?? ''), subpoints: stringList(entry['subpoints']) }));
+}
+
+const RESEARCH_STATE: Record<string, string> = {
+  sufficient: 'las que había no encajaban con los huecos',
+  turned_off: 'la investigación automática del sitio está apagada',
+  no_provider: 'no hay ningún proveedor SEO disponible',
+  not_authorized: 'la plataforma no permite que la automatización investigue por su cuenta',
+  researched_recently: 'ya se investigó hace poco',
+  finished: 'se investigó antes de planificar',
+  in_progress: 'la investigación sigue en marcha',
+  failed: 'la investigación no se pudo hacer',
+  not_requested: 'solo se rehizo una propuesta',
+};
+
+/** What a plan lacked, in one sentence; null when every article came from a stored opportunity. */
+export function shortageText(shortage: PlanShortage | null | undefined): string | null {
+  if (!shortage) return null;
+  const parts = [`${shortage.fromOpportunities} de ${shortage.requested} artículos salen de oportunidades guardadas`];
+  if (shortage.fromModel) parts.push(`${shortage.fromModel} los propone la IA, sin medir`);
+  if (shortage.unfilled) parts.push(`${shortage.unfilled} huecos quedan vacíos`);
+  return `${parts.join('; ')}: ${RESEARCH_STATE[shortage.research.state] ?? 'faltan oportunidades'}.`;
 }
 
 export function evidenceOf(value: unknown): PlanEvidenceEntry[] {
