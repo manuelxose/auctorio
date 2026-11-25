@@ -30,7 +30,7 @@ const STAGES: Record<string, string> = {
   rejected: 'Rechazadas', superseded: 'Superadas',
 };
 const SOURCES: Record<string, string> = { corrected: 'Corregido por tu equipo', configured: 'Configurado', approved: 'Estrategia aprobada', observed: 'Observado', detected: 'Detectado', unknown: 'Desconocido' };
-const KINDS: Record<string, string> = { new_website: 'Sitio nuevo', established: 'Consolidado', publisher: 'Medio o blog', local_business: 'Negocio local', services: 'Servicios', ecommerce: 'Tienda', multilingual: 'Varios idiomas' };
+const KINDS: Record<string, string> = { new_website: 'Sitio nuevo', established: 'Consolidado', publisher: 'Medio o blog', local_business: 'Negocio local', services: 'Servicios', ecommerce: 'Tienda', multilingual: 'Varios idiomas', corporate: 'Web corporativa', custom: 'Personalizado' };
 const MODES: Record<string, string> = { automatic: 'Automática, si hay motivo', manual: 'Solo cuando la pida alguien', off: 'Desactivada' };
 const ERRORS: Record<string, string> = {
   research_already_running: 'Ya hay una investigación abierta.', research_run_not_controllable: 'Su estado ha cambiado: ya no admite esa acción.', research_disabled: 'La investigación está desactivada para este sitio.', invalid_corrections: 'Revisa los datos del perfil.', invalid_policy: 'Algún límite está fuera de rango.',
@@ -50,7 +50,7 @@ const LISTS = ['topics', 'excludedTopics', 'offerings', 'revenueObjectives', 'ma
     .sr-facts dt { color: var(--au-muted); }
     .sr-facts dd { margin: 0; overflow-wrap: anywhere; }
     .sr-note { display: block; color: var(--au-muted); font-size: var(--au-fs-metadata); overflow-wrap: anywhere; }
-    .sr-progress { display: grid; grid-template-columns: 4ch minmax(60px, 1fr); align-items: center; gap: 8px; min-width: 110px; }
+    .sr-progress { display: grid; grid-template-columns: 6ch minmax(60px, 1fr); align-items: center; gap: 8px; min-width: 110px; }
     .sr-tasks { display: grid; gap: 10px; margin: 16px 0 0; padding: 0; list-style: none; }
     .sr-tasks li { display: grid; gap: 2px; overflow-wrap: anywhere; }
     .sr-table th.au-table__actions { text-align: right; }
@@ -75,8 +75,8 @@ const LISTS = ['topics', 'excludedTopics', 'offerings', 'revenueObjectives', 'ma
         <div class="au-banner" role="status">
           <app-icon name="info"></app-icon>
           <span class="au-banner__text">
-            @if (e.acquisitions.length) { Compraría como máximo {{ purchasable(e) }} lote(s), hasta {{ e.maxUsd | number: '1.2-3' }} USD, y parará antes si ya basta. }
-            @else { No hay nada que comprar: se usará solo lo guardado. }
+            @if (purchasable(e)) { Compraría como máximo {{ purchasable(e) }} lote(s), hasta {{ e.maxUsd | number: '1.2-3' }} USD, y parará antes si ya basta. }
+            @else { No hay nada que comprar: se usará solo lo guardado.{{ e.acquisitions[0]?.blocked ? ' ' + reason(e.acquisitions[0].blocked) : '' }} }
           </span>
           <button class="au-banner__action" type="button" [disabled]="!!busy()" (click)="start()">Empezar</button>
           <button class="au-banner__action" type="button" (click)="estimate.set(null)">Cancelar</button>
@@ -211,7 +211,7 @@ export class SeoResearchPageComponent implements OnDestroy {
   readonly facts = computed(() => {
     const profile = this.overview()?.profile;
     if (!profile) return [];
-    const text = (value: unknown) => (Array.isArray(value) ? value.join(', ') : String(value ?? ''));
+    const text = (value: unknown) => (Array.isArray(value) ? value.join(', ') : (KINDS[String(value)] ?? String(value ?? '')));
     return [
       { label: 'Negocio', field: profile.businessModel }, { label: 'Público', field: profile.audience }, { label: 'Temas', field: profile.topics }, { label: 'Excluidos', field: profile.excludedTopics }, { label: 'Mercados', field: profile.markets },
       { label: 'Idiomas', field: profile.languages }, { label: 'Ingresos', field: profile.revenueObjectives },
@@ -253,11 +253,14 @@ export class SeoResearchPageComponent implements OnDestroy {
   kindLabels(o: ResearchOverview): string {
     return (o.profile.kinds.value ?? []).map((kind) => KINDS[kind] ?? kind).join(', ');
   }
+  reason(code: string | null): string {
+    return code ? (REASONS[code] ?? code) : '';
+  }
   purchasable(e: ResearchEstimate): number {
     return e.acquisitions.filter((entry) => !entry.blocked).length;
   }
   note(task: ResearchTask): string {
-    const reason = task.reason ? (REASONS[task.reason] ?? task.reason) : '';
+    const reason = this.reason(task.reason);
     const cost = task.external && task.billedUsd !== null ? `${task.billedUsd.toFixed(3)} USD` : '';
     const rows = typeof task.result?.['rows'] === 'number' ? `${task.result['rows']} palabras` : '';
     return [reason, rows, cost].filter(Boolean).join(' · ');
